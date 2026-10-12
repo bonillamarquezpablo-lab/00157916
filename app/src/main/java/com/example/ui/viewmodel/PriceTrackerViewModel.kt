@@ -88,8 +88,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             .filter { product ->
                 // Store filter
                 if (state.selectedStoreName != null) {
-                    product.currentStore.name.contains(state.selectedStoreName, ignoreCase = true) ||
-                    product.offers.any { it.store.name.contains(state.selectedStoreName, ignoreCase = true) }
+                    // A bundled sample's assigned currentStore is not evidence that the shop
+                    // currently sells this product. Store filtering only uses source-backed data.
+                    product.isPriceVerified && (
+                        product.currentStore.name.contains(state.selectedStoreName, ignoreCase = true) ||
+                        product.offers.any { it.store.name.contains(state.selectedStoreName, ignoreCase = true) }
+                    )
                 } else true
             }
             .let { list ->

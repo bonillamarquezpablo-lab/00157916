@@ -23,7 +23,12 @@ class ExampleUnitTest {
         val products = SpanishMarketData.getInitialProducts()
         assertTrue(products.isNotEmpty())
         products.forEach { product ->
-            assertFalse("Bundled sample must not be marked verified: ${product.title}", product.isPriceVerified)
+            assertFalse("Bundled sample must not be marked price-verified: ${product.title}", product.isPriceVerified)
+            assertFalse("Bundled PVP must not be treated as an official verified price: ${product.title}", product.isOfficialPvpVerified)
+            assertFalse("Bundled rating must not be treated as source-verified: ${product.title}", product.isRatingVerified)
+            assertFalse("Bundled barcode must not be treated as verified: ${product.title}", product.isEanVerified)
+            assertEquals(0.0, product.realSavingsAmount, 0.001)
+            assertEquals(0, product.realSavingsPercent)
             assertFalse("Bundled sample must not claim an all-time low: ${product.title}", product.isAtAth)
             assertEquals(VerdictLevel.UNVERIFIED, product.verdict.level)
             assertEquals(0, product.verdict.confidenceScore)

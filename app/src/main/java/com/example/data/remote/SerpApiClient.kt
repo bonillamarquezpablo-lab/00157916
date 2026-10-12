@@ -1,5 +1,6 @@
 package com.example.data.remote
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -40,6 +41,12 @@ data class SerpApiQuote(
     val sourceName: String = "SerpApi · Google Shopping España"
 )
 
+data class SerpApiBatchResult(
+    val quotes: List<SerpApiQuote>,
+    val requestedQueries: Int,
+    val failedQueries: Int
+)
+
 class SerpApiException(
     message: String,
     val httpCode: Int? = null
@@ -68,7 +75,7 @@ class SerpApiClient(
         token: String,
         products: List<SerpApiRequestProduct>,
         onStage: suspend (String) -> Unit = {}
-    ): List<SerpApiQuote> = withContext(Dispatchers.IO) {
+    ): SerpApiBatchResult = withContext(Dispatchers.IO) {
         val apiKey = token.trim()
         require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
 
@@ -77,19 +84,49 @@ class SerpApiClient(
             .distinctBy { it.id }
             .take(MAX_PRODUCTS_PER_BATCH)
 
-        if (requested.isEmpty()) return@withContext emptyList()
+        if (requested.isEmpty()) {
+            return@withContext SerpApiBatchResult(
+                quotes = emptyList(),
+                requestedQueries = 0,
+                failedQueries = 0
+            )
+        }
 
         val quotes = mutableListOf<SerpApiQuote>()
+        var failedQueries = 0
+        var firstFailure: Exception? = null
         requested.forEachIndexed { index, product ->
             onStage("Consultando Google Shopping España: ${index + 1}/${requested.size}…")
-            val json = executeSearch(apiKey, product.queryTerm)
-            quotes += parseQuotes(json, product)
+            try {
+                val json = executeSearch(apiKey, product.queryTerm)
+                quotes += parseQuotes(json, product)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                // A single bad product must not discard offers already collected for this batch.
+                failedQueries++
+                if (firstFailure == null) firstFailure = error
+                onStage("Falló una consulta (${failedQueries}/${requested.size}); conservando los resultados válidos…")
+            }
             // Spread requests to avoid unnecessarily bursting the provider.
             if (index < requested.lastIndex) delay(INTER_REQUEST_DELAY_MS)
         }
-        quotes
-            .distinctBy { "${it.productId}|${it.storeId}|${it.price}|${it.sourceUrl}" }
-            .sortedWith(compareBy<SerpApiQuote> { it.productId }.thenBy { it.price })
+
+        if (quotes.isEmpty() && failedQueries > 0) {
+            val providerFailure = firstFailure as? SerpApiException
+            if (providerFailure != null) throw providerFailure
+            throw SerpApiException(
+                "No se pudo consultar ningún producto (${failedQueries} de ${requested.size} consultas fallidas)."
+            )
+        }
+
+        SerpApiBatchResult(
+            quotes = quotes
+                .distinctBy { "${it.productId}|${it.storeId}|${it.price}|${it.sourceUrl}" }
+                .sortedWith(compareBy<SerpApiQuote> { it.productId }.thenBy { it.price }),
+            requestedQueries = requested.size,
+            failedQueries = failedQueries
+        )
     }
 
     internal fun parseQuotes(

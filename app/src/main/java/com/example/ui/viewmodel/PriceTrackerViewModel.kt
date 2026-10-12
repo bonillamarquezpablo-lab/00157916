@@ -319,7 +319,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     fun searchAmazonShopping() = startOnlineSearch(OnlineSearchProvider.AMAZON)
 
-    /** Each explicit Google Shopping or Amazon.es search reserves one local SerpApi request. */
+    /** Search Google Shopping or Amazon.es, reusing fresh local results whenever possible. */
     private fun startOnlineSearch(provider: OnlineSearchProvider) {
         val current = _uiState.value
         val query = current.onlineSearchQuery.trim()
@@ -345,15 +345,31 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         )
         viewModelScope.launch {
             try {
+                // Cache lookup comes first: saved results remain usable even if the quota is empty
+                // or the API key was removed after the previous search.
+                val cached = onlineSearchCache.read(provider.name, query)
+                if (cached != null) {
+                    val ageMinutes = ((System.currentTimeMillis() - cached.savedAt) / 60_000L).coerceAtLeast(1L)
+                    val base = onlineSearchResultMessage(cached.results, provider)
+                    val cacheNotice = "Resultados guardados hace $ageMinutes min; no se ha consumido otra búsqueda."
+                    _uiState.value = _uiState.value.copy(
+                        onlineSearchResults = cached.results,
+                        onlineSearchStatus = "$base $cacheNotice"
+                    )
+                    return@launch
+                }
+
                 val token = serpApiTokenStore.read()
                 if (token.isNullOrBlank()) {
-                    val message = "Configura tu clave de SerpApi en Ajustes para consultar precios dentro de Mínimo. La comprobación de precios personalizados sigue disponible al abrir Amazon con tu sesión."
+                    val message = "Para mostrar precios dentro de Mínimo, guarda tu clave de SerpApi en Ajustes. También puedes abrir Amazon con tu sesión iniciada."
                     _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
                     showSnackbar(message)
                     return@launch
                 }
-                if (!reserveSerpApiSearches(1)) {
-                    val message = "Límite local alcanzado: máximo 45 búsquedas por hora entre Google Shopping, Amazon.es y la actualización del catálogo."
+
+                val accountInfo = readAccountInfo(token)
+                if (accountInfo != null && accountCapacity(accountInfo) <= 0) {
+                    val message = quotaBlockMessage(accountInfo)
                     _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
                     showSnackbar(message)
                     return@launch
@@ -363,16 +379,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     OnlineSearchProvider.GOOGLE_SHOPPING -> serpApiClient.searchOnline(token, query)
                     OnlineSearchProvider.AMAZON -> serpApiClient.searchAmazonOnline(token, query)
                 }
-                val message = if (results.isEmpty()) {
-                    if (provider == OnlineSearchProvider.AMAZON) {
-                        "Amazon.es no ha devuelto resultados con precio en euros y enlace válido. Prueba una búsqueda más concreta."
-                    } else {
-                        "No se han encontrado ofertas con precio en euros y enlace seguro. Prueba otra búsqueda."
-                    }
-                } else {
-                    val source = if (provider == OnlineSearchProvider.AMAZON) "productos de Amazon.es" else "resultados de Google Shopping"
-                    "Se han encontrado ${results.size} ${source}, ordenados por precio. Confirma el precio final antes de comprar."
-                }
+                onlineSearchCache.write(provider.name, query, results)
+                val base = onlineSearchResultMessage(results, provider)
+                // The account endpoint is free; refresh the displayed balance after a live request.
+                val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
+                val quotaNote = quotaAfter?.let { " ${it.quotaSummary()}" }.orEmpty()
+                val message = base + quotaNote
                 _uiState.value = _uiState.value.copy(
                     onlineSearchResults = results,
                     onlineSearchStatus = message
@@ -391,6 +403,20 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 _uiState.value = _uiState.value.copy(isOnlineSearching = false)
             }
         }
+    }
+
+    private fun onlineSearchResultMessage(
+        results: List<SerpApiShoppingResult>,
+        provider: OnlineSearchProvider
+    ): String = when {
+        results.isEmpty() && provider == OnlineSearchProvider.AMAZON ->
+            "Amazon.es no ha devuelto productos con precio en euros y enlace válido. Prueba con el nombre o modelo completo."
+        results.isEmpty() ->
+            "No se han encontrado ofertas con precio en euros y enlace seguro. Prueba con otra búsqueda."
+        provider == OnlineSearchProvider.AMAZON ->
+            "Amazon.es: ${results.size} productos encontrados, ordenados por precio. El precio final y los cupones se confirman en Amazon."
+        else ->
+            "Google Shopping: ${results.size} ofertas encontradas, ordenadas por precio. Confirma el precio final antes de comprar."
     }
 
     fun onSearchQueryChange(query: String) {

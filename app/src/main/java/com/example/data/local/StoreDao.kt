@@ -17,6 +17,9 @@ interface StoreDao {
     @Query("SELECT COUNT(*) FROM spanish_stores")
     suspend fun getStoreCount(): Int
 
+    @Query("SELECT * FROM spanish_stores")
+    suspend fun getAllStoresSnapshot(): List<StoreEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(stores: List<StoreEntity>)
 }

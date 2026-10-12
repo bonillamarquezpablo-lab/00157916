@@ -24,12 +24,16 @@ data class StoreEntity(
         } catch (e: Exception) {
             Color(0xFF047857)
         }
-        return Store(
-            id = id,
-            name = name,
-            domain = domain,
-            brandColor = color,
-            isVerifiedSpanish = true
-        )
+        val configured = Store.ALL_STORES.firstOrNull { it.id == id }
+        return configured?.copy(name = name, domain = domain, brandColor = color)
+            ?: Store(
+                id = id,
+                name = name,
+                domain = domain,
+                brandColor = color,
+                isVerifiedSpanish = true,
+                category = category,
+                physicalStores = physicalStoresInSpain
+            )
     }
 }

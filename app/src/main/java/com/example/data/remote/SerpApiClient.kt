@@ -188,15 +188,27 @@ class SerpApiClient(
         return items.mapNotNull { item ->
             val title = item.optString("title").trim()
                 .takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
-            val priceText = item.optString("price")
-            // The Amazon.es engine should return EUR, but reject anything without an explicit EUR marker.
-            if (!priceText.contains("€") && !priceText.contains("EUR", ignoreCase = true)) {
-                return@mapNotNull null
-            }
-            val price = parsePrice(
-                item.opt("extracted_price")?.takeIf { it !is JSONObject && it !is JSONArray }
-                    ?: priceText
-            ) ?: return@mapNotNull null
+            // SerpApi's Amazon engine can expose the active offer as price/extracted_price,
+            // or as primary_price/extracted_primary_price depending on the product layout.
+            val priceText = sequenceOf(
+                item.optString("price"),
+                item.optString("primary_price"),
+                item.optString("extracted_price"),
+                item.optString("extracted_primary_price")
+            ).firstOrNull { it.isNotBlank() && it != "null" && it != "0" } ?: ""
+            val extractedPrice = sequenceOf("extracted_price", "extracted_primary_price")
+                .mapNotNull { key ->
+                    item.opt(key)?.takeIf { it !is JSONObject && it !is JSONArray }
+                        ?.toString()?.toDoubleOrNull()
+                }
+                .firstOrNull { it.isFinite() && it > 0.0 }
+            // Amazon.es is a Spanish storefront; when its structured numeric price is present,
+            // it is a EUR amount even if the formatted label is omitted by a result layout.
+            val price = extractedPrice ?: parsePrice(priceText)
+            if (price == null || !price.isFinite() || price <= 0.0) return@mapNotNull null
+            if (extractedPrice == null &&
+                !priceText.contains("€") && !priceText.contains("EUR", ignoreCase = true)
+            ) return@mapNotNull null
 
             val url = sequenceOf(item.optString("link_clean"), item.optString("link"))
                 .firstOrNull { isAmazonSpainUrl(it) } ?: return@mapNotNull null

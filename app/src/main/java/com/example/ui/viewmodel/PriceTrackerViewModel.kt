@@ -59,6 +59,8 @@ data class TrackerUiState(
     val onlineSearchStatus: String? = null,
     val onlineSearchAmazonOnly: Boolean = false,
     val onlineSearchProvider: OnlineSearchProvider = OnlineSearchProvider.GOOGLE_SHOPPING,
+    val isCheckingSerpApiAccount: Boolean = false,
+    val serpApiAccountStatus: String? = null,
     val snackbarMessage: String? = null
 )
 
@@ -299,6 +301,44 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 showSnackbar(message)
             } finally {
                 _uiState.value = _uiState.value.copy(isRefreshingPrices = false)
+            }
+        }
+    }
+
+    fun checkSerpApiAccount() {
+        if (_uiState.value.isCheckingSerpApiAccount || _uiState.value.isRefreshingPrices || _uiState.value.isOnlineSearching) return
+        _uiState.value = _uiState.value.copy(
+            isCheckingSerpApiAccount = true,
+            serpApiAccountStatus = "Comprobando la clave y el saldo de SerpApi…"
+        )
+        viewModelScope.launch {
+            try {
+                val token = serpApiTokenStore.read()
+                if (token.isNullOrBlank()) {
+                    val message = "No hay una clave de SerpApi guardada. Pégala arriba y pulsa «Guardar clave cifrada»."
+                    _uiState.value = _uiState.value.copy(serpApiAccountStatus = message)
+                    return@launch
+                }
+                val info = serpApiClient.getAccountInfo(token)
+                val message = if (info.accountStatus.isNotBlank() && !info.accountStatus.equals("active", ignoreCase = true)) {
+                    "Estado de la cuenta SerpApi: ${info.accountStatus}. ${info.quotaSummary()}"
+                } else {
+                    quotaMessage(info)
+                }
+                _uiState.value = _uiState.value.copy(serpApiAccountStatus = message)
+                showSnackbar(message)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: SerpApiException) {
+                val message = error.message ?: "No se pudo validar la clave de SerpApi."
+                _uiState.value = _uiState.value.copy(serpApiAccountStatus = message)
+                showSnackbar(message)
+            } catch (_: Exception) {
+                val message = "No se pudo consultar la cuenta. Comprueba la conexión e inténtalo de nuevo."
+                _uiState.value = _uiState.value.copy(serpApiAccountStatus = message)
+                showSnackbar(message)
+            } finally {
+                _uiState.value = _uiState.value.copy(isCheckingSerpApiAccount = false)
             }
         }
     }

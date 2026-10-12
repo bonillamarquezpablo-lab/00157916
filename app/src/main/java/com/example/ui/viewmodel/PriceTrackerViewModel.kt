@@ -26,6 +26,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeout
 
+enum class OnlineSearchProvider { GOOGLE_SHOPPING, AMAZON }
+
 enum class SortOption(val label: String) {
     BEST_ATH_DISCOUNT("Mejores ofertas verificadas"),
     PRICE_LOW_HIGH("Precio: menor a mayor (verificados)"),
@@ -54,6 +56,7 @@ data class TrackerUiState(
     val isOnlineSearching: Boolean = false,
     val onlineSearchStatus: String? = null,
     val onlineSearchAmazonOnly: Boolean = false,
+    val onlineSearchProvider: OnlineSearchProvider = OnlineSearchProvider.GOOGLE_SHOPPING,
     val snackbarMessage: String? = null
 )
 
@@ -285,8 +288,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(onlineSearchAmazonOnly = onlyAmazon)
     }
 
-    /** One deliberate search consumes one local SerpApi search reservation. */
-    fun searchOnlineShopping() {
+    fun searchOnlineShopping() = startOnlineSearch(OnlineSearchProvider.GOOGLE_SHOPPING)
+
+    fun searchAmazonShopping() = startOnlineSearch(OnlineSearchProvider.AMAZON)
+
+    /** Each explicit Google Shopping or Amazon.es search reserves one local SerpApi request. */
+    private fun startOnlineSearch(provider: OnlineSearchProvider) {
         val current = _uiState.value
         val query = current.onlineSearchQuery.trim()
         if (current.isOnlineSearching || current.isRefreshingPrices) return
@@ -297,32 +304,47 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             return
         }
 
+        val searchingMessage = if (provider == OnlineSearchProvider.AMAZON) {
+            "Consultando resultados públicos de Amazon.es…"
+        } else {
+            "Buscando ofertas en Google Shopping España…"
+        }
         _uiState.value = current.copy(
             isOnlineSearching = true,
-            onlineSearchStatus = "Buscando ofertas en Google Shopping España…",
-            onlineSearchResults = emptyList()
+            onlineSearchStatus = searchingMessage,
+            onlineSearchResults = emptyList(),
+            onlineSearchProvider = provider,
+            onlineSearchAmazonOnly = provider == OnlineSearchProvider.AMAZON
         )
         viewModelScope.launch {
             try {
                 val token = serpApiTokenStore.read()
                 if (token.isNullOrBlank()) {
-                    val message = "Configura tu clave de SerpApi en Ajustes para ver precios dentro de Mínimo. La búsqueda directa de Amazon sigue disponible sin esa clave."
+                    val message = "Configura tu clave de SerpApi en Ajustes para consultar precios dentro de Mínimo. La comprobación de precios personalizados sigue disponible al abrir Amazon con tu sesión."
                     _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
                     showSnackbar(message)
                     return@launch
                 }
                 if (!reserveSerpApiSearches(1)) {
-                    val message = "Límite local alcanzado: máximo 45 búsquedas por hora entre el buscador y la actualización del catálogo."
+                    val message = "Límite local alcanzado: máximo 45 búsquedas por hora entre Google Shopping, Amazon.es y la actualización del catálogo."
                     _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
                     showSnackbar(message)
                     return@launch
                 }
 
-                val results = serpApiClient.searchOnline(token, query)
+                val results = when (provider) {
+                    OnlineSearchProvider.GOOGLE_SHOPPING -> serpApiClient.searchOnline(token, query)
+                    OnlineSearchProvider.AMAZON -> serpApiClient.searchAmazonOnline(token, query)
+                }
                 val message = if (results.isEmpty()) {
-                    "No se han encontrado ofertas con precio en euros y enlace seguro. Prueba otra búsqueda o abre Amazon.es directamente."
+                    if (provider == OnlineSearchProvider.AMAZON) {
+                        "Amazon.es no ha devuelto resultados con precio en euros y enlace válido. Prueba una búsqueda más concreta."
+                    } else {
+                        "No se han encontrado ofertas con precio en euros y enlace seguro. Prueba otra búsqueda."
+                    }
                 } else {
-                    "Se han encontrado ${results.size} resultados ordenados por precio. Confirma el precio final en la tienda antes de comprar."
+                    val source = if (provider == OnlineSearchProvider.AMAZON) "productos de Amazon.es" else "resultados de Google Shopping"
+                    "Se han encontrado ${results.size} ${source}, ordenados por precio. Confirma el precio final antes de comprar."
                 }
                 _uiState.value = _uiState.value.copy(
                     onlineSearchResults = results,

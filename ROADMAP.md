@@ -17,7 +17,7 @@
 - [ ] **M09 — Alertas reales.** Activar avisos solo con monitorización funcional, permisos y preferencias claras del usuario.
 - [ ] **M10 — Cuenta online.** Autenticación segura, sincronización y recuperación; el perfil local actual no es una cuenta.
 - [~] **M11 — Catálogo escalable (parcial).** Room es la fuente de verdad y las instalaciones existentes añaden solo los IDs que faltan sin sobrescribir filas. Quedan pendientes paginación y filtros escalables.
-- [ ] **M12 — Ordenación comprobable.** Precio verificado, nombre, categoría, comercio y frescura de la observación.
+- [~] **M12 — Ordenación comprobable (parcial).** Ya hay orden por nombre/categoría y por precio verificado; falta ampliar por comercio y frescura del dato.
 - [ ] **M13 — Seguimiento y objetivos.** Favoritos, objetivos de precio, exportación e historial por usuario.
 - [ ] **M14 — Interfaz moderna y accesible.** Cargas, errores, estados vacíos, diseño adaptable y accesibilidad.
 - [ ] **M15 — Calidad y publicación.** Pruebas de integración, privacidad, seguridad, observabilidad, copias y flujo de publicación.
@@ -25,9 +25,9 @@
 ## 5 fallos o limitaciones detectados en el código actual
 
 1. **No hay proveedor de precios en directo activo.** El catálogo precargado es de demostración.
-2. **Dos fuentes de verdad para productos.** Se guardan productos semilla en Room, pero el flujo que presenta el catálogo procede de listas en memoria; el DAO de productos no alimenta el listado principal.
-3. **No existe historial persistente con procedencia.** El modelo local de producto no almacena observaciones de precio con URL y marca temporal.
-4. **Riesgo de pérdida de datos.** La configuración de Room usa una migración destructiva si falta una migración compatible.
+2. **[RESUELTO] Dos fuentes de verdad para productos.** El flujo principal ahora lee los productos desde Room; el catálogo estático solo sirve para añadir fichas que faltan.
+3. **[PARCIALMENTE RESUELTO] Historial persistente con procedencia.** Ya existe una tabla/DAO con URL, fecha y verificación; sigue sin datos reales hasta conectar un proveedor autorizado.
+4. **[RESUELTO] Riesgo de pérdida por migración destructiva.** La migración destructiva se retiró y el camino 2→3→4 ha superado pruebas de preservación.
 5. **El seguimiento no monitoriza.** Los objetivos se guardan localmente, pero no hay comprobaciones automáticas ni alertas reales; la simulación de caída modifica objetos de demostración.
 
 ## 3 correcciones prioritarias

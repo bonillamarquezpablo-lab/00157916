@@ -97,6 +97,19 @@ class ExampleRobolectricTest {
                     isVerified = false
                 )
             )
+
+            // Even a mistakenly set verification flag must not make an unrelated domain trusted.
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "sony_wh1000xm5",
+                    storeId = "amazon_es",
+                    price = 2.00,
+                    observedAt = System.currentTimeMillis() + 2000,
+                    sourceUrl = "https://example.com/invalid-source",
+                    sourceName = "Invalid source fixture",
+                    isVerified = true
+                )
+            )
             database.productDao().updatePriceVerification("sony_wh1000xm5", true)
 
             val sourceBackedProducts: List<Product> = withTimeout<List<Product>>(10_000) {
@@ -105,9 +118,9 @@ class ExampleRobolectricTest {
                 }
             }
             val sourceBackedSony = sourceBackedProducts.first { it.id == "sony_wh1000xm5" }
-            assertEquals(222.50, sourceBackedSony.currentPrice, 0.001)
+            assertEquals("Invalid retailer host must be ignored", 222.50, sourceBackedSony.currentPrice, 0.001)
             assertEquals(222.50, sourceBackedSony.athMinPrice, 0.001)
-            assertEquals(1, sourceBackedSony.priceHistory.size)
+            assertEquals("Only the valid Amazon observation should enter history", 1, sourceBackedSony.priceHistory.size)
             assertEquals(222.50, sourceBackedSony.priceHistory.single().price, 0.001)
         } finally {
             database.close()

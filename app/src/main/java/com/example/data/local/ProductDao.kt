@@ -28,4 +28,7 @@ interface ProductDao {
 
     @Query("UPDATE products SET currentPrice = :newPrice, athMinPrice = :athMin, athMinDate = :athDate, athMinStore = :athStore WHERE id = :productId")
     suspend fun updatePriceDrop(productId: String, newPrice: Double, athMin: Double, athDate: String, athStore: String)
+
+    @Query("UPDATE products SET isPriceVerified = :isVerified WHERE id = :productId")
+    suspend fun updatePriceVerification(productId: String, isVerified: Boolean)
 }

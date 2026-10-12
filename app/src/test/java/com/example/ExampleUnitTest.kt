@@ -5,6 +5,8 @@ import com.example.data.model.PricePoint
 import com.example.data.model.Store
 import com.example.data.model.VerdictLevel
 import com.example.data.repository.SpanishMarketData
+import com.example.ui.components.ChartRange
+import com.example.ui.components.filterPricePointsForRange
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -75,6 +77,32 @@ class ExampleUnitTest {
         assertTrue(history.isAtAth)
         assertEquals(VerdictLevel.ATH_RECORD, history.verdict.level)
         assertTrue(history.verdict.explanation.contains("no garantiza"))
+    }
+
+    @Test
+    fun chartRangesFilterByActualDateWindowsNotPointCounts() {
+        val now = 2_000_000_000_000L
+        val day = 24L * 60L * 60L * 1000L
+        val points = listOf(
+            PricePoint(now - 200 * day, "Hace 200 días", 200.0, "Tienda"),
+            PricePoint(now - 100 * day, "Hace 100 días", 180.0, "Tienda"),
+            PricePoint(now - 45 * day, "Hace 45 días", 150.0, "Tienda"),
+            PricePoint(now - 20 * day, "Hace 20 días", 120.0, "Tienda"),
+            PricePoint(now, "Hoy", 100.0, "Tienda")
+        )
+        assertEquals(
+            listOf(points[3], points[4]),
+            filterPricePointsForRange(points, ChartRange.DAYS_30, now)
+        )
+        assertEquals(
+            listOf(points[2], points[3], points[4]),
+            filterPricePointsForRange(points, ChartRange.DAYS_90, now)
+        )
+        assertEquals(
+            listOf(points[1], points[2], points[3], points[4]),
+            filterPricePointsForRange(points, ChartRange.MONTHS_6, now)
+        )
+        assertEquals(points, filterPricePointsForRange(points, ChartRange.ALL, now))
     }
 
     @Test

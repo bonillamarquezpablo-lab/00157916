@@ -267,6 +267,7 @@ fun MainScreen(
                     state = uiState,
                     onQueryChange = viewModel::onOnlineSearchQueryChange,
                     onSearch = viewModel::searchOnlineShopping,
+                    onAmazonSearch = viewModel::searchAmazonShopping,
                     onAmazonOnlyChange = viewModel::onOnlineSearchAmazonOnlyChange,
                     onOpenSettings = {
                         showOnlineSearch = false

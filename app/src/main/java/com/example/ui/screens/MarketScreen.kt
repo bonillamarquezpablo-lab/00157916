@@ -494,7 +494,11 @@ fun MarketScreen(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "El catálogo contiene datos de demostración. Los mínimos verificados aparecerán cuando incorporemos fuentes reales.",
+                            text = if (uiState.selectedStoreName != null) {
+                                "No hay precios verificados conectados para esa tienda. El directorio solo enlaza a su web oficial; no demuestra que Mínimo haya consultado sus precios."
+                            } else {
+                                "El catálogo contiene fichas de demostración. Los precios y mínimos solo aparecerán cuando conectemos fuentes reales autorizadas."
+                            },
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

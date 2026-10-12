@@ -100,7 +100,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 // Sorting
                 when (state.sortOption) {
                     SortOption.BEST_ATH_DISCOUNT -> list.sortedWith(
-                        compareByDescending<Product> { it.isPriceVerified }
+                        compareByDescending<Product> { it.hasSufficientHistoryForDealVerdict }
                             .thenByDescending { it.realSavingsPercent }
                             .thenBy { it.title.lowercase() }
                     )
@@ -121,8 +121,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             .thenBy { it.title.lowercase() }
                     )
                     SortOption.RATING -> list.sortedWith(
-                        compareByDescending<Product> { it.isPriceVerified }
-                            .thenByDescending { it.rating }
+                        compareByDescending<Product> { it.isRatingVerified }
+                            .thenByDescending<Product> { if (it.isRatingVerified) it.rating else Double.NEGATIVE_INFINITY }
                             .thenBy { it.title.lowercase() }
                     )
                 }

@@ -75,7 +75,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     val query = state.searchQuery.trim().lowercase()
                     product.title.lowercase().contains(query) ||
                     product.brand.lowercase().contains(query) ||
-                    product.ean.contains(query) ||
+                    (product.isEanVerified && product.ean.contains(query)) ||
                     product.category.displayName.lowercase().contains(query) ||
                     product.currentStore.name.lowercase().contains(query) ||
                     product.currentStore.domain.lowercase().contains(query)

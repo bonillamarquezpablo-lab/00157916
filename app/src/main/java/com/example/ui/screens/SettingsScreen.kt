@@ -64,6 +64,9 @@ fun SettingsScreen(
     isRefreshingPrices: Boolean,
     priceRefreshStatus: String?,
     onRefreshPrices: (testOneProduct: Boolean) -> Unit,
+    isCheckingSerpApiAccount: Boolean,
+    serpApiAccountStatus: String?,
+    onCheckSerpApiAccount: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -331,6 +334,25 @@ fun SettingsScreen(
                 }
                 serpApiKeyMessage?.let { message ->
                     Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                }
+                OutlinedButton(
+                    onClick = onCheckSerpApiAccount,
+                    enabled = serpApiKeyConfigured && !isCheckingSerpApiAccount && !isRefreshingPrices,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (isCheckingSerpApiAccount) {
+                        CircularProgressIndicator(modifier = Modifier.size(17.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.VerifiedUser, null, Modifier.size(17.dp))
+                    }
+                    Text("  Comprobar clave y cuota")
+                }
+                serpApiAccountStatus?.let { status ->
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 OutlinedButton(
                     onClick = { onRefreshPrices(true) },

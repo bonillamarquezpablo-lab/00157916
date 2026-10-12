@@ -122,7 +122,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     )
                     SortOption.RATING -> list.sortedWith(
                         compareByDescending<Product> { it.isRatingVerified }
-                            .thenByDescending<Product> { if (it.isRatingVerified) it.rating else Double.NEGATIVE_INFINITY }
+                            .thenByDescending { if (it.isRatingVerified) it.rating else Double.NEGATIVE_INFINITY }
                             .thenBy { it.title.lowercase() }
                     )
                 }

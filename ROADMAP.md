@@ -4,7 +4,7 @@
 
 **Progreso global provisional: 1%** se mantiene hasta completar el primer flujo de precio real de extremo a extremo en el móvil. El código del conector está integrado, pero falta la clave del proveedor y validar una búsqueda real; el porcentaje se actualiza por resultados funcionales, no por líneas de código.
 
-## 15 mejoras planificadas
+## 16 mejoras planificadas
 
 - [x] **M01 — Base de integridad y procedencia.** Existe una tabla persistente de observaciones con producto, comercio, precio, moneda, fecha/hora, URL y estado de verificación; queda pendiente alimentarla con un proveedor real.
 - [~] **M02 — Primer proveedor real (código preparado).** La app incluye consultas manuales de Google Shopping España a través de SerpApi, con almacenamiento local de la clave cifrada. Falta crear/configurar la cuenta, guardar la clave en Ajustes y probar una consulta real. No es una actualización continua.
@@ -21,6 +21,7 @@
 - [ ] **M13 — Seguimiento y objetivos.** Favoritos, objetivos de precio, exportación e historial por usuario.
 - [ ] **M14 — Interfaz moderna y accesible.** Cargas, errores, estados vacíos, diseño adaptable y accesibilidad.
 - [ ] **M15 — Calidad y publicación.** Pruebas de integración, privacidad, seguridad, observabilidad, copias y flujo de publicación.
+- [x] **M16 — Buscador online manual.** Búsqueda libre en Google Shopping España, resultados con precio en euros y enlace HTTPS, orden por precio y filtro «Solo Amazon»; también permite abrir una búsqueda directa en Amazon.es sin clave. Los precios dentro de la app requieren SerpApi; no es una conexión oficial con Prime ni una monitorización automática.
 
 ## 5 fallos o limitaciones detectados en el código actual
 
@@ -45,7 +46,7 @@
 | Ajustes y perfil local | Completado; sin autenticación online |
 | C01: migración no destructiva | Completado y probado |
 | C02: esquema y DAO de observaciones | Completado; falta el proveedor real |
-| Conector manual Google Shopping/SerpApi | Código integrado y pruebas superadas; falta configurar una cuenta/clave y verificar la primera consulta real |
+| Conector manual Google Shopping/SerpApi | Código integrado; el buscador libre se añade en M16. Falta configurar la clave y probar precios reales en el móvil |
 | Monitorización y alertas | Pendiente |
 
 ## Criterio de finalización

@@ -4,14 +4,17 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
         StoreEntity::class,
         ProductEntity::class,
-        TrackedProductEntity::class
+        TrackedProductEntity::class,
+        PriceObservationEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -19,7 +22,39 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun productDao(): ProductDao
     abstract fun trackedProductDao(): TrackedProductDao
 
+    abstract fun priceObservationDao(): PriceObservationDao
+
     companion object {
+        /**
+         * Adds the price-observation table without deleting existing products or watchlists.
+         * The migration is deliberately additive so local user tracking survives app updates.
+         */
+        val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `price_observations` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`productId` TEXT NOT NULL, " +
+                        "`storeId` TEXT NOT NULL, " +
+                        "`price` REAL NOT NULL, " +
+                        "`currency` TEXT NOT NULL, " +
+                        "`observedAt` INTEGER NOT NULL, " +
+                        "`sourceUrl` TEXT NOT NULL, " +
+                        "`sourceName` TEXT NOT NULL, " +
+                        "`isVerified` INTEGER NOT NULL, " +
+                        "`verificationNote` TEXT)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_price_observations_productId_observedAt` " +
+                        "ON `price_observations` (`productId`, `observedAt`)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_price_observations_storeId_observedAt` " +
+                        "ON `price_observations` (`storeId`, `observedAt`)"
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -30,7 +65,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "minimo_spanish_market.db"
                 )
-                    .fallbackToDestructiveMigration()
+                    .addMigrations(MIGRATION_2_3)
                     .build()
                 INSTANCE = instance
                 instance

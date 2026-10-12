@@ -73,9 +73,9 @@ data class DealVerdict(
                 currentPrice <= athMinPrice + 0.05 -> {
                     DealVerdict(
                         level = VerdictLevel.ATH_RECORD,
-                        title = "¡Mínimo Histórico Absoluto!",
-                        badgeText = "MÍNIMO HISTÓRICO REAL",
-                        explanation = "Sin trampa ni cartón: Es el precio más bajo jamás registrado en el mercado español. Nunca ha costado menos.",
+                        title = "Mínimo registrado en los datos disponibles",
+                        badgeText = "MÍNIMO OBSERVADO",
+                        explanation = "El precio actual iguala la observación verificada más baja que conserva Mínimo. Esto no garantiza que sea el precio más bajo de toda la vida del producto.",
                         iconName = "CheckCircle",
                         color = Color(0xFF059669)
                     )
@@ -84,9 +84,9 @@ data class DealVerdict(
                 percentAboveAth in 0.01..5.0 -> {
                     DealVerdict(
                         level = VerdictLevel.NEAR_ATH,
-                        title = "Rozando Mínimo Histórico",
-                        badgeText = "A ${String.format("%.1f", percentAboveAth)}% DEL RÉCORD",
-                        explanation = "Gran oportunidad: Solo cuesta ${String.format("%.2f", diffWithAth)} € más que su récord histórico de ${String.format("%.2f", athMinPrice)} €.",
+                        title = "Cerca del mínimo observado",
+                        badgeText = "A ${String.format("%.1f", percentAboveAth)}% DEL MÍNIMO OBSERVADO",
+                        explanation = "El precio está ${String.format("%.2f", diffWithAth)} € por encima del mínimo de las observaciones verificadas disponibles.",
                         iconName = "TrendingDown",
                         color = Color(0xFF10B981)
                     )
@@ -96,9 +96,9 @@ data class DealVerdict(
                     val savingsVsAvg = avg90dPrice - currentPrice
                     DealVerdict(
                         level = VerdictLevel.FAIR_DISCOUNT,
-                        title = "Descuento Real Comprobado",
-                        badgeText = "OFERTA REAL",
-                        explanation = "Ahorras ${String.format("%.2f", savingsVsAvg)} € respecto al precio medio de los últimos 3 meses (${String.format("%.2f", avg90dPrice)} €). Sin inflado artificial.",
+                        title = "Por debajo de la media observada",
+                        badgeText = "POR DEBAJO DE LA MEDIA",
+                        explanation = "El precio está ${String.format("%.2f", savingsVsAvg)} € por debajo de la media de las observaciones verificadas de los últimos 90 días. La fuente no garantiza que sea el mínimo de toda la vida del producto.",
                         iconName = "ThumbUp",
                         color = Color(0xFF0284C7)
                     )

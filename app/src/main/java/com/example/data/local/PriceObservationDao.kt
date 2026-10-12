@@ -32,6 +32,9 @@ interface PriceObservationDao {
     )
     suspend fun getLatestVerified(productId: String): PriceObservationEntity?
 
+    @Query("SELECT * FROM price_observations WHERE isVerified = 1 ORDER BY observedAt ASC")
+    fun observeAllVerified(): Flow<List<PriceObservationEntity>>
+
     @Query("SELECT COUNT(*) FROM price_observations WHERE isVerified = 1")
     suspend fun getVerifiedObservationCount(): Int
 

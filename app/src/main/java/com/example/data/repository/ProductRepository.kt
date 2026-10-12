@@ -79,7 +79,9 @@ class ProductRepository(
     ) { productEntities, storeEntities, trackedEntities, observations, simulations ->
         val stores = storeEntities.map { it.toDomainStore() }.ifEmpty { Store.ALL_STORES }
         val trackingMap = trackedEntities.associateBy { it.productId }
-        val observationsByProduct = observations.groupBy { it.productId }
+        val observationsByProduct = observations
+            .filter { observation -> observation.isValidVerifiedObservation(stores) }
+            .groupBy { it.productId }
 
         productEntities.map { entity ->
             val product = entity.toDomainProduct(
@@ -327,6 +329,28 @@ class ProductRepository(
             isRatingVerified = isRatingVerified,
             isEanVerified = isEanVerified
         )
+    }
+
+    /**
+     * The database verification flag alone is not enough to trust a price. Validate the fields
+     * needed for provenance again at read time, including that the source URL belongs to the
+     * configured retailer named by storeId.
+     */
+    private fun PriceObservationEntity.isValidVerifiedObservation(stores: List<Store>): Boolean {
+        if (!isVerified || !price.isFinite() || price <= 0.0) return false
+        if (currency != "EUR" || observedAt <= 0L) return false
+        if (observedAt > System.currentTimeMillis() + 5L * 60L * 1000L) return false
+        if (sourceName.isBlank()) return false
+
+        val uri = parseHttpUri(sourceUrl) ?: return false
+        if (uri.scheme?.equals("https", ignoreCase = true) != true) return false
+        val host = uri.host?.let(::normalizeHost) ?: return false
+        val sourceStore = stores.firstOrNull { store ->
+            val storeHost = normalizeHost(store.domain.substringBefore('/'))
+            storeHost.isNotBlank() && (host == storeHost || host.endsWith(".$storeHost"))
+        } ?: return false
+
+        return sourceStore.id == storeId
     }
 
     private fun parseHttpUri(value: String): URI? {

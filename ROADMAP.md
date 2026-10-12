@@ -1,12 +1,12 @@
 # Mínimo — hoja de ruta de producto
 
-**Estado inicial:** versión instalada 1.2 · 33 comercios en directorio · catálogo de demostración · 0 conectores de precios reales · autenticación online no configurada · alertas automáticas no implementadas.
+**Estado de código en main:** versión 1.4 (pendiente de instalación en el móvil) · 33 comercios registrados · catálogo de descubrimiento en Room · 0 conectores de precios reales · autenticación online no configurada · alertas automáticas no implementadas.
 
-**Progreso global provisional: 1%**, según la estimación inicial del proyecto. Lo actualizaremos únicamente al cerrar hitos verificables, no por líneas de código escritas.
+**Progreso global provisional: 1%** se mantiene como base hasta completar el primer flujo de precio real de extremo a extremo. Ya se han mejorado las migraciones y el catálogo, pero aún no hay ningún proveedor conectado. Lo actualizaremos cuando se cierre ese hito funcional, no por líneas de código escritas.
 
 ## 15 mejoras planificadas
 
-- [ ] **M01 — Integridad de datos y procedencia.** Guardar cada observación con producto, comercio, precio, moneda, fecha/hora, URL y verificación. **En curso.**
+- [x] **M01 — Base de integridad y procedencia.** Existe una tabla persistente de observaciones con producto, comercio, precio, moneda, fecha/hora, URL y estado de verificación; queda pendiente alimentarla con un proveedor real.
 - [ ] **M02 — Primer proveedor real.** Evaluar Keepa (coste, presupuesto de tokens, términos y uso en app Android) y conectarlo solo tras aprobación.
 - [ ] **M03 — Más proveedores autorizados.** Integrar fuentes oficiales o feeds con permiso explícito por comercio; no confundir una lista de webs con conectores.
 - [ ] **M04 — Identidad de producto.** Normalizar EAN/GTIN, MPN/SKU, variante, capacidad, color y estado nuevo/reacondicionado.
@@ -16,7 +16,7 @@
 - [ ] **M08 — Actualizaciones de fondo.** Programar consultas respetando batería, conectividad y condiciones de los proveedores.
 - [ ] **M09 — Alertas reales.** Activar avisos solo con monitorización funcional, permisos y preferencias claras del usuario.
 - [ ] **M10 — Cuenta online.** Autenticación segura, sincronización y recuperación; el perfil local actual no es una cuenta.
-- [ ] **M11 — Catálogo escalable.** Búsqueda, paginación, filtros y actualización incremental sin duplicados.
+- [~] **M11 — Catálogo escalable (parcial).** Room es la fuente de verdad y las instalaciones existentes añaden solo los IDs que faltan sin sobrescribir filas. Quedan pendientes paginación y filtros escalables.
 - [ ] **M12 — Ordenación comprobable.** Precio verificado, nombre, categoría, comercio y frescura de la observación.
 - [ ] **M13 — Seguimiento y objetivos.** Favoritos, objetivos de precio, exportación e historial por usuario.
 - [ ] **M14 — Interfaz moderna y accesible.** Cargas, errores, estados vacíos, diseño adaptable y accesibilidad.
@@ -32,19 +32,19 @@
 
 ## 3 correcciones prioritarias
 
-- [ ] **C01 — Preservar datos del usuario.** Retirar la migración destructiva y añadir migraciones explícitas. **En curso.**
-- [ ] **C02 — Persistir observaciones verificables.** Nueva tabla con precio, moneda, producto, comercio, fecha/hora, URL de fuente y estado de verificación. **En curso.**
-- [ ] **C03 — Bloquear falsas ofertas.** Mínimos, descuentos y alertas solo podrán derivarse de observaciones válidas y verificadas.
+- [x] **C01 — Preservar datos del usuario.** Migraciones explícitas 2→3→4; se ha retirado la migración destructiva y las pruebas confirman que los seguimientos/productos se conservan.
+- [~] **C02 — Persistir observaciones verificables (base completada).** La entidad, el DAO y el historial filtrado por verificación existen; falta conectar un proveedor real y registrar consultas auténticas.
+- [~] **C03 — Bloquear falsas ofertas (parcial).** El modelo requiere un registro verificado para presentar precios e historial como reales. Las alertas auténticas esperan a que se conecte la monitorización.
 
 ## Registro de progreso
 
 | Hito | Estado |
 |---|---|
 | APK Android instalable y rama principal privada | Completado |
-| Catálogo y directorio de comercios ampliados | Completado como datos de descubrimiento, no como precios en directo |
+| Catálogo y directorio de comercios ampliados | Completado como datos de descubrimiento; catálogo ahora sale de Room, pero no son precios en directo |
 | Ajustes y perfil local | Completado; sin autenticación online |
-| C01: migración no destructiva | En curso |
-| C02: tabla de observaciones | En curso |
+| C01: migración no destructiva | Completado y probado |
+| C02: esquema y DAO de observaciones | Completado; falta el proveedor real |
 | Conectores de precios reales | Pendiente |
 | Monitorización y alertas | Pendiente |
 

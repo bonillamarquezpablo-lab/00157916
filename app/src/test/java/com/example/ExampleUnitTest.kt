@@ -2,7 +2,6 @@ package com.example
 
 import com.example.data.model.DealVerdict
 import com.example.data.model.PricePoint
-import com.example.data.model.Product
 import com.example.data.model.Store
 import com.example.data.model.VerdictLevel
 import com.example.data.repository.SpanishMarketData

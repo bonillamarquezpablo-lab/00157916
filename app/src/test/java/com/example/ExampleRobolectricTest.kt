@@ -6,6 +6,12 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.AppDatabase
 import com.example.data.local.PriceObservationEntity
 import com.example.data.local.ProductEntity
+import com.example.data.repository.ProductRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -19,6 +25,57 @@ import org.robolectric.annotation.Config
 // Resource and SQLite migration tests run on API 35 using the Java 17 CI runtime.
 @Config(sdk = [35])
 class ExampleRobolectricTest {
+
+    @Test
+    fun `catalogue streams from Room and seeds missing products without replacing old rows`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            database.productDao().insert(
+                ProductEntity(
+                    id = "sony_wh1000xm5",
+                    title = "Producto Sony preservado por el usuario",
+                    brand = "Sony",
+                    category = "TV_AUDIO",
+                    currentPrice = 888.0,
+                    athMinPrice = 888.0,
+                    athMinDate = "Sin datos",
+                    athMinStore = "Amazon España",
+                    athMaxPrice = 888.0,
+                    avg90dPrice = 888.0,
+                    officialPvp = 888.0,
+                    currentStoreId = "amazon_es",
+                    storeUrl = "https://www.amazon.es/",
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = scope
+            )
+
+            val products = withTimeout(10_000) {
+                repository.allProductsStream.first { it.size >= 60 }
+            }
+            assertTrue("Catalog should load from Room and include 60+ entries", products.size >= 60)
+            assertEquals("Product IDs must stay unique", products.size, products.map { it.id }.toSet().size)
+            val preserved = products.first { it.id == "sony_wh1000xm5" }
+            assertEquals("Existing row should not be overwritten by seed data", "Producto Sony preservado por el usuario", preserved.title)
+            assertFalse("Existing sample should stay unverified", preserved.isPriceVerified)
+            assertTrue("Unverified product should not display sample history", preserved.priceHistory.isEmpty())
+            assertTrue("New catalogue IDs should be seeded", products.any { it.id == "demo_galaxy_s26_ultra" })
+        } finally {
+            database.close()
+        }
+    }
 
     @Test
     fun `read string from context`() {

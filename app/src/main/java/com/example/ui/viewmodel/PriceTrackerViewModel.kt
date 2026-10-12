@@ -183,6 +183,18 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         return info.quotaSummary() + hourly + renewal
     }
 
+    private fun quotaBlockMessage(info: SerpApiAccountInfo): String = when {
+        info.searchesRemaining <= 0 -> {
+            "Has agotado las búsquedas disponibles de tu cuenta SerpApi. Mínimo no hará nuevas consultas para evitar errores." +
+                (info.renewalDate?.let { " Tu cuota se renueva el $it." } ?: " Revisa el saldo o el plan de tu cuenta.")
+        }
+        info.remainingThisHour == 0 -> {
+            "Has alcanzado el límite horario de SerpApi (${info.hourlyLimit} búsquedas/h). Espera a que se renueve. " +
+                info.quotaSummary()
+        }
+        else -> quotaMessage(info)
+    }
+
     /**
      * Run a manual price refresh. A single-product test is offered first so the user can verify
      * the provider configuration before spending credits on the full catalogue.
@@ -230,7 +242,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
                 val capacity = accountInfo?.let(::accountCapacity) ?: 1
                 if (capacity <= 0) {
-                    val message = accountInfo?.let(::quotaMessage)
+                    val message = accountInfo?.let(::quotaBlockMessage)
                         ?: "SerpApi no tiene consultas disponibles en este momento."
                     _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
                     showSnackbar(message)
@@ -273,7 +285,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     } else {
                         ""
                     }
-                    val message = "Actualización terminada: precios guardados para $updatedProducts producto(s).$partialNotice Es una instantánea de Google Shopping; verifica el precio final y la disponibilidad en la tienda."
+                    val message = "Actualización terminada: precios guardados para $updatedProducts producto(s).$partialNotice Es una instantánea de Google Shopping; verifica el precio final y la disponibilidad en la tienda." + quotaNote
                     _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
                     showSnackbar(message)
                 }

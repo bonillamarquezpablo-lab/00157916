@@ -72,6 +72,41 @@ class ExampleRobolectricTest {
             assertFalse("Existing sample should stay unverified", preserved.isPriceVerified)
             assertTrue("Unverified product should not display sample history", preserved.priceHistory.isEmpty())
             assertTrue("New catalogue IDs should be seeded", products.any { it.id == "demo_galaxy_s26_ultra" })
+
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "sony_wh1000xm5",
+                    storeId = "amazon_es",
+                    price = 222.50,
+                    observedAt = System.currentTimeMillis(),
+                    sourceUrl = "https://www.amazon.es/dp/TEST",
+                    sourceName = "Authorized unit-test source",
+                    isVerified = true
+                )
+            )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "sony_wh1000xm5",
+                    storeId = "amazon_es",
+                    price = 1.00,
+                    observedAt = System.currentTimeMillis() + 1000,
+                    sourceUrl = "https://example.com/demo",
+                    sourceName = "Demo fixture",
+                    isVerified = false
+                )
+            )
+            database.productDao().updatePriceVerification("sony_wh1000xm5", true)
+
+            val sourceBackedProducts = withTimeout(10_000) {
+                repository.allProductsStream.first { rows ->
+                    rows.firstOrNull { it.id == "sony_wh1000xm5" }?.isPriceVerified == true
+                }
+            }
+            val sourceBackedSony = sourceBackedProducts.first { it.id == "sony_wh1000xm5" }
+            assertEquals(222.50, sourceBackedSony.currentPrice, 0.001)
+            assertEquals(222.50, sourceBackedSony.athMinPrice, 0.001)
+            assertEquals(1, sourceBackedSony.priceHistory.size)
+            assertEquals(222.50, sourceBackedSony.priceHistory.single().price, 0.001)
         } finally {
             database.close()
         }

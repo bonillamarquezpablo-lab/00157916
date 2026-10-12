@@ -67,6 +67,7 @@ class OnlineSearchCache(context: Context) {
     }
 
     fun write(provider: String, query: String, results: List<SerpApiShoppingResult>, now: Long = System.currentTimeMillis()) {
+        pruneExpiredAndOldEntries(now)
         val key = cacheKey(provider, query)
         val array = JSONArray()
         results.forEach { result ->
@@ -89,6 +90,27 @@ class OnlineSearchCache(context: Context) {
             .apply()
     }
 
+    private fun pruneExpiredAndOldEntries(now: Long) {
+        val keys = preferences.all.keys
+            .filter { it.startsWith("search_") && !it.endsWith("_saved_at") }
+        val entries = keys.map { key -> key to preferences.getLong("${key}_saved_at", 0L) }
+        val stale = entries.filter { (_, savedAt) ->
+            savedAt <= 0L || now < savedAt || now - savedAt >= CACHE_TTL_MS
+        }.map { it.first }
+        val validNewestFirst = entries
+            .filterNot { it.first in stale }
+            .sortedByDescending { it.second }
+        val excess = validNewestFirst.drop(MAX_CACHED_SEARCHES).map { it.first }
+        if (stale.isNotEmpty() || excess.isNotEmpty()) {
+            preferences.edit().apply {
+                (stale + excess).distinct().forEach { key ->
+                    remove(key)
+                    remove("${key}_saved_at")
+                }
+            }.apply()
+        }
+    }
+
     private fun cacheKey(provider: String, query: String): String {
         val normalized = query.trim().replace(Regex("\\s+"), " ").lowercase(Locale.ROOT).take(120)
         val bytes = MessageDigest.getInstance("SHA-256")
@@ -99,5 +121,6 @@ class OnlineSearchCache(context: Context) {
 
     companion object {
         const val CACHE_TTL_MS = 55L * 60L * 1000L
+        private const val MAX_CACHED_SEARCHES = 40
     }
 }

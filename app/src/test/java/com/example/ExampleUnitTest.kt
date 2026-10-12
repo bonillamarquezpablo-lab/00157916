@@ -1,6 +1,8 @@
 package com.example
 
 import com.example.data.model.DealVerdict
+import com.example.data.model.PricePoint
+import com.example.data.model.Product
 import com.example.data.model.Store
 import com.example.data.model.VerdictLevel
 import com.example.data.repository.SpanishMarketData
@@ -36,7 +38,60 @@ class ExampleUnitTest {
             athMaxPrice = 419.0
         )
         assertEquals(VerdictLevel.ATH_RECORD, verdict.level)
-        assertTrue(verdict.badgeText.contains("MÍNIMO HISTÓRICO"))
+        assertTrue(verdict.badgeText.contains("MÍNIMO OBSERVADO"))
+    }
+
+    @Test
+    fun historicalDealClaimsRequireNinetyDaysOfVerifiedObservations() {
+        val seed = SpanishMarketData.getInitialProducts().first()
+        val now = System.currentTimeMillis()
+        val day = 24L * 60L * 60L * 1000L
+        val snapshot = seed.copy(
+            currentPrice = 100.0,
+            athMinPrice = 100.0,
+            athMinDate = "Hoy",
+            athMinStore = "Tienda comprobada",
+            athMaxPrice = 160.0,
+            avg90dPrice = 0.0,
+            wasRecentlyInflated = false,
+            fakePriorPrice = null,
+            isPriceVerified = true,
+            priceHistory = listOf(
+                PricePoint(now, "Hoy", 100.0, "Tienda comprobada")
+            )
+        )
+        assertFalse("One price snapshot cannot establish an all-time low", snapshot.hasSufficientHistoryForDealVerdict)
+        assertFalse("One price snapshot cannot be called a historical record", snapshot.isAtAth)
+        assertEquals(VerdictLevel.UNVERIFIED, snapshot.verdict.level)
+
+        val history = snapshot.copy(
+            priceHistory = listOf(
+                PricePoint(now - 90 * day, "Hace 90 días", 145.0, "Tienda comprobada"),
+                PricePoint(now - 60 * day, "Hace 60 días", 130.0, "Tienda comprobada"),
+                PricePoint(now - 30 * day, "Hace 30 días", 118.0, "Tienda comprobada"),
+                PricePoint(now, "Hoy", 100.0, "Tienda comprobada")
+            )
+        )
+        assertTrue("Historical analysis requires adequate time coverage", history.hasSufficientHistoryForDealVerdict)
+        assertTrue(history.isAtAth)
+        assertEquals(VerdictLevel.ATH_RECORD, history.verdict.level)
+        assertTrue(history.verdict.explanation.contains("no garantiza"))
+    }
+
+    @Test
+    fun savingsRequiresAnIndependentlyVerifiedOfficialPvp() {
+        val seed = SpanishMarketData.getInitialProducts().first().copy(
+            currentPrice = 100.0,
+            officialPvp = 200.0,
+            isPriceVerified = true,
+            isOfficialPvpVerified = false
+        )
+        assertEquals(0.0, seed.realSavingsAmount, 0.001)
+        assertEquals(0, seed.realSavingsPercent)
+
+        val verifiedPvp = seed.copy(isOfficialPvpVerified = true)
+        assertEquals(100.0, verifiedPvp.realSavingsAmount, 0.001)
+        assertEquals(50, verifiedPvp.realSavingsPercent)
     }
 
     @Test

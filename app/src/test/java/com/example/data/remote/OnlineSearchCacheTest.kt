@@ -3,7 +3,6 @@ package com.example.data.remote
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -61,7 +60,7 @@ class OnlineSearchCacheTest {
         cache.write("GOOGLE_SHOPPING", "usb c cable", listOf(result), now)
 
         assertNull(cache.read("AMAZON", "usb c cable", now + 1_000L))
+        assertNotNull(cache.read("GOOGLE_SHOPPING", "usb c cable", now + 1_000L))
         assertNull(cache.read("GOOGLE_SHOPPING", "usb c cable", now + OnlineSearchCache.CACHE_TTL_MS))
-        assertFalse(cache.read("GOOGLE_SHOPPING", "usb c cable", now + 1_000L) != null)
     }
 }

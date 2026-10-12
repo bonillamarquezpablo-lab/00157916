@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.AppDatabase
 import com.example.data.local.PriceObservationEntity
 import com.example.data.local.ProductEntity
+import com.example.data.model.Product
 import com.example.data.repository.ProductRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +17,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -27,7 +29,7 @@ import org.robolectric.annotation.Config
 class ExampleRobolectricTest {
 
     @Test
-    fun `catalogue streams from Room and seeds missing products without replacing old rows`() = runBlocking {
+    fun `catalogue streams from Room and seeds missing products without replacing old rows`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,
@@ -62,8 +64,8 @@ class ExampleRobolectricTest {
                 externalScope = scope
             )
 
-            val products = withTimeout(10_000) {
-                repository.allProductsStream.first { it.size >= 60 }
+            val products: List<Product> = withTimeout<List<Product>>(10_000) {
+                repository.allProductsStream.first { productRows -> productRows.size >= 60 }
             }
             assertTrue("Catalog should load from Room and include 60+ entries", products.size >= 60)
             assertEquals("Product IDs must stay unique", products.size, products.map { it.id }.toSet().size)
@@ -97,9 +99,9 @@ class ExampleRobolectricTest {
             )
             database.productDao().updatePriceVerification("sony_wh1000xm5", true)
 
-            val sourceBackedProducts = withTimeout(10_000) {
+            val sourceBackedProducts: List<Product> = withTimeout<List<Product>>(10_000) {
                 repository.allProductsStream.first { rows ->
-                    rows.firstOrNull { it.id == "sony_wh1000xm5" }?.isPriceVerified == true
+                    rows.firstOrNull { row -> row.id == "sony_wh1000xm5" }?.isPriceVerified == true
                 }
             }
             val sourceBackedSony = sourceBackedProducts.first { it.id == "sony_wh1000xm5" }

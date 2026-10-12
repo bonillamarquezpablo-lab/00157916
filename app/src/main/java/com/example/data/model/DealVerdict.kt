@@ -32,6 +32,16 @@ data class DealVerdict(
             confidenceScore = 0
         )
 
+        fun insufficientHistory(): DealVerdict = DealVerdict(
+            level = VerdictLevel.UNVERIFIED,
+            title = "Precio consultado",
+            badgeText = "HISTORIAL INSUFICIENTE",
+            explanation = "Se ha encontrado un precio en Google Shopping, pero Mínimo aún no tiene observaciones en distintas consultas para confirmar un mínimo histórico, una media de 90 días o un descuento real.",
+            iconName = "Info",
+            color = Color(0xFF64748B),
+            confidenceScore = 0
+        )
+
         fun analyze(
             currentPrice: Double,
             athMinPrice: Double,
@@ -63,9 +73,9 @@ data class DealVerdict(
                 currentPrice <= athMinPrice + 0.05 -> {
                     DealVerdict(
                         level = VerdictLevel.ATH_RECORD,
-                        title = "¡Mínimo Histórico Absoluto!",
-                        badgeText = "MÍNIMO HISTÓRICO REAL",
-                        explanation = "Sin trampa ni cartón: Es el precio más bajo jamás registrado en el mercado español. Nunca ha costado menos.",
+                        title = "Mínimo observado en los datos disponibles",
+                        badgeText = "MÍNIMO OBSERVADO",
+                        explanation = "El precio actual iguala la observación verificada más baja que conserva Mínimo. Esto no garantiza que sea el precio más bajo de toda la vida del producto.",
                         iconName = "CheckCircle",
                         color = Color(0xFF059669)
                     )
@@ -74,9 +84,9 @@ data class DealVerdict(
                 percentAboveAth in 0.01..5.0 -> {
                     DealVerdict(
                         level = VerdictLevel.NEAR_ATH,
-                        title = "Rozando Mínimo Histórico",
-                        badgeText = "A ${String.format("%.1f", percentAboveAth)}% DEL RÉCORD",
-                        explanation = "Gran oportunidad: Solo cuesta ${String.format("%.2f", diffWithAth)} € más que su récord histórico de ${String.format("%.2f", athMinPrice)} €.",
+                        title = "Cerca del mínimo observado",
+                        badgeText = "A ${String.format("%.1f", percentAboveAth)}% DEL MÍNIMO OBSERVADO",
+                        explanation = "El precio está ${String.format("%.2f", diffWithAth)} € por encima del mínimo observado que conserva Mínimo; no es una garantía de récord absoluto.",
                         iconName = "TrendingDown",
                         color = Color(0xFF10B981)
                     )

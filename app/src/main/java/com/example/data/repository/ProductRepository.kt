@@ -1,5 +1,6 @@
 package com.example.data.repository
 
+import androidx.compose.ui.graphics.Color
 import com.example.data.local.PriceObservationDao
 import com.example.data.local.PriceObservationEntity
 import com.example.data.local.ProductDao
@@ -10,6 +11,8 @@ import com.example.data.local.TrackedProductEntity
 import com.example.data.model.PricePoint
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
+import com.example.data.model.StoreOffer
+import com.example.data.remote.SerpApiQuote
 import com.example.data.model.Store
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -103,6 +106,39 @@ class ProductRepository(
 
     val todayAthDealsStream: Flow<List<Product>> = allProductsStream.map { list ->
         list.filter { it.isAtAth }
+    }
+
+    /**
+     * Store only provider-backed, EUR offers with HTTPS destination URLs. A product is marked
+     * verified only if at least one validated offer was stored for that product.
+     */
+    suspend fun recordSerpApiQuotes(quotes: List<SerpApiQuote>): Int {
+        val validQuotes = quotes.filter {
+            it.productId.isNotBlank() &&
+                it.price.isFinite() && it.price > 0.0 &&
+                it.currency == "EUR" &&
+                parseHttpUri(it.sourceUrl)?.scheme.equals("https", ignoreCase = true)
+        }
+        if (validQuotes.isEmpty()) return 0
+
+        val observations = validQuotes.map { quote ->
+            PriceObservationEntity(
+                productId = quote.productId,
+                storeId = quote.storeId,
+                price = quote.price,
+                currency = quote.currency,
+                observedAt = quote.observedAt,
+                sourceUrl = quote.sourceUrl,
+                sourceName = "${quote.storeName} · ${quote.sourceName}",
+                isVerified = true,
+                verificationNote = "Consulta manual de Google Shopping España mediante SerpApi; validar precio y disponibilidad en la tienda antes de comprar."
+            )
+        }
+        priceObservationDao.insertAll(observations)
+        observations.map { it.productId }.distinct().forEach { productId ->
+            productDao.updatePriceVerification(productId, true)
+        }
+        return observations.map { it.productId }.distinct().size
     }
 
     suspend fun toggleTracking(productId: String, targetAlertPrice: Double? = null) {
@@ -257,33 +293,61 @@ class ProductRepository(
         verifiedObservations: List<PriceObservationEntity>
     ): Product {
         val sortedHistory = verifiedObservations.sortedBy { it.observedAt }
-        val latestObservation = sortedHistory.lastOrNull()
-        val minObservation = sortedHistory.minByOrNull { it.price }
-        val maxObservation = sortedHistory.maxByOrNull { it.price }
-        // Require both the explicit product flag and at least one provenance-bearing verified
-        // observation before a stored row may be displayed as a real live price.
+        // Each explicit refresh can produce several retailer offers at the same observation time.
+        // Use the cheapest offer in the latest batch as the visible price, but retain all offers.
+        val latestObservedAt = sortedHistory.lastOrNull()?.observedAt
+        val latestBatch = sortedHistory.filter { it.observedAt == latestObservedAt }
+        val snapshotHistory = sortedHistory
+            .groupBy { it.observedAt }
+            .values
+            .mapNotNull { batch -> batch.minByOrNull { it.price } }
+            .sortedBy { it.observedAt }
+        val latestObservation = latestBatch.minByOrNull { it.price }
+        val minObservation = snapshotHistory.minByOrNull { it.price }
+        val maxObservation = snapshotHistory.maxByOrNull { it.price }
+        // Require both the explicit product flag and a provider-backed observation.
         val priceIsVerified = isPriceVerified && latestObservation != null
-        val effectiveHistory = if (priceIsVerified) sortedHistory else emptyList()
+        val effectiveHistory = if (priceIsVerified) snapshotHistory else emptyList()
         val effectiveStore = if (priceIsVerified) {
-            stores.firstOrNull { it.id == latestObservation?.storeId }
-                ?: Store.findByName(latestObservation?.storeId.orEmpty())
+            observationStore(latestObservation!!, stores)
         } else {
             stores.firstOrNull { it.id == currentStoreId } ?: Store.findByName(currentStoreId)
         }
         val now = System.currentTimeMillis()
-        val ninetyDaysAgo = now - 90L * 24L * 60L * 60L * 1000L
+        val ninetyDaysMs = 90L * 24L * 60L * 60L * 1000L
+        val ninetyDaysAgo = now - ninetyDaysMs
         val lastNinetyDays = effectiveHistory.filter { it.observedAt >= ninetyDaysAgo }
+        val uniqueTimestamps = snapshotHistory.map { it.observedAt }.distinct().sorted()
+        val hasSufficientHistory = priceIsVerified &&
+            uniqueTimestamps.size >= 3 &&
+            uniqueTimestamps.last() - uniqueTimestamps.first() >= ninetyDaysMs &&
+            lastNinetyDays.map { it.observedAt }.distinct().size >= 3 &&
+            now - (uniqueTimestamps.lastOrNull() ?: 0L) <= 7L * 24L * 60L * 60L * 1000L
         val current = if (priceIsVerified) latestObservation!!.price else currentPrice
-        val lowest = if (priceIsVerified) minObservation!!.price else athMinPrice
-        val highest = if (priceIsVerified) maxObservation!!.price else athMaxPrice
-        val average = if (lastNinetyDays.isNotEmpty()) lastNinetyDays.map { it.price }.average() else avg90dPrice
+        // Never present a single snapshot as an historical minimum or a 90-day average.
+        val lowest = if (hasSufficientHistory) minObservation!!.price else current
+        val highest = if (hasSufficientHistory) maxObservation!!.price else current
+        val average = if (hasSufficientHistory) lastNinetyDays.map { it.price }.average() else 0.0
+        val latestOffers = if (priceIsVerified) {
+            latestBatch.distinctBy { "${it.storeId}|${it.sourceUrl}" }.map { observation ->
+                StoreOffer(
+                    store = observationStore(observation, stores),
+                    price = observation.price,
+                    inStock = false,
+                    shippingInfo = "Consultar envío en la tienda",
+                    url = observation.sourceUrl
+                )
+            }.sortedBy { it.price }
+        } else {
+            emptyList()
+        }
         val dateFormatter = SimpleDateFormat("dd MMM yyyy", Locale("es", "ES"))
         val historyPoints = effectiveHistory.map { observation ->
             PricePoint(
                 timestamp = observation.observedAt,
                 dateLabel = dateFormatter.format(Date(observation.observedAt)),
                 price = observation.price,
-                storeName = stores.firstOrNull { it.id == observation.storeId }?.name ?: observation.storeId,
+                storeName = observationStore(observation, stores).name,
                 eventLabel = observation.sourceName
             )
         }
@@ -294,24 +358,53 @@ class ProductRepository(
             category = ProductCategory.values().firstOrNull { it.name == category } ?: ProductCategory.ALL,
             currentPrice = current,
             athMinPrice = lowest,
-            athMinDate = if (priceIsVerified) dateFormatter.format(Date(minObservation!!.observedAt)) else athMinDate,
-            athMinStore = if (priceIsVerified) (stores.firstOrNull { it.id == minObservation!!.storeId }?.name ?: minObservation!!.storeId) else athMinStore,
+            athMinDate = if (hasSufficientHistory) dateFormatter.format(Date(minObservation!!.observedAt)) else "Historial en construcción",
+            athMinStore = if (hasSufficientHistory) observationStore(minObservation!!, stores).name else "",
             athMaxPrice = highest,
             avg90dPrice = average,
-            officialPvp = officialPvp,
+            officialPvp = if (priceIsVerified) 0.0 else officialPvp,
             currentStore = effectiveStore,
             storeUrl = if (priceIsVerified) latestObservation!!.sourceUrl else storeUrl,
-            ean = ean,
+            // Price lookup doesn't prove the bundled EAN, rating or review count.
+            ean = if (priceIsVerified) "" else ean,
             priceHistory = historyPoints,
-            // Historical offers in the original bundled catalogue were examples, not source-backed.
-            offers = emptyList(),
-            wasRecentlyInflated = wasRecentlyInflated,
-            fakePriorPrice = fakePriorPrice,
-            rating = rating,
-            reviewCount = reviewCount,
+            // The latest provider snapshot retains individual sellers; availability and shipping
+            // are not inferred from a search result and must be checked at the merchant.
+            offers = latestOffers,
+            wasRecentlyInflated = if (priceIsVerified) false else wasRecentlyInflated,
+            fakePriorPrice = if (priceIsVerified) null else fakePriorPrice,
+            rating = if (priceIsVerified) 0.0 else rating,
+            reviewCount = if (priceIsVerified) 0 else reviewCount,
             imageResName = imageResName,
             imageUrl = imageUrl.orEmpty(),
-            isPriceVerified = priceIsVerified
+            isPriceVerified = priceIsVerified,
+            priceObservedAt = latestObservation?.observedAt.takeIf { priceIsVerified }
+        )
+    }
+
+    private fun observationStore(observation: PriceObservationEntity, stores: List<Store>): Store {
+        stores.firstOrNull { it.id == observation.storeId }?.let { return it }
+        val host = parseHttpUri(observation.sourceUrl)?.host
+            ?.lowercase(Locale.ROOT)
+            ?.removePrefix("www.")
+            .orEmpty()
+        if (host.isNotBlank()) {
+            stores.firstOrNull { store ->
+                val storeHost = store.domain.substringBefore('/').removePrefix("www.").lowercase(Locale.ROOT)
+                storeHost.isNotBlank() && (host == storeHost || host.endsWith(".$storeHost"))
+            }?.let { return it }
+        }
+        val merchantName = observation.sourceName.substringBefore(" · SerpApi")
+            .takeIf { it.isNotBlank() }
+            ?: host.ifBlank { "Comercio consultado" }
+        return Store(
+            id = observation.storeId,
+            name = merchantName,
+            domain = host.ifBlank { "shopping.google.com" },
+            brandColor = Color(0xFF4285F4),
+            category = "Oferta online",
+            physicalStores = false,
+            hasLivePriceIntegration = false
         )
     }
 

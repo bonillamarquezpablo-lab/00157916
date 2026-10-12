@@ -50,6 +50,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import com.example.data.model.Product
 import com.example.data.model.Store
 
@@ -157,7 +160,7 @@ fun ProductCard(
                             fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        if (product.isPriceVerified) {
+                        if (product.isRatingVerified) {
                             Spacer(modifier = Modifier.width(6.dp))
                             Icon(
                                 imageVector = Icons.Default.Star,
@@ -226,6 +229,21 @@ fun ProductCard(
                             color = Color(0xFF059669)
                         )
                     }
+                    if (product.isPriceVerified && product.priceObservedAt != null) {
+                        Text(
+                            text = "Consultado " + SimpleDateFormat("dd/MM HH:mm", Locale("es", "ES"))
+                                .format(Date(product.priceObservedAt)),
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (product.isPriceVerified) {
+                        Text(
+                            text = "Precio observado en Google Shopping; confirma el precio final en la tienda.",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
 
@@ -275,13 +293,13 @@ fun ProductCard(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (product.isPriceVerified) "Mínimo histórico:" else "Historial:",
+                            text = if (product.hasSufficientHistory) "Mínimo observado:" else "Historial:",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = if (product.isPriceVerified) "${String.format("%.2f", product.athMinPrice)} €" else "No verificado",
+                            text = if (product.hasSufficientHistory) "${String.format("%.2f", product.athMinPrice)} €" else "En construcción",
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp,
                             color = if (product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
@@ -289,7 +307,7 @@ fun ProductCard(
                     }
 
                     Text(
-                        text = if (product.isPriceVerified) "${product.athMinDate} (${product.athMinStore})" else "Sin historial verificable",
+                        text = if (product.hasSufficientHistory) "${product.athMinDate} (${product.athMinStore})" else if (product.isPriceVerified) "Se necesitan varias consultas durante 90 días" else "Sin historial verificable",
                         fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -305,7 +323,7 @@ fun ProductCard(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Mínimo aún no obtiene los precios automáticamente. Abre una tienda para consultar el precio publicado actualmente.",
+                        "Puedes abrir las webs de los comercios desde aquí. Para precios observados, consulta Google Shopping desde Ajustes y confirma el precio final, envío y disponibilidad en la tienda.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

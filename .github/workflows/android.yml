@@ -32,8 +32,10 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Preparar Android SDK
-        uses: android-actions/setup-android@v3
+            - name: Preparar Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
 
       - name: Instalar componentes Android
         run: |

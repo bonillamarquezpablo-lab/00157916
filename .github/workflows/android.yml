@@ -57,7 +57,17 @@ jobs:
           echo "Clave estable encontrada y validada."
 
       - name: Compilar APK
-        run: gradle :app:assembleDebug --stacktrace
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          # Keep Android versionCode strictly increasing across CI builds.
+          VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))
+          VERSION_NAME="1.5.${GITHUB_RUN_NUMBER}"
+          echo "Building Mínimo ${VERSION_NAME} (versionCode ${VERSION_CODE})"
+          gradle :app:assembleDebug --stacktrace \\
+            -PVERSION_CODE="${VERSION_CODE}" \\
+            -PVERSION_NAME="${VERSION_NAME}"
 
       - name: Guardar el APK
         uses: actions/upload-artifact@v4

@@ -47,6 +47,29 @@ data class SerpApiBatchResult(
     val failedQueries: Int
 )
 
+data class SerpApiAccountInfo(
+    val planName: String,
+    val accountStatus: String,
+    val monthlyLimit: Int,
+    val monthlySearchesUsed: Int,
+    val searchesRemaining: Int,
+    val hourlyLimit: Int,
+    val searchesThisHour: Int,
+    val renewalDate: String?
+) {
+    val remainingThisHour: Int?
+        get() = hourlyLimit.takeIf { it > 0 }?.let { (it - searchesThisHour).coerceAtLeast(0) }
+
+    fun quotaSummary(): String {
+        val plan = planName.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
+        return if (monthlyLimit > 0) {
+            "SerpApi$plan: quedan $searchesRemaining de $monthlyLimit búsquedas este mes."
+        } else {
+            "SerpApi$plan: quedan $searchesRemaining búsquedas disponibles."
+        }
+    }
+}
+
 class SerpApiException(
     message: String,
     val httpCode: Int? = null
@@ -71,6 +94,59 @@ class SerpApiClient(
         .writeTimeout(20, TimeUnit.SECONDS)
         .build()
 ) {
+    /**
+     * Account usage lookup is free at SerpApi and is used to avoid hard-coded local quota guesses.
+     * It never exposes the key or email in app state.
+     */
+    suspend fun getAccountInfo(token: String): SerpApiAccountInfo = withContext(Dispatchers.IO) {
+        val apiKey = token.trim()
+        require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
+        val request = Request.Builder()
+            .url("https://serpapi.com/account.json".toHttpUrl().newBuilder()
+                .addQueryParameter("api_key", apiKey)
+                .build())
+            .get()
+            .header("Accept", "application/json")
+            .build()
+        http.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                val message = when (response.code) {
+                    401, 403 -> "La clave de SerpApi no es válida o no tiene acceso."
+                    429 -> "SerpApi está limitando temporalmente las consultas. Espera un poco y vuelve a intentarlo."
+                    else -> "No se pudo comprobar la cuenta SerpApi (HTTP ${response.code})."
+                }
+                throw SerpApiException(message, response.code)
+            }
+            val json = runCatching { JSONObject(body) }.getOrElse {
+                throw SerpApiException("SerpApi devolvió información de cuenta no válida.")
+            }
+            parseAccountInfo(json)
+        }
+    }
+
+    internal fun parseAccountInfo(root: JSONObject): SerpApiAccountInfo {
+        val apiError = root.optString("error").takeIf { it.isNotBlank() && it != "null" }
+        if (apiError != null) throw SerpApiException("SerpApi: $apiError")
+        val planLeft = root.optInt("plan_searches_left", -1)
+        val extras = root.optInt("extra_credits", 0).coerceAtLeast(0)
+        val remaining = root.optInt(
+            "total_searches_left",
+            if (planLeft >= 0) planLeft + extras else -1
+        )
+        if (remaining < 0) throw SerpApiException("La cuenta SerpApi no ha informado del saldo de búsquedas.")
+        return SerpApiAccountInfo(
+            planName = root.optString("plan_name").takeUnless { it == "null" }.orEmpty(),
+            accountStatus = root.optString("account_status").takeUnless { it == "null" }.orEmpty(),
+            monthlyLimit = root.optInt("searches_per_month", 0).coerceAtLeast(0),
+            monthlySearchesUsed = root.optInt("this_month_usage", 0).coerceAtLeast(0),
+            searchesRemaining = remaining,
+            hourlyLimit = root.optInt("account_rate_limit_per_hour", 0).coerceAtLeast(0),
+            searchesThisHour = root.optInt("this_hour_searches", root.optInt("last_hour_searches", 0)).coerceAtLeast(0),
+            renewalDate = root.optString("plan_renewal_date").takeIf { it.isNotBlank() && it != "null" && it != "0" }
+        )
+    }
+
     /**
      * Search any user-entered product phrase. Results are Google Shopping snapshots for Spain,
      * not prices obtained from the user's Amazon Prime session or a direct Amazon API.

@@ -48,6 +48,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         storeDao = database.storeDao(),
         productDao = database.productDao(),
         trackedDao = database.trackedProductDao(),
+        priceObservationDao = database.priceObservationDao(),
         externalScope = viewModelScope
     )
 

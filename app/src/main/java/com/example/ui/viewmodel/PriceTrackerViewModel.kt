@@ -1,9 +1,14 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
+import com.example.data.remote.SerpApiClient
+import com.example.data.remote.SerpApiException
+import com.example.data.remote.SerpApiRequestProduct
+import com.example.data.remote.SerpApiTokenStore
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.Store
@@ -16,6 +21,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeout
 
 enum class SortOption(val label: String) {
     BEST_ATH_DISCOUNT("Mejores ofertas verificadas"),
@@ -38,6 +45,8 @@ data class TrackerUiState(
     val verifierInput: String = "",
     val verifierResult: UrlAnalysisResult? = null,
     val isVerifying: Boolean = false,
+    val isRefreshingPrices: Boolean = false,
+    val priceRefreshStatus: String? = null,
     val snackbarMessage: String? = null
 )
 
@@ -52,7 +61,19 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         externalScope = viewModelScope
     )
 
+    private val serpApiTokenStore = SerpApiTokenStore(application)
+    private val serpApiClient = SerpApiClient()
+    private val priceRefreshPreferences = application.getSharedPreferences(
+        "minimo_serpapi_refresh_state",
+        Context.MODE_PRIVATE
+    )
+
     private val _uiState = MutableStateFlow(TrackerUiState())
+
+    private companion object {
+        const val MAX_SEARCHES_PER_HOUR = 45
+        const val ONE_HOUR_MS = 60L * 60L * 1000L
+    }
     val uiState: StateFlow<TrackerUiState> = _uiState.asStateFlow()
 
     val spanishStores: StateFlow<List<Store>> = repository.allStoresStream
@@ -130,6 +151,114 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     val todayAthDeals: StateFlow<List<Product>> = repository.todayAthDealsStream
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /**
+     * Locally reserve calls in a rolling one-hour window, below SerpApi's published free-tier
+     * throughput. Failed calls are conservatively counted because the client cannot always know
+     * whether the provider counted a request before returning an error.
+     */
+    private fun reserveSerpApiSearches(count: Int): Boolean {
+        val now = System.currentTimeMillis()
+        val windowStart = priceRefreshPreferences.getLong("hour_window_start", 0L)
+        val savedCount = priceRefreshPreferences.getInt("hourly_searches_reserved", 0)
+        val windowExpired = windowStart <= 0L || now < windowStart || now - windowStart >= ONE_HOUR_MS
+        val effectiveStart = if (windowExpired) now else windowStart
+        val used = if (windowExpired) 0 else savedCount
+        if (count !in 1..MAX_SEARCHES_PER_HOUR || used + count > MAX_SEARCHES_PER_HOUR) {
+            return false
+        }
+        priceRefreshPreferences.edit()
+            .putLong("hour_window_start", effectiveStart)
+            .putInt("hourly_searches_reserved", used + count)
+            .apply()
+        return true
+    }
+
+    /**
+     * Run a manual price refresh. A single-product test is offered first so the user can verify
+     * the provider configuration before spending credits on the full catalogue.
+     */
+    fun refreshLivePrices(testOneProduct: Boolean) {
+        if (_uiState.value.isRefreshingPrices) return
+        viewModelScope.launch {
+            val token = serpApiTokenStore.read()
+            if (token.isNullOrBlank()) {
+                val message = "Guarda una clave de SerpApi cifrada en Ajustes antes de consultar precios."
+                _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
+                showSnackbar(message)
+                return@launch
+            }
+
+            _uiState.value = _uiState.value.copy(
+                isRefreshingPrices = true,
+                priceRefreshStatus = if (testOneProduct) "Preparando una prueba de 1 producto…" else "Preparando la actualización del catálogo…"
+            )
+            try {
+                val allProducts = withTimeout(20_000L) {
+                    repository.allProductsStream.first { products -> products.isNotEmpty() }
+                }
+                val targets = if (testOneProduct) {
+                    listOf(
+                        allProducts.firstOrNull { product -> product.id == "demo_galaxy_s26_ultra" }
+                            ?: allProducts.first()
+                    )
+                } else {
+                    // Spread catalog lookups over multiple manual batches, prioritizing products
+                    // never queried or queried longest ago. This keeps one tap within 40 searches
+                    // on the advertised free tier and prevents repeated no-match items from starving
+                    // the rest of the catalog.
+                    allProducts.sortedWith(
+                        compareBy<Product> { priceRefreshPreferences.getLong("attempt_${it.id}", 0L) }
+                            .thenBy { it.title.lowercase() }
+                    ).take(40)
+                }
+                val requests = targets.map { product ->
+                    SerpApiRequestProduct(
+                        id = product.id,
+                        title = product.title,
+                        brand = product.brand,
+                        ean = product.ean
+                    )
+                }
+                if (!reserveSerpApiSearches(requests.size)) {
+                    val message = "Para respetar el límite gratuito, Mínimo limita las consultas a 45 por hora en este dispositivo. Espera a que se renueve la ventana y vuelve a intentarlo."
+                    _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+                val quotes = serpApiClient.searchProducts(token, requests) { stage ->
+                    _uiState.value = _uiState.value.copy(priceRefreshStatus = stage)
+                }
+                val attemptedAt = System.currentTimeMillis()
+                priceRefreshPreferences.edit().apply {
+                    targets.forEach { product ->
+                        putLong("attempt_${product.id}", attemptedAt)
+                    }
+                }.apply()
+
+                if (quotes.isEmpty()) {
+                    val message = "La fuente no devolvió ofertas que coincidan con seguridad con los productos consultados. No se han cambiado los precios."
+                    _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
+                    showSnackbar(message)
+                } else {
+                    val updatedProducts = repository.recordSerpApiQuotes(quotes)
+                    val message = "Actualización terminada: precios guardados para $updatedProducts producto(s). Es una instantánea de Google Shopping; verifica el precio final y la disponibilidad en la tienda."
+                    _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
+                    showSnackbar(message)
+                }
+            } catch (e: SerpApiException) {
+                val message = e.message ?: "No se pudo consultar SerpApi."
+                _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
+                showSnackbar(message)
+            } catch (_: Exception) {
+                val message = "No se pudo actualizar el catálogo. Comprueba tu clave, la conexión y vuelve a intentarlo más tarde."
+                _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
+                showSnackbar(message)
+            } finally {
+                _uiState.value = _uiState.value.copy(isRefreshingPrices = false)
+            }
+        }
+    }
 
     fun onSearchQueryChange(query: String) {
         _uiState.value = _uiState.value.copy(searchQuery = query)

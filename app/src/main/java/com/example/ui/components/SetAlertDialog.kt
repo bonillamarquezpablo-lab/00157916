@@ -45,9 +45,16 @@ fun SetAlertDialog(
     var targetPriceText by remember {
         mutableStateOf(
             product.alertTargetPrice?.let { String.format("%.2f", it) }
-                ?: if (product.isPriceVerified) String.format("%.2f", product.athMinPrice) else ""
+                ?: when {
+                    product.hasSufficientHistory -> String.format("%.2f", product.athMinPrice)
+                    product.isPriceVerified -> String.format("%.2f", product.currentPrice)
+                    else -> ""
+                }
         )
     }
+    val parsedTargetPrice = targetPriceText.replace(",", ".").toDoubleOrNull()
+    val isTargetPriceValid = targetPriceText.isBlank() ||
+        (parsedTargetPrice != null && parsedTargetPrice.isFinite() && parsedTargetPrice > 0.0)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -76,10 +83,13 @@ fun SetAlertDialog(
                 )
 
                 Text(
-                    text = if (product.isPriceVerified) {
-                        "Precio actual: ${String.format("%.2f", product.currentPrice)} €\nMínimo histórico: ${String.format("%.2f", product.athMinPrice)} €"
-                    } else {
-                        "Esta ficha contiene datos de demostración. Puedes guardar un objetivo manual, pero todavía no se consultan precios ni se envían notificaciones automáticas."
+                    text = when {
+                        product.hasSufficientHistory ->
+                            "Precio observado: ${String.format("%.2f", product.currentPrice)} €\\nMínimo observado en los datos disponibles: ${String.format("%.2f", product.athMinPrice)} €.\\n\\nEl objetivo se guarda en este móvil; esta versión todavía no comprueba precios en segundo plano ni envía avisos automáticos."
+                        product.isPriceVerified ->
+                            "Precio observado: ${String.format("%.2f", product.currentPrice)} €. Aún no hay suficientes datos para calcular un mínimo histórico.\\n\\nEl objetivo se guarda en este móvil; esta versión todavía no comprueba precios en segundo plano ni envía avisos automáticos."
+                        else ->
+                            "Esta ficha contiene datos de demostración y no tiene un precio actual consultado. Puedes guardar un objetivo manual, pero esta versión todavía no comprueba precios en segundo plano ni envía avisos automáticos."
                     },
                     fontSize = 12.sp,
                     lineHeight = 16.sp
@@ -96,25 +106,34 @@ fun SetAlertDialog(
                         .testTag("alert_target_input")
                 )
 
-                // Presets are meaningful only after prices have been verified.
+                // Only offer a historic-low preset after sufficient history exists.
                 if (product.isPriceVerified) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    SuggestionChip(
-                        onClick = {
-                            targetPriceText = String.format("%.2f", product.athMinPrice)
-                        },
-                        label = { Text("Mínimo Histórico", fontSize = 10.sp) }
-                    )
-                    SuggestionChip(
-                        onClick = {
-                            targetPriceText = String.format("%.2f", product.athMinPrice * 0.95)
-                        },
-                        label = { Text("-5% nuevo récord", fontSize = 10.sp) }
-                    )
-                }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (product.hasSufficientHistory) {
+                            SuggestionChip(
+                                onClick = {
+                                    targetPriceText = String.format("%.2f", product.athMinPrice)
+                                },
+                                label = { Text("Mínimo observado", fontSize = 10.sp) }
+                            )
+                            SuggestionChip(
+                                onClick = {
+                                    targetPriceText = String.format("%.2f", product.athMinPrice * 0.95)
+                                },
+                                label = { Text("-5% del mínimo observado", fontSize = 10.sp) }
+                            )
+                        } else {
+                            SuggestionChip(
+                                onClick = {
+                                    targetPriceText = String.format("%.2f", product.currentPrice)
+                                },
+                                label = { Text("Precio actual", fontSize = 10.sp) }
+                            )
+                        }
+                    }
                 }
             }
         },
@@ -124,6 +143,7 @@ fun SetAlertDialog(
                     val parsed = targetPriceText.replace(",", ".").toDoubleOrNull()
                     onSaveAlert(parsed)
                 },
+                enabled = isTargetPriceValid,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color(0xFF047857)
                 ),

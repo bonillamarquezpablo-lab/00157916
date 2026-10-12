@@ -239,7 +239,12 @@ fun MainScreen(
                 .padding(innerPadding)
         ) {
             if (showSettings) {
-                SettingsScreen(storeCount = spanishStores.size)
+                SettingsScreen(
+                    storeCount = spanishStores.size,
+                    isRefreshingPrices = uiState.isRefreshingPrices,
+                    priceRefreshStatus = uiState.priceRefreshStatus,
+                    onRefreshPrices = viewModel::refreshLivePrices
+                )
             } else when (currentTab) {
                 MainTab.MARKET -> {
                     MarketScreen(

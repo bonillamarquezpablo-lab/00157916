@@ -40,6 +40,7 @@ import com.example.data.model.StoreOffer
 fun StoreComparisonView(
     offers: List<StoreOffer>,
     athPrice: Double,
+    hasSufficientHistory: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -67,7 +68,7 @@ fun StoreComparisonView(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Precios oficiales verificados en tiempo real",
+                    text = "Ofertas encontradas en la última consulta",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -80,7 +81,7 @@ fun StoreComparisonView(
                     .padding(horizontal = 6.dp, vertical = 3.dp)
             ) {
                 Text(
-                    text = "${offers.size} tiendas",
+                    text = "${offers.size} ofertas",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF059669)
@@ -92,7 +93,7 @@ fun StoreComparisonView(
 
         offers.sortedBy { it.price }.forEachIndexed { index, offer ->
             val isBestCurrent = offer.price == minOfferPrice
-            val isAtHistoricalMin = offer.price <= athPrice + 0.05
+            val isAtHistoricalMin = hasSufficientHistory && offer.price <= athPrice + 0.05
 
             Surface(
                 modifier = Modifier
@@ -144,7 +145,7 @@ fun StoreComparisonView(
                                             .padding(horizontal = 5.dp, vertical = 1.dp)
                                     ) {
                                         Text(
-                                            text = "MEJOR PRECIO",
+                                            text = "MENOR PRECIO EN ESTA CONSULTA",
                                             color = Color.White,
                                             fontSize = 9.sp,
                                             fontWeight = FontWeight.ExtraBold
@@ -153,7 +154,7 @@ fun StoreComparisonView(
                                 }
                             }
                             Text(
-                                text = "${offer.shippingInfo} • En stock",
+                                text = "${offer.shippingInfo} • ${if (offer.inStock) "Disponibilidad indicada" else "Stock por confirmar"}",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -170,7 +171,7 @@ fun StoreComparisonView(
                             )
                             if (isAtHistoricalMin) {
                                 Text(
-                                    text = "Récord Mínimo",
+                                    text = "Mínimo observado",
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF059669)

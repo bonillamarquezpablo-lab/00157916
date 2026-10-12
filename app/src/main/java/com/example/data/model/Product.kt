@@ -29,13 +29,36 @@ data class Product(
      * True only after a current price and its history have been fetched and validated.
      * The bundled catalogue remains unverified by default.
      */
-    val isPriceVerified: Boolean = false
+    val isPriceVerified: Boolean = false,
+    val priceObservedAt: Long? = null,
+    /** A product price lookup does not verify the demo rating or review count. */
+    val isRatingVerified: Boolean = false,
+    /** A product price lookup does not verify a bundled EAN. */
+    val isEanVerified: Boolean = false
 ) {
+    /**
+     * Historical conclusions require at least three distinct snapshots spanning 90 days,
+     * including three observations within the latest 90-day window and a recent last query.
+     * One live price can be shown immediately, but is not enough to establish a historical low.
+     */
+    val hasSufficientHistory: Boolean
+        get() {
+            if (!isPriceVerified) return false
+            val timestamps = priceHistory.map { it.timestamp }.distinct().sorted()
+            if (timestamps.size < MIN_HISTORY_POINTS) return false
+            val now = System.currentTimeMillis()
+            val ninetyDays = 90L * 24L * 60L * 60L * 1000L
+            val recentPoints = timestamps.count { it >= now - ninetyDays && it <= now }
+            return timestamps.last() - timestamps.first() >= ninetyDays &&
+                recentPoints >= MIN_HISTORY_POINTS &&
+                now - timestamps.last() <= MAX_PRICE_AGE_FOR_HISTORICAL_CLAIMS
+        }
+
     val verdict: DealVerdict
-        get() = if (!isPriceVerified) {
-            DealVerdict.unverified()
-        } else {
-            DealVerdict.analyze(
+        get() = when {
+            !isPriceVerified -> DealVerdict.unverified()
+            !hasSufficientHistory -> DealVerdict.insufficientHistory()
+            else -> DealVerdict.analyze(
                 currentPrice = currentPrice,
                 athMinPrice = athMinPrice,
                 avg90dPrice = avg90dPrice,
@@ -59,5 +82,10 @@ data class Product(
         } else 0.0
 
     val isAtAth: Boolean
-        get() = isPriceVerified && currentPrice <= athMinPrice + 0.05
+        get() = hasSufficientHistory && currentPrice <= athMinPrice + 0.05
+
+    private companion object {
+        const val MIN_HISTORY_POINTS = 3
+        const val MAX_PRICE_AGE_FOR_HISTORICAL_CLAIMS = 7L * 24L * 60L * 60L * 1000L
+    }
 }

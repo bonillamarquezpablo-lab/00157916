@@ -8,6 +8,11 @@ import com.example.data.local.PriceObservationEntity
 import com.example.data.local.ProductEntity
 import com.example.data.model.Product
 import com.example.data.repository.ProductRepository
+import com.example.data.repository.SpanishMarketData
+import com.example.data.remote.SerpApiClient
+import com.example.data.remote.SerpApiQuote
+import com.example.data.remote.SerpApiRequestProduct
+import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -109,6 +114,152 @@ class ExampleRobolectricTest {
             assertEquals(222.50, sourceBackedSony.athMinPrice, 0.001)
             assertEquals(1, sourceBackedSony.priceHistory.size)
             assertEquals(222.50, sourceBackedSony.priceHistory.single().price, 0.001)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun `SerpApi parser accepts matching euro HTTPS offers and rejects unsafe results`() {
+        val requested = SerpApiRequestProduct(
+            id = "demo_galaxy_s26_ultra",
+            title = "Samsung Galaxy S26 Ultra 512 GB",
+            brand = "Samsung"
+        )
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {
+                  "title": "Samsung Galaxy S26 Ultra 512GB negro",
+                  "price": "1.299,99 €",
+                  "extracted_price": 1299.99,
+                  "link": "https://www.pccomponentes.com/samsung-galaxy-s26-ultra",
+                  "source": "PcComponentes"
+                },
+                {
+                  "title": "Samsung Galaxy S26 Ultra 512GB negro",
+                  "price": "1.249,50 €",
+                  "extracted_price": 1249.50,
+                  "link": "https://www.amazon.es/dp/example",
+                  "source": "Amazon España"
+                },
+                {
+                  "title": "Samsung Galaxy S26 Ultra 512GB",
+                  "price": "$999.99",
+                  "extracted_price": 999.99,
+                  "link": "https://shop.example.com/product",
+                  "source": "Example USD"
+                },
+                {
+                  "title": "Samsung Galaxy S26 Ultra 512GB",
+                  "price": "899,99 €",
+                  "extracted_price": 899.99,
+                  "link": "http://unsafe.example.com/product",
+                  "source": "Unsafe HTTP"
+                },
+                {
+                  "title": "Tostadora de cocina",
+                  "price": "19,99 €",
+                  "extracted_price": 19.99,
+                  "link": "https://shop.example.com/toaster",
+                  "source": "Unrelated item"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val quotes = SerpApiClient().parseQuotes(payload, requested, observedAt = 123L)
+
+        assertEquals("Only matching EUR offers with HTTPS merchant URLs should survive", 2, quotes.size)
+        assertEquals(1249.50, quotes.first().price, 0.001)
+        assertEquals("EUR", quotes.first().currency)
+        assertEquals(123L, quotes.first().observedAt)
+        assertTrue(quotes.all { it.productId == "demo_galaxy_s26_ultra" })
+        assertTrue(quotes.all { it.sourceUrl.startsWith("https://") })
+    }
+
+    @Test
+    fun `manual price refresh displays current seller quotes without fake stock or history`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+
+        try {
+            database.storeDao().insertAll(SpanishMarketData.getInitialStoreEntities())
+            database.productDao().insert(
+                ProductEntity(
+                    id = "live-test-product",
+                    title = "Sony WH-1000XM5",
+                    brand = "Sony",
+                    category = "TV_AUDIO",
+                    currentPrice = 888.0,
+                    athMinPrice = 888.0,
+                    athMinDate = "Sin datos",
+                    athMinStore = "Sin datos",
+                    athMaxPrice = 888.0,
+                    avg90dPrice = 888.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "amazon_es",
+                    storeUrl = "https://www.amazon.es/",
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val observedAt = System.currentTimeMillis()
+            val changedProducts = repository.recordSerpApiQuotes(
+                listOf(
+                    SerpApiQuote(
+                        productId = "live-test-product",
+                        price = 222.50,
+                        currency = "EUR",
+                        observedAt = observedAt,
+                        sourceUrl = "https://www.amazon.es/dp/TEST",
+                        storeId = "retailer_amazon_es",
+                        storeName = "Amazon España"
+                    ),
+                    SerpApiQuote(
+                        productId = "live-test-product",
+                        price = 230.00,
+                        currency = "EUR",
+                        observedAt = observedAt,
+                        sourceUrl = "https://www.pccomponentes.com/TEST",
+                        storeId = "retailer_pccomponentes_com",
+                        storeName = "PcComponentes"
+                    )
+                )
+            )
+
+            assertEquals("Returns the count of products refreshed", 1, changedProducts)
+            val rows: List<Product> = withTimeout<List<Product>>(10_000) {
+                repository.allProductsStream.first { items ->
+                    items.firstOrNull { item -> item.id == "live-test-product" }?.offers?.size == 2
+                }
+            }
+            val product = rows.first { it.id == "live-test-product" }
+            assertTrue(product.isPriceVerified)
+            assertEquals(222.50, product.currentPrice, 0.001)
+            assertEquals(2, product.offers.size)
+            assertTrue("Stock status must be checked at the store", product.offers.none { it.inStock })
+            assertTrue(
+                "Shipping must not be assumed",
+                product.offers.all { it.shippingInfo == "Consultar envío en la tienda" }
+            )
+            assertFalse("One query cannot establish 90-day history", product.hasSufficientHistory)
+            assertFalse("One query cannot establish an all-time low", product.isAtAth)
+            assertEquals("Live query must not keep the demo EAN", "", product.ean)
+            assertFalse("Live query must not verify demo ratings", product.isRatingVerified)
         } finally {
             database.close()
         }

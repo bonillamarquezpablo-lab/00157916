@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.SettingsSuggest
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.HorizontalDivider
@@ -47,10 +48,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.BuildConfig
+import com.example.data.remote.SerpApiTokenStore
 
 private const val PROFILE_PREFS = "minimo_user_profile"
 private const val DEFAULT_PROFILE_NAME = "Usuario principal"
@@ -58,6 +61,9 @@ private const val DEFAULT_PROFILE_NAME = "Usuario principal"
 @Composable
 fun SettingsScreen(
     storeCount: Int,
+    isRefreshingPrices: Boolean,
+    priceRefreshStatus: String?,
+    onRefreshPrices: (testOneProduct: Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -72,6 +78,10 @@ fun SettingsScreen(
     }
     var saved by remember { mutableStateOf(false) }
     var emailError by remember { mutableStateOf(false) }
+    val serpApiTokenStore = remember(context) { SerpApiTokenStore(context) }
+    var serpApiKeyInput by remember { mutableStateOf("") }
+    var serpApiKeyConfigured by remember { mutableStateOf(serpApiTokenStore.isConfigured()) }
+    var serpApiKeyMessage by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = modifier
@@ -250,9 +260,9 @@ fun SettingsScreen(
                         )
                     }
                     Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
-                        Text("Price API · primera prueba", fontWeight = FontWeight.Bold)
+                        Text("SerpApi · Google Shopping España", fontWeight = FontWeight.Bold)
                         Text(
-                            "Amazon España + Google Shopping",
+                            "Ofertas de comercios en Google Shopping",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -262,26 +272,107 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.surfaceVariant
                     ) {
                         Text(
-                            "No conectado",
+                            if (serpApiKeyConfigured) "Clave guardada" else "Sin configurar",
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                             style = MaterialTheme.typography.labelMedium
                         )
                     }
                 }
                 Text(
-                    "Permite consultar datos de producto y ofertas para España. La prueba publicada incluye 1.000 créditos sin tarjeta bancaria. No introduzcas ninguna clave en Mínimo: la conexión debe pasar por un servicio seguro. Los términos restringen el uso de los datos para terceros sin aprobación escrita; no publicaremos la integración para otras personas sin permiso explícito.",
+                    "Consulta resultados de Google Shopping para España y puede encontrar ofertas de varios comercios. El plan gratuito anuncia 250 búsquedas al mes; cada producto consultado consume una búsqueda. Mínimo consulta solo cuando pulsas un botón y limita cada lote a 40 productos.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Text(
+                    "Tu clave se cifra en este dispositivo con Android Keystore. No publiques esta versión con la clave dentro ni redistribuyas los resultados. Para una versión multiusuario necesitaremos un backend y revisar las condiciones del proveedor.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = serpApiKeyInput,
+                    onValueChange = { serpApiKeyInput = it; serpApiKeyMessage = null },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Clave API (token)") },
+                    placeholder = { Text(if (serpApiKeyConfigured) "Clave guardada; introduce otra para cambiarla" else "Pega aquí tu clave API de SerpApi") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp)
+                )
+                Button(
+                    onClick = {
+                        runCatching { serpApiTokenStore.save(serpApiKeyInput) }
+                            .onSuccess {
+                                serpApiKeyConfigured = true
+                                serpApiKeyInput = ""
+                                serpApiKeyMessage = "Clave guardada cifrada en este dispositivo. Aún no se ha validado con el proveedor."
+                            }
+                            .onFailure { error ->
+                                serpApiKeyMessage = error.message ?: "No se pudo guardar la clave."
+                            }
+                    },
+                    enabled = serpApiKeyInput.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Lock, null, Modifier.size(17.dp))
+                    Text("  Guardar clave cifrada")
+                }
+                if (serpApiKeyConfigured) {
+                    OutlinedButton(
+                        onClick = {
+                            serpApiTokenStore.clear()
+                            serpApiKeyConfigured = false
+                            serpApiKeyInput = ""
+                            serpApiKeyMessage = "Clave eliminada de este dispositivo."
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Eliminar clave guardada")
+                    }
+                }
+                serpApiKeyMessage?.let { message ->
+                    Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                }
                 OutlinedButton(
-                    onClick = { openWeb(context, "https://app.priceapi.com/users/sign_up") },
+                    onClick = { onRefreshPrices(true) },
+                    enabled = serpApiKeyConfigured && !isRefreshingPrices,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (isRefreshingPrices) {
+                        CircularProgressIndicator(modifier = Modifier.size(17.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.CloudDownload, null, Modifier.size(17.dp))
+                    }
+                    Text("  Probar con 1 producto (1 búsqueda)")
+                }
+                Button(
+                    onClick = { onRefreshPrices(false) },
+                    enabled = serpApiKeyConfigured && !isRefreshingPrices,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.CloudDownload, null, Modifier.size(17.dp))
+                    Text("  Actualizar hasta 40 productos")
+                }
+                priceRefreshStatus?.let { status ->
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isRefreshingPrices) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Text(
+                    "El plan gratuito anuncia 250 búsquedas al mes. Una actualización completa consume hasta 40 búsquedas por lote. Los resultados son una instantánea de Google Shopping, no una garantía del precio final: comprueba siempre el precio y la disponibilidad en la tienda antes de comprar.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedButton(
+                    onClick = { openWeb(context, "https://serpapi.com/users/sign_up") },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Default.Launch, null, Modifier.size(17.dp))
                     Text("  Crear cuenta de prueba gratuita")
                 }
                 OutlinedButton(
-                    onClick = { openWeb(context, "https://www.priceapi.com/pricing") },
+                    onClick = { openWeb(context, "https://serpapi.com/pricing") },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Default.Launch, null, Modifier.size(17.dp))
@@ -471,7 +562,7 @@ fun SettingsScreen(
             ) {
                 InfoLine("Versión instalada", BuildConfig.VERSION_NAME)
                 InfoLine("Tiendas registradas", storeCount.toString())
-                InfoLine("Conectores de precios en directo", "0 conectados")
+                InfoLine("Fuente de búsqueda", if (serpApiKeyConfigured) "SerpApi · clave guardada, pendiente de prueba" else "No configurada")
                 InfoLine("Perfil online", "No configurado")
                 Text(
                     "Mínimo no afirma que una tienda esté conectada hasta que la fuente se haya autorizado y probado de verdad.",

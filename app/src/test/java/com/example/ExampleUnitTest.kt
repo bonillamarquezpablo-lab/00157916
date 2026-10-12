@@ -1,6 +1,8 @@
 package com.example
 
 import com.example.data.model.DealVerdict
+import com.example.data.model.PricePoint
+import com.example.data.model.Product
 import com.example.data.model.Store
 import com.example.data.model.VerdictLevel
 import com.example.data.repository.SpanishMarketData
@@ -36,7 +38,45 @@ class ExampleUnitTest {
             athMaxPrice = 419.0
         )
         assertEquals(VerdictLevel.ATH_RECORD, verdict.level)
-        assertTrue(verdict.badgeText.contains("MÍNIMO HISTÓRICO"))
+        assertTrue(verdict.badgeText.contains("MÍNIMO OBSERVADO"))
+    }
+
+    @Test
+    fun livePriceNeedsNinetyDayHistoryBeforeHistoricalClaims() {
+        val seed = SpanishMarketData.getInitialProducts().first()
+        val now = System.currentTimeMillis()
+        val day = 24L * 60L * 60L * 1000L
+        fun point(daysAgo: Long, price: Double) = PricePoint(
+            timestamp = now - daysAgo * day,
+            dateLabel = "$daysAgo días",
+            price = price,
+            storeName = "Comercio consultado",
+            eventLabel = "Consulta de prueba"
+        )
+
+        val oneSnapshot: Product = seed.copy(
+            currentPrice = 199.0,
+            athMinPrice = 199.0,
+            officialPvp = 0.0,
+            priceObservedAt = now,
+            isPriceVerified = true,
+            priceHistory = listOf(point(0, 199.0))
+        )
+        assertFalse("One snapshot must not count as historical evidence", oneSnapshot.hasSufficientHistory)
+        assertFalse("One snapshot must not be labelled a historic low", oneSnapshot.isAtAth)
+        assertEquals(VerdictLevel.UNVERIFIED, oneSnapshot.verdict.level)
+
+        val enoughHistory = oneSnapshot.copy(
+            currentPrice = 189.0,
+            priceObservedAt = now,
+            priceHistory = listOf(
+                point(92, 229.0),
+                point(60, 209.0),
+                point(30, 199.0),
+                point(0, 189.0)
+            )
+        )
+        assertTrue("History requires coverage across 90 days plus recent samples", enoughHistory.hasSufficientHistory)
     }
 
     @Test

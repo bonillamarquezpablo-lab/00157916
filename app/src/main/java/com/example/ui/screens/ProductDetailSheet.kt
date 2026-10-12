@@ -113,13 +113,18 @@ fun ProductDetailSheet(
                 Row {
                     IconButton(
                         onClick = {
-                            val shareText = if (product.isPriceVerified) {
-                                "📊 Informe de precio para ${product.title}:\n" +
-                                    "• Precio actual: ${String.format("%.2f", product.currentPrice)} € en ${product.currentStore.name}\n" +
-                                    "• Mínimo histórico: ${String.format("%.2f", product.athMinPrice)} € (${product.athMinDate} en ${product.athMinStore})\n" +
-                                    "• Diagnóstico: ${product.verdict.badgeText} - ${product.verdict.explanation}"
+                            val shareText = if (product.hasSufficientHistoryForDealVerdict) {
+                                "📊 Informe de precio para ${product.title}:\\n" +
+                                    "• Precio observado: ${String.format("%.2f", product.currentPrice)} € en ${product.currentStore.name}\\n" +
+                                    "• Mínimo observado en los datos disponibles: ${String.format("%.2f", product.athMinPrice)} € (${product.athMinDate} en ${product.athMinStore})\\n" +
+                                    "• Diagnóstico: ${product.verdict.badgeText} - ${product.verdict.explanation}" +
+                                    if (product.isOfficialPvpVerified) "\\n• PVP fuente verificada: ${String.format("%.2f", product.officialPvp)} €" else ""
+                            } else if (product.isPriceVerified) {
+                                "📊 Precio observado para ${product.title}:\\n" +
+                                    "• Precio actual: ${String.format("%.2f", product.currentPrice)} € en ${product.currentStore.name}\\n" +
+                                    "• Aún no hay suficientes observaciones verificadas para afirmar un mínimo histórico o descuento."
                             } else {
-                                "Ficha de demostración de Mínimo: ${product.title}.\nNo contiene precios verificados ni un historial real. No debe usarse como referencia de compra."
+                                "Ficha de demostración de Mínimo: ${product.title}.\\nNo contiene precios verificados ni un historial real. No debe usarse como referencia de compra."
                             }
                             val intent = Intent(Intent.ACTION_SEND).apply {
                                 type = "text/plain"
@@ -223,31 +228,31 @@ fun ProductDetailSheet(
                             )
                         }
 
-                        // Mínimo Histórico
+                        // Minimum observed. Do not claim a historic record without 90-day coverage.
                         Column(horizontalAlignment = Alignment.End) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(
                                     modifier = Modifier
                                         .size(7.dp)
                                         .clip(CircleShape)
-                                        .background(Color(0xFF10B981))
+                                        .background(MaterialTheme.colorScheme.primary)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "MÍNIMO HISTÓRICO",
+                                    text = if (product.hasSufficientHistoryForDealVerdict) "MÍNIMO OBSERVADO" else "HISTORIAL",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF059669)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                             Text(
-                                text = "${String.format("%.2f", product.athMinPrice)} €",
-                                fontWeight = FontWeight.Black,
-                                fontSize = 20.sp,
-                                color = Color(0xFF059669)
+                                text = if (product.hasSufficientHistoryForDealVerdict) "${String.format("%.2f", product.athMinPrice)} €" else "Insuficiente",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "${product.athMinDate} en ${product.athMinStore}",
+                                text = if (product.hasSufficientHistoryForDealVerdict) "${product.athMinDate} en ${product.athMinStore}" else "Se requieren 90 días de datos",
                                 fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -262,82 +267,123 @@ fun ProductDetailSheet(
                     ) {
                         Column {
                             Text(
-                                text = "Media 90 Días",
+                                text = "Media de 90 días",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = "${String.format("%.2f", product.avg90dPrice)} €",
+                                text = if (product.hasSufficientHistoryForDealVerdict) "${String.format("%.2f", product.avg90dPrice)} €" else "Insuficiente",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp
                             )
                         }
 
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = "PVP Oficial",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = "${String.format("%.2f", product.officialPvp)} €",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                textDecoration = TextDecoration.LineThrough
-                            )
-                        }
+                        if (product.isOfficialPvpVerified) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = "PVP oficial verificado",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "${String.format("%.2f", product.officialPvp)} €",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    textDecoration = TextDecoration.LineThrough
+                                )
+                            }
 
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                text = "Ahorro Real",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = "${String.format("%.2f", product.realSavingsAmount)} € (${product.realSavingsPercent}%)",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                color = Color(0xFF059669)
-                            )
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = "Ahorro frente al PVP",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "${String.format("%.2f", product.realSavingsAmount)} € (${product.realSavingsPercent}%)",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = Color(0xFF059669)
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            // Interactive Price History Chart
-            PriceHistoryChart(
-                priceHistory = product.priceHistory,
-                athMinPrice = product.athMinPrice,
-                avg90dPrice = product.avg90dPrice
-            )
-
-            // Multi-Store Spain Comparison
-            StoreComparisonView(
-                offers = product.offers,
-                athPrice = product.athMinPrice
-            )
-
-            // Barcode / EAN Info
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.QrCode,
-                    contentDescription = "Código de barras",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp)
+            // Do not draw a chart from one snapshot or make an empty offer list look like a comparator.
+            if (product.priceHistory.size >= 2) {
+                PriceHistoryChart(
+                    priceHistory = product.priceHistory,
+                    athMinPrice = product.athMinPrice,
+                    avg90dPrice = product.avg90dPrice
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Código de barras EAN oficial: ${product.ean} (Válido para escanear en tienda física)",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().testTag("price_history_insufficient"),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Historial de precios aún insuficiente", fontWeight = FontWeight.Bold)
+                        Text(
+                            "El precio actual está verificado, pero hacen falta varias observaciones fechadas para dibujar una evolución. No se crearán puntos artificiales.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            if (product.offers.isNotEmpty()) {
+                StoreComparisonView(
+                    offers = product.offers,
+                    athPrice = product.athMinPrice
                 )
+            } else {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().testTag("store_comparison_unavailable"),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Comparación entre tiendas no disponible", fontWeight = FontWeight.Bold)
+                        Text(
+                            "Solo mostraremos otras ofertas cuando dispongamos de precios comparables, con fuente y fecha de consulta. No se mostrarán precios de ejemplo.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            // EAN/GTIN metadata is separate from the verification of a current price.
+            if (product.ean.isNotBlank()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.QrCode,
+                        contentDescription = "Código de barras",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (product.isEanVerified) {
+                            "EAN/GTIN verificado: ${product.ean}"
+                        } else {
+                            "EAN/GTIN de referencia (no verificado independientemente): ${product.ean}"
+                        },
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             }
@@ -380,7 +426,7 @@ fun ProductDetailSheet(
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text(
-                            if (product.isPriceVerified) "Ver en ${product.currentStore.name}" else "Buscar en web oficial",
+                            if (product.isPriceVerified) "Ver en ${product.currentStore.name}" else "Buscar en Google",
                             fontSize = 12.sp
                         )
                         Spacer(modifier = Modifier.width(4.dp))

@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Store
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Business
 import androidx.compose.material.icons.outlined.CheckCircleOutline
@@ -56,6 +57,7 @@ import com.example.ui.components.SetAlertDialog
 import com.example.ui.screens.AlertsScreen
 import com.example.ui.screens.DealsScreen
 import com.example.ui.screens.MarketScreen
+import com.example.ui.screens.OnlineSearchScreen
 import com.example.ui.screens.ProductDetailSheet
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.StoresScreen
@@ -81,6 +83,7 @@ fun MainScreen(
 ) {
     var currentTab by remember { mutableStateOf(MainTab.MARKET) }
     var showSettings by remember { mutableStateOf(false) }
+    var showOnlineSearch by remember { mutableStateOf(false) }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val filteredProducts by viewModel.filteredProducts.collectAsStateWithLifecycle()
     val trackedProducts by viewModel.trackedProducts.collectAsStateWithLifecycle()
@@ -97,11 +100,11 @@ fun MainScreen(
     }
 
     // Return from settings before leaving the current marketplace section.
-    BackHandler(enabled = showSettings || currentTab != MainTab.MARKET) {
-        if (showSettings) {
-            showSettings = false
-        } else {
-            currentTab = MainTab.MARKET
+    BackHandler(enabled = showSettings || showOnlineSearch || currentTab != MainTab.MARKET) {
+        when {
+            showSettings -> showSettings = false
+            showOnlineSearch -> showOnlineSearch = false
+            else -> currentTab = MainTab.MARKET
         }
     }
 
@@ -109,7 +112,7 @@ fun MainScreen(
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    if (showSettings) {
+                    if (showSettings || showOnlineSearch) {
                         IconButton(onClick = { showSettings = false }) {
                             Icon(Icons.Default.ArrowBack, contentDescription = "Volver")
                         }
@@ -117,14 +120,28 @@ fun MainScreen(
                 },
                 title = {
                     Text(
-                        text = if (showSettings) "Ajustes" else "Mínimo",
+                        text = when {
+                            showSettings -> "Ajustes"
+                            showOnlineSearch -> "Buscador online"
+                            else -> "Mínimo"
+                        },
                         fontWeight = FontWeight.Black,
                         fontSize = 20.sp,
                         letterSpacing = (-0.5).sp
                     )
                 },
                 actions = {
-                    if (!showSettings) {
+                    if (!showSettings && !showOnlineSearch) {
+                        IconButton(
+                            onClick = { showOnlineSearch = true },
+                            modifier = Modifier.padding(end = 1.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Buscar productos online",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                         Surface(
                             modifier = Modifier.padding(end = 4.dp),
                             shape = MaterialTheme.shapes.large,
@@ -157,7 +174,7 @@ fun MainScreen(
             )
         },
         bottomBar = {
-            if (!showSettings) {
+            if (!showSettings && !showOnlineSearch) {
             NavigationBar(
                 modifier = Modifier
                     .windowInsetsPadding(WindowInsets.navigationBars)
@@ -244,6 +261,17 @@ fun MainScreen(
                     isRefreshingPrices = uiState.isRefreshingPrices,
                     priceRefreshStatus = uiState.priceRefreshStatus,
                     onRefreshPrices = viewModel::refreshLivePrices
+                )
+            } else if (showOnlineSearch) {
+                OnlineSearchScreen(
+                    state = uiState,
+                    onQueryChange = viewModel::onOnlineSearchQueryChange,
+                    onSearch = viewModel::searchOnlineShopping,
+                    onAmazonOnlyChange = viewModel::onOnlineSearchAmazonOnlyChange,
+                    onOpenSettings = {
+                        showOnlineSearch = false
+                        showSettings = true
+                    }
                 )
             } else when (currentTab) {
                 MainTab.MARKET -> {

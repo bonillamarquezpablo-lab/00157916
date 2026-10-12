@@ -1,6 +1,6 @@
 # Mínimo — hoja de ruta de producto
 
-**Estado del código en main:** integración de consulta manual de Google Shopping España mediante SerpApi añadida; todavía no se ha configurado una clave de proveedor en el móvil · 33 comercios en el directorio · autenticación online no configurada · actualización en segundo plano y alertas automáticas no implementadas.
+**Estado de la rama del buscador:** consulta manual de Google Shopping y Amazon.es mediante SerpApi integrada; falta confirmar clave y consulta real en el móvil · 33 comercios en el directorio · actualización en segundo plano y alertas automáticas no implementadas.
 
 **Progreso global provisional: 1%** se mantiene hasta completar el primer flujo de precio real de extremo a extremo en el móvil. El código del conector está integrado, pero falta la clave del proveedor y validar una búsqueda real; el porcentaje se actualiza por resultados funcionales, no por líneas de código.
 
@@ -21,11 +21,11 @@
 - [ ] **M13 — Seguimiento y objetivos.** Favoritos, objetivos de precio, exportación e historial por usuario.
 - [ ] **M14 — Interfaz moderna y accesible.** Cargas, errores, estados vacíos, diseño adaptable y accesibilidad.
 - [ ] **M15 — Calidad y publicación.** Pruebas de integración, privacidad, seguridad, observabilidad, copias y flujo de publicación.
-- [x] **M16 — Buscador online manual.** Búsqueda libre en Google Shopping España, resultados con precio en euros y enlace HTTPS, orden por precio y filtro «Solo Amazon»; también permite abrir una búsqueda directa en Amazon.es sin clave. Los precios dentro de la app requieren SerpApi; no es una conexión oficial con Prime ni una monitorización automática.
+- [x] **M16 — Buscador online manual.** Búsqueda libre en Google Shopping España y búsqueda directa de Amazon.es a través de SerpApi; ambas muestran resultados con precio en euros dentro de Mínimo. Los resultados de Amazon.es incluyen, cuando se informa, la elegibilidad de entrega Prime. No leen precios/cupones personalizados de la sesión personal y requieren SerpApi; no hay monitorización automática.
 
 ## 5 fallos o limitaciones detectados en el código actual
 
-1. **Conector listo, proveedor sin configurar.** El catálogo precargado sigue siendo de demostración; la consulta de Google Shopping solo funciona tras guardar la clave del proveedor en el dispositivo.
+1. **Conector listo, proveedor sin configurar.** El catálogo precargado sigue siendo de demostración; las consultas manuales de Google Shopping y Amazon.es solo funcionan tras guardar la clave de SerpApi en el dispositivo.
 2. **[RESUELTO] Dos fuentes de verdad para productos.** El flujo principal ahora lee los productos desde Room; el catálogo estático solo sirve para añadir fichas que faltan.
 3. **[PARCIALMENTE RESUELTO] Historial persistente con procedencia.** Ya existe una tabla/DAO con URL, fecha y verificación; sigue sin datos reales hasta conectar un proveedor autorizado.
 4. **[RESUELTO] Riesgo de pérdida por migración destructiva.** La migración destructiva se retiró y el camino 2→3→4 ha superado pruebas de preservación.
@@ -46,7 +46,7 @@
 | Ajustes y perfil local | Completado; sin autenticación online |
 | C01: migración no destructiva | Completado y probado |
 | C02: esquema y DAO de observaciones | Completado; falta el proveedor real |
-| Conector manual Google Shopping/SerpApi | Código integrado; el buscador libre se añade en M16. Falta configurar la clave y probar precios reales en el móvil |
+| Conectores manuales Google Shopping y Amazon.es mediante SerpApi | Código integrado en la rama del buscador; falta configurar la clave y probar precios reales en el móvil |
 | Monitorización y alertas | Pendiente |
 
 ## Criterio de finalización

@@ -114,17 +114,17 @@ fun ProductDetailSheet(
                     IconButton(
                         onClick = {
                             val shareText = if (product.hasSufficientHistoryForDealVerdict) {
-                                "📊 Informe de precio para ${product.title}:\\n" +
-                                    "• Precio observado: ${String.format("%.2f", product.currentPrice)} € en ${product.currentStore.name}\\n" +
-                                    "• Mínimo observado en los datos disponibles: ${String.format("%.2f", product.athMinPrice)} € (${product.athMinDate} en ${product.athMinStore})\\n" +
+                                "📊 Informe de precio para ${product.title}:\n" +
+                                    "• Precio observado: ${String.format("%.2f", product.currentPrice)} € en ${product.currentStore.name}\n" +
+                                    "• Mínimo observado en los datos disponibles: ${String.format("%.2f", product.athMinPrice)} € (${product.athMinDate} en ${product.athMinStore})\n" +
                                     "• Diagnóstico: ${product.verdict.badgeText} - ${product.verdict.explanation}" +
-                                    if (product.isOfficialPvpVerified) "\\n• PVP fuente verificada: ${String.format("%.2f", product.officialPvp)} €" else ""
+                                    if (product.isOfficialPvpVerified) "\n• PVP fuente verificada: ${String.format("%.2f", product.officialPvp)} €" else ""
                             } else if (product.isPriceVerified) {
-                                "📊 Precio observado para ${product.title}:\\n" +
-                                    "• Precio actual: ${String.format("%.2f", product.currentPrice)} € en ${product.currentStore.name}\\n" +
+                                "📊 Precio observado para ${product.title}:\n" +
+                                    "• Precio actual: ${String.format("%.2f", product.currentPrice)} € en ${product.currentStore.name}\n" +
                                     "• Aún no hay suficientes observaciones verificadas para afirmar un mínimo histórico o descuento."
                             } else {
-                                "Ficha de demostración de Mínimo: ${product.title}.\\nNo contiene precios verificados ni un historial real. No debe usarse como referencia de compra."
+                                "Ficha de demostración de Mínimo: ${product.title}.\nNo contiene precios verificados ni un historial real. No debe usarse como referencia de compra."
                             }
                             val intent = Intent(Intent.ACTION_SEND).apply {
                                 type = "text/plain"

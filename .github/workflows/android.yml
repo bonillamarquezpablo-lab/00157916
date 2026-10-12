@@ -1,5 +1,10 @@
 name: Compilar Minimo APK
 
+# Cancel obsolete builds so only the latest commit for a branch consumes CI time.
+concurrency:
+  group: minimo-android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   push:

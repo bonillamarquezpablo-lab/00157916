@@ -48,37 +48,38 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.PricePoint
 
-enum class ChartRange(val label: String, val takePoints: Int) {
-    DAYS_30("30 Días", 3),
-    DAYS_90("90 Días", 6),
-    MONTHS_6("6 Meses", 8),
-    ALL("Histórico", 100)
+enum class ChartRange(val label: String, val windowDays: Long?) {
+    DAYS_30("30 días", 30),
+    DAYS_90("90 días", 90),
+    MONTHS_6("6 meses", 180),
+    ALL("Todo el historial", null)
 }
 
 @Composable
 fun PriceHistoryChart(
     priceHistory: List<PricePoint>,
-    athMinPrice: Double,
-    avg90dPrice: Double,
     modifier: Modifier = Modifier
 ) {
     var selectedRange by remember { mutableStateOf(ChartRange.ALL) }
     var selectedPointIndex by remember { mutableIntStateOf(-1) }
 
     val filteredPoints = remember(priceHistory, selectedRange) {
-        if (priceHistory.isEmpty()) emptyList()
-        else {
-            val count = minOf(priceHistory.size, selectedRange.takePoints)
-            priceHistory.takeLast(count)
+        val startAt = selectedRange.windowDays?.let { days ->
+            System.currentTimeMillis() - days * 24L * 60L * 60L * 1000L
         }
+        if (startAt == null) priceHistory
+        else priceHistory.filter { it.timestamp >= startAt }
     }
 
     val minPriceInView = remember(filteredPoints) {
-        filteredPoints.minOfOrNull { it.price } ?: athMinPrice
+        filteredPoints.minOfOrNull { it.price } ?: 0.0
     }
     val maxPriceInView = remember(filteredPoints) {
-        val max = filteredPoints.maxOfOrNull { it.price } ?: (athMinPrice * 1.3)
+        val max = filteredPoints.maxOfOrNull { it.price } ?: 1.0
         if (max == minPriceInView) max * 1.1 else max
+    }
+    val averagePriceInView = remember(filteredPoints) {
+        filteredPoints.map { it.price }.average().takeIf { filteredPoints.isNotEmpty() } ?: 0.0
     }
 
     val selectedPoint = remember(selectedPointIndex, filteredPoints) {
@@ -104,13 +105,13 @@ fun PriceHistoryChart(
         ) {
             Column {
                 Text(
-                    text = "Evolución Real del Precio",
+                    text = "Evolución del precio observado",
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Registrado en mercado español sin sesgo",
+                    text = "Solo incluye observaciones verificadas guardadas en Mínimo.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -125,7 +126,7 @@ fun PriceHistoryChart(
                         .padding(horizontal = 6.dp, vertical = 3.dp)
                 ) {
                     Text(
-                        text = "Mín: ${String.format("%.0f", athMinPrice)}€",
+                        text = if (filteredPoints.isNotEmpty()) "Mín. del rango: ${String.format("%.2f", minPriceInView)}€" else "Mín. del rango: —",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF059669)
@@ -139,7 +140,7 @@ fun PriceHistoryChart(
                         .padding(horizontal = 6.dp, vertical = 3.dp)
                 ) {
                     Text(
-                        text = "Media: ${String.format("%.0f", avg90dPrice)}€",
+                        text = if (filteredPoints.isNotEmpty()) "Media del rango: ${String.format("%.2f", averagePriceInView)}€" else "Media del rango: —",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -178,7 +179,8 @@ fun PriceHistoryChart(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(180.dp)
+                .height(180.dp),
+            contentAlignment = Alignment.Center
         ) {
             Canvas(
                 modifier = Modifier
@@ -212,16 +214,18 @@ fun PriceHistoryChart(
                     Offset(x, y)
                 }
 
-                // Draw Average price horizontal dotted guide line
-                val avgNormalized = ((avg90dPrice - minPriceInView) / priceRange).coerceIn(0.0, 1.0)
-                val avgY = paddingTop + usableHeight - (avgNormalized.toFloat() * usableHeight)
-                drawLine(
-                    color = Color.Gray.copy(alpha = 0.5f),
-                    start = Offset(0f, avgY),
-                    end = Offset(width, avgY),
-                    strokeWidth = 1.5.dp.toPx(),
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
-                )
+                // Draw the average of points inside the selected time window.
+                if (filteredPoints.isNotEmpty()) {
+                    val avgNormalized = ((averagePriceInView - minPriceInView) / priceRange).coerceIn(0.0, 1.0)
+                    val avgY = paddingTop + usableHeight - (avgNormalized.toFloat() * usableHeight)
+                    drawLine(
+                        color = Color.Gray.copy(alpha = 0.5f),
+                        start = Offset(0f, avgY),
+                        end = Offset(width, avgY),
+                        strokeWidth = 1.5.dp.toPx(),
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
+                    )
+                }
 
                 // Fill gradient under curve
                 val fillPath = Path().apply {
@@ -269,7 +273,7 @@ fun PriceHistoryChart(
                 // Draw node points
                 coords.forEachIndexed { index, coord ->
                     val pt = filteredPoints[index]
-                    val isAth = pt.price <= (athMinPrice + 0.05)
+                    val isRangeMinimum = pt.price <= (minPriceInView + 0.05)
                     val isSelected = index == selectedPointIndex
 
                     when {
@@ -285,8 +289,8 @@ fun PriceHistoryChart(
                                 center = coord
                             )
                         }
-                        isAth -> {
-                            // ATH marker
+                        isRangeMinimum -> {
+                            // Lowest observed point inside the selected range
                             drawCircle(
                                 color = Color(0xFF10B981),
                                 radius = 6.dp.toPx(),
@@ -307,6 +311,14 @@ fun PriceHistoryChart(
                         }
                     }
                 }
+            }
+            if (filteredPoints.isEmpty()) {
+                Text(
+                    text = "No hay observaciones verificadas en este intervalo.",
+                    modifier = Modifier.padding(16.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 12.sp
+                )
             }
         }
 
@@ -330,12 +342,12 @@ fun PriceHistoryChart(
                                 text = "${String.format("%.2f", selectedPoint.price)} €",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
-                                color = if (selectedPoint.price <= athMinPrice + 0.05) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
+                                color = if (selectedPoint.price <= minPriceInView + 0.05) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
                             )
-                            if (selectedPoint.price <= athMinPrice + 0.05) {
+                            if (selectedPoint.price <= minPriceInView + 0.05) {
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "★ MÍNIMO HISTÓRICO",
+                                    text = "★ MÍNIMO DEL RANGO",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = Color(0xFF059669)
@@ -382,7 +394,7 @@ fun PriceHistoryChart(
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "Toca sobre el gráfico para ver el precio exacto en cada fecha",
+                    text = if (filteredPoints.isNotEmpty()) "Toca el gráfico para consultar cada observación" else "Elige un rango con datos disponibles",
                     fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

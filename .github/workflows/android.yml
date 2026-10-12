@@ -1,0 +1,64 @@
+name: Compilar Minimo APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - '*.gradle.kts'
+      - 'gradle.properties'
+      - '.github/workflows/android.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar el proyecto
+        uses: actions/checkout@v4
+
+      - name: Preparar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Preparar Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Preparar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar componentes Android
+        run: |
+          sdkmanager "platforms;android-36.1" \
+            "build-tools;36.0.0" \
+            "platform-tools"
+
+      - name: Crear clave temporal de depuración
+        run: |
+          keytool -genkeypair -v \
+            -keystore debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Compilar APK
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Guardar el APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: minimo-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

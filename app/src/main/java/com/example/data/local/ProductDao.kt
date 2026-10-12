@@ -14,6 +14,9 @@ interface ProductDao {
     @Query("SELECT COUNT(*) FROM products")
     suspend fun getProductCount(): Int
 
+    @Query("SELECT * FROM products ORDER BY title ASC")
+    suspend fun getAllProductsSnapshot(): List<ProductEntity>
+
     @Query("SELECT * FROM products WHERE id = :productId LIMIT 1")
     suspend fun getProductById(productId: String): ProductEntity?
 

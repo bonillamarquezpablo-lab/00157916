@@ -36,7 +36,7 @@ data class DealVerdict(
             level = VerdictLevel.UNVERIFIED,
             title = "Historial insuficiente",
             badgeText = "HISTORIAL EN CONSTRUCCIÓN",
-            explanation = "El precio actual tiene una fuente verificada, pero solo hay $observationCount observaciones y/o cubren menos de 30 días. Mínimo no afirmará que es un récord ni calculará descuentos históricos hasta reunir al menos 3 observaciones verificadas a lo largo de 30 días.",
+            explanation = "El precio actual tiene una fuente verificada, pero solo hay $observationCount observaciones y/o no cubren al menos 90 días. Mínimo no afirmará que es un récord ni calculará descuentos históricos hasta reunir al menos 3 observaciones verificadas a lo largo de al menos 90 días.",
             iconName = "Info",
             color = Color(0xFF64748B),
             confidenceScore = 0

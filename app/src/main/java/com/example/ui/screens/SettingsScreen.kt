@@ -282,7 +282,7 @@ fun SettingsScreen(
                     }
                 }
                 Text(
-                    "Consulta resultados de Google Shopping para España y puede encontrar ofertas de varios comercios. El plan gratuito anuncia 250 búsquedas al mes; cada producto consultado consume una búsqueda. Mínimo consulta solo cuando pulsas un botón y limita cada lote a 40 productos.",
+                    "Consulta Google Shopping España. Mínimo comprueba el saldo real de tu cuenta y el límite horario antes de los lotes; las búsquedas recientes se reutilizan desde caché local para evitar llamadas repetidas. El plan gratuito anuncia 250 búsquedas al mes y 50 por hora; otros planes pueden tener límites distintos.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -343,7 +343,7 @@ fun SettingsScreen(
                     if (isCheckingSerpApiAccount) {
                         CircularProgressIndicator(modifier = Modifier.size(17.dp), strokeWidth = 2.dp)
                     } else {
-                        Icon(Icons.Default.VerifiedUser, null, Modifier.size(17.dp))
+                        Icon(Icons.Default.CheckCircle, null, Modifier.size(17.dp))
                     }
                     Text("  Comprobar clave y cuota")
                 }

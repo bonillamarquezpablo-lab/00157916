@@ -8,6 +8,7 @@ import com.example.data.local.AppDatabase
 import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiException
 import com.example.data.remote.SerpApiRequestProduct
+import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.SerpApiTokenStore
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeout
 
 enum class SortOption(val label: String) {
@@ -47,6 +49,11 @@ data class TrackerUiState(
     val isVerifying: Boolean = false,
     val isRefreshingPrices: Boolean = false,
     val priceRefreshStatus: String? = null,
+    val onlineSearchQuery: String = "",
+    val onlineSearchResults: List<SerpApiShoppingResult> = emptyList(),
+    val isOnlineSearching: Boolean = false,
+    val onlineSearchStatus: String? = null,
+    val onlineSearchAmazonOnly: Boolean = false,
     val snackbarMessage: String? = null
 )
 
@@ -262,6 +269,77 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 showSnackbar(message)
             } finally {
                 _uiState.value = _uiState.value.copy(isRefreshingPrices = false)
+            }
+        }
+    }
+
+    fun onOnlineSearchQueryChange(query: String) {
+        _uiState.value = _uiState.value.copy(
+            onlineSearchQuery = query,
+            onlineSearchResults = emptyList(),
+            onlineSearchStatus = null
+        )
+    }
+
+    fun onOnlineSearchAmazonOnlyChange(onlyAmazon: Boolean) {
+        _uiState.value = _uiState.value.copy(onlineSearchAmazonOnly = onlyAmazon)
+    }
+
+    /** One deliberate search consumes one local SerpApi search reservation. */
+    fun searchOnlineShopping() {
+        val current = _uiState.value
+        val query = current.onlineSearchQuery.trim()
+        if (current.isOnlineSearching || current.isRefreshingPrices) return
+        if (query.length < 2) {
+            val message = "Escribe al menos 2 caracteres para buscar."
+            _uiState.value = current.copy(onlineSearchStatus = message)
+            showSnackbar(message)
+            return
+        }
+
+        _uiState.value = current.copy(
+            isOnlineSearching = true,
+            onlineSearchStatus = "Buscando ofertas en Google Shopping España…",
+            onlineSearchResults = emptyList()
+        )
+        viewModelScope.launch {
+            try {
+                val token = serpApiTokenStore.read()
+                if (token.isNullOrBlank()) {
+                    val message = "Configura tu clave de SerpApi en Ajustes para ver precios dentro de Mínimo. La búsqueda directa de Amazon sigue disponible sin esa clave."
+                    _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+                if (!reserveSerpApiSearches(1)) {
+                    val message = "Límite local alcanzado: máximo 45 búsquedas por hora entre el buscador y la actualización del catálogo."
+                    _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+
+                val results = serpApiClient.searchOnline(token, query)
+                val message = if (results.isEmpty()) {
+                    "No se han encontrado ofertas con precio en euros y enlace seguro. Prueba otra búsqueda o abre Amazon.es directamente."
+                } else {
+                    "Se han encontrado ${results.size} resultados ordenados por precio. Confirma el precio final en la tienda antes de comprar."
+                }
+                _uiState.value = _uiState.value.copy(
+                    onlineSearchResults = results,
+                    onlineSearchStatus = message
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: SerpApiException) {
+                val message = error.message ?: "No se pudo completar la búsqueda."
+                _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                showSnackbar(message)
+            } catch (_: Exception) {
+                val message = "No se pudo buscar. Comprueba la conexión y la clave guardada en Ajustes."
+                _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                showSnackbar(message)
+            } finally {
+                _uiState.value = _uiState.value.copy(isOnlineSearching = false)
             }
         }
     }

@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Patterns
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -70,6 +71,7 @@ fun SettingsScreen(
         mutableStateOf(preferences.getString("email", "") ?: "")
     }
     var saved by remember { mutableStateOf(false) }
+    var emailError by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -179,18 +181,28 @@ fun SettingsScreen(
                 )
                 OutlinedTextField(
                     value = email,
-                    onValueChange = { email = it; saved = false },
+                    onValueChange = { email = it; saved = false; emailError = false },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Correo (opcional)") },
                     placeholder = { Text("tucorreo@ejemplo.com") },
+                    isError = emailError,
+                    supportingText = {
+                        if (emailError) Text("Introduce un correo válido o deja el campo vacío.")
+                    },
                     singleLine = true,
                     shape = RoundedCornerShape(14.dp)
                 )
                 Button(
                     onClick = {
+                        val normalizedEmail = email.trim()
+                        if (normalizedEmail.isNotEmpty() && !Patterns.EMAIL_ADDRESS.matcher(normalizedEmail).matches()) {
+                            emailError = true
+                            saved = false
+                            return@Button
+                        }
                         preferences.edit()
                             .putString("display_name", displayName.trim().ifBlank { DEFAULT_PROFILE_NAME })
-                            .putString("email", email.trim())
+                            .putString("email", normalizedEmail)
                             .apply()
                         displayName = displayName.trim().ifBlank { DEFAULT_PROFILE_NAME }
                         saved = true

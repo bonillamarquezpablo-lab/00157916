@@ -9,7 +9,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+// Resource-only test: API 35 runs on the Java 17 CI runtime; API 36 requires Java 21 in Robolectric 4.16.
+@Config(sdk = [35])
 class ExampleRobolectricTest {
 
   @Test

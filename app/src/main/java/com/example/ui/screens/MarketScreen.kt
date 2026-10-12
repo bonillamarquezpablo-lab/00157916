@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
@@ -121,7 +122,7 @@ fun MarketScreen(
                                 .padding(horizontal = 7.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = "MERCADO ESPAÑOL",
+                                text = "CATÁLOGO DE DEMOSTRACIÓN",
                                 color = Color(0xFF0B132B),
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Black
@@ -129,14 +130,14 @@ fun MarketScreen(
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Icon(
-                            imageVector = Icons.Default.Shield,
+                            imageVector = Icons.Default.Info,
                             contentDescription = null,
                             tint = Color(0xFF10B981),
                             modifier = Modifier.size(14.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "${stores.size} Grandes Tiendas Auditadas",
+                            text = "${stores.size} tiendas configuradas",
                             color = Color(0xFF10B981),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
@@ -146,7 +147,7 @@ fun MarketScreen(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
-                        text = "El Precio Mínimo Histórico Real",
+                        text = "Comparador de precios · modo demo",
                         color = Color.White,
                         fontWeight = FontWeight.Black,
                         fontSize = 18.sp,
@@ -154,7 +155,7 @@ fun MarketScreen(
                     )
 
                     Text(
-                        text = "Base de datos con Amazon, PcComponentes, MediaMarkt, El Corte Inglés, Carrefour, Fnac, Alcampo, Leroy Merlin, Decathlon y más.",
+                        text = "Productos, precios e historiales de ejemplo. Mínimo todavía no consulta las tiendas en tiempo real.",
                         color = Color(0xFFCBD5E1),
                         fontSize = 11.sp,
                         lineHeight = 15.sp
@@ -334,7 +335,7 @@ fun MarketScreen(
                                 tint = if (uiState.onlyAthFilter) Color(0xFF047857) else Color(0xFFEAB308)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Solo Mínimo Histórico", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Solo mínimos verificados", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     },
                     colors = FilterChipDefaults.filterChipColors(
@@ -454,7 +455,7 @@ fun MarketScreen(
                 )
 
                 Text(
-                    text = "Garantía de Veracidad",
+                    text = "Precios sin verificar",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold
@@ -479,7 +480,7 @@ fun MarketScreen(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Prueba a cambiar la tienda seleccionada o el filtro de búsqueda.",
+                            text = "El catálogo contiene datos de demostración. Los mínimos verificados aparecerán cuando incorporemos fuentes reales.",
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

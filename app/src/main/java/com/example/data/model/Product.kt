@@ -24,27 +24,40 @@ data class Product(
     val rating: Double = 4.7,
     val reviewCount: Int = 1240,
     val imageResName: String? = null,
-    val imageUrl: String = ""
+    val imageUrl: String = "",
+    /**
+     * True only after a current price and its history have been fetched and validated.
+     * The bundled catalogue remains unverified by default.
+     */
+    val isPriceVerified: Boolean = false
 ) {
     val verdict: DealVerdict
-        get() = DealVerdict.analyze(
-            currentPrice = currentPrice,
-            athMinPrice = athMinPrice,
-            avg90dPrice = avg90dPrice,
-            athMaxPrice = athMaxPrice,
-            wasRecentlyInflated = wasRecentlyInflated,
-            fakePriorPrice = fakePriorPrice
-        )
+        get() = if (!isPriceVerified) {
+            DealVerdict.unverified()
+        } else {
+            DealVerdict.analyze(
+                currentPrice = currentPrice,
+                athMinPrice = athMinPrice,
+                avg90dPrice = avg90dPrice,
+                athMaxPrice = athMaxPrice,
+                wasRecentlyInflated = wasRecentlyInflated,
+                fakePriorPrice = fakePriorPrice
+            )
+        }
 
     val realSavingsAmount: Double
-        get() = (officialPvp - currentPrice).coerceAtLeast(0.0)
+        get() = if (isPriceVerified) (officialPvp - currentPrice).coerceAtLeast(0.0) else 0.0
 
     val realSavingsPercent: Int
-        get() = if (officialPvp > 0) (((officialPvp - currentPrice) / officialPvp) * 100).toInt() else 0
+        get() = if (isPriceVerified && officialPvp > 0) {
+            (((officialPvp - currentPrice) / officialPvp) * 100).toInt()
+        } else 0
 
     val diffFromAthPercent: Double
-        get() = if (athMinPrice > 0) (((currentPrice - athMinPrice) / athMinPrice) * 100) else 0.0
+        get() = if (isPriceVerified && athMinPrice > 0) {
+            ((currentPrice - athMinPrice) / athMinPrice) * 100
+        } else 0.0
 
     val isAtAth: Boolean
-        get() = currentPrice <= athMinPrice + 0.05
+        get() = isPriceVerified && currentPrice <= athMinPrice + 0.05
 }

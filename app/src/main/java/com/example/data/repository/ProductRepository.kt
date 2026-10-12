@@ -8,9 +8,7 @@ import com.example.data.local.TrackedProductDao
 import com.example.data.local.TrackedProductEntity
 import com.example.data.model.PricePoint
 import com.example.data.model.Product
-import com.example.data.model.ProductCategory
 import com.example.data.model.Store
-import com.example.data.model.StoreOffer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -18,13 +16,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import java.net.URI
 
 data class UrlAnalysisResult(
     val queryOrUrl: String,
     val identifiedStore: Store?,
     val detectedTitle: String,
     val matchedProduct: Product?,
-    val isVerifiedSpanishRetailer: Boolean,
+    val isKnownRetailerDomain: Boolean,
     val adviceMessage: String
 )
 
@@ -136,15 +135,15 @@ class ProductRepository(
                 val droppedPrice = newLowPrice ?: (product.athMinPrice * 0.95)
                 val newPoint = PricePoint(
                     timestamp = System.currentTimeMillis(),
-                    dateLabel = "Ahora mismo",
+                    dateLabel = "Simulación",
                     price = droppedPrice,
                     storeName = product.currentStore.name,
-                    eventLabel = "¡NUEVO MÍNIMO HISTÓRICO!"
+                    eventLabel = "SIMULACIÓN DE DEMOSTRACIÓN — NO ES UN PRECIO REAL"
                 )
                 product.copy(
                     currentPrice = droppedPrice,
                     athMinPrice = minOf(product.athMinPrice, droppedPrice),
-                    athMinDate = "Hoy (Nuevo récord)",
+                    athMinDate = "Simulación de demostración",
                     athMinStore = product.currentStore.name,
                     priceHistory = product.priceHistory + newPoint
                 )
@@ -155,90 +154,96 @@ class ProductRepository(
     }
 
     fun analyzeSpanishUrlOrQuery(input: String): UrlAnalysisResult {
-        val cleaned = input.trim().lowercase()
+        val rawInput = input.trim()
+        if (rawInput.isBlank()) {
+            return UrlAnalysisResult(
+                queryOrUrl = input,
+                identifiedStore = null,
+                detectedTitle = "",
+                matchedProduct = null,
+                isKnownRetailerDomain = false,
+                adviceMessage = "Escribe el nombre de un producto o pega el enlace de una ficha de producto."
+            )
+        }
 
-        // Match against existing catalog first
-        val directMatch = (_catalogProducts.value + _customProducts.value).firstOrNull { prod ->
-            prod.title.lowercase().contains(cleaned) ||
-            prod.brand.lowercase().contains(cleaned) ||
-            prod.ean == cleaned ||
-            prod.storeUrl.lowercase().contains(cleaned) ||
-            cleaned.contains(prod.id.lowercase())
+        val submittedUri = parseHttpUri(rawInput)
+        val detectedStore = findStoreForUrl(submittedUri)
+        val cleaned = rawInput.lowercase()
+        val catalog = _catalogProducts.value + _customProducts.value
+
+        val directMatch = if (submittedUri != null) {
+            catalog.firstOrNull { product ->
+                val productUri = parseHttpUri(product.storeUrl)
+                productUri != null &&
+                    normalizeHost(productUri.host) == normalizeHost(submittedUri.host) &&
+                    normalizePath(productUri) == normalizePath(submittedUri)
+            }
+        } else {
+            catalog.firstOrNull { product ->
+                product.title.lowercase().contains(cleaned) ||
+                    product.brand.equals(rawInput, ignoreCase = true) ||
+                    product.ean == rawInput ||
+                    product.id.equals(rawInput, ignoreCase = true)
+            }
         }
 
         if (directMatch != null) {
             return UrlAnalysisResult(
                 queryOrUrl = input,
-                identifiedStore = directMatch.currentStore,
+                identifiedStore = detectedStore,
                 detectedTitle = directMatch.title,
                 matchedProduct = directMatch,
-                isVerifiedSpanishRetailer = true,
-                adviceMessage = "Producto verificado en nuestra base histórica de precios de España."
+                isKnownRetailerDomain = detectedStore != null,
+                adviceMessage = "Coincidencia con una ficha del catálogo de demostración. Sus precios e historial son datos de ejemplo; no se ha consultado la tienda ni verificado el precio actual."
             )
         }
 
-        // Detect Spanish Retailer domain among all 20 Spanish stores
-        val detectedStore = Store.ALL_STORES.firstOrNull { store ->
-            cleaned.contains(store.domain) ||
-            cleaned.contains(store.id) ||
-            cleaned.contains(store.name.lowercase())
+        val displayTitle = submittedUri?.let { uri ->
+            val slug = uri.path.orEmpty()
+                .substringAfterLast('/')
+                .replace(Regex("[-_]+"), " ")
+                .trim()
+            if (slug.isBlank()) "Página de ${uri.host}" else slug
+        } ?: rawInput
+
+        val advice = when {
+            submittedUri != null && detectedStore != null ->
+                "Dominio reconocido: ${detectedStore.name}. Esta versión todavía no extrae el precio de la página ni consulta su historial. No se ha inventado ningún precio."
+            submittedUri != null ->
+                "No se reconoce este dominio como una de las tiendas configuradas y la app todavía no puede extraer el precio de la página. No se ha inventado ningún precio ni historial."
+            else ->
+                "No hay coincidencia con el catálogo de demostración. Escribe el modelo exacto o pega un enlace de producto. Esta versión aún no dispone de una fuente de precios en directo."
         }
 
-        // Generate synthetic tracked item for the verified URL/query
-        val extractedName = if (input.startsWith("http://") || input.startsWith("https://")) {
-            val domain = input.substringAfter("://").substringBefore("/")
-            val path = input.substringAfter(domain).replace("-", " ").replace("/", " ").trim()
-            if (path.length > 5) "Artículo verificado en $domain (${path.take(35)}...)"
-            else "Producto en $domain"
-        } else {
-            input.replaceFirstChar { it.uppercase() }
-        }
-
-        val estimatedPvp = 199.99
-        val estimatedAth = 149.99
-        val estimatedCurrent = 169.99
-        val newId = "custom_" + System.currentTimeMillis()
-
-        val generated = Product(
-            id = newId,
-            title = extractedName,
-            brand = "Marca Detectada",
-            category = ProductCategory.COMPUTING,
-            currentPrice = estimatedCurrent,
-            athMinPrice = estimatedAth,
-            athMinDate = "Hace 2 meses",
-            athMinStore = detectedStore?.name ?: "Amazon España",
-            athMaxPrice = estimatedPvp,
-            avg90dPrice = 179.0,
-            officialPvp = estimatedPvp,
-            currentStore = detectedStore ?: Store.AMAZON_ES,
-            storeUrl = if (input.startsWith("http")) input else "https://www.google.es/search?q=$input",
-            ean = "8400000000000",
-            imageUrl = "https://images.unsplash.com/photo-1526738549149-8e07eca6c147?w=600",
-            priceHistory = listOf(
-                PricePoint(System.currentTimeMillis() - (90 * 86400000L), "Hace 90 días", estimatedPvp, "Mercado"),
-                PricePoint(System.currentTimeMillis() - (45 * 86400000L), "Hace 45 días", estimatedAth, "Mínimo"),
-                PricePoint(System.currentTimeMillis(), "Hoy", estimatedCurrent, "Actual")
-            ),
-            offers = listOf(
-                StoreOffer(detectedStore ?: Store.AMAZON_ES, estimatedCurrent, true)
-            )
-        )
-
-        // Add to custom monitored products
-        _customProducts.value = _customProducts.value + generated
-
+        // Never manufacture a product with placeholder prices, a fake EAN or synthetic history.
         return UrlAnalysisResult(
             queryOrUrl = input,
             identifiedStore = detectedStore,
-            detectedTitle = extractedName,
-            matchedProduct = generated,
-            isVerifiedSpanishRetailer = detectedStore != null,
-            adviceMessage = if (detectedStore != null) {
-                "Enlace de tienda española (${detectedStore.name}) reconocido e indexado en la base de datos para auditoría."
-            } else {
-                "Producto agregado al rastreador de precios mínimos del mercado español."
-            }
+            detectedTitle = displayTitle,
+            matchedProduct = null,
+            isKnownRetailerDomain = detectedStore != null,
+            adviceMessage = advice
         )
     }
+
+    private fun parseHttpUri(value: String): URI? {
+        val uri = runCatching { URI(value) }.getOrNull() ?: return null
+        val scheme = uri.scheme?.lowercase()
+        return uri.takeIf {
+            (scheme == "http" || scheme == "https") && !it.host.isNullOrBlank()
+        }
+    }
+
+    private fun findStoreForUrl(uri: URI?): Store? {
+        val host = uri?.host?.let(::normalizeHost) ?: return null
+        return Store.ALL_STORES.firstOrNull { store ->
+            val storeHost = normalizeHost(store.domain.substringBefore('/'))
+            storeHost.isNotBlank() && (host == storeHost || host.endsWith(".$storeHost"))
+        }
+    }
+
+    private fun normalizeHost(host: String): String = host.lowercase().removePrefix("www.")
+
+    private fun normalizePath(uri: URI): String = uri.path.orEmpty().trimEnd('/').ifEmpty { "/" }
+
 }

@@ -113,11 +113,14 @@ fun ProductDetailSheet(
                 Row {
                     IconButton(
                         onClick = {
-                            val shareText = "📊 Auditoría 'Mínimo' para ${product.title}:\n" +
+                            val shareText = if (product.isPriceVerified) {
+                                "📊 Informe de precio para ${product.title}:\n" +
                                     "• Precio actual: ${String.format("%.2f", product.currentPrice)} € en ${product.currentStore.name}\n" +
-                                    "• Mínimo Histórico Real: ${String.format("%.2f", product.athMinPrice)} € (${product.athMinDate} en ${product.athMinStore})\n" +
-                                    "• Diagnóstico: ${product.verdict.badgeText} - ${product.verdict.explanation}\n" +
-                                    "• Verificación: Sin trampa ni cartón."
+                                    "• Mínimo histórico: ${String.format("%.2f", product.athMinPrice)} € (${product.athMinDate} en ${product.athMinStore})\n" +
+                                    "• Diagnóstico: ${product.verdict.badgeText} - ${product.verdict.explanation}"
+                            } else {
+                                "Ficha de demostración de Mínimo: ${product.title}.\nNo contiene precios verificados ni un historial real. No debe usarse como referencia de compra."
+                            }
                             val intent = Intent(Intent.ACTION_SEND).apply {
                                 type = "text/plain"
                                 putExtra(Intent.EXTRA_SUBJECT, "Auditoría de precio: ${product.title}")
@@ -154,7 +157,7 @@ fun ProductDetailSheet(
                     product = product,
                     modifier = Modifier.fillMaxWidth().height(210.dp),
                     contentScale = ContentScale.Fit,
-                    showAthRibbon = true
+                    showAthRibbon = product.isPriceVerified && product.isAtAth
                 )
             }
 
@@ -170,6 +173,28 @@ fun ProductDetailSheet(
             // Verdict Certificate Badge
             DealVerdictBadge(verdict = product.verdict, compact = false)
 
+            if (!product.isPriceVerified) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Precio e historial no verificados",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Los valores numéricos de esta ficha son datos de demostración. Se ocultan el precio, las ofertas y el gráfico hasta disponer de observaciones reales con fuente y fecha.",
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+            if (product.isPriceVerified) {
             // Key Price Metrics Grid
             Surface(
                 modifier = Modifier
@@ -315,6 +340,8 @@ fun ProductDetailSheet(
                 )
             }
 
+            }
+
             // Primary Actions: Alert setting and Open store
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
@@ -331,7 +358,7 @@ fun ProductDetailSheet(
                     Icon(imageVector = Icons.Default.NotificationsActive, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (product.isTracked) "Modificar Alerta de Precio" else "Activar Alerta de Precio Mínimo",
+                        text = if (product.isTracked) "Modificar seguimiento" else "Guardar seguimiento",
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -348,9 +375,13 @@ fun ProductDetailSheet(
                         modifier = Modifier
                             .weight(1f)
                             .height(44.dp),
+                        enabled = product.isPriceVerified,
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("Ver en ${product.currentStore.name}", fontSize = 12.sp)
+                        Text(
+                            if (product.isPriceVerified) "Ver en ${product.currentStore.name}" else "Enlace no verificado",
+                            fontSize = 12.sp
+                        )
                         Spacer(modifier = Modifier.width(4.dp))
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.OpenInNew,
@@ -373,7 +404,7 @@ fun ProductDetailSheet(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Simular Récord", fontSize = 12.sp)
+                        Text("Simular caída (demo)", fontSize = 10.sp)
                     }
                 }
             }

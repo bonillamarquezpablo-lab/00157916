@@ -92,7 +92,7 @@ fun AlertsScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Añade cualquier producto del mercado español para recibir avisos cuando alcance su precio mínimo histórico o el objetivo que elijas.",
+                    text = "Guarda productos para tenerlos a mano. Las consultas automáticas de precios y las notificaciones todavía no están implementadas.",
                     fontSize = 13.sp,
                     lineHeight = 18.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -146,12 +146,12 @@ fun AlertsScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Column {
                                 Text(
-                                    text = "Rastreador de Mínimos Activo",
+                                    text = "Seguimiento local guardado",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp
                                 )
                                 Text(
-                                    text = "${trackedProducts.size} artículos bajo vigilancia continua",
+                                    text = "${trackedProducts.size} productos guardados · sin vigilancia automática",
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -198,9 +198,9 @@ fun AlertsScreen(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = if (product.alertTargetPrice != null) {
-                                    "Avisar si baja de ${String.format("%.2f", product.alertTargetPrice)} €"
+                                    "Objetivo guardado: ${String.format("%.2f", product.alertTargetPrice)} € (sin avisos automáticos)"
                                 } else {
-                                    "Avisar si toca nuevo mínimo histórico"
+                                    "Guardado para seguimiento manual (sin avisos automáticos)"
                                 },
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
@@ -228,7 +228,7 @@ fun AlertsScreen(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.FlashOn,
-                                    contentDescription = "Simular caída",
+                                    contentDescription = "Simulación de demostración; no es un precio real",
                                     tint = Color(0xFFD97706),
                                     modifier = Modifier.size(16.dp)
                                 )

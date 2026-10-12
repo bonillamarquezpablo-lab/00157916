@@ -249,7 +249,10 @@ class ProductRepository(
         reviewCount = reviewCount,
         wasRecentlyInflated = wasRecentlyInflated,
         fakePriorPrice = fakePriorPrice,
-        isPriceVerified = isPriceVerified
+        isPriceVerified = isPriceVerified,
+        isOfficialPvpVerified = isOfficialPvpVerified,
+        isRatingVerified = isRatingVerified,
+        isEanVerified = isEanVerified
     )
 
     private fun ProductEntity.toDomainProduct(
@@ -305,13 +308,18 @@ class ProductRepository(
             priceHistory = historyPoints,
             // Historical offers in the original bundled catalogue were examples, not source-backed.
             offers = emptyList(),
-            wasRecentlyInflated = wasRecentlyInflated,
-            fakePriorPrice = fakePriorPrice,
+            // The seed catalogue's fake-discount marker, PVP, ratings and barcode aren't
+            // evidence from the price provider. Only expose those fields when independently verified.
+            wasRecentlyInflated = false,
+            fakePriorPrice = null,
             rating = rating,
             reviewCount = reviewCount,
             imageResName = imageResName,
             imageUrl = imageUrl.orEmpty(),
-            isPriceVerified = priceIsVerified
+            isPriceVerified = priceIsVerified,
+            isOfficialPvpVerified = isOfficialPvpVerified,
+            isRatingVerified = isRatingVerified,
+            isEanVerified = isEanVerified
         )
     }
 

@@ -104,7 +104,7 @@ fun SetAlertDialog(
                 )
 
                 // Historical presets require adequate time coverage; one snapshot is not a historical low.
-                if (product.isPriceVerified) {
+                if (product.hasSufficientHistoryForDealVerdict) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)

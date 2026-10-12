@@ -84,13 +84,13 @@ fun DealsScreen(
 
                         Column {
                             Text(
-                                text = "En Mínimo Histórico Absoluto",
+                                text = "Mínimos verificados: aún no disponibles",
                                 fontWeight = FontWeight.Black,
                                 fontSize = 16.sp,
                                 color = Color(0xFF064E3B)
                             )
                             Text(
-                                text = "Comprobado en histórico multi-tienda de España",
+                                text = "Pendiente de incorporar fuentes reales de precios",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -100,7 +100,7 @@ fun DealsScreen(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Text(
-                        text = "Estos productos están hoy al precio más bajo jamás registrado desde que se monitorizan en España. Sin trucos, sin subidas previas ni falsos porcentajes de rebajas.",
+                        text = "Los productos precargados son datos de demostración y no se cuentan como mínimos reales. Esta sección solo debería mostrar récords cuando existan mediciones verificadas con fecha y fuente.",
                         fontSize = 12.sp,
                         lineHeight = 16.sp,
                         color = MaterialTheme.colorScheme.onSurface
@@ -117,13 +117,13 @@ fun DealsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "${athProducts.size} Récords Activos Ahora Mismo",
+                    text = "${athProducts.size} mínimos verificados",
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp
                 )
 
                 Text(
-                    text = "Actualizado Hoy",
+                    text = "Sin datos en directo",
                     fontSize = 11.sp,
                     color = Color(0xFF059669),
                     fontWeight = FontWeight.SemiBold

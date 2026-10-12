@@ -5,6 +5,7 @@ import com.example.data.model.Store
 import com.example.data.model.VerdictLevel
 import com.example.data.repository.SpanishMarketData
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -12,6 +13,18 @@ class ExampleUnitTest {
     @Test
     fun addition_isCorrect() {
         assertEquals(4, 2 + 2)
+    }
+
+    @Test
+    fun bundledProductsAreNeverPresentedAsVerifiedPrices() {
+        val products = SpanishMarketData.getInitialProducts()
+        assertTrue(products.isNotEmpty())
+        products.forEach { product ->
+            assertFalse("Bundled sample must not be marked verified: ${product.title}", product.isPriceVerified)
+            assertFalse("Bundled sample must not claim an all-time low: ${product.title}", product.isAtAth)
+            assertEquals(VerdictLevel.UNVERIFIED, product.verdict.level)
+            assertEquals(0, product.verdict.confidenceScore)
+        }
     }
 
     @Test

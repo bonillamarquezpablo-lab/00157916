@@ -74,7 +74,7 @@ fun ProductCard(
                         .size(88.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .testTag("product_photo_${product.id}"),
-                    showAthRibbon = true
+                    showAthRibbon = product.isPriceVerified && product.isAtAth
                 )
 
                 Spacer(modifier = Modifier.width(12.dp))
@@ -90,14 +90,14 @@ fun ProductCard(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(product.currentStore.brandColor.copy(alpha = 0.15f))
+                                .background(if (product.isPriceVerified) product.currentStore.brandColor.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant)
                                 .padding(horizontal = 7.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = product.currentStore.name,
+                                text = if (product.isPriceVerified) product.currentStore.name else "Ficha de demostración",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp,
-                                color = product.currentStore.brandColor
+                                color = if (product.isPriceVerified) product.currentStore.brandColor else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 
@@ -139,20 +139,22 @@ fun ProductCard(
                             fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Icon(
-                            imageVector = Icons.Default.Star,
-                            contentDescription = null,
-                            tint = Color(0xFFEAB308),
-                            modifier = Modifier.size(11.dp)
-                        )
-                        Spacer(modifier = Modifier.width(2.dp))
-                        Text(
-                            text = "${product.rating}",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                        if (product.isPriceVerified) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(
+                                imageVector = Icons.Default.Star,
+                                contentDescription = null,
+                                tint = Color(0xFFEAB308),
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Text(
+                                text = "${product.rating}",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 }
             }
@@ -165,6 +167,14 @@ fun ProductCard(
             Spacer(modifier = Modifier.height(10.dp))
 
             // Price Section
+            if (!product.isPriceVerified) {
+                Text(
+                    text = "PRECIO DE MUESTRA · NO CONSULTADO EN TIENDA",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Bottom,
@@ -173,13 +183,13 @@ fun ProductCard(
                 Column {
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
-                            text = "${String.format("%.2f", product.currentPrice)} €",
+                            text = if (product.isPriceVerified) "${String.format("%.2f", product.currentPrice)} €" else "—",
                             fontWeight = FontWeight.Black,
                             fontSize = 22.sp,
                             color = if (product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
                         )
 
-                        if (product.officialPvp > product.currentPrice) {
+                        if (product.isPriceVerified && product.officialPvp > product.currentPrice) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "${String.format("%.2f", product.officialPvp)} €",
@@ -190,7 +200,7 @@ fun ProductCard(
                         }
                     }
 
-                    if (product.realSavingsPercent > 0) {
+                    if (product.isPriceVerified && product.realSavingsPercent > 0) {
                         Text(
                             text = "Ahorro real: -${product.realSavingsPercent}% (-${String.format("%.2f", product.realSavingsAmount)} €)",
                             fontSize = 11.sp,
@@ -228,13 +238,13 @@ fun ProductCard(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Mínimo histórico:",
+                            text = if (product.isPriceVerified) "Mínimo histórico:" else "Historial:",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "${String.format("%.2f", product.athMinPrice)} €",
+                            text = if (product.isPriceVerified) "${String.format("%.2f", product.athMinPrice)} €" else "No verificado",
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp,
                             color = if (product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
@@ -242,7 +252,7 @@ fun ProductCard(
                     }
 
                     Text(
-                        text = "${product.athMinDate} (${product.athMinStore})",
+                        text = if (product.isPriceVerified) "${product.athMinDate} (${product.athMinStore})" else "Sin historial verificable",
                         fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

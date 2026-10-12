@@ -138,9 +138,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             repository.toggleTracking(product.id, targetPrice)
             val msg = if (product.isTracked) {
-                "Eliminado de tus alertas de precio"
+                "Producto eliminado del seguimiento local"
             } else {
-                "¡Producto añadido! Te avisaremos si toca nuevo mínimo histórico."
+                "Producto guardado localmente. Los avisos automáticos aún no están disponibles."
             }
             showSnackbar(msg)
         }
@@ -151,7 +151,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             repository.updateAlertTarget(product.id, targetPrice)
             _uiState.value = _uiState.value.copy(isSettingAlert = null)
             val targetStr = if (targetPrice != null) "${String.format("%.2f", targetPrice)} €" else "nuevo mínimo"
-            showSnackbar("Alerta activada: te avisaremos si baja a $targetStr")
+            showSnackbar(if (targetPrice != null) "Objetivo guardado: $targetStr. Aún no hay monitorización ni avisos automáticos." else "Seguimiento guardado. Aún no hay monitorización ni avisos automáticos.")
         }
     }
 
@@ -177,7 +177,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     fun simulatePriceDrop(productId: String) {
         repository.simulatePriceDrop(productId)
-        showSnackbar("Simulación activada: ¡Nuevo récord de precio mínimo registrado!")
+        showSnackbar("Simulación local de demostración. No se ha registrado un mínimo real ni se enviará ninguna alerta.")
     }
 
     fun clearSnackbarMessage() {

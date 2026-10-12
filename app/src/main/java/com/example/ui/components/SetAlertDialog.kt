@@ -45,7 +45,7 @@ fun SetAlertDialog(
     var targetPriceText by remember {
         mutableStateOf(
             product.alertTargetPrice?.let { String.format("%.2f", it) }
-                ?: String.format("%.2f", product.athMinPrice)
+                ?: if (product.isPriceVerified) String.format("%.2f", product.athMinPrice) else ""
         )
     }
 
@@ -60,7 +60,7 @@ fun SetAlertDialog(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Configurar Alerta de Precio",
+                    text = "Guardar Seguimiento de Precio",
                     fontWeight = FontWeight.Bold,
                     fontSize = 17.sp
                 )
@@ -76,7 +76,11 @@ fun SetAlertDialog(
                 )
 
                 Text(
-                    text = "Precio actual: ${String.format("%.2f", product.currentPrice)} €\nMínimo histórico registrado: ${String.format("%.2f", product.athMinPrice)} €",
+                    text = if (product.isPriceVerified) {
+                        "Precio actual: ${String.format("%.2f", product.currentPrice)} €\nMínimo histórico: ${String.format("%.2f", product.athMinPrice)} €"
+                    } else {
+                        "Esta ficha contiene datos de demostración. Puedes guardar un objetivo manual, pero todavía no se consultan precios ni se envían notificaciones automáticas."
+                    },
                     fontSize = 12.sp,
                     lineHeight = 16.sp
                 )
@@ -92,7 +96,8 @@ fun SetAlertDialog(
                         .testTag("alert_target_input")
                 )
 
-                // Quick presets
+                // Presets are meaningful only after prices have been verified.
+                if (product.isPriceVerified) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -110,6 +115,7 @@ fun SetAlertDialog(
                         label = { Text("-5% nuevo récord", fontSize = 10.sp) }
                     )
                 }
+                }
             }
         },
         confirmButton = {
@@ -124,7 +130,7 @@ fun SetAlertDialog(
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.testTag("save_alert_button")
             ) {
-                Text("Guardar Alerta", fontWeight = FontWeight.Bold)
+                Text("Guardar objetivo", fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {

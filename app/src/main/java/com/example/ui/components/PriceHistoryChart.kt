@@ -55,6 +55,20 @@ enum class ChartRange(val label: String, val windowDays: Long?) {
     ALL("Todo el historial", null)
 }
 
+/**
+ * Filters observations by elapsed time, rather than taking an arbitrary number of data points.
+ * [nowMillis] is injectable so the date-window behavior is deterministic in unit tests.
+ */
+internal fun filterPricePointsForRange(
+    priceHistory: List<PricePoint>,
+    selectedRange: ChartRange,
+    nowMillis: Long = System.currentTimeMillis()
+): List<PricePoint> {
+    val windowDays = selectedRange.windowDays ?: return priceHistory
+    val startAt = nowMillis - windowDays * 24L * 60L * 60L * 1000L
+    return priceHistory.filter { it.timestamp >= startAt }
+}
+
 @Composable
 fun PriceHistoryChart(
     priceHistory: List<PricePoint>,
@@ -64,11 +78,7 @@ fun PriceHistoryChart(
     var selectedPointIndex by remember { mutableIntStateOf(-1) }
 
     val filteredPoints = remember(priceHistory, selectedRange) {
-        val startAt = selectedRange.windowDays?.let { days ->
-            System.currentTimeMillis() - days * 24L * 60L * 60L * 1000L
-        }
-        if (startAt == null) priceHistory
-        else priceHistory.filter { it.timestamp >= startAt }
+        filterPricePointsForRange(priceHistory, selectedRange)
     }
 
     val minPriceInView = remember(filteredPoints) {

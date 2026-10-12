@@ -260,7 +260,10 @@ fun MainScreen(
                     storeCount = spanishStores.size,
                     isRefreshingPrices = uiState.isRefreshingPrices,
                     priceRefreshStatus = uiState.priceRefreshStatus,
-                    onRefreshPrices = viewModel::refreshLivePrices
+                    onRefreshPrices = viewModel::refreshLivePrices,
+                    isCheckingSerpApiAccount = uiState.isCheckingSerpApiAccount,
+                    serpApiAccountStatus = uiState.serpApiAccountStatus,
+                    onCheckSerpApiAccount = viewModel::checkSerpApiAccount
                 )
             } else if (showOnlineSearch) {
                 OnlineSearchScreen(

@@ -102,7 +102,7 @@ fun OnlineSearchScreen(
                     )
                     Button(
                         onClick = onSearch,
-                        enabled = !state.isOnlineSearching && state.onlineSearchQuery.trim().length >= 2,
+                        enabled = !state.isOnlineSearching && !state.isRefreshingPrices && state.onlineSearchQuery.trim().length >= 2,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         if (state.isOnlineSearching) {
@@ -117,7 +117,7 @@ fun OnlineSearchScreen(
                     }
                     OutlinedButton(
                         onClick = onAmazonSearch,
-                        enabled = !state.isOnlineSearching && state.onlineSearchQuery.trim().length >= 2,
+                        enabled = !state.isOnlineSearching && !state.isRefreshingPrices && state.onlineSearchQuery.trim().length >= 2,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         if (state.isOnlineSearching && state.onlineSearchProvider == OnlineSearchProvider.AMAZON) {
@@ -138,7 +138,7 @@ fun OnlineSearchScreen(
                     TextButton(
                         onClick = { openAmazonSearch(context, state.onlineSearchQuery) },
                         modifier = Modifier.fillMaxWidth(),
-                        enabled = !state.isOnlineSearching
+                        enabled = !state.isOnlineSearching && !state.isRefreshingPrices
                     ) {
                         Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))

@@ -232,7 +232,7 @@ fun ProductCard(
                     shape = RoundedCornerShape(10.dp)
                 ) {
                     Text(
-                        text = "Buscar en ${product.currentStore.name}",
+                        text = "Buscar en Google · ${product.currentStore.name}",
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 12.sp
                     )
@@ -271,13 +271,13 @@ fun ProductCard(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (product.isPriceVerified) "Mínimo histórico:" else "Historial:",
+                            text = if (product.hasSufficientHistoryForDealVerdict) "Mínimo observado:" else "Historial:",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = if (product.isPriceVerified) "${String.format("%.2f", product.athMinPrice)} €" else "No verificado",
+                            text = if (product.hasSufficientHistoryForDealVerdict) "${String.format("%.2f", product.athMinPrice)} €" else if (product.isPriceVerified) "Insuficiente" else "No verificado",
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp,
                             color = if (product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
@@ -285,7 +285,7 @@ fun ProductCard(
                     }
 
                     Text(
-                        text = if (product.isPriceVerified) "${product.athMinDate} (${product.athMinStore})" else "Sin historial verificable",
+                        text = if (product.hasSufficientHistoryForDealVerdict) "${product.athMinDate} (${product.athMinStore})" else if (product.isPriceVerified) "Requiere 90 días de datos" else "Sin historial verificable",
                         fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -40,6 +40,9 @@ jobs:
       - name: Instalar componentes Android
         run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
 
+      - name: Ejecutar pruebas unitarias
+        run: gradle :app:testDebugUnitTest --stacktrace
+
       - name: Crear clave temporal
         run: |
           keytool -genkeypair -v \

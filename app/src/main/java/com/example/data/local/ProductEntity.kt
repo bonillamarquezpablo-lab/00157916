@@ -28,5 +28,11 @@ data class ProductEntity(
     val wasRecentlyInflated: Boolean = false,
     val fakePriorPrice: Double? = null,
     @ColumnInfo(defaultValue = "0")
-    val isPriceVerified: Boolean = false
+    val isPriceVerified: Boolean = false,
+    @ColumnInfo(defaultValue = "0")
+    val isOfficialPvpVerified: Boolean = false,
+    @ColumnInfo(defaultValue = "0")
+    val isRatingVerified: Boolean = false,
+    @ColumnInfo(defaultValue = "0")
+    val isEanVerified: Boolean = false
 )

@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.preciominimo.esrxvt"
     minSdk = 24
     targetSdk = 36
-    versionCode = 6
-    versionName = "1.5"
+    versionCode = providers.gradleProperty("VERSION_CODE").orElse("6").get().toInt()
+    versionName = providers.gradleProperty("VERSION_NAME").orElse("1.5").get()
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

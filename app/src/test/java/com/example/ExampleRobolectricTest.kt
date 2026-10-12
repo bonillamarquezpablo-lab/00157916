@@ -5,8 +5,10 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.AppDatabase
 import com.example.data.local.PriceObservationEntity
+import com.example.data.local.ProductEntity
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -26,7 +28,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `migration 2 to 3 preserves watchlist and stores verified price observations`() {
+    fun `migration 2 to 4 preserves watchlist and old products and stores verified price observations`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val databaseName = "minimo_migration_preservation_test.db"
         context.deleteDatabase(databaseName)
@@ -61,6 +63,16 @@ class ExampleRobolectricTest {
                 "(`productId`, `targetAlertPrice`, `isNotificationEnabled`, `trackedAtTimestamp`, `notes`) " +
                 "VALUES ('keep-me', 159.99, 1, 123456789, 'preserve this watch')"
         )
+        oldDatabase.execSQL(
+            "INSERT INTO `products` " +
+                "(`id`, `title`, `brand`, `category`, `currentPrice`, `athMinPrice`, " +
+                "`athMinDate`, `athMinStore`, `athMaxPrice`, `avg90dPrice`, `officialPvp`, " +
+                "`currentStoreId`, `storeUrl`, `ean`, `imageResName`, `imageUrl`, `rating`, " +
+                "`reviewCount`, `wasRecentlyInflated`, `fakePriorPrice`) " +
+                "VALUES ('keep-product', 'Producto guardado', 'Marca', 'COMPUTING', 123.45, 120.00, " +
+                "'Fecha anterior', 'Amazon España', 180.00, 145.00, 180.00, 'amazon_es', " +
+                "'https://www.amazon.es/dp/TEST', '0000000000000', NULL, NULL, 0.0, 0, 0, NULL)"
+        )
         oldDatabase.version = 2
         oldDatabase.close()
 
@@ -69,7 +81,7 @@ class ExampleRobolectricTest {
             AppDatabase::class.java,
             databaseName
         )
-            .addMigrations(AppDatabase.MIGRATION_2_3)
+            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
             .allowMainThreadQueries()
             .build()
 
@@ -81,6 +93,11 @@ class ExampleRobolectricTest {
                 assertNotNull("Existing tracking must survive migration", preserved)
                 assertEquals("preserve this watch", preserved?.notes)
                 assertEquals(159.99, preserved?.targetAlertPrice ?: 0.0, 0.001)
+
+                val preservedProduct = migratedDatabase.productDao().getProductById("keep-product")
+                assertNotNull("Existing product row must survive migration", preservedProduct)
+                assertEquals(123.45, preservedProduct?.currentPrice ?: 0.0, 0.001)
+                assertFalse("Pre-existing demo product must remain unverified", preservedProduct?.isPriceVerified ?: true)
 
                 migratedDatabase.priceObservationDao().insert(
                     PriceObservationEntity(

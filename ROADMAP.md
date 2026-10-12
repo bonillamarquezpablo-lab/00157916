@@ -10,7 +10,7 @@
 - [~] **M02 — Primer proveedor real (código preparado).** La app incluye consultas manuales de Google Shopping España a través de SerpApi, con almacenamiento local de la clave cifrada. Falta crear/configurar la cuenta, guardar la clave en Ajustes y probar una consulta real. No es una actualización continua.
 - [ ] **M03 — Más proveedores autorizados.** Integrar fuentes oficiales o feeds con permiso explícito por comercio; no confundir una lista de webs con conectores.
 - [ ] **M04 — Identidad de producto.** Normalizar EAN/GTIN, MPN/SKU, variante, capacidad, color y estado nuevo/reacondicionado.
-- [~] **M05 — Ingesta fiable (parcial).** Se valida la respuesta y se limita la actualización manual a 40 productos y 45 búsquedas por hora en el dispositivo. Falta backend compartido para una app multiusuario, gestión central de cuotas, registros y tareas programadas.
+- [~] **M05 — Ingesta fiable (parcial).** Se valida la respuesta, se consulta el saldo real/límite horario de SerpApi antes de los lotes, se adaptan los lotes a la cuota disponible y se reutilizan búsquedas recientes desde caché local (hasta 40 entradas / 55 min). Falta backend compartido para una app multiusuario, gestión central de cuotas, registros y tareas programadas.
 - [ ] **M06 — Historial y mínimos reales.** Calcular mínimos y descuentos solo desde observaciones verificadas y fechadas.
 - [ ] **M07 — Comparación de coste final.** Incluir envío, disponibilidad, vendedor, IVA, condición y fecha de comprobación.
 - [ ] **M08 — Actualizaciones de fondo.** Programar consultas respetando batería, conectividad y condiciones de los proveedores.

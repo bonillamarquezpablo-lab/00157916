@@ -84,6 +84,78 @@ class SerpApiClient(
             parseShoppingResults(executeSearch(apiKey, normalizedQuery))
         }
 
+    /**
+     * Search Amazon.es itself, rather than Google Shopping. This still returns a public search
+     * snapshot through SerpApi; it cannot see the user's signed-in account or personalized coupons.
+     */
+    suspend fun searchAmazonOnline(token: String, query: String): List<SerpApiShoppingResult> =
+        withContext(Dispatchers.IO) {
+            val apiKey = token.trim()
+            require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
+            val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
+            require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
+            parseAmazonResults(executeAmazonSearch(apiKey, normalizedQuery))
+        }
+
+    internal fun parseAmazonResults(
+        root: JSONObject,
+        observedAt: Long = System.currentTimeMillis()
+    ): List<SerpApiShoppingResult> {
+        val error = root.optString("error").takeIf { it.isNotBlank() && it != "null" }
+        if (error != null) throw SerpApiException(error)
+        val status = root.optJSONObject("search_metadata")?.optString("status")
+        if (status.equals("Error", ignoreCase = true)) {
+            throw SerpApiException("SerpApi no pudo completar la búsqueda en Amazon.es.")
+        }
+
+        val items = root.optJSONArray("organic_results")?.toObjects().orEmpty()
+        return items.mapNotNull { item ->
+            val title = item.optString("title").trim()
+                .takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
+            val priceText = item.optString("price")
+            // The Amazon.es engine should return EUR, but reject anything without an explicit EUR marker.
+            if (!priceText.contains("€") && !priceText.contains("EUR", ignoreCase = true)) {
+                return@mapNotNull null
+            }
+            val price = parsePrice(
+                item.opt("extracted_price")?.takeIf { it !is JSONObject && it !is JSONArray }
+                    ?: priceText
+            ) ?: return@mapNotNull null
+
+            val url = sequenceOf(item.optString("link_clean"), item.optString("link"))
+                .firstOrNull { isAmazonSpainUrl(it) } ?: return@mapNotNull null
+            val thumbnail = item.optString("thumbnail").takeIf { isHttpsUrl(it) }.orEmpty()
+            val delivery = when (val raw = item.opt("delivery")) {
+                is JSONArray -> (0 until raw.length())
+                    .mapNotNull { index -> raw.optString(index).takeIf { it.isNotBlank() && it != "null" } }
+                    .joinToString(" · ")
+                is JSONObject -> raw.optString("text").takeIf { it.isNotBlank() && it != "null" }.orEmpty()
+                else -> raw?.toString()?.takeIf { it.isNotBlank() && it != "null" }.orEmpty()
+            }
+            val rating = item.opt("rating")?.toString()?.toDoubleOrNull()
+                ?.takeIf { it.isFinite() && it in 0.0..5.0 }
+            val reviewCount = item.opt("reviews")?.toString()
+                ?.replace(Regex("[^0-9]"), "")
+                ?.toIntOrNull()
+                ?.takeIf { it >= 0 }
+
+            SerpApiShoppingResult(
+                title = title,
+                price = price,
+                storeName = "Amazon.es",
+                sourceUrl = url,
+                thumbnailUrl = thumbnail,
+                delivery = delivery,
+                rating = rating,
+                reviewCount = reviewCount,
+                observedAt = observedAt,
+                primeEligible = item.optBoolean("prime", false)
+            )
+        }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
+            .sortedBy { it.price }
+            .take(30)
+    }
+
     internal fun parseShoppingResults(
         root: JSONObject,
         observedAt: Long = System.currentTimeMillis()
@@ -267,8 +339,13 @@ class SerpApiClient(
         }.sortedBy { it.price }
     }
 
-    private suspend fun executeSearch(apiKey: String, query: String): JSONObject {
-        val url = buildUrl(apiKey, query)
+    private suspend fun executeSearch(apiKey: String, query: String): JSONObject =
+        executeJson(buildUrl(apiKey, query))
+
+    private suspend fun executeAmazonSearch(apiKey: String, query: String): JSONObject =
+        executeJson(buildAmazonUrl(apiKey, query))
+
+    private suspend fun executeJson(url: HttpUrl): JSONObject {
         val request = Request.Builder()
             .url(url)
             .get()
@@ -308,6 +385,19 @@ class SerpApiClient(
             .addQueryParameter("api_key", apiKey)
             .build()
 
+    private fun buildAmazonUrl(apiKey: String, query: String): HttpUrl =
+        "https://serpapi.com/search.json"
+            .toHttpUrl()
+            .newBuilder()
+            .addQueryParameter("engine", "amazon")
+            .addQueryParameter("k", query)
+            .addQueryParameter("amazon_domain", "amazon.es")
+            .addQueryParameter("language", "es_ES")
+            .addQueryParameter("shipping_location", "ES")
+            .addQueryParameter("s", "price-asc-rank")
+            .addQueryParameter("api_key", apiKey)
+            .build()
+
     private fun JSONArray.toObjects(): List<JSONObject> =
         (0 until length()).mapNotNull { optJSONObject(it) }
 
@@ -335,6 +425,13 @@ class SerpApiClient(
     private fun isHttpsUrl(value: String): Boolean = runCatching {
         val uri = URI(value)
         uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank()
+    }.getOrDefault(false)
+
+    private fun isAmazonSpainUrl(value: String): Boolean = runCatching {
+        val uri = URI(value)
+        val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+        uri.scheme.equals("https", ignoreCase = true) &&
+            (host == "amazon.es" || host.endsWith(".amazon.es"))
     }.getOrDefault(false)
 
     private fun isPlausibleProductMatch(requested: String, returned: String): Boolean {

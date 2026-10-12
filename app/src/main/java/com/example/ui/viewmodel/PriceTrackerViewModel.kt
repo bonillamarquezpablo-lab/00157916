@@ -221,7 +221,27 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             .thenBy { it.title.lowercase() }
                     ).take(40)
                 }
-                val requests = targets.map { product ->
+                val accountInfo = readAccountInfo(token)
+                if (accountInfo == null && !testOneProduct) {
+                    val message = "No hemos podido comprobar el saldo de SerpApi. Para evitar gastar consultas sin control, prueba primero con 1 producto o vuelve a intentarlo cuando haya conexión."
+                    _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+                val capacity = accountInfo?.let(::accountCapacity) ?: 1
+                if (capacity <= 0) {
+                    val message = accountInfo?.let(::quotaMessage)
+                        ?: "SerpApi no tiene consultas disponibles en este momento."
+                    _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+                val selectedTargets = targets.take(minOf(targets.size, capacity))
+                if (selectedTargets.size < targets.size) {
+                    val message = "Para respetar tu cuota actual, esta actualización consultará ${selectedTargets.size} de ${targets.size} productos."
+                    _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
+                }
+                val requests = selectedTargets.map { product ->
                     SerpApiRequestProduct(
                         id = product.id,
                         title = product.title,
@@ -229,19 +249,15 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         ean = product.ean
                     )
                 }
-                if (!reserveSerpApiSearches(requests.size)) {
-                    val message = "Para respetar el límite gratuito, Mínimo limita las consultas a 45 por hora en este dispositivo. Espera a que se renueve la ventana y vuelve a intentarlo."
-                    _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
-                    showSnackbar(message)
-                    return@launch
-                }
                 val batchResult = serpApiClient.searchProducts(token, requests) { stage ->
                     _uiState.value = _uiState.value.copy(priceRefreshStatus = stage)
                 }
                 val quotes = batchResult.quotes
+                val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
+                val quotaNote = quotaAfter?.let { " ${it.quotaSummary()}" }.orEmpty()
                 val attemptedAt = System.currentTimeMillis()
                 priceRefreshPreferences.edit().apply {
-                    targets.forEach { product ->
+                    selectedTargets.forEach { product ->
                         putLong("attempt_${product.id}", attemptedAt)
                     }
                 }.apply()

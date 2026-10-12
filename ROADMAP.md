@@ -22,7 +22,7 @@
 - [~] **M14 — Interfaz moderna y accesible (parcial).** Se explican los precios ausentes, la búsqueda abre Google de forma explícita y las fichas sin historial/ofertas muestran estados vacíos informativos.
 - [~] **M15 — Calidad y publicación (parcial).** Se añaden pruebas para migraciones, metadatos separados e historial mínimo; quedan auditoría final, observabilidad y pruebas end-to-end del proveedor real.
 
-## 5 fallos o limitaciones detectados en el código actual
+## Fallos y limitaciones detectados en el código actual
 
 1. **No hay proveedor de precios en directo activo.** El catálogo precargado es de demostración.
 2. **[RESUELTO] Dos fuentes de verdad para productos.** El flujo principal ahora lee los productos desde Room; el catálogo estático solo sirve para añadir fichas que faltan.

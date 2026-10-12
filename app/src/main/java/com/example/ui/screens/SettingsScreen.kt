@@ -228,6 +228,64 @@ fun SettingsScreen(
                     Surface(
                         modifier = Modifier.size(44.dp),
                         shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer
+                    ) {
+                        Icon(
+                            Icons.Default.CloudDownload,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(11.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
+                        Text("Keepa API · Amazon España", fontWeight = FontWeight.Bold)
+                        Text(
+                            "Historial, precios y ofertas de Amazon",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(100.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Text(
+                            "Sin conectar",
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
+                Text(
+                    "La documentación de Keepa contempla la integración de precios e historiales directamente en aplicaciones. Requiere una suscripción mensual con consumo de tokens. Aún no se ha contratado ni conectado; antes de usarla, revisaremos sus condiciones para el uso previsto.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedButton(
+                    onClick = { openWeb(context, "https://keepa.com/api-docs/") },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Launch, null, Modifier.size(17.dp))
+                    Text("  Consultar API de Keepa")
+                }
+            }
+        }
+
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.elevatedCardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        modifier = Modifier.size(44.dp),
+                        shape = RoundedCornerShape(14.dp),
                         color = MaterialTheme.colorScheme.tertiaryContainer
                     ) {
                         Icon(

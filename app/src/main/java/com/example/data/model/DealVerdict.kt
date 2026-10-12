@@ -120,7 +120,7 @@ data class DealVerdict(
                         level = VerdictLevel.EXPENSIVE,
                         title = "Precio Elevado Actualmente",
                         badgeText = "CARO AHORA",
-                        explanation = "Está notablemente más caro que su media habitual (${String.format("%.2f", avg90dPrice)} €). Recomendamos activar alerta y esperar.",
+                        explanation = "Está notablemente más caro que su media habitual (${String.format("%.2f", avg90dPrice)} €). Recomendamos esperar y volver a comprobar el precio manualmente; la monitorización automática aún no está disponible.",
                         iconName = "ArrowUpward",
                         color = Color(0xFFD97706)
                     )

@@ -45,7 +45,8 @@ data class Product(
         get() = isPriceVerified &&
             priceHistory.size >= 3 &&
             (priceHistory.maxOfOrNull { it.timestamp } ?: 0L) -
-            (priceHistory.minOfOrNull { it.timestamp } ?: 0L) >= MIN_HISTORY_COVERAGE_MS
+            (priceHistory.minOfOrNull { it.timestamp } ?: 0L)  >= MIN_HISTORY_COVERAGE_MS &&
+            priceHistory.count { it.timestamp >= System.currentTimeMillis() - MIN_HISTORY_COVERAGE_MS } >= MIN_HISTORY_POINTS
 
     val verdict: DealVerdict
         get() = when {
@@ -81,6 +82,7 @@ data class Product(
         get() = hasSufficientHistoryForDealVerdict && currentPrice <= athMinPrice + 0.05
 
     companion object {
-        private const val MIN_HISTORY_COVERAGE_MS = 30L * 24L * 60L * 60L * 1000L
+        private const val MIN_HISTORY_COVERAGE_MS = 90L * 24L * 60L * 60L * 1000L
+        private const val MIN_HISTORY_POINTS = 3
     }
 }

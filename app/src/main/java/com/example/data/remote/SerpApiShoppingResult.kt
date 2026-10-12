@@ -16,7 +16,9 @@ data class SerpApiShoppingResult(
     val delivery: String = "",
     val rating: Double? = null,
     val reviewCount: Int? = null,
-    val observedAt: Long
+    val observedAt: Long,
+    /** Whether Amazon reports Prime delivery eligibility; not a personalized account price. */
+    val primeEligible: Boolean = false
 ) {
     val isAmazonOffer: Boolean
         get() {

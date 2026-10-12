@@ -47,11 +47,15 @@ fun SetAlertDialog(
             product.alertTargetPrice?.let { String.format("%.2f", it) }
                 ?: if (product.hasSufficientHistoryForDealVerdict) {
                     String.format("%.2f", product.athMinPrice)
-                } else if (product.hasSufficientHistoryForDealVerdict) {
+                } else if (product.isPriceVerified) {
                     String.format("%.2f", product.currentPrice)
                 } else ""
         )
     }
+
+    val parsedTargetPrice = targetPriceText.replace(",", ".").toDoubleOrNull()
+    val isTargetInputValid = targetPriceText.isBlank() ||
+        (parsedTargetPrice != null && parsedTargetPrice.isFinite() && parsedTargetPrice > 0.0)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -103,6 +107,21 @@ fun SetAlertDialog(
                         .testTag("alert_target_input")
                 )
 
+                if (!isTargetInputValid) {
+                    Text(
+                        text = "Introduce un precio mayor que 0 € o deja el campo vacío.",
+                        color = MaterialTheme.colorScheme.error,
+                        fontSize = 11.sp
+                    )
+                }
+
+                Text(
+                    text = "El objetivo se guarda en este móvil. Mínimo aún no consulta precios automáticamente ni puede enviar avisos.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp
+                )
+
                 // Historical presets require adequate time coverage; one snapshot is not a historical low.
                 if (product.hasSufficientHistoryForDealVerdict) {
                 Row(
@@ -128,9 +147,9 @@ fun SetAlertDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    val parsed = targetPriceText.replace(",", ".").toDoubleOrNull()
-                    onSaveAlert(parsed)
+                    onSaveAlert(parsedTargetPrice.takeIf { targetPriceText.isNotBlank() })
                 },
+                enabled = isTargetInputValid,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color(0xFF047857)
                 ),

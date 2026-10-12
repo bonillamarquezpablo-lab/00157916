@@ -226,9 +226,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     showSnackbar(message)
                     return@launch
                 }
-                val quotes = serpApiClient.searchProducts(token, requests) { stage ->
+                val batchResult = serpApiClient.searchProducts(token, requests) { stage ->
                     _uiState.value = _uiState.value.copy(priceRefreshStatus = stage)
                 }
+                val quotes = batchResult.quotes
                 val attemptedAt = System.currentTimeMillis()
                 priceRefreshPreferences.edit().apply {
                     targets.forEach { product ->
@@ -242,7 +243,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     showSnackbar(message)
                 } else {
                     val updatedProducts = repository.recordSerpApiQuotes(quotes)
-                    val message = "Actualización terminada: precios guardados para $updatedProducts producto(s). Es una instantánea de Google Shopping; verifica el precio final y la disponibilidad en la tienda."
+                    val partialNotice = if (batchResult.failedQueries > 0) {
+                        " Consulta parcial: fallaron ${batchResult.failedQueries} de ${batchResult.requestedQueries} consultas; se han conservado y guardado las ofertas válidas."
+                    } else {
+                        ""
+                    }
+                    val message = "Actualización terminada: precios guardados para $updatedProducts producto(s).$partialNotice Es una instantánea de Google Shopping; verifica el precio final y la disponibilidad en la tienda."
                     _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
                     showSnackbar(message)
                 }

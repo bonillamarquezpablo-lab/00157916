@@ -3,6 +3,7 @@ package com.example.data.model
 import androidx.compose.ui.graphics.Color
 
 enum class VerdictLevel {
+    UNVERIFIED,         // Datos insuficientes para clasificar la oferta
     ATH_RECORD,         // Record mínimo histórico absoluto
     NEAR_ATH,           // Rozando el mínimo (<5% por encima)
     FAIR_DISCOUNT,      // Oferta honesta (por debajo de la media de 90 días)
@@ -21,6 +22,16 @@ data class DealVerdict(
     val confidenceScore: Int = 100 // Porcentaje de fiabilidad matemática
 ) {
     companion object {
+        fun unverified(): DealVerdict = DealVerdict(
+            level = VerdictLevel.UNVERIFIED,
+            title = "Datos de demostración",
+            badgeText = "PRECIO SIN VERIFICAR",
+            explanation = "Los precios, ofertas e historial de esta ficha son datos de ejemplo. Mínimo todavía no consulta la tienda en tiempo real, así que no puede confirmar una oferta ni un mínimo histórico.",
+            iconName = "Info",
+            color = Color(0xFF64748B),
+            confidenceScore = 0
+        )
+
         fun analyze(
             currentPrice: Double,
             athMinPrice: Double,

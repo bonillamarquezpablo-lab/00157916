@@ -124,7 +124,11 @@ fun DealVerdictBadge(
                                 color = verdict.color
                             )
                             Text(
-                                text = "Garantía 'Sin Trampa ni Cartón' (100% Auditado)",
+                                text = if (verdict.level == VerdictLevel.UNVERIFIED) {
+                                    "Datos de demostración · sin consulta en directo"
+                                } else {
+                                    "Resultado basado en datos verificados"
+                                },
                                 fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -133,14 +137,14 @@ fun DealVerdictBadge(
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            imageVector = Icons.Default.Shield,
-                            contentDescription = "Auditado",
+                            imageVector = if (verdict.level == VerdictLevel.UNVERIFIED) Icons.Default.Info else Icons.Default.Shield,
+                            contentDescription = if (verdict.level == VerdictLevel.UNVERIFIED) "Sin verificar" else "Verificado",
                             tint = verdict.color,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Auditado",
+                            text = if (verdict.level == VerdictLevel.UNVERIFIED) "Sin verificar" else "Verificado",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = verdict.color
@@ -165,7 +169,7 @@ fun DealVerdictBadge(
                             color = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            text = "Cruzamos el historial continuo de precios en las principales tiendas españolas (Amazon, PcComponentes, MediaMarkt, Carrefour, ECI) y detectamos si hubo una subida previa artificial antes de una campaña.",
+                            text = "El análisis solo puede confirmar una oferta cuando existen observaciones de precio con fuente y fecha. En esta versión, el catálogo inicial contiene datos de demostración y no se consultan automáticamente las tiendas.",
                             fontSize = 10.sp,
                             lineHeight = 14.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant

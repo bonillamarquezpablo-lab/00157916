@@ -103,12 +103,12 @@ fun VerifierScreen(
 
                     Column {
                         Text(
-                            text = "Auditor 'Sin Trampa ni Cartón'",
+                            text = "Analizador de productos y enlaces",
                             fontWeight = FontWeight.Black,
                             fontSize = 16.sp
                         )
                         Text(
-                            text = "Verificador de enlaces de tiendas españolas",
+                            text = "Comprobación preliminar · sin precios en directo",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -118,7 +118,7 @@ fun VerifierScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "Pega un enlace de Amazon.es, PcComponentes, MediaMarkt, El Corte Inglés, Carrefour o escribe el modelo exacto. Analizaremos si la rebaja es real o si inflaron el precio previamente.",
+                    text = "Puedes pegar un enlace o escribir un modelo. Por ahora, el catálogo es de demostración: la app aún no extrae precios ni comprueba el historial en las tiendas.",
                     fontSize = 12.sp,
                     lineHeight = 16.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -180,11 +180,11 @@ fun VerifierScreen(
                         strokeWidth = 2.dp
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Auditando historial de precios...", fontWeight = FontWeight.Bold)
+                    Text("Revisando catálogo local...", fontWeight = FontWeight.Bold)
                 } else {
                     Icon(imageVector = Icons.Default.Search, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Verificar Precio Mínimo Histórico", fontWeight = FontWeight.Bold)
+                    Text("Analizar referencia", fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -192,7 +192,7 @@ fun VerifierScreen(
         // Quick Examples for testing
         Column {
             Text(
-                text = "Ejemplos rápidos para auditar:",
+                text = "Pruebas con productos de muestra:",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -209,14 +209,14 @@ fun VerifierScreen(
                         onInputChange("cecotec mambo")
                         onVerifyClick()
                     },
-                    label = { Text("Detectar Oferta Inflada", fontSize = 11.sp) }
+                    label = { Text("Probar ficha demo", fontSize = 11.sp) }
                 )
                 SuggestionChip(
                     onClick = {
                         onInputChange("sony wh-1000xm5")
                         onVerifyClick()
                     },
-                    label = { Text("Mínimo Histórico Real", fontSize = 11.sp) }
+                    label = { Text("Buscar Sony demo", fontSize = 11.sp) }
                 )
             }
         }
@@ -227,7 +227,7 @@ fun VerifierScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .border(1.5.dp, Color(0xFF10B981).copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                    .border(1.5.dp, Color(0xFFD97706).copy(alpha = 0.5f), RoundedCornerShape(16.dp))
                     .testTag("verification_result_card"),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surface
@@ -241,14 +241,14 @@ fun VerifierScreen(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                imageVector = Icons.Default.CheckCircle,
+                                imageVector = Icons.Default.Warning,
                                 contentDescription = null,
-                                tint = Color(0xFF059669),
+                                tint = Color(0xFFD97706),
                                 modifier = Modifier.size(20.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Informe de Verificación",
+                                text = "Resultado preliminar",
                                 fontWeight = FontWeight.Black,
                                 fontSize = 15.sp
                             )
@@ -262,7 +262,7 @@ fun VerifierScreen(
                                     .padding(horizontal = 8.dp, vertical = 3.dp)
                             ) {
                                 Text(
-                                    text = analysisResult.identifiedStore.name,
+                                    text = "Dominio: ${analysisResult.identifiedStore.name}",
                                     color = analysisResult.identifiedStore.brandColor,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
@@ -287,6 +287,12 @@ fun VerifierScreen(
                             product = prod,
                             onClick = { onSelectProduct(prod) },
                             onToggleTrack = { onToggleTrack(prod) }
+                        )
+                    } else {
+                        Text(
+                            text = "No se ha obtenido un precio actual ni se ha creado un historial ficticio.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 

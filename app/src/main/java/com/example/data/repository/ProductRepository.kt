@@ -276,10 +276,16 @@ class ProductRepository(
         val now = System.currentTimeMillis()
         val ninetyDaysAgo = now - 90L * 24L * 60L * 60L * 1000L
         val lastNinetyDays = effectiveHistory.filter { it.observedAt >= ninetyDaysAgo }
+        val historyCoverage = (sortedHistory.lastOrNull()?.observedAt ?: 0L) -
+            (sortedHistory.firstOrNull()?.observedAt ?: 0L)
+        val hasFullNinetyDaySample = priceIsVerified &&
+            sortedHistory.size >= 3 &&
+            historyCoverage >= 90L * 24L * 60L * 60L * 1000L &&
+            lastNinetyDays.size >= 3
         val current = if (priceIsVerified) latestObservation!!.price else currentPrice
         val lowest = if (priceIsVerified) minObservation!!.price else athMinPrice
         val highest = if (priceIsVerified) maxObservation!!.price else athMaxPrice
-        val average = if (lastNinetyDays.isNotEmpty()) lastNinetyDays.map { it.price }.average() else avg90dPrice
+        val average = if (hasFullNinetyDaySample) lastNinetyDays.map { it.price }.average() else 0.0
         val dateFormatter = SimpleDateFormat("dd MMM yyyy", Locale("es", "ES"))
         val historyPoints = effectiveHistory.map { observation ->
             PricePoint(

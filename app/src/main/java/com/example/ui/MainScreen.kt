@@ -10,11 +10,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Store
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Business
 import androidx.compose.material.icons.outlined.CheckCircleOutline
@@ -24,6 +26,7 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -31,6 +34,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -53,6 +57,7 @@ import com.example.ui.screens.AlertsScreen
 import com.example.ui.screens.DealsScreen
 import com.example.ui.screens.MarketScreen
 import com.example.ui.screens.ProductDetailSheet
+import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.StoresScreen
 import com.example.ui.screens.VerifierScreen
 import com.example.ui.viewmodel.PriceTrackerViewModel
@@ -75,6 +80,7 @@ fun MainScreen(
     viewModel: PriceTrackerViewModel
 ) {
     var currentTab by remember { mutableStateOf(MainTab.MARKET) }
+    var showSettings by remember { mutableStateOf(false) }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val filteredProducts by viewModel.filteredProducts.collectAsStateWithLifecycle()
     val trackedProducts by viewModel.trackedProducts.collectAsStateWithLifecycle()
@@ -90,35 +96,58 @@ fun MainScreen(
         }
     }
 
-    // Handle back button when not on main tab
-    BackHandler(enabled = currentTab != MainTab.MARKET) {
-        currentTab = MainTab.MARKET
+    // Return from settings before leaving the current marketplace section.
+    BackHandler(enabled = showSettings || currentTab != MainTab.MARKET) {
+        if (showSettings) {
+            showSettings = false
+        } else {
+            currentTab = MainTab.MARKET
+        }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
+                navigationIcon = {
+                    if (showSettings) {
+                        IconButton(onClick = { showSettings = false }) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Volver")
+                        }
+                    }
+                },
                 title = {
                     Text(
-                        text = "Mínimo",
+                        text = if (showSettings) "Ajustes" else "Mínimo",
                         fontWeight = FontWeight.Black,
                         fontSize = 20.sp,
                         letterSpacing = (-0.5).sp
                     )
                 },
                 actions = {
-                    Box(
-                        modifier = Modifier
-                            .padding(end = 16.dp)
-                            .background(Color(0xFF10B981).copy(alpha = 0.15f), MaterialTheme.shapes.small)
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = "${spanishStores.size} TIENDAS ESP",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF047857)
-                        )
+                    if (!showSettings) {
+                        Surface(
+                            modifier = Modifier.padding(end = 4.dp),
+                            shape = MaterialTheme.shapes.large,
+                            color = MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Text(
+                                text = "${spanishStores.size} tiendas",
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                        IconButton(
+                            onClick = { showSettings = true },
+                            modifier = Modifier.padding(end = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Abrir ajustes",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -128,6 +157,7 @@ fun MainScreen(
             )
         },
         bottomBar = {
+            if (!showSettings) {
             NavigationBar(
                 modifier = Modifier
                     .windowInsetsPadding(WindowInsets.navigationBars)
@@ -199,6 +229,7 @@ fun MainScreen(
                     )
                 }
             }
+            }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { innerPadding ->
@@ -207,7 +238,9 @@ fun MainScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            when (currentTab) {
+            if (showSettings) {
+                SettingsScreen(storeCount = spanishStores.size)
+            } else when (currentTab) {
                 MainTab.MARKET -> {
                     MarketScreen(
                         products = filteredProducts,

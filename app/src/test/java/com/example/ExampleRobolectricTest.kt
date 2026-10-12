@@ -13,6 +13,11 @@ import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiQuote
 import com.example.data.remote.SerpApiRequestProduct
 import org.json.JSONObject
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody.Companion.toResponseBody
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -179,6 +184,62 @@ class ExampleRobolectricTest {
         assertEquals(123L, quotes.first().observedAt)
         assertTrue(quotes.all { it.productId == "demo_galaxy_s26_ultra" })
         assertTrue(quotes.all { it.sourceUrl.startsWith("https://") })
+    }
+
+    @Test
+    fun `batch keeps valid offers when one product lookup fails`() = runBlocking<Unit> {
+        val http = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val request = chain.request()
+                val query = request.url.queryParameter("q").orEmpty()
+                val isFailure = query.contains("Samsung", ignoreCase = true)
+                val code = if (isFailure) 503 else 200
+                val body = if (isFailure) {
+                    """{"error":"temporary provider failure"}"""
+                } else {
+                    """
+                    {
+                      "search_metadata": {"status": "Success"},
+                      "shopping_results": [{
+                        "title": "Sony WH-1000XM5",
+                        "price": "249,99 €",
+                        "extracted_price": 249.99,
+                        "link": "https://www.sony.es/electronics/headband-headphones/wh-1000xm5",
+                        "source": "Sony"
+                      }]
+                    }
+                    """.trimIndent()
+                }
+                Response.Builder()
+                    .request(request)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(code)
+                    .message(if (isFailure) "Service Unavailable" else "OK")
+                    .body(body.toResponseBody("application/json".toMediaType()))
+                    .build()
+            }
+            .build()
+
+        val batch = SerpApiClient(http).searchProducts(
+            token = "test-api-key",
+            products = listOf(
+                SerpApiRequestProduct(
+                    id = "samsung_product",
+                    title = "Samsung Galaxy S26 Ultra 512 GB",
+                    brand = "Samsung"
+                ),
+                SerpApiRequestProduct(
+                    id = "sony_product",
+                    title = "Sony WH-1000XM5",
+                    brand = "Sony"
+                )
+            )
+        )
+
+        assertEquals(2, batch.requestedQueries)
+        assertEquals(1, batch.failedQueries)
+        assertEquals("sony_product", batch.quotes.single().productId)
+        assertEquals(249.99, batch.quotes.single().price, 0.001)
     }
 
     @Test

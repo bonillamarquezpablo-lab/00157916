@@ -43,17 +43,18 @@ jobs:
       - name: Ejecutar pruebas unitarias
         run: gradle :app:testDebugUnitTest --stacktrace
 
-      - name: Crear clave temporal
+      - name: Restaurar clave de firma estable
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
-          keytool -genkeypair -v \
-            -keystore debug.keystore \
-            -storepass android \
-            -alias androiddebugkey \
-            -keypass android \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
+          set -euo pipefail
+          if [ -z "${DEBUG_KEYSTORE_BASE64:-}" ]; then
+            echo "::error::Falta el secreto DEBUG_KEYSTORE_BASE64 en la configuración de GitHub Actions."
+            exit 1
+          fi
+          printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 --decode > debug.keystore
+          keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey >/dev/null
+          echo "Clave estable encontrada y validada."
 
       - name: Compilar APK
         run: gradle :app:assembleDebug --stacktrace

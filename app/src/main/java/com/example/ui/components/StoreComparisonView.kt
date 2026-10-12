@@ -67,7 +67,7 @@ fun StoreComparisonView(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Precios oficiales verificados en tiempo real",
+                    text = "Ofertas con fuente y fecha de consulta",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -80,7 +80,7 @@ fun StoreComparisonView(
                     .padding(horizontal = 6.dp, vertical = 3.dp)
             ) {
                 Text(
-                    text = "${offers.size} tiendas",
+                    text = "${offers.size} ofertas",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF059669)
@@ -170,7 +170,7 @@ fun StoreComparisonView(
                             )
                             if (isAtHistoricalMin) {
                                 Text(
-                                    text = "Récord Mínimo",
+                                    text = "Mínimo observado",
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF059669)

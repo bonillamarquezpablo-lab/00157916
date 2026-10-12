@@ -146,7 +146,7 @@ fun ProductCard(
                             fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        if (product.isPriceVerified) {
+                        if (product.isRatingVerified) {
                             Spacer(modifier = Modifier.width(6.dp))
                             Icon(
                                 imageVector = Icons.Default.Star,
@@ -196,7 +196,7 @@ fun ProductCard(
                             color = if (product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
-                        if (product.isPriceVerified && product.officialPvp > product.currentPrice) {
+                        if (product.isOfficialPvpVerified && product.officialPvp > product.currentPrice) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "${String.format("%.2f", product.officialPvp)} €",
@@ -207,7 +207,7 @@ fun ProductCard(
                         }
                     }
 
-                    if (product.isPriceVerified && product.realSavingsPercent > 0) {
+                    if (product.isOfficialPvpVerified && product.realSavingsPercent > 0) {
                         Text(
                             text = "Ahorro real: -${product.realSavingsPercent}% (-${String.format("%.2f", product.realSavingsAmount)} €)",
                             fontSize = 11.sp,

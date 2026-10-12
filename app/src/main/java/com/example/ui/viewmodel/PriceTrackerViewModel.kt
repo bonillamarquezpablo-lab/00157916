@@ -18,10 +18,13 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 enum class SortOption(val label: String) {
-    BEST_ATH_DISCOUNT("Mayor bajada %"),
-    PRICE_LOW_HIGH("Precio: Menor a Mayor"),
-    PRICE_HIGH_LOW("Precio: Mayor a Menor"),
-    RATING("Mejor Valorados")
+    BEST_ATH_DISCOUNT("Mejores ofertas verificadas"),
+    PRICE_LOW_HIGH("Precio: menor a mayor (verificados)"),
+    PRICE_HIGH_LOW("Precio: mayor a menor (verificados)"),
+    NAME_AZ("Nombre: A-Z"),
+    NAME_ZA("Nombre: Z-A"),
+    CATEGORY_AZ("Categoría: A-Z"),
+    RATING("Mejor valorados (verificados)")
 }
 
 data class TrackerUiState(
@@ -72,7 +75,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     product.title.lowercase().contains(query) ||
                     product.brand.lowercase().contains(query) ||
                     product.ean.contains(query) ||
-                    product.currentStore.name.lowercase().contains(query)
+                    product.category.displayName.lowercase().contains(query) ||
+                    product.currentStore.name.lowercase().contains(query) ||
+                    product.currentStore.domain.lowercase().contains(query)
                 }
             }
             .filter { product ->
@@ -90,12 +95,31 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 // Sorting
                 when (state.sortOption) {
                     SortOption.BEST_ATH_DISCOUNT -> list.sortedWith(
-                        compareByDescending<Product> { it.isAtAth }
+                        compareByDescending<Product> { it.isPriceVerified }
                             .thenByDescending { it.realSavingsPercent }
+                            .thenBy { it.title.lowercase() }
                     )
-                    SortOption.PRICE_LOW_HIGH -> list.sortedBy { it.currentPrice }
-                    SortOption.PRICE_HIGH_LOW -> list.sortedByDescending { it.currentPrice }
-                    SortOption.RATING -> list.sortedByDescending { it.rating }
+                    SortOption.PRICE_LOW_HIGH -> list.sortedWith(
+                        compareByDescending<Product> { it.isPriceVerified }
+                            .thenBy { if (it.isPriceVerified) it.currentPrice else Double.POSITIVE_INFINITY }
+                            .thenBy { it.title.lowercase() }
+                    )
+                    SortOption.PRICE_HIGH_LOW -> list.sortedWith(
+                        compareByDescending<Product> { it.isPriceVerified }
+                            .thenByDescending { if (it.isPriceVerified) it.currentPrice else Double.NEGATIVE_INFINITY }
+                            .thenBy { it.title.lowercase() }
+                    )
+                    SortOption.NAME_AZ -> list.sortedBy { it.title.lowercase() }
+                    SortOption.NAME_ZA -> list.sortedByDescending { it.title.lowercase() }
+                    SortOption.CATEGORY_AZ -> list.sortedWith(
+                        compareBy<Product> { it.category.displayName.lowercase() }
+                            .thenBy { it.title.lowercase() }
+                    )
+                    SortOption.RATING -> list.sortedWith(
+                        compareByDescending<Product> { it.isPriceVerified }
+                            .thenByDescending { it.rating }
+                            .thenBy { it.title.lowercase() }
+                    )
                 }
             }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())

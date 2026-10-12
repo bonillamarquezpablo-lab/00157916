@@ -438,4 +438,61 @@ class ExampleRobolectricTest {
             context.deleteDatabase(databaseName)
         }
     }
+
+    @Test
+    fun onlineShoppingSearchKeepsSafeEuroOffersAndSortsByPrice() {
+        val client = SerpApiClient()
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {
+                  "title": "Auriculares Sony WH-1000XM5",
+                  "price": "89,99 €",
+                  "extracted_price": 89.99,
+                  "link": "https://www.amazon.es/dp/B0TEST123",
+                  "source": "Amazon.es",
+                  "thumbnail": "https://images.example.test/sony.jpg",
+                  "delivery": "Entrega gratis",
+                  "rating": 4.5,
+                  "reviews": 123
+                },
+                {
+                  "title": "Auriculares Sony WH-1000XM5",
+                  "price": "79,99 €",
+                  "extracted_price": 79.99,
+                  "link": "https://www.pccomponentes.com/auriculares-sony",
+                  "source": "PcComponentes"
+                },
+                {
+                  "title": "Auriculares Sony WH-1000XM5",
+                  "price": "$59.99",
+                  "extracted_price": 59.99,
+                  "link": "https://shop.example.test/item",
+                  "source": "Example USD"
+                },
+                {
+                  "title": "Auriculares Sony WH-1000XM5",
+                  "price": "49,99 €",
+                  "extracted_price": 49.99,
+                  "link": "http://insecure.example.test/item",
+                  "source": "Unsafe HTTP"
+                }
+              ]
+            }
+            """
+        )
+
+        val results = client.parseShoppingResults(payload, observedAt = 123L)
+
+        assertEquals(2, results.size)
+        assertEquals("PcComponentes", results[0].storeName)
+        assertEquals(79.99, results[0].price, 0.001)
+        assertEquals("Amazon.es", results[1].storeName)
+        assertTrue(results[1].isAmazonOffer)
+        assertEquals(123L, results[1].observedAt)
+        assertEquals("https://images.example.test/sony.jpg", results[1].thumbnailUrl)
+    }
+
 }

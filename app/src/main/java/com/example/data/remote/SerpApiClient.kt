@@ -78,8 +78,8 @@ class SerpApiException(
 /**
  * Queries Google Shopping results through SerpApi for Spain.
  *
- * Each product query consumes one search credit; this client caps a batch at 40 queries so a
- * single manual refresh stays below the free-plan throughput advertised by SerpApi. Nothing runs
+ * Each successful non-cached query consumes one search credit; the app reuses recent searches and
+ * checks the actual account balance/rate window before catalog batches. Nothing runs
  * automatically in the background. Results represent a Google Shopping snapshot, not a direct
  * retailer API guarantee; prices and availability must be rechecked at the seller before purchase.
  *

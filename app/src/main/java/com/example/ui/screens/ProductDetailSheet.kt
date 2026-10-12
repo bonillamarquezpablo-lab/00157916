@@ -313,11 +313,7 @@ fun ProductDetailSheet(
 
             // Do not draw a chart from one snapshot or make an empty offer list look like a comparator.
             if (product.priceHistory.size >= 2) {
-                PriceHistoryChart(
-                    priceHistory = product.priceHistory,
-                    athMinPrice = product.athMinPrice,
-                    avg90dPrice = product.avg90dPrice
-                )
+                PriceHistoryChart(priceHistory = product.priceHistory)
             } else {
                 Surface(
                     modifier = Modifier.fillMaxWidth().testTag("price_history_insufficient"),

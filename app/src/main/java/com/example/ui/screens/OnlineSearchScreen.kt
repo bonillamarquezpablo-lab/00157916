@@ -37,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.example.data.remote.SerpApiShoppingResult
+import com.example.ui.viewmodel.OnlineSearchProvider
 import com.example.ui.viewmodel.TrackerUiState
 import java.text.NumberFormat
 import java.util.Locale
@@ -58,6 +60,7 @@ fun OnlineSearchScreen(
     state: TrackerUiState,
     onQueryChange: (String) -> Unit,
     onSearch: () -> Unit,
+    onAmazonSearch: () -> Unit,
     onAmazonOnlyChange: (Boolean) -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
@@ -84,7 +87,7 @@ fun OnlineSearchScreen(
                         Spacer(Modifier.width(9.dp))
                         Text("Encuentra productos y ofertas", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
                     }
-                    Text("Busca cualquier producto aunque no exista en el catálogo. Comparamos resultados de Google Shopping España y puedes filtrar las ofertas de Amazon.")
+                    Text("Busca cualquier producto aunque no exista en el catálogo. Consulta Google Shopping o Amazon.es y muestra los precios aquí mismo.")
                     OutlinedTextField(
                         value = state.onlineSearchQuery,
                         onValueChange = onQueryChange,
@@ -105,7 +108,7 @@ fun OnlineSearchScreen(
                         if (state.isOnlineSearching) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                             Spacer(Modifier.width(8.dp))
-                            Text("Buscando ofertas…")
+                            Text(if (state.onlineSearchProvider == OnlineSearchProvider.AMAZON) "Consultando Amazon.es…" else "Buscando ofertas…")
                         } else {
                             Icon(Icons.Default.Search, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
@@ -113,25 +116,34 @@ fun OnlineSearchScreen(
                         }
                     }
                     OutlinedButton(
-                        onClick = { openAmazonSearch(context, state.onlineSearchQuery) },
+                        onClick = onAmazonSearch,
+                        enabled = !state.isOnlineSearching && state.onlineSearchQuery.trim().length >= 2,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.ShoppingBag, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            if (state.onlineSearchQuery.trim().length >= 2)
-                                "Buscar en Amazon con mi sesión Prime"
-                            else
-                                "Abrir Amazon con mi sesión Prime"
-                        )
-                        Spacer(Modifier.width(5.dp))
-                        Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                        if (state.isOnlineSearching && state.onlineSearchProvider == OnlineSearchProvider.AMAZON) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Consultando Amazon.es…")
+                        } else {
+                            Icon(Icons.Default.ShoppingBag, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Buscar precios de Amazon.es en Mínimo")
+                        }
                     }
                     Text(
-                        "Este botón intenta abrir la app de Amazon primero para aprovechar tu sesión iniciada; si no está instalada, abre Amazon.es en el navegador. El precio se verá en Amazon, pero no se importa automáticamente a Mínimo.",
+                        "Consulta el catálogo público de Amazon.es y muestra los precios aquí. No necesita abrir la app de Amazon, pero no puede leer tus cupones o precios personalizados de la cuenta Prime.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    TextButton(
+                        onClick = { openAmazonSearch(context, state.onlineSearchQuery) },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !state.isOnlineSearching
+                    ) {
+                        Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Abrir Amazon con mi sesión Prime")
+                    }
                     OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
                         Text("Configurar la fuente de precios")
                     }
@@ -149,23 +161,36 @@ fun OnlineSearchScreen(
         if (state.onlineSearchResults.isNotEmpty()) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Resultados de búsqueda", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            selected = !state.onlineSearchAmazonOnly,
-                            onClick = { onAmazonOnlyChange(false) },
-                            label = { Text("Todos (${state.onlineSearchResults.size})") }
-                        )
-                        FilterChip(
-                            selected = state.onlineSearchAmazonOnly,
-                            onClick = { onAmazonOnlyChange(true) },
-                            label = { Text("Solo Amazon (${state.onlineSearchResults.count { it.isAmazonOffer }})") }
-                        )
+                    Text(
+                        if (state.onlineSearchProvider == OnlineSearchProvider.AMAZON) "Resultados de Amazon.es" else "Resultados de Google Shopping",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (state.onlineSearchProvider == OnlineSearchProvider.GOOGLE_SHOPPING) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = !state.onlineSearchAmazonOnly,
+                                onClick = { onAmazonOnlyChange(false) },
+                                label = { Text("Todos (${state.onlineSearchResults.size})") }
+                            )
+                            FilterChip(
+                                selected = state.onlineSearchAmazonOnly,
+                                onClick = { onAmazonOnlyChange(true) },
+                                label = { Text("Solo Amazon (${state.onlineSearchResults.count { it.isAmazonOffer }})") }
+                            )
+                        }
                     }
                 }
             }
             if (visibleResults.isEmpty()) {
-                item { Text("No hay ofertas identificadas como Amazon en esta consulta. Prueba la búsqueda directa de arriba.") }
+                item {
+                    Text(
+                        if (state.onlineSearchProvider == OnlineSearchProvider.AMAZON)
+                            "Amazon.es no ha devuelto productos con precio en euros para esta búsqueda."
+                        else
+                            "No hay ofertas identificadas como Amazon en esta consulta."
+                    )
+                }
             }
             items(visibleResults, key = { "${it.sourceUrl}|${it.price}" }) { result ->
                 ShoppingResultCard(result = result) {
@@ -224,6 +249,9 @@ private fun ShoppingResultCard(result: SerpApiShoppingResult, onOpen: () -> Unit
                         )
                     }
                 }
+            }
+            if (result.primeEligible) {
+                Text("Entrega Prime disponible", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
             }
             if (result.delivery.isNotBlank()) {
                 Text(result.delivery, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)

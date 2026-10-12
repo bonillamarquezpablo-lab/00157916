@@ -238,6 +238,71 @@ fun SettingsScreen(
                         )
                     }
                     Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
+                        Text("Price API · primera prueba", fontWeight = FontWeight.Bold)
+                        Text(
+                            "Amazon España + Google Shopping",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(100.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Text(
+                            "No conectado",
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
+                Text(
+                    "Permite consultar datos de producto y ofertas para España. La prueba publicada incluye 1.000 créditos sin tarjeta bancaria. No introduzcas ninguna clave en Mínimo: la conexión debe pasar por un servicio seguro. Los términos restringen el uso de los datos para terceros sin aprobación escrita; no publicaremos la integración para otras personas sin permiso explícito.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedButton(
+                    onClick = { openWeb(context, "https://app.priceapi.com/users/sign_up") },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Launch, null, Modifier.size(17.dp))
+                    Text("  Crear cuenta de prueba gratuita")
+                }
+                OutlinedButton(
+                    onClick = { openWeb(context, "https://www.priceapi.com/pricing") },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Launch, null, Modifier.size(17.dp))
+                    Text("  Revisar precios antes de contratar")
+                }
+            }
+        }
+
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.elevatedCardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        modifier = Modifier.size(44.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer
+                    ) {
+                        Icon(
+                            Icons.Default.CloudDownload,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(11.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
                         Text("Keepa API · Amazon España", fontWeight = FontWeight.Bold)
                         Text(
                             "Historial, precios y ofertas de Amazon",

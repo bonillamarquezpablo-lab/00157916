@@ -122,7 +122,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `migration 2 to 4 preserves watchlist and old products and stores verified price observations`() {
+    fun `migration 2 to 5 preserves data and defaults metadata verification flags to false`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val databaseName = "minimo_migration_preservation_test.db"
         context.deleteDatabase(databaseName)
@@ -175,7 +175,7 @@ class ExampleRobolectricTest {
             AppDatabase::class.java,
             databaseName
         )
-            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
             .allowMainThreadQueries()
             .build()
 
@@ -192,6 +192,9 @@ class ExampleRobolectricTest {
                 assertNotNull("Existing product row must survive migration", preservedProduct)
                 assertEquals(123.45, preservedProduct?.currentPrice ?: 0.0, 0.001)
                 assertFalse("Pre-existing demo product must remain unverified", preservedProduct?.isPriceVerified ?: true)
+                assertFalse("Existing PVP must not be treated as independently verified", preservedProduct?.isOfficialPvpVerified ?: true)
+                assertFalse("Existing rating must not be treated as independently verified", preservedProduct?.isRatingVerified ?: true)
+                assertFalse("Existing EAN must not be treated as independently verified", preservedProduct?.isEanVerified ?: true)
 
                 migratedDatabase.priceObservationDao().insert(
                     PriceObservationEntity(

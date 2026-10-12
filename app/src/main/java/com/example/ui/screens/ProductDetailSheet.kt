@@ -369,17 +369,18 @@ fun ProductDetailSheet(
                 ) {
                     OutlinedButton(
                         onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(product.storeUrl))
+                            val destination = if (product.isPriceVerified) product.storeUrl else product.currentStore.searchUrlFor(product.title)
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(destination))
                             context.startActivity(intent)
                         },
                         modifier = Modifier
                             .weight(1f)
                             .height(44.dp),
-                        enabled = product.isPriceVerified,
+                        enabled = true,
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text(
-                            if (product.isPriceVerified) "Ver en ${product.currentStore.name}" else "Enlace no verificado",
+                            if (product.isPriceVerified) "Ver en ${product.currentStore.name}" else "Buscar en web oficial",
                             fontSize = 12.sp
                         )
                         Spacer(modifier = Modifier.width(4.dp))

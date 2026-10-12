@@ -45,7 +45,11 @@ fun SetAlertDialog(
     var targetPriceText by remember {
         mutableStateOf(
             product.alertTargetPrice?.let { String.format("%.2f", it) }
-                ?: if (product.isPriceVerified) String.format("%.2f", product.athMinPrice) else ""
+                ?: if (product.hasSufficientHistoryForDealVerdict) {
+                    String.format("%.2f", product.athMinPrice)
+                } else if (product.hasSufficientHistoryForDealVerdict) {
+                    String.format("%.2f", product.currentPrice)
+                } else ""
         )
     }
 
@@ -76,10 +80,13 @@ fun SetAlertDialog(
                 )
 
                 Text(
-                    text = if (product.isPriceVerified) {
-                        "Precio actual: ${String.format("%.2f", product.currentPrice)} €\nMínimo histórico: ${String.format("%.2f", product.athMinPrice)} €"
-                    } else {
-                        "Esta ficha contiene datos de demostración. Puedes guardar un objetivo manual, pero todavía no se consultan precios ni se envían notificaciones automáticas."
+                    text = when {
+                        product.hasSufficientHistoryForDealVerdict ->
+                            "Precio actual verificado: ${String.format("%.2f", product.currentPrice)} €\nMínimo observado en 90 días o más: ${String.format("%.2f", product.athMinPrice)} €."
+                        product.isPriceVerified ->
+                            "Precio actual verificado: ${String.format("%.2f", product.currentPrice)} €. Aún no hay suficiente historial para usar un mínimo como referencia."
+                        else ->
+                            "Esta ficha contiene datos de demostración. Puedes guardar un objetivo manual, pero todavía no se consultan precios ni se envían notificaciones automáticas."
                     },
                     fontSize = 12.sp,
                     lineHeight = 16.sp
@@ -96,7 +103,7 @@ fun SetAlertDialog(
                         .testTag("alert_target_input")
                 )
 
-                // Presets are meaningful only after prices have been verified.
+                // Historical presets require adequate time coverage; one snapshot is not a historical low.
                 if (product.isPriceVerified) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -106,13 +113,13 @@ fun SetAlertDialog(
                         onClick = {
                             targetPriceText = String.format("%.2f", product.athMinPrice)
                         },
-                        label = { Text("Mínimo Histórico", fontSize = 10.sp) }
+                        label = { Text("Mínimo observado", fontSize = 10.sp) }
                     )
                     SuggestionChip(
                         onClick = {
                             targetPriceText = String.format("%.2f", product.athMinPrice * 0.95)
                         },
-                        label = { Text("-5% nuevo récord", fontSize = 10.sp) }
+                        label = { Text("-5% del mínimo observado", fontSize = 10.sp) }
                     )
                 }
                 }

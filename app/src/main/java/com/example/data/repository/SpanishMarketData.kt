@@ -231,6 +231,20 @@ object SpanishMarketData {
             headquartersInSpain = "Totana (Murcia)",
             description = "Comercio online español de smartphones, domótica y electrónica con entrega urgente 24h."
         )
+    ) + listOf(
+        StoreEntity("apple_store", "Apple Store España", "apple.com/es/store", "#3A3A3C", "Móviles & Informática", true, 0, "Web oficial", "Tienda oficial de Apple. Mínimo aún no recibe precios automáticamente."),
+        StoreEntity("samsung_store", "Samsung Shop España", "samsung.com/es", "#1428A0", "Móviles & Electrónica", true, 0, "Web oficial", "Tienda oficial de Samsung. Sin integración automática de precios."),
+        StoreEntity("google_store", "Google Store España", "store.google.com/es", "#4285F4", "Móviles & Hogar", false, 0, "Web oficial", "Tienda oficial de dispositivos Google. Sin integración automática de precios."),
+        StoreEntity("xiaomi_store", "Xiaomi Store España", "mi.com/es", "#FF6900", "Móviles & Hogar", true, 0, "Web oficial", "Tienda oficial de Xiaomi. Sin integración automática de precios."),
+        StoreEntity("lenovo_store", "Lenovo España", "lenovo.com/es/es", "#E2231A", "Informática", false, 0, "Web oficial", "Tienda online oficial Lenovo. Sin integración automática de precios."),
+        StoreEntity("dell_store", "Dell España", "dell.com/es-es", "#007DB8", "Informática", false, 0, "Web oficial", "Tienda online oficial Dell. Sin integración automática de precios."),
+        StoreEntity("hp_store", "HP Store España", "hp.com/es-es/shop", "#0096D6", "Informática", false, 0, "Web oficial", "Tienda online oficial HP. Sin integración automática de precios."),
+        StoreEntity("neobyte", "Neobyte", "neobyte.es", "#00A6A6", "Informática & Gaming", true, 0, "Barcelona", "Tienda española de informática y gaming; precios aún no consultados por Mínimo."),
+        StoreEntity("coolmod", "Coolmod", "coolmod.com", "#282828", "Informática & Gaming", false, 0, "Web oficial", "Tienda online de informática y gaming; precios aún no consultados por Mínimo."),
+        StoreEntity("alternate", "ALTERNATE España", "alternate.es", "#2D5EAA", "Informática & Gaming", false, 0, "Web oficial", "Tienda online de informática; precios aún no consultados por Mínimo."),
+        StoreEntity("tradeinn", "Tradeinn", "tradeinn.com", "#222222", "Deportes & Outdoor", false, 0, "Web oficial", "Comercio online de deporte y outdoor; precios aún no consultados por Mínimo."),
+        StoreEntity("backmarket", "Back Market España", "backmarket.es", "#1D6159", "Tecnología reacondicionada", false, 0, "Web oficial", "Marketplace reacondicionado; precios aún no consultados por Mínimo."),
+        StoreEntity("ldlc", "LDLC España", "ldlc.com/es-es", "#303030", "Informática & Gaming", false, 0, "Web oficial", "Tienda online de informática; precios aún no consultados por Mínimo.")
     )
 
     fun getInitialProducts(): List<Product> = listOf(
@@ -659,7 +673,94 @@ object SpanishMarketData {
             rating = 4.8,
             reviewCount = 15300
         )
+    ) + getAdditionalDemoProducts()
+
+
+    private data class DemoProductSeed(
+        val id: String, val title: String, val brand: String,
+        val category: ProductCategory, val referencePrice: Double, val store: Store
     )
+
+    /**
+     * Discovery fixtures only: reference amounts are never presented as live offers.
+     * Every generated product is explicitly unverified until a source connector confirms it.
+     */
+    private fun getAdditionalDemoProducts(): List<Product> = listOf(
+        DemoProductSeed("demo_galaxy_s26_ultra", "Samsung Galaxy S26 Ultra 512 GB", "Samsung", ProductCategory.SMARTPHONES, 1499.0, Store.SAMSUNG_STORE),
+        DemoProductSeed("demo_iphone_17_pro_max", "Apple iPhone 17 Pro Max 256 GB", "Apple", ProductCategory.SMARTPHONES, 1449.0, Store.APPLE_STORE),
+        DemoProductSeed("demo_pixel_pro", "Google Pixel Pro 256 GB", "Google", ProductCategory.SMARTPHONES, 1099.0, Store.GOOGLE_STORE),
+        DemoProductSeed("demo_xiaomi_flagship", "Xiaomi flagship 512 GB", "Xiaomi", ProductCategory.SMARTPHONES, 899.0, Store.XIAOMI_STORE),
+        DemoProductSeed("demo_galaxy_tab_ultra", "Samsung Galaxy Tab Ultra 256 GB", "Samsung", ProductCategory.SMARTPHONES, 1199.0, Store.SAMSUNG_STORE),
+        DemoProductSeed("demo_ipad_air", "Apple iPad Air 11 pulgadas 128 GB", "Apple", ProductCategory.SMARTPHONES, 699.0, Store.APPLE_STORE),
+        DemoProductSeed("demo_lenovo_legion", "Lenovo Legion 5 portátil gaming", "Lenovo", ProductCategory.COMPUTING, 1399.0, Store.LENOVO_STORE),
+        DemoProductSeed("demo_thinkpad_e", "Lenovo ThinkPad E14", "Lenovo", ProductCategory.COMPUTING, 899.0, Store.LENOVO_STORE),
+        DemoProductSeed("demo_dell_xps", "Dell XPS 14 portátil", "Dell", ProductCategory.COMPUTING, 1699.0, Store.DELL_STORE),
+        DemoProductSeed("demo_hp_omen", "HP OMEN portátil gaming", "HP", ProductCategory.COMPUTING, 1599.0, Store.HP_STORE),
+        DemoProductSeed("demo_rtx_5070_ti", "ASUS GeForce RTX 5070 Ti 16 GB", "ASUS", ProductCategory.COMPUTING, 899.0, Store.PC_COMPONENTES),
+        DemoProductSeed("demo_rtx_5070", "MSI GeForce RTX 5070 12 GB", "MSI", ProductCategory.COMPUTING, 699.0, Store.COOLMOD),
+        DemoProductSeed("demo_ryzen_9800x3d", "AMD Ryzen 7 9800X3D", "AMD", ProductCategory.COMPUTING, 499.0, Store.NEOBYTE),
+        DemoProductSeed("demo_ryzen_9600x", "AMD Ryzen 5 9600X", "AMD", ProductCategory.COMPUTING, 259.0, Store.ALTERNATE),
+        DemoProductSeed("demo_samsung_990pro", "Samsung 990 PRO NVMe SSD 2 TB", "Samsung", ProductCategory.COMPUTING, 189.0, Store.SAMSUNG_STORE),
+        DemoProductSeed("demo_wd_black", "WD_BLACK SN850X NVMe SSD 2 TB", "Western Digital", ProductCategory.COMPUTING, 179.0, Store.AMAZON_ES),
+        DemoProductSeed("demo_kingston_ddr5", "Kingston Fury DDR5 32 GB", "Kingston", ProductCategory.COMPUTING, 119.0, Store.PC_COMPONENTES),
+        DemoProductSeed("demo_gigabyte_b850", "Gigabyte B850 placa base AM5", "Gigabyte", ProductCategory.COMPUTING, 199.0, Store.ALTERNATE),
+        DemoProductSeed("demo_lg_ultragear_oled", "LG UltraGear OLED 27 pulgadas", "LG", ProductCategory.COMPUTING, 799.0, Store.PC_COMPONENTES),
+        DemoProductSeed("demo_logitech_g923", "Logitech G923 volante de simulación", "Logitech", ProductCategory.GAMING, 299.0, Store.GAME),
+        DemoProductSeed("demo_ps5_pro", "Sony PlayStation 5 Pro", "Sony", ProductCategory.GAMING, 799.0, Store.GAME),
+        DemoProductSeed("demo_xbox_series_x", "Xbox Series X 1 TB", "Microsoft", ProductCategory.GAMING, 549.0, Store.CARREFOUR),
+        DemoProductSeed("demo_switch_2", "Nintendo Switch 2", "Nintendo", ProductCategory.GAMING, 469.0, Store.GAME),
+        DemoProductSeed("demo_steam_deck", "Steam Deck OLED 1 TB", "Valve", ProductCategory.GAMING, 679.0, Store.AMAZON_ES),
+        DemoProductSeed("demo_dualsense_edge", "Sony DualSense Edge", "Sony", ProductCategory.GAMING, 219.0, Store.GAME),
+        DemoProductSeed("demo_playstation_portal", "PlayStation Portal", "Sony", ProductCategory.GAMING, 219.0, Store.GAME),
+        DemoProductSeed("demo_meta_quest", "Meta Quest 3S 128 GB", "Meta", ProductCategory.GAMING, 329.0, Store.MEDIA_MARKT),
+        DemoProductSeed("demo_sony_xm6", "Sony WH-1000XM6 auriculares", "Sony", ProductCategory.TV_AUDIO, 449.0, Store.FNAC),
+        DemoProductSeed("demo_bose_qc_ultra", "Bose QuietComfort Ultra", "Bose", ProductCategory.TV_AUDIO, 379.0, Store.EL_CORTE_INGLES),
+        DemoProductSeed("demo_sennheiser_m4", "Sennheiser Momentum 4 Wireless", "Sennheiser", ProductCategory.TV_AUDIO, 299.0, Store.FNAC),
+        DemoProductSeed("demo_samsung_oled_42", "Samsung OLED 42 pulgadas", "Samsung", ProductCategory.TV_AUDIO, 1399.0, Store.SAMSUNG_STORE),
+        DemoProductSeed("demo_lg_oled_42", "LG OLED 42 pulgadas serie C", "LG", ProductCategory.TV_AUDIO, 1099.0, Store.MEDIA_MARKT),
+        DemoProductSeed("demo_samsung_q990", "Samsung barra de sonido Q990", "Samsung", ProductCategory.TV_AUDIO, 1199.0, Store.SAMSUNG_STORE),
+        DemoProductSeed("demo_jbl_flip", "JBL Flip altavoz Bluetooth", "JBL", ProductCategory.TV_AUDIO, 149.0, Store.CARREFOUR),
+        DemoProductSeed("demo_sonos_era", "Sonos Era 100", "Sonos", ProductCategory.TV_AUDIO, 229.0, Store.EL_CORTE_INGLES),
+        DemoProductSeed("demo_galaxy_buds", "Samsung Galaxy Buds Pro", "Samsung", ProductCategory.TV_AUDIO, 199.0, Store.SAMSUNG_STORE),
+        DemoProductSeed("demo_roborock_saros", "Roborock Saros robot aspirador", "Roborock", ProductCategory.HOME_APPLIANCES, 1499.0, Store.AMAZON_ES),
+        DemoProductSeed("demo_dreame_l40", "Dreame L40 Ultra robot aspirador", "Dreame", ProductCategory.HOME_APPLIANCES, 999.0, Store.AMAZON_ES),
+        DemoProductSeed("demo_dyson_v15", "Dyson V15 Detect aspiradora", "Dyson", ProductCategory.HOME_APPLIANCES, 699.0, Store.EL_CORTE_INGLES),
+        DemoProductSeed("demo_philips_hue", "Philips Hue kit de inicio", "Philips Hue", ProductCategory.HOME_APPLIANCES, 89.0, Store.LEROY_MERLIN),
+        DemoProductSeed("demo_xiaomi_airfryer", "Xiaomi Air Fryer 6.5 L", "Xiaomi", ProductCategory.HOME_APPLIANCES, 129.0, Store.XIAOMI_STORE),
+        DemoProductSeed("demo_conga_robot", "Cecotec Conga robot aspirador", "Cecotec", ProductCategory.HOME_APPLIANCES, 449.0, Store.POWERPLANET),
+        DemoProductSeed("demo_delonghi_magnifica", "DeLonghi Magnifica cafetera automática", "DeLonghi", ProductCategory.HOME_APPLIANCES, 499.0, Store.CARREFOUR),
+        DemoProductSeed("demo_bosch_dishwasher", "Bosch lavavajillas serie 6", "Bosch", ProductCategory.HOME_APPLIANCES, 699.0, Store.WORTEN),
+        DemoProductSeed("demo_garmin_fenix", "Garmin Fenix reloj multideporte", "Garmin", ProductCategory.SPORTS, 999.0, Store.DECATHLON),
+        DemoProductSeed("demo_garmin_forerunner", "Garmin Forerunner reloj GPS", "Garmin", ProductCategory.SPORTS, 399.0, Store.DECATHLON),
+        DemoProductSeed("demo_apple_watch", "Apple Watch SE", "Apple", ProductCategory.SPORTS, 279.0, Store.APPLE_STORE),
+        DemoProductSeed("demo_xiaomi_band", "Xiaomi Smart Band", "Xiaomi", ProductCategory.SPORTS, 49.0, Store.XIAOMI_STORE),
+        DemoProductSeed("demo_oralb_io6", "Oral-B iO 6 cepillo eléctrico", "Oral-B", ProductCategory.PERSONAL_CARE, 149.0, Store.CARREFOUR),
+        DemoProductSeed("demo_philips_oneblade", "Philips OneBlade 360", "Philips", ProductCategory.PERSONAL_CARE, 39.0, Store.ALCAMPO),
+        DemoProductSeed("demo_philips_airfryer", "Philips Airfryer serie 5000", "Philips", ProductCategory.HOME_APPLIANCES, 149.0, Store.WORTEN),
+        DemoProductSeed("demo_dji_mini", "DJI Mini dron compacto", "DJI", ProductCategory.TV_AUDIO, 899.0, Store.MEDIA_MARKT),
+        DemoProductSeed("demo_canon_r50", "Canon EOS R50 cámara sin espejo", "Canon", ProductCategory.TV_AUDIO, 779.0, Store.EL_CORTE_INGLES),
+        DemoProductSeed("demo_galaxy_watch_ultra", "Samsung Galaxy Watch Ultra", "Samsung", ProductCategory.SPORTS, 499.0, Store.SAMSUNG_STORE),
+        DemoProductSeed("demo_logitech_mx_master", "Logitech MX Master ratón inalámbrico", "Logitech", ProductCategory.COMPUTING, 119.0, Store.NEOBYTE),
+        DemoProductSeed("demo_anker_prime_bank", "Anker Prime batería externa USB-C", "Anker", ProductCategory.HOME_APPLIANCES, 179.0, Store.AMAZON_ES),
+        DemoProductSeed("demo_ugreen_charger", "UGREEN cargador USB-C GaN", "UGREEN", ProductCategory.HOME_APPLIANCES, 149.0, Store.AMAZON_ES),
+        DemoProductSeed("demo_tp_link_mesh", "TP-Link Deco Wi-Fi mesh", "TP-Link", ProductCategory.COMPUTING, 399.0, Store.PC_COMPONENTES),
+        DemoProductSeed("demo_kindle_paperwhite", "Amazon Kindle Paperwhite", "Amazon", ProductCategory.TV_AUDIO, 159.0, Store.AMAZON_ES),
+        DemoProductSeed("demo_samsung_t7", "Samsung T7 Shield SSD externo 2 TB", "Samsung", ProductCategory.COMPUTING, 169.0, Store.SAMSUNG_STORE),
+        DemoProductSeed("demo_tradeinn_shoes", "Zapatillas running de entrenamiento", "Running", ProductCategory.SPORTS, 119.0, Store.TRADEINN),
+        DemoProductSeed("demo_backmarket_phone", "Smartphone reacondicionado", "Back Market", ProductCategory.SMARTPHONES, 299.0, Store.BACKMARKET),
+        DemoProductSeed("demo_ldlc_pc", "PC gaming configurado", "LDLC", ProductCategory.COMPUTING, 1299.0, Store.LDLC)
+    ).map { seed ->
+        Product(
+            id = seed.id, title = seed.title, brand = seed.brand, category = seed.category,
+            currentPrice = seed.referencePrice, athMinPrice = seed.referencePrice,
+            athMinDate = "Sin datos", athMinStore = "Sin datos",
+            athMaxPrice = seed.referencePrice, avg90dPrice = seed.referencePrice,
+            officialPvp = seed.referencePrice, currentStore = seed.store,
+            storeUrl = seed.store.searchUrlFor(seed.title), ean = "",
+            priceHistory = emptyList(), offers = emptyList(), rating = 0.0,
+            reviewCount = 0, isPriceVerified = false
+        )
+    }
 
     private fun generateHistory(
         basePrice: Double,

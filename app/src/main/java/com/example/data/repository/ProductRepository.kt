@@ -39,9 +39,10 @@ class ProductRepository(
     init {
         // Pre-populate Room database with all major Spanish stores and catalog
         externalScope.launch {
-            if (storeDao.getStoreCount() == 0) {
-                storeDao.insertAll(SpanishMarketData.getInitialStoreEntities())
-            }
+            val configuredStores = SpanishMarketData.getInitialStoreEntities()
+            val existingStoreIds = storeDao.getAllStoresSnapshot().map { it.id }.toSet()
+            val missingStores = configuredStores.filter { it.id !in existingStoreIds }
+            if (missingStores.isNotEmpty()) storeDao.insertAll(missingStores)
             if (productDao.getProductCount() == 0) {
                 val entities = SpanishMarketData.getInitialProducts().map { prod ->
                     ProductEntity(

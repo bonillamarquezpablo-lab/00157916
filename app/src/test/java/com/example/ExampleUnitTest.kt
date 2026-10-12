@@ -54,6 +54,25 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun expandedCatalogueHasAtLeastSixtyUniqueUnverifiedFixtures() {
+        val products = SpanishMarketData.getInitialProducts()
+        assertTrue("The discovery catalogue should contain 60+ products", products.size >= 60)
+        assertEquals("Product IDs must be unique", products.size, products.map { it.id }.toSet().size)
+        assertTrue("Seeded items must remain unverified", products.none { it.isPriceVerified })
+    }
+
+    @Test
+    fun storeDirectoryContainsThirtyPlusOfficialWebsitesWithoutFalsePriceIntegration() {
+        assertTrue("At least 30 stores should be listed", Store.ALL_STORES.size >= 30)
+        assertEquals("Store IDs must be unique", Store.ALL_STORES.size, Store.ALL_STORES.map { it.id }.toSet().size)
+        Store.ALL_STORES.forEach { store ->
+            assertTrue("Missing official HTTPS URL for ${store.name}", store.officialUrl.startsWith("https://"))
+            assertFalse("No live price connector configured for ${store.name}", store.hasLivePriceIntegration)
+            assertTrue("Search should be restricted to retailer domain", store.searchUrlFor("test").contains("site%3A"))
+        }
+    }
+
+    @Test
     fun testSpanishMarketCatalogIntegrity() {
         val products = SpanishMarketData.getInitialProducts()
         assertTrue("Market products catalog should not be empty", products.isNotEmpty())
@@ -66,7 +85,7 @@ class ExampleUnitTest {
     @Test
     fun testSpanishStoresDatabaseIntegrity() {
         val storeEntities = SpanishMarketData.getInitialStoreEntities()
-        assertTrue("Store entities should contain at least 15 stores", storeEntities.size >= 15)
+        assertTrue("Store entities should contain at least 30 stores", storeEntities.size >= 30)
         val names = storeEntities.map { it.name }
         assertTrue(names.any { it.contains("Amazon", ignoreCase = true) })
         assertTrue(names.any { it.contains("PcComponentes", ignoreCase = true) })
@@ -75,6 +94,9 @@ class ExampleUnitTest {
         assertTrue(names.any { it.contains("Carrefour", ignoreCase = true) })
         assertTrue(names.any { it.contains("Decathlon", ignoreCase = true) })
         assertTrue(names.any { it.contains("Leroy Merlin", ignoreCase = true) })
+        assertTrue(names.any { it.contains("Apple Store", ignoreCase = true) })
+        assertTrue(names.any { it.contains("Samsung Shop", ignoreCase = true) })
+        assertTrue(names.any { it.contains("Xiaomi", ignoreCase = true) })
         assertTrue(names.any { it.contains("Fnac", ignoreCase = true) })
         assertTrue(names.any { it.contains("Alcampo", ignoreCase = true) })
     }

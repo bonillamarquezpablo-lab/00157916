@@ -110,7 +110,7 @@ fun StoresScreen(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Text(
-                        text = "Rastreamos de forma continua los catálogos y ofertas de los principales minoristas del mercado español para encontrar el precio mínimo sin manipulación ni engaño.",
+                        text = "Directorio de webs oficiales para buscar productos. Las fichas del catálogo siguen siendo de demostración: todavía no hay consultas automáticas de precios para estas tiendas.",
                         fontSize = 12.sp,
                         lineHeight = 16.sp,
                         color = Color(0xFFE2E8F0)
@@ -122,7 +122,7 @@ fun StoresScreen(
         // Section Title
         item {
             Text(
-                text = "Cadenas Auditadas en Base de Datos (${stores.size})",
+                text = "Webs oficiales registradas (${stores.size})",
                 fontWeight = FontWeight.Bold,
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -209,17 +209,17 @@ fun StoresScreen(
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                imageVector = Icons.Default.Verified,
+                                imageVector = Icons.Default.Business,
                                 contentDescription = null,
-                                tint = Color(0xFF059669),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(13.dp)
                             )
                             Spacer(modifier = Modifier.width(3.dp))
                             Text(
-                                text = "Auditada",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF059669)
+                                text = if (store.hasLivePriceIntegration) "Precios conectados" else "Web oficial · sin precios en directo",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -248,7 +248,7 @@ fun StoresScreen(
 
                         OutlinedButton(
                             onClick = {
-                                val url = "https://www.${store.domain}"
+                                val url = store.officialUrl
                                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                                 context.startActivity(intent)
                             },
@@ -257,7 +257,7 @@ fun StoresScreen(
                                 .height(38.dp),
                             shape = RoundedCornerShape(8.dp)
                         ) {
-                            Text("Ir a la Web", fontSize = 11.sp)
+                            Text("Web oficial", fontSize = 11.sp)
                             Spacer(modifier = Modifier.width(4.dp))
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.OpenInNew,

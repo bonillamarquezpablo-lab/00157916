@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -111,21 +113,22 @@ fun OnlineSearchScreen(
                         }
                     }
                     OutlinedButton(
-                        onClick = {
-                            val url = "https://www.amazon.es/s?k=${Uri.encode(state.onlineSearchQuery.trim())}"
-                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-                        },
-                        enabled = state.onlineSearchQuery.trim().length >= 2,
+                        onClick = { openAmazonSearch(context, state.onlineSearchQuery) },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.ShoppingBag, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
-                        Text("Buscar directamente en Amazon.es")
+                        Text(
+                            if (state.onlineSearchQuery.trim().length >= 2)
+                                "Buscar en Amazon con mi sesión Prime"
+                            else
+                                "Abrir Amazon con mi sesión Prime"
+                        )
                         Spacer(Modifier.width(5.dp))
                         Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
                     }
                     Text(
-                        "La búsqueda directa de Amazon funciona sin clave. Para comparar precios dentro de Mínimo, configura SerpApi en Ajustes. Esta app no usa tu sesión ni tus cookies de Prime.",
+                        "Este botón intenta abrir la app de Amazon primero para aprovechar tu sesión iniciada; si no está instalada, abre Amazon.es en el navegador. El precio se verá en Amazon, pero no se importa automáticamente a Mínimo.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -166,7 +169,7 @@ fun OnlineSearchScreen(
             }
             items(visibleResults, key = { "${it.sourceUrl}|${it.price}" }) { result ->
                 ShoppingResultCard(result = result) {
-                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(result.sourceUrl))) }
+                    openStoreUrl(context, result.sourceUrl, preferAmazonApp = result.isAmazonOffer)
                 }
             }
             item {
@@ -233,3 +236,34 @@ private fun ShoppingResultCard(result: SerpApiShoppingResult, onOpen: () -> Unit
         }
     }
 }
+
+private const val AMAZON_SHOPPING_PACKAGE = "com.amazon.mShop.android.shopping"
+
+/**
+ * Prefer the official Amazon Shopping app so the user's existing sign-in can be used.
+ * Fall back to the HTTPS page when the app is not installed or does not handle the URL.
+ */
+private fun openAmazonSearch(context: Context, query: String) {
+    val trimmedQuery = query.trim()
+    val url = if (trimmedQuery.length >= 2) {
+        "https://www.amazon.es/s?k=${Uri.encode(trimmedQuery)}"
+    } else {
+        "https://www.amazon.es/"
+    }
+    openStoreUrl(context, url, preferAmazonApp = true)
+}
+
+private fun openStoreUrl(context: Context, url: String, preferAmazonApp: Boolean) {
+    val uri = Uri.parse(url)
+    if (preferAmazonApp) {
+        val amazonIntent = Intent(Intent.ACTION_VIEW, uri).setPackage(AMAZON_SHOPPING_PACKAGE)
+        try {
+            context.startActivity(amazonIntent)
+            return
+        } catch (_: ActivityNotFoundException) {
+            // Amazon app isn't installed; continue with the website below.
+        }
+    }
+    context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+}
+

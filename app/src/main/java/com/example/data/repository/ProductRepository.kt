@@ -186,7 +186,7 @@ class ProductRepository(
             catalog.firstOrNull { product ->
                 product.title.lowercase().contains(cleaned) ||
                     product.brand.equals(rawInput, ignoreCase = true) ||
-                    product.ean == rawInput ||
+                    (product.isEanVerified && product.ean == rawInput) ||
                     product.id.equals(rawInput, ignoreCase = true)
             }
         }

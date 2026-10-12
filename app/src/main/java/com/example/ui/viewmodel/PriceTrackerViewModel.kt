@@ -5,6 +5,8 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
+import com.example.data.remote.OnlineSearchCache
+import com.example.data.remote.SerpApiAccountInfo
 import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiException
 import com.example.data.remote.SerpApiRequestProduct
@@ -73,6 +75,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     private val serpApiTokenStore = SerpApiTokenStore(application)
     private val serpApiClient = SerpApiClient()
+    private val onlineSearchCache = OnlineSearchCache(application)
     private val priceRefreshPreferences = application.getSharedPreferences(
         "minimo_serpapi_refresh_state",
         Context.MODE_PRIVATE
@@ -80,10 +83,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     private val _uiState = MutableStateFlow(TrackerUiState())
 
-    private companion object {
-        const val MAX_SEARCHES_PER_HOUR = 45
-        const val ONE_HOUR_MS = 60L * 60L * 1000L
-    }
     val uiState: StateFlow<TrackerUiState> = _uiState.asStateFlow()
 
     val spanishStores: StateFlow<List<Store>> = repository.allStoresStream
@@ -163,25 +162,25 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     /**
-     * Locally reserve calls in a rolling one-hour window, below SerpApi's published free-tier
-     * throughput. Failed calls are conservatively counted because the client cannot always know
-     * whether the provider counted a request before returning an error.
+     * Account checks are free at SerpApi. If the account endpoint is temporarily unavailable,
+     * manual single searches can still be attempted and the provider remains the final authority.
      */
-    private fun reserveSerpApiSearches(count: Int): Boolean {
-        val now = System.currentTimeMillis()
-        val windowStart = priceRefreshPreferences.getLong("hour_window_start", 0L)
-        val savedCount = priceRefreshPreferences.getInt("hourly_searches_reserved", 0)
-        val windowExpired = windowStart <= 0L || now < windowStart || now - windowStart >= ONE_HOUR_MS
-        val effectiveStart = if (windowExpired) now else windowStart
-        val used = if (windowExpired) 0 else savedCount
-        if (count !in 1..MAX_SEARCHES_PER_HOUR || used + count > MAX_SEARCHES_PER_HOUR) {
-            return false
-        }
-        priceRefreshPreferences.edit()
-            .putLong("hour_window_start", effectiveStart)
-            .putInt("hourly_searches_reserved", used + count)
-            .apply()
-        return true
+    private suspend fun readAccountInfo(token: String): SerpApiAccountInfo? = try {
+        serpApiClient.getAccountInfo(token)
+    } catch (error: SerpApiException) {
+        if (error.httpCode == 401 || error.httpCode == 403) throw error
+        null
+    }
+
+    private fun accountCapacity(info: SerpApiAccountInfo): Int {
+        val hourly = info.remainingThisHour ?: Int.MAX_VALUE
+        return minOf(info.searchesRemaining, hourly).coerceAtLeast(0)
+    }
+
+    private fun quotaMessage(info: SerpApiAccountInfo): String {
+        val renewal = info.renewalDate?.let { " Se renueva el $it." }.orEmpty()
+        val hourly = info.remainingThisHour?.let { " Disponibles esta hora: $it de ${info.hourlyLimit}." }.orEmpty()
+        return info.quotaSummary() + hourly + renewal
     }
 
     /**

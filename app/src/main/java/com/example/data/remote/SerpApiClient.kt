@@ -71,6 +71,84 @@ class SerpApiClient(
         .writeTimeout(20, TimeUnit.SECONDS)
         .build()
 ) {
+    /**
+     * Search any user-entered product phrase. Results are Google Shopping snapshots for Spain,
+     * not prices obtained from the user's Amazon Prime session or a direct Amazon API.
+     */
+    suspend fun searchOnline(token: String, query: String): List<SerpApiShoppingResult> =
+        withContext(Dispatchers.IO) {
+            val apiKey = token.trim()
+            require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
+            val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
+            require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
+            parseShoppingResults(executeSearch(apiKey, normalizedQuery))
+        }
+
+    internal fun parseShoppingResults(
+        root: JSONObject,
+        observedAt: Long = System.currentTimeMillis()
+    ): List<SerpApiShoppingResult> {
+        val error = root.optString("error").takeIf { it.isNotBlank() && it != "null" }
+        if (error != null) throw SerpApiException(error)
+        val status = root.optJSONObject("search_metadata")?.optString("status")
+        if (status.equals("Error", ignoreCase = true)) {
+            throw SerpApiException("SerpApi no pudo completar la búsqueda.")
+        }
+
+        val items = mutableListOf<JSONObject>()
+        root.optJSONArray("shopping_results")?.let { items += it.toObjects() }
+        root.optJSONArray("categorized_shopping_results")?.let { categories ->
+            for (index in 0 until categories.length()) {
+                categories.optJSONObject(index)?.optJSONArray("shopping_results")?.let {
+                    items += it.toObjects()
+                }
+            }
+        }
+
+        return items.mapNotNull { item ->
+            val title = item.optString("title").trim()
+                .takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
+            val priceText = item.optString("price")
+            if (!priceText.contains("€") && !priceText.contains("EUR", ignoreCase = true)) {
+                return@mapNotNull null
+            }
+            val price = parsePrice(
+                item.opt("extracted_price")?.takeIf { it !is JSONObject && it !is JSONArray }
+                    ?: priceText
+            ) ?: return@mapNotNull null
+            val url = item.optString("link").takeIf { isHttpsUrl(it) }
+                ?: return@mapNotNull null
+            val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
+                .getOrNull().orEmpty()
+            if (host.isBlank()) return@mapNotNull null
+            val source = item.optString("source").trim()
+                .takeIf { it.isNotBlank() && it != "null" } ?: humanizeHost(host)
+            val thumbnail = item.optString("thumbnail").takeIf { isHttpsUrl(it) }.orEmpty()
+            val delivery = sequenceOf(item.optString("delivery"), item.optString("shipping"))
+                .firstOrNull { it.isNotBlank() && it != "null" }.orEmpty()
+            val rating = item.opt("rating")?.toString()?.toDoubleOrNull()
+                ?.takeIf { it.isFinite() && it in 0.0..5.0 }
+            val reviewCount = item.opt("reviews")?.toString()
+                ?.replace(Regex("[^0-9]"), "")
+                ?.toIntOrNull()
+                ?.takeIf { it >= 0 }
+
+            SerpApiShoppingResult(
+                title = title,
+                price = price,
+                storeName = source,
+                sourceUrl = url,
+                thumbnailUrl = thumbnail,
+                delivery = delivery,
+                rating = rating,
+                reviewCount = reviewCount,
+                observedAt = observedAt
+            )
+        }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
+            .sortedBy { it.price }
+            .take(30)
+    }
+
     suspend fun searchProducts(
         token: String,
         products: List<SerpApiRequestProduct>,

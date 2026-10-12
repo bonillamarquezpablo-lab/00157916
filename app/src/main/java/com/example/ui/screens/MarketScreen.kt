@@ -155,7 +155,7 @@ fun MarketScreen(
                     )
 
                     Text(
-                        text = "Productos, precios e historiales de ejemplo. Mínimo todavía no consulta las tiendas en tiempo real.",
+                        text = "Catálogo ampliado de productos de muestra. Busca cada modelo en su web oficial; los precios en directo aún no están conectados.",
                         color = Color(0xFFCBD5E1),
                         fontSize = 11.sp,
                         lineHeight = 15.sp
@@ -448,17 +448,31 @@ fun MarketScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "${products.size} productos registrados",
+                    text = "${products.size} productos · ${products.count { it.isPriceVerified }} precios verificados",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 Text(
-                    text = "Precios sin verificar",
+                    text = if (products.any { it.isPriceVerified }) "Precios verificados disponibles" else "Sin precios en directo",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        if (products.isNotEmpty() &&
+            products.none { it.isPriceVerified } &&
+            uiState.sortOption in setOf(SortOption.PRICE_LOW_HIGH, SortOption.PRICE_HIGH_LOW)
+        ) {
+            item {
+                Text(
+                    text = "La ordenación por precio solo usa precios verificados. Como aún no hay fuentes conectadas, las fichas de muestra se ordenan por nombre.",
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

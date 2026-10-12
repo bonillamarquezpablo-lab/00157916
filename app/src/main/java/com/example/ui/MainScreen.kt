@@ -113,7 +113,7 @@ fun MainScreen(
             TopAppBar(
                 navigationIcon = {
                     if (showSettings || showOnlineSearch) {
-                        IconButton(onClick = { showSettings = false }) {
+                        IconButton(onClick = { if (showSettings) showSettings = false else showOnlineSearch = false }) {
                             Icon(Icons.Default.ArrowBack, contentDescription = "Volver")
                         }
                     }

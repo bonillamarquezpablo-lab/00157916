@@ -39,7 +39,7 @@ data class Product(
 ) {
     /**
      * An all-time low or "good deal" cannot be inferred from a single snapshot. Require at least
-     * three verified observations spanning 30 days before claiming historical context.
+     * three verified observations spanning 90 days before claiming historical context.
      */
     val hasSufficientHistoryForDealVerdict: Boolean
         get() = isPriceVerified &&

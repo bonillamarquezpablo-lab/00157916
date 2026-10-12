@@ -9,11 +9,11 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'app/**'
-      - 'gradle/**'
-      - '*.gradle.kts'
-      - 'gradle.properties'
-      - '.github/workflows/android.yml'
+      - "app/**"
+      - "gradle/**"
+      - "*.gradle.kts"
+      - "gradle.properties"
+      - ".github/workflows/android.yml"
 
 permissions:
   contents: read
@@ -69,9 +69,7 @@ jobs:
           VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))
           VERSION_NAME="1.5.${GITHUB_RUN_NUMBER}"
           echo "Building Mínimo ${VERSION_NAME} (versionCode ${VERSION_CODE})"
-          gradle :app:assembleDebug --stacktrace \\
-            -PVERSION_CODE="${VERSION_CODE}" \\
-            -PVERSION_NAME="${VERSION_NAME}"
+          gradle :app:assembleDebug --stacktrace -PVERSION_CODE="${VERSION_CODE}" -PVERSION_NAME="${VERSION_NAME}"
 
       - name: Guardar el APK
         uses: actions/upload-artifact@v4

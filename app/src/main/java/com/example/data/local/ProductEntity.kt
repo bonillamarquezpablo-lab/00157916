@@ -1,5 +1,6 @@
 package com.example.data.local
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -25,5 +26,7 @@ data class ProductEntity(
     val rating: Double = 4.7,
     val reviewCount: Int = 1200,
     val wasRecentlyInflated: Boolean = false,
-    val fakePriorPrice: Double? = null
+    val fakePriorPrice: Double? = null,
+    @ColumnInfo(defaultValue = "0")
+    val isPriceVerified: Boolean = false
 )

@@ -99,7 +99,7 @@ data class Product(
             val age = priceAgeMillis ?: return "Fecha de observación desconocida"
             return when {
                 age < 60_000L -> "Consultado hace menos de 1 min"
-                age < HOUR_MS -> "Consultado hace ${age / HOUR_MS} h"
+                age < HOUR_MS -> "Consultado hace menos de 1 h"
                 age < DAY_MS -> "Consultado hace ${age / HOUR_MS} h"
                 age < 2L * DAY_MS -> "Consultado hace 1 día · conviene confirmar"
                 else -> "Consultado hace ${age / DAY_MS} días · conviene volver a consultar"

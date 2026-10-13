@@ -1,5 +1,6 @@
 package com.example.data.local
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -31,9 +32,12 @@ data class PriceObservationEntity(
     val isVerified: Boolean = false,
     val verificationNote: String? = null,
     /** Full title captured from the live search result; blank only for legacy rows. */
+    @ColumnInfo(defaultValue = "''")
     val productTitle: String = "",
     /** Merchant presented by the provider, kept separate from the provider name. */
+    @ColumnInfo(defaultValue = "''")
     val storeName: String = "",
     /** Provider that yielded this observation: Google Shopping or Amazon.es. */
+    @ColumnInfo(defaultValue = "'Google Shopping'")
     val sourceType: String = "Google Shopping"
 )

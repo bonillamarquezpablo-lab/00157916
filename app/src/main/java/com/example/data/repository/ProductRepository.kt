@@ -469,10 +469,20 @@ class ProductRepository(
                 markers += token
             }
         }
-        // Headphones such as WH-1000XM5 are tokenized as "wh 1000xm5".
+        // Sony model codes are often formatted as "WH-1000XM5", "WH1000XM5" or
+        // "1000XM5". Add a canonical marker so harmless retailer formatting differences match.
+        val sonyModelCode = Regex("""^(?:wh)?\d{3,5}xm\d[a-z0-9]*$""")
+        tokens.filter(sonyModelCode::matches).forEach { token ->
+            val canonicalCode = token.removePrefix("wh")
+            markers += canonicalCode
+            markers += "wh$canonicalCode"
+        }
         if ("wh" in tokens) {
             tokens.getOrNull(tokens.indexOf("wh") + 1)?.let { next ->
-                if (Regex("""^\d+[a-z0-9]+$""").matches(next)) markers += "wh" + next
+                if (Regex("""^\d+[a-z0-9]+$""").matches(next)) {
+                    markers += "wh" + next
+                    markers += next
+                }
             }
         }
         return markers
@@ -491,6 +501,18 @@ class ProductRepository(
         val requestedVariants = normalizedProductTitle(query).split(' ').filter { it in variantWords }.toSet()
         val resultVariants = normalizedProductTitle(resultTitle).split(' ').filter { it in variantWords }.toSet()
         if (!resultVariants.containsAll(requestedVariants)) return true
+
+        // Do not accidentally accept an Ultra/Plus/FE result for a different requested variant,
+        // even when both titles contain the same base model number.
+        val exclusiveVariantFamilies = listOf(
+            setOf("pro", "max", "plus", "ultra", "fe", "lite", "mini"),
+            setOf("fold", "flip"),
+            setOf("classic", "edge")
+        )
+        for (family in exclusiveVariantFamilies) {
+            val requestedFamily = requestedVariants.intersect(family)
+            if (requestedFamily.isNotEmpty() && resultVariants.intersect(family) != requestedFamily) return true
+        }
 
         val memoryPattern = Regex("""\b\d+\s?(?:gb|tb)\b""")
         val requestedMemory = memoryPattern.findAll(normalizedProductTitle(query))

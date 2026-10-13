@@ -397,7 +397,7 @@ class ProductRepository(
         return true
     }
 
-    private fun inferProductBrand(title: String) {
+    private fun inferProductBrand(title: String): String {
         val brands = listOf(
             "Apple", "Samsung", "Xiaomi", "Redmi", "POCO", "Google", "Sony", "UGREEN",
             "Anker", "Baseus", "Huawei", "Honor", "Motorola", "OPPO", "OnePlus", "Dyson",

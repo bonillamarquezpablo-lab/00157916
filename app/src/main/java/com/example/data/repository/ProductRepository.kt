@@ -55,8 +55,8 @@ class ProductRepository(
     private val _simulationOverrides = MutableStateFlow<Map<String, Product>>(emptyMap())
 
     init {
-        // Seed new store/product IDs incrementally. Existing product rows and tracking settings are
-        // preserved rather than replaced, and upgrades receive newly added catalogue entries.
+        // Store metadata is bundled; product rows are not. The user's online searches populate
+        // Room, while existing rows and tracking settings from older versions are preserved.
         externalScope.launch {
             val configuredStores = SpanishMarketData.getInitialStoreEntities()
             val existingStoreIds = storeDao.getAllStoresSnapshot().map { it.id }.toSet()

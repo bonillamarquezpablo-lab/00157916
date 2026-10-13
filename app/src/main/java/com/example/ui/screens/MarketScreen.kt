@@ -122,7 +122,7 @@ fun MarketScreen(
                                 .padding(horizontal = 7.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = "CATÁLOGO DE DEMOSTRACIÓN",
+                                text = "CATÁLOGO PERSONAL",
                                 color = Color(0xFF0B132B),
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Black
@@ -147,7 +147,7 @@ fun MarketScreen(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
-                        text = "Comparador de precios · modo demo",
+                        text = "Tu mercado de productos",
                         color = Color.White,
                         fontWeight = FontWeight.Black,
                         fontSize = 18.sp,
@@ -155,7 +155,7 @@ fun MarketScreen(
                     )
 
                     Text(
-                        text = "Catálogo ampliado de productos de muestra. Busca cada modelo en su web oficial; los precios en directo aún no están conectados.",
+                        text = "Los productos que consultes online se guardan aquí con sus ofertas y el historial real de precios.",
                         color = Color(0xFFCBD5E1),
                         fontSize = 11.sp,
                         lineHeight = 15.sp
@@ -469,7 +469,7 @@ fun MarketScreen(
         ) {
             item {
                 Text(
-                    text = "La ordenación por precio solo usa precios verificados. Como aún no hay fuentes conectadas, las fichas de muestra se ordenan por nombre.",
+                    text = "La ordenación por precio solo utiliza observaciones reales guardadas en Room.",
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -488,13 +488,13 @@ fun MarketScreen(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "No se encontraron productos",
+                            text = "Tu Mercado está vacío",
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "El catálogo contiene datos de demostración. Los mínimos verificados aparecerán cuando incorporemos fuentes reales.",
+                            text = "Pulsa la lupa, busca un producto real y Mínimo lo añadirá automáticamente a este escaparate.",
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

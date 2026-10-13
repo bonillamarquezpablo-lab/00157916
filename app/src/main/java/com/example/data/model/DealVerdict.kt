@@ -36,7 +36,7 @@ data class DealVerdict(
             level = VerdictLevel.UNVERIFIED,
             title = "Precio consultado",
             badgeText = "HISTORIAL INSUFICIENTE",
-            explanation = "Se ha encontrado un precio en Google Shopping, pero Mínimo aún no tiene observaciones en distintas consultas para confirmar un mínimo histórico, una media de 90 días o un descuento real.",
+            explanation = "Se ha encontrado una observación online, pero el precio puede estar desactualizado o aún no hay suficientes consultas distintas para confirmar un mínimo observado, una media de 90 días o un descuento real.",
             iconName = "Info",
             color = Color(0xFF64748B),
             confidenceScore = 0

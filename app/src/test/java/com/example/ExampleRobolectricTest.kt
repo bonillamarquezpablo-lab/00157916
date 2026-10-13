@@ -369,6 +369,42 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `Google Shopping rejects keyboard mouse bundle for a single mouse query`() {
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {
+                  "title": "Logitech G203 Lightsync Gaming Mouse",
+                  "price": "29,99 €",
+                  "extracted_price": 29.99,
+                  "link": "https://shop.example.com/logitech-g203",
+                  "source": "Tienda de ratones"
+                },
+                {
+                  "title": "Teclados Logitech Pack G213 Prodigy Teclado Gaming + Logitech G203 Lightsync 2nd Gen Ratón Gaming",
+                  "price": "88,98 €",
+                  "extracted_price": 88.98,
+                  "link": "https://shop.example.com/g213-g203-pack",
+                  "source": "Tienda de packs"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = payload,
+            query = "Logitech G203",
+            observedAt = 123L
+        )
+
+        assertEquals("A model search must only keep the standalone mouse", 1, report.results.size)
+        assertEquals("Logitech G203 Lightsync Gaming Mouse", report.results.single().title)
+    }
+
+    @Test
     fun `Google Shopping rejects used and open-box metadata before recording offers`() {
         val payload = JSONObject(
             """

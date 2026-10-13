@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -105,6 +106,27 @@ interface PriceObservationDao {
         dayStart: Long,
         dayEnd: Long
     ): PriceObservationEntity?
+
+    /**
+     * Atomically deduplicate and insert a daily offer. The transaction prevents two overlapping
+     * search callbacks from both observing "no row" and writing duplicate history points.
+     */
+    @Transaction
+    suspend fun insertIfNoVerifiedStoreOfferForDay(
+        observation: PriceObservationEntity,
+        dayStart: Long,
+        dayEnd: Long
+    ): Boolean {
+        val existing = getObservationForStoreProductDay(
+            productId = observation.productId,
+            storeId = observation.storeId,
+            dayStart = dayStart,
+            dayEnd = dayEnd
+        )
+        if (existing != null) return false
+        insert(observation)
+        return true
+    }
 
     @Query("SELECT COUNT(*) FROM price_observations WHERE productId = :productId")
     suspend fun getObservationCount(productId: String): Int

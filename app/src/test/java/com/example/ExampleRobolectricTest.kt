@@ -548,13 +548,42 @@ class ExampleRobolectricTest {
         )
 
         assertEquals(4, report.rawResultCount)
-        assertEquals(1, report.results.size)
-        assertEquals("Sony WH1000XM5 Wireless Noise Canceling Headphones", report.results.single().title)
-        assertEquals(249.99, report.results.single().price, 0.001)
+        assertEquals(2, report.results.size)
+        val amazonResult = report.results.single { it.storeName == "Amazon.es" }
+        assertEquals("Sony WH1000XM5 Wireless Noise Canceling Headphones", amazonResult.title)
+        assertEquals(249.99, amazonResult.price, 0.001)
+
+        val fallbackResult = report.results.single { it.price == 229.99 }
+        assertEquals("Sony WH-1000XM5 headphones", fallbackResult.title)
+        assertTrue(fallbackResult.sourceUrl.startsWith("https://www.google.com/search?"))
+        assertTrue(fallbackResult.sourceUrl.contains("tbm=shop"))
+        assertTrue(fallbackResult.sourceUrl.contains("hl=es"))
+        assertTrue(fallbackResult.sourceUrl.contains("gl=es"))
+        assertTrue(fallbackResult.sourceUrl.contains("q=Sony%20WH-1000XM5%20headphones"))
+        assertTrue(fallbackResult.isGoogleShoppingProductLink)
+
         assertEquals(1, report.rejectedAsIrrelevant)
         assertEquals(1, report.rejectedForPriceOrCurrency)
-        assertEquals(1, report.rejectedForLink)
+        assertEquals(0, report.rejectedForLink)
         assertTrue(report.emptyResultMessage("Sony WH-1000XM5").isNotBlank())
+    }
+
+    @Test
+    fun `missing shopping links report the received result field names`() {
+        val report = com.example.data.remote.SerpApiShoppingSearchReport(
+            results = emptyList(),
+            rawResultCount = 2,
+            rejectedAsIrrelevant = 0,
+            rejectedForPriceOrCurrency = 0,
+            rejectedForLink = 2,
+            rejectedOther = 0,
+            firstResultFields = "title, price, link"
+        )
+
+        assertTrue(
+            report.emptyResultMessage("Sony WH-1000XM5")
+                .contains("Campos recibidos: title, price, link")
+        )
     }
 
     @Test

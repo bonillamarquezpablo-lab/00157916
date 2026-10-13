@@ -473,12 +473,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 // or the API key was removed after the previous search.
                 val cached = onlineSearchCache.read(provider.name, query)
                 if (cached != null && cached.results.isNotEmpty()) {
-                    val safeCachedResults = repository.filterOnlineSearchResults(cached.results)
+                    val safeCachedResults = repository.filterOnlineSearchResults(cached.results, query)
                     if (safeCachedResults.isNotEmpty()) {
                         val ageMinutes = ((System.currentTimeMillis() - cached.savedAt) / 60_000L).coerceAtLeast(1L)
                         val base = onlineSearchResultMessage(safeCachedResults, provider)
                         val cacheNotice = "Resultados guardados hace $ageMinutes min; no se ha consumido otra búsqueda."
-                        val savedObservations = repository.recordOnlineSearchResults(safeCachedResults, provider.name)
+                        val savedObservations = repository.recordOnlineSearchResults(safeCachedResults, provider.name, query)
                         val historyNotice = onlineHistoryNotice(savedObservations, safeCachedResults.size)
                         val filterNotice = onlineFilterNotice(cached.results.size, safeCachedResults.size)
                         _uiState.value = _uiState.value.copy(
@@ -526,9 +526,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 val rawResults = googleReport?.results
                     ?: serpApiClient.searchAmazonOnline(token, query)
                 // Use the same plausibility rules for visible cards, cache entries and Room history.
-                val results = repository.filterOnlineSearchResults(rawResults)
+                val results = repository.filterOnlineSearchResults(rawResults, query)
                 val savedObservations = if (results.isNotEmpty()) {
-                    repository.recordOnlineSearchResults(results, provider.name)
+                    repository.recordOnlineSearchResults(results, provider.name, query)
                 } else 0
                 // Cache only filtered offers so a suspicious cached price cannot return later.
                 if (results.isNotEmpty()) onlineSearchCache.write(provider.name, query, results)

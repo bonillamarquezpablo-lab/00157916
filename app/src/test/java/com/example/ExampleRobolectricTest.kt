@@ -140,7 +140,7 @@ class ExampleRobolectricTest {
                   "title": "Samsung Galaxy S26 Ultra 512GB negro",
                   "price": "1.299,99 €",
                   "extracted_price": 1299.99,
-                  "link": "https://www.pccomponentes.com/samsung-galaxy-s26-ultra",
+                  "product_link": "https://www.google.com/shopping/product/123456789?gl=es",
                   "source": "PcComponentes"
                 },
                 {
@@ -184,6 +184,9 @@ class ExampleRobolectricTest {
         assertEquals(123L, quotes.first().observedAt)
         assertTrue(quotes.all { it.productId == "demo_galaxy_s26_ultra" })
         assertTrue(quotes.all { it.sourceUrl.startsWith("https://") })
+        val pcComponentesQuote = quotes.first { it.storeName == "PcComponentes" }
+        assertEquals("pccomponentes", pcComponentesQuote.storeId)
+        assertTrue(pcComponentesQuote.sourceUrl.contains("google.com/shopping/product"))
     }
 
     @Test
@@ -462,7 +465,7 @@ class ExampleRobolectricTest {
                   "title": "Auriculares Sony WH-1000XM5",
                   "price": "79,99 €",
                   "extracted_price": 79.99,
-                  "link": "https://www.pccomponentes.com/auriculares-sony",
+                  "product_link": "https://www.google.com/shopping/product/987654321?gl=es",
                   "source": "PcComponentes"
                 },
                 {
@@ -489,7 +492,9 @@ class ExampleRobolectricTest {
         assertEquals(2, results.size)
         assertEquals("PcComponentes", results[0].storeName)
         assertEquals(79.99, results[0].price, 0.001)
+        assertTrue(results[0].isGoogleShoppingProductLink)
         assertEquals("Amazon.es", results[1].storeName)
+        assertTrue(!results[1].isGoogleShoppingProductLink)
         assertTrue(results[1].isAmazonOffer)
         assertEquals(123L, results[1].observedAt)
         assertEquals("https://images.example.test/sony.jpg", results[1].thumbnailUrl)

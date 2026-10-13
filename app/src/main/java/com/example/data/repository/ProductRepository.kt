@@ -49,22 +49,19 @@ class ProductRepository(
     private val priceObservationDao: PriceObservationDao,
     externalScope: CoroutineScope = CoroutineScope(Dispatchers.IO)
 ) {
-    // Room is the catalogue source of truth. This cache is only for URL analysis and explicitly
-    // labelled local demo simulations; it does not replace the persisted product catalogue.
+    // Room is the only product catalogue. Online searches are the sole source of persisted items.
     private val _latestProducts = MutableStateFlow<List<Product>>(emptyList())
     private val _simulationOverrides = MutableStateFlow<Map<String, Product>>(emptyMap())
 
     init {
-        // Store metadata is bundled; product rows are not. The user's online searches populate
-        // Room, while existing rows and tracking settings from older versions are preserved.
+        // The database must never seed a demonstration catalogue. On upgrade, discard old rows
+        // that do not have real verified online observations and their orphaned watchlist/history.
+        // The static Store.ALL_STORES directory is read-only metadata and does not need Room rows.
         externalScope.launch {
-            val configuredStores = SpanishMarketData.getInitialStoreEntities()
-            val existingStoreIds = storeDao.getAllStoresSnapshot().map { it.id }.toSet()
-            val missingStores = configuredStores.filter { it.id !in existingStoreIds }
-            if (missingStores.isNotEmpty()) storeDao.insertAll(missingStores)
-
-            // Product rows are no longer seeded from the demo catalogue. Existing Room rows
-            // remain untouched for safety; Mercado hides unverified, untracked sample products.
+            priceObservationDao.deleteObservationsWithoutVerifiedHistory()
+            productDao.deleteProductsWithoutVerifiedObservations()
+            trackedDao.deleteTrackingForMissingProducts()
+            storeDao.deleteAll()
         }
     }
 
@@ -86,18 +83,22 @@ class ProductRepository(
         val trackingMap = trackedEntities.associateBy { it.productId }
         val observationsByProduct = observations.groupBy { it.productId }
 
-        productEntities.map { entity ->
-            val product = entity.toDomainProduct(
-                stores = stores,
-                verifiedObservations = observationsByProduct[entity.id].orEmpty()
-            )
-            val shownProduct = simulations[product.id] ?: product
-            val trackingInfo = trackingMap[product.id]
-            shownProduct.copy(
-                isTracked = trackingInfo != null,
-                alertTargetPrice = trackingInfo?.targetAlertPrice
-            )
-        }
+        // Never render a Room product without at least one verified source-backed observation.
+        // This also prevents legacy/mock rows from flashing on screen while startup cleanup runs.
+        productEntities
+            .filter { entity -> observationsByProduct[entity.id].orEmpty().isNotEmpty() }
+            .map { entity ->
+                val product = entity.toDomainProduct(
+                    stores = stores,
+                    verifiedObservations = observationsByProduct[entity.id].orEmpty()
+                )
+                val shownProduct = simulations[product.id] ?: product
+                val trackingInfo = trackingMap[product.id]
+                shownProduct.copy(
+                    isTracked = trackingInfo != null,
+                    alertTargetPrice = trackingInfo?.targetAlertPrice
+                )
+            }
     }.onEach { currentProducts ->
         _latestProducts.value = currentProducts
     }
@@ -115,8 +116,7 @@ class ProductRepository(
      * verified only if at least one validated offer was stored for that product.
      */
     suspend fun recordSerpApiQuotes(quotes: List<SerpApiQuote>): Int {
-        // Resolve titles from persisted products only. The bundled demonstration catalogue is not
-        // a valid source for a real market observation.
+        // Resolve titles from persisted, user-searched products only.
         val storedProducts = productDao.getAllProductsSnapshot()
         val titleById = storedProducts.associate { it.id to it.title }.toMutableMap().apply {
             _latestProducts.value.forEach { product -> put(product.id, product.title) }

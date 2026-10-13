@@ -245,6 +245,11 @@ fun ProductDetailSheet(
                                 fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            Text(
+                                text = "Enlace: $currentLinkType",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
 
                         // Do not infer a historical low from a single query.

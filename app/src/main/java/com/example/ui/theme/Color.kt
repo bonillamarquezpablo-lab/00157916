@@ -32,3 +32,10 @@ val DarkSurface = Color(0xFF131D2E)
 val DarkSurfaceVariant = Color(0xFF1E293B)
 val DarkOnSurface = Color(0xFFF8FAFC)
 val DarkOutline = Color(0xFF334155)
+
+
+// OLED / Expressive surface tokens (first UI pass).
+val OledBlack = Color(0xFF000000)
+val OledSurface = Color(0xFF0A0A0A)
+val OledSurfaceVariant = Color(0xFF141414)
+val OledHairline = Color(0x26FFFFFF)

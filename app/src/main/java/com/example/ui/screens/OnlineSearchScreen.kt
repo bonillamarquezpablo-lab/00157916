@@ -202,9 +202,8 @@ fun OnlineSearchScreen(
                 ShoppingResultCard(
                     group = group,
                     onOpenProduct = { onOpenProduct(group.identityKey) },
-                    onOpenBestOffer = {
-                        val best = group.bestPurchaseOffer
-                        openStoreUrl(context, best.sourceUrl, preferAmazonApp = best.isAmazonOffer)
+                    onOpenOffer = { offer ->
+                        openStoreUrl(context, offer.sourceUrl, preferAmazonApp = offer.isAmazonOffer)
                     }
                 )
             }
@@ -223,9 +222,12 @@ fun OnlineSearchScreen(
 private fun ShoppingResultCard(
     group: OnlineProductGroup,
     onOpenProduct: () -> Unit,
-    onOpenBestOffer: () -> Unit
+    onOpenOffer: (SerpApiShoppingResult) -> Unit
 ) {
     val best = group.bestPurchaseOffer
+    val displayedStoreOffers = group.offers
+        .distinctBy { it.storeName.trim().lowercase(Locale.ROOT) }
+        .take(MAX_VISIBLE_STORE_OFFERS)
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenProduct),
         shape = RoundedCornerShape(20.dp),
@@ -275,17 +277,45 @@ private fun ShoppingResultCard(
             if (best.primeEligible) {
                 Text("Entrega Prime disponible en la oferta más barata", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
             }
-            OutlinedButton(onClick = onOpenBestOffer, modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    if (best.isGoogleShoppingProductLink) "Ver ofertas en Google Shopping"
-                    else "Abrir oferta en ${best.storeName}"
-                )
-                Spacer(Modifier.width(8.dp))
-                Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+            Text(
+                "Comparar tiendas",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold
+            )
+            displayedStoreOffers.forEach { offer ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(offer.storeName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            if (offer.isGoogleShoppingProductLink) "Ver en Google Shopping" else "Enlace directo a la tienda",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(offer.price),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    OutlinedButton(onClick = { onOpenOffer(offer) }) {
+                        Text(if (offer.isGoogleShoppingProductLink) "Ver" else "Abrir")
+                    }
+                }
+            }
+            if (group.offers.size > displayedStoreOffers.size) {
+                TextButton(onClick = onOpenProduct, modifier = Modifier.fillMaxWidth()) {
+                    Text("Ver todas las ${group.offers.size} ofertas e historial")
+                }
             }
         }
     }
 }
+
+private const val MAX_VISIBLE_STORE_OFFERS = 5
 
 private const val AMAZON_SHOPPING_PACKAGE = "com.amazon.mShop.android.shopping"
 

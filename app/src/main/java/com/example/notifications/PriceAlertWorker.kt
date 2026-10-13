@@ -75,7 +75,7 @@ class PriceAlertWorker(
             !account.accountStatus.equals("active", ignoreCase = true)
         ) return Result.success()
 
-        val availableThisHour = account.remainingThisHour ?: MAX_PRODUCTS_PER_RUN
+        val availableThisHour = account.remainingThisHour ?: MAX_PRODUCTS_PER_DAY
         val queryCount = minOf(remainingDailyQuota, due.size, account.searchesRemaining, availableThisHour)
         if (queryCount <= 0) return Result.success()
         val selected = due.take(queryCount)

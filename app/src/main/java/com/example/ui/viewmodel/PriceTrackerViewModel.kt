@@ -216,7 +216,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             val token = serpApiTokenStore.read()
             if (token.isNullOrBlank()) {
-                val message = "Guarda una clave de SerpApi cifrada en Ajustes antes de consultar precios."
+                val message = serpApiTokenStore.lastReadErrorMessage()
+                    ?: "Guarda una clave de SerpApi cifrada en Ajustes antes de consultar precios."
                 _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
                 showSnackbar(message)
                 return@launch
@@ -382,7 +383,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             try {
                 val token = serpApiTokenStore.read()
                 if (token.isNullOrBlank()) {
-                    val message = "No hay una clave de SerpApi guardada. Pégala arriba y pulsa «Guardar clave cifrada»."
+                    val message = serpApiTokenStore.lastReadErrorMessage()
+                        ?: "No hay una clave de SerpApi guardada. Pégala arriba y pulsa «Guardar clave cifrada»."
                     _uiState.value = _uiState.value.copy(serpApiAccountStatus = message)
                     return@launch
                 }
@@ -468,7 +470,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
                 val token = serpApiTokenStore.read()
                 if (token.isNullOrBlank()) {
-                    val message = "Para mostrar precios dentro de Mínimo, guarda tu clave de SerpApi en Ajustes. También puedes abrir Amazon con tu sesión iniciada."
+                    val message = serpApiTokenStore.lastReadErrorMessage()
+                        ?: "Para mostrar precios dentro de Mínimo, guarda tu clave de SerpApi en Ajustes. También puedes abrir Amazon con tu sesión iniciada."
                     _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
                     showSnackbar(message)
                     return@launch

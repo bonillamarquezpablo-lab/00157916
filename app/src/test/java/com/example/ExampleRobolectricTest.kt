@@ -153,8 +153,8 @@ class ExampleRobolectricTest {
             withTimeout(10_000) {
                 while (database.productDao().getProductCount() != 1) kotlinx.coroutines.delay(10)
             }
-            assertEquals(0, database.productDao().getObservationCount("demo_iphone_17_pro_max"))
-            assertEquals(1, database.productDao().getObservationCount("online_product_redmi17"))
+            assertEquals(0, database.priceObservationDao().getObservationCount("demo_iphone_17_pro_max"))
+            assertEquals(1, database.priceObservationDao().getObservationCount("online_product_redmi17"))
             assertTrue("Legacy mock tracking must be purged", database.trackedProductDao().getAllTracked().first().isEmpty())
             assertEquals("Room's static store rows must also be empty", 0, database.storeDao().getStoreCount())
         } finally {

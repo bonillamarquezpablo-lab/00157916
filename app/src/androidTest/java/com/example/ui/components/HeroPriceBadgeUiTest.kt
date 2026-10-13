@@ -1,10 +1,10 @@
 package com.example.ui.components
 
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.data.model.PriceBadgeClassifier
 import org.junit.Rule
@@ -34,7 +34,7 @@ class HeroPriceBadgeUiTest {
         }
 
         composeRule.onNodeWithText("PRIMER PRECIO REGISTRADO").assertIsDisplayed()
-        composeRule.onNodeWithText("🔥 MÍNIMO OBSERVADO").assertDoesNotExist()
+        composeRule.onAllNodesWithText("🔥 MÍNIMO OBSERVADO").assertCountEquals(0)
     }
 
     @Test
@@ -73,6 +73,6 @@ class HeroPriceBadgeUiTest {
         }
 
         composeRule.onNodeWithText("HISTORIAL EN CONSTRUCCIÓN").assertIsDisplayed()
-        composeRule.onNodeWithText("🔴 PRECIO ALTO").assertDoesNotExist()
+        composeRule.onAllNodesWithText("🔴 PRECIO ALTO").assertCountEquals(0)
     }
 }

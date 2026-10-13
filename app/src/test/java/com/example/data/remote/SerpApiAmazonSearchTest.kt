@@ -73,6 +73,85 @@ class SerpApiAmazonSearchTest {
     }
 
     @Test
+    fun rejectsWrongMemoryVariantsUsedListingsAndPromotionalMultipacks() {
+        val macbookPayload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {
+                  "title": "Apple MacBook Air M3 16GB RAM 256GB SSD",
+                  "price": "999,00 €",
+                  "extracted_price": 999.0,
+                  "source": "Tienda fiable",
+                  "link": "https://shop.example/macbook-correct"
+                },
+                {
+                  "title": "Apple MacBook Air M3 8GB RAM 512GB SSD",
+                  "price": "67,50 €",
+                  "extracted_price": 67.5,
+                  "source": "Wallapop",
+                  "link": "https://es.wallapop.com/item/macbook"
+                },
+                {
+                  "title": "Apple MacBook Air M3 16GB RAM 256GB SSD reacondicionado",
+                  "price": "499,00 €",
+                  "extracted_price": 499.0,
+                  "second_hand_condition": "refurbished",
+                  "source": "Marketplace",
+                  "link": "https://shop.example/macbook-refurbished"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val macbookResults = SerpApiClient()
+            .parseShoppingResultsDetailed(
+                macbookPayload,
+                query = "Apple MacBook Air M3 16GB RAM 256GB SSD",
+                observedAt = 1234L
+            ).results
+
+        assertEquals(1, macbookResults.size)
+        assertEquals(999.0, macbookResults.single().price, 0.001)
+
+        val powerBankPayload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {
+                  "title": "3x Batería portátil 20000 mAh 35W impreso con su logotipo",
+                  "price": "297,91 €",
+                  "extracted_price": 297.91,
+                  "source": "Regalos corporativos",
+                  "link": "https://shop.example/promotional-powerbank"
+                },
+                {
+                  "title": "Batería portátil 20000 mAh 35W",
+                  "price": "39,99 €",
+                  "extracted_price": 39.99,
+                  "source": "Tienda fiable",
+                  "link": "https://shop.example/powerbank"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val powerBankResults = SerpApiClient()
+            .parseShoppingResultsDetailed(
+                powerBankPayload,
+                query = "Batería portátil 20000 mAh 35W",
+                observedAt = 1234L
+            ).results
+
+        assertEquals(1, powerBankResults.size)
+        assertEquals(39.99, powerBankResults.single().price, 0.001)
+    }
+
+    @Test
     fun acceptsStructuredShoppingPricesWithoutEuroLabelAndRejectsForeignCurrency() {
         val payload = JSONObject(
             """

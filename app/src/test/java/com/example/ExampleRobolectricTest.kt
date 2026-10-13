@@ -382,7 +382,7 @@ class ExampleRobolectricTest {
                 .put("shopping_results", JSONArray().put(
                     JSONObject()
                         .put("title", "Logitech G203 Lightsync Gaming Mouse")
-                        .put("price", "\${20 + index},99 €")
+                        .put("price", (20 + index).toString() + ",99 €")
                         .put("extracted_price", 20.0 + index)
                         .put("link", "https://$host/logitech-g203")
                         .put("source", merchant)

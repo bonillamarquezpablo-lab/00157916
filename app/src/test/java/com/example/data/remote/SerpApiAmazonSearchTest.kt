@@ -71,4 +71,46 @@ class SerpApiAmazonSearchTest {
         assertEquals("Entrega GRATIS con Prime", results[1].delivery)
         assertEquals(1234L, results[1].observedAt)
     }
+
+    @Test
+    fun acceptsStructuredShoppingPricesWithoutEuroLabelAndRejectsForeignCurrency() {
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {
+                  "title": "Anker Power Bank 20000mAh",
+                  "price": "39.99",
+                  "extracted_price": 39.99,
+                  "source": "Amazon.es",
+                  "link": "https://www.amazon.es/dp/B0ANKER123"
+                },
+                {
+                  "title": "Anker Power Bank 20000mAh",
+                  "price": "$10.99",
+                  "extracted_price": 10.99,
+                  "source": "Foreign store",
+                  "link": "https://shop.example/product"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val results = SerpApiClient().parseShoppingResults(payload, observedAt = 1234L)
+        assertEquals(1, results.size)
+        assertEquals(39.99, results.single().price, 0.001)
+        assertEquals("Amazon.es", results.single().storeName)
+
+        val requested = SerpApiRequestProduct(
+            id = "anker-powerbank",
+            title = "Anker Power Bank 20000mAh",
+            brand = "Anker"
+        )
+        val quotes = SerpApiClient().parseQuotes(payload, requested, observedAt = 1234L)
+        assertEquals(1, quotes.size)
+        assertEquals(39.99, quotes.single().price, 0.001)
+        assertEquals("EUR", quotes.single().currency)
+    }
 }

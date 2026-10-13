@@ -391,19 +391,19 @@ class ProductRepository(
     private fun inferProductCategory(title: String, query: String): ProductCategory {
         val text = "${title.lowercase(Locale.ROOT)} ${query.lowercase(Locale.ROOT)}"
         return when {
-            Regex("""\\b(iphone|redmi|poco|smartphone|movil|telefono|galaxy s|pixel)\\b""").containsMatchIn(text) ->
+            Regex("""\b(iphone|redmi|poco|smartphone|movil|telefono|galaxy s|pixel)\b""").containsMatchIn(text) ->
                 ProductCategory.SMARTPHONES
-            Regex("""\\b(laptop|portatil|macbook|chromebook|pc|ram|ssd|procesador|gpu|usb|hub|ethernet|router|cable|cargador)\\b""").containsMatchIn(text) ->
+            Regex("""\b(laptop|portatil|macbook|chromebook|pc|ram|ssd|procesador|gpu|usb|hub|ethernet|router|cable|cargador)\b""").containsMatchIn(text) ->
                 ProductCategory.COMPUTING
-            Regex("""\\b(playstation|ps5|xbox|nintendo|switch|consola|mando)\\b""").containsMatchIn(text) ->
+            Regex("""\b(playstation|ps5|xbox|nintendo|switch|consola|mando)\b""").containsMatchIn(text) ->
                 ProductCategory.GAMING
-            Regex("""\\b(oled|qled|televisor|television|tv|auriculares|headphones|altavoz|speaker)\\b""").containsMatchIn(text) ->
+            Regex("""\b(oled|qled|televisor|television|tv|auriculares|headphones|altavoz|speaker)\b""").containsMatchIn(text) ->
                 ProductCategory.TV_AUDIO
-            Regex("""\\b(aspiradora|vacuum|robot aspirador|cafetera|frigorifico|microondas|lavadora|mop kit)\\b""").containsMatchIn(text) ->
+            Regex("""\b(aspiradora|vacuum|robot aspirador|cafetera|frigorifico|microondas|lavadora|mop kit)\b""").containsMatchIn(text) ->
                 ProductCategory.HOME_APPLIANCES
-            Regex("""\\b(afeitadora|depiladora|secador|cepillo electrico)\\b""").containsMatchIn(text) ->
+            Regex("""\b(afeitadora|depiladora|secador|cepillo electrico)\b""").containsMatchIn(text) ->
                 ProductCategory.PERSONAL_CARE
-            Regex("""\\b(bicicleta|bicicletas|casco|running|deporte)\\b""").containsMatchIn(text) ->
+            Regex("""\b(bicicleta|bicicletas|casco|running|deporte)\b""").containsMatchIn(text) ->
                 ProductCategory.SPORTS
             else -> ProductCategory.ALL
         }
@@ -440,11 +440,11 @@ class ProductRepository(
             val token = tokens[index]
             if (token in modelFamilies && index + 1 < tokens.size) {
                 val next = tokens[index + 1]
-                if (Regex("""^[a-z]{0,3}\\d+[a-z0-9]*$""").matches(next) &&
-                    !Regex("""^\\d+(gb|tb|mah|mp|hz|w|mm|cm|g)$""").matches(next)
+                if (Regex("""^[a-z]{0,3}\d+[a-z0-9]*$""").matches(next) &&
+                    !Regex("""^\d+(gb|tb|mah|mp|hz|w|mm|cm|g)$""").matches(next)
                 ) markers += token + next
             }
-            if (Regex("""^[a-z]{1,8}\\d[a-z0-9]{1,12}$""").matches(token) &&
+            if (Regex("""^[a-z]{1,8}\d[a-z0-9]{1,12}$""").matches(token) &&
                 !Regex("""^(usb|wifi|typec|[0-9]+gb|[0-9]+tb)""").containsMatchIn(token)
             ) {
                 markers += token
@@ -453,7 +453,7 @@ class ProductRepository(
         // Headphones such as WH-1000XM5 are tokenized as "wh 1000xm5".
         if ("wh" in tokens) {
             tokens.getOrNull(tokens.indexOf("wh") + 1)?.let { next ->
-                if (Regex("""^\\d+[a-z0-9]+$""").matches(next)) markers += "wh" + next
+                if (Regex("""^\d+[a-z0-9]+$""").matches(next)) markers += "wh" + next
             }
         }
         return markers
@@ -469,7 +469,7 @@ class ProductRepository(
     private fun isDeviceSearchQuery(query: String): Boolean {
         val normalized = normalizedProductTitle(query)
         return explicitModelMarkers(query).isNotEmpty() || Regex(
-            """\b(movil|telefono|smartphone|iphone|redmi|poco|pixel|galaxy\\s+(s|a|z|m)\\s?\\d{1,2}|aspiradora|vacuum|dyson|roomba|robot\\s+aspirador|consola|playstation|ps5|xbox|nintendo\\s+switch|oled|qled|televisor|television|smart\\s+tv|laptop|portatil|macbook|chromebook|tablet|ipad|auriculares|headphones|headset)\b"""
+            """\b(movil|telefono|smartphone|iphone|redmi|poco|pixel|galaxy\s+(s|a|z|m)\s?\d{1,2}|aspiradora|vacuum|dyson|roomba|robot\s+aspirador|consola|playstation|ps5|xbox|nintendo\s+switch|oled|qled|televisor|television|smart\s+tv|laptop|portatil|macbook|chromebook|tablet|ipad|auriculares|headphones|headset)\b"""
         ).containsMatchIn(normalized)
     }
 

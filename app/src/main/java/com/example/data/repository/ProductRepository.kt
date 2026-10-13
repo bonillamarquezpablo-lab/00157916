@@ -177,6 +177,8 @@ class ProductRepository(
         results: List<SerpApiShoppingResult>,
         searchQuery: String = ""
     ): List<SerpApiShoppingResult> {
+        val deviceSearch = isDeviceSearchQuery(searchQuery)
+        val queryModelMarkers = explicitModelMarkers(searchQuery)
         val eligible = results.filter { result ->
             result.title.isNotBlank() &&
                 result.storeName.isNotBlank() &&
@@ -185,12 +187,16 @@ class ProductRepository(
                 parseHttpUri(result.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
                 isEligibleHistoryTitle(result.title) &&
                 isEligibleSeller(result.storeName) &&
-                isPlausibleHistoryPrice(result.title, result.price)
+                isPlausibleHistoryPrice(result.title, result.price) &&
+                !hasStrictModelMismatch(queryModelMarkers, result.title) &&
+                // A device-specific query should never show cases, filters, mop kits or other
+                // accessories as if they were the requested device. Brand-only accessory searches
+                // remain unrestricted, preserving UGREEN cable/hub deals.
+                !(deviceSearch && isAccessoryListing(result.title))
         }
 
-        // Compare suspect accessories against complete-product offers only. Median is more
-        // robust than the arithmetic mean when one provider result has an extreme price.
-        val deviceSearch = isDeviceSearchQuery(searchQuery)
+        // Retain the 25% accessory outlier guard for queries that ask about an entire device but
+        // lack a fully identifiable model. Median is robust against an extreme provider quote.
         val fullProductPrices = if (deviceSearch) {
             eligible.filterNot { isAccessoryListing(it.title) }.map { it.price }.sorted()
         } else emptyList()
@@ -425,10 +431,45 @@ class ProductRepository(
             """(?i)\b(funda|fundas|carcasa|carcasas|cristal\s+templado|mop\s+kit|recambio|recambios|filtro|filtros|protector|adaptador|soporte|repuesto|repuestos|replacement|screen\s+protector|tempered\s+glass|cover|case)\b"""
         ).containsMatchIn(normalizedProductTitle(title))
 
+    private fun explicitModelMarkers(text: String): Set<String> {
+        val normalized = normalizedProductTitle(text)
+        val tokens = normalized.split(' ').filter { it.isNotBlank() }
+        val markers = linkedSetOf<String>()
+        val modelFamilies = setOf("redmi", "poco", "iphone", "pixel", "galaxy", "wh", "dyson", "roborock")
+        for (index in tokens.indices) {
+            val token = tokens[index]
+            if (token in modelFamilies && index + 1 < tokens.size) {
+                val next = tokens[index + 1]
+                if (Regex("""^[a-z]{0,3}\\d+[a-z0-9]*$""").matches(next) &&
+                    !Regex("""^\\d+(gb|tb|mah|mp|hz|w|mm|cm|g)$""").matches(next)
+                ) markers += token + next
+            }
+            if (Regex("""^[a-z]{1,8}\\d[a-z0-9]{1,12}$""").matches(token) &&
+                !Regex("""^(usb|wifi|typec|[0-9]+gb|[0-9]+tb)""").containsMatchIn(token)
+            ) {
+                markers += token
+            }
+        }
+        // Headphones such as WH-1000XM5 are tokenized as "wh 1000xm5".
+        if ("wh" in tokens) {
+            tokens.getOrNull(tokens.indexOf("wh") + 1)?.let { next ->
+                if (Regex("""^\\d+[a-z0-9]+$""").matches(next)) markers += "wh" + next
+            }
+        }
+        return markers
+    }
+
+    private fun hasStrictModelMismatch(queryMarkers: Set<String>, resultTitle: String): Boolean {
+        if (queryMarkers.isEmpty()) return false
+        val resultMarkers = explicitModelMarkers(resultTitle)
+        // Only enforce a model marker if the provider title provides any model evidence.
+        return resultMarkers.isNotEmpty() && queryMarkers.intersect(resultMarkers).isEmpty()
+    }
+
     private fun isDeviceSearchQuery(query: String): Boolean {
         val normalized = normalizedProductTitle(query)
-        return Regex(
-            """\b(movil|telefono|smartphone|iphone|redmi|poco|pixel|galaxy\s+(s|a|z|m)\s?\d{1,2}|aspiradora|vacuum|dyson|roomba|robot\s+aspirador|consola|playstation|ps5|xbox|nintendo\s+switch|oled|qled|televisor|television|smart\s+tv|laptop|portatil|macbook|chromebook|tablet|ipad|auriculares|headphones|headset)\b"""
+        return explicitModelMarkers(query).isNotEmpty() || Regex(
+            """\b(movil|telefono|smartphone|iphone|redmi|poco|pixel|galaxy\\s+(s|a|z|m)\\s?\\d{1,2}|aspiradora|vacuum|dyson|roomba|robot\\s+aspirador|consola|playstation|ps5|xbox|nintendo\\s+switch|oled|qled|televisor|television|smart\\s+tv|laptop|portatil|macbook|chromebook|tablet|ipad|auriculares|headphones|headset)\b"""
         ).containsMatchIn(normalized)
     }
 

@@ -708,7 +708,7 @@ class SerpApiClient(
         val memoryWanted = memoryMarkers(requested)
         val memoryFound = memoryMarkers(returned)
         if (memoryWanted.isNotEmpty() && memoryFound.isNotEmpty() &&
-            memoryWanted.intersect(memoryFound).isEmpty()
+            !memoryFound.containsAll(memoryWanted)
         ) return false
 
         val containsModelCode = wanted.any { token -> token.length >= 4 && token.any(Char::isDigit) && token.any(Char::isLetter) }
@@ -799,7 +799,7 @@ class SerpApiClient(
                 }
             }
             if (Regex("""^[a-z]{1,8}\d[a-z0-9]{1,12}$""").matches(word) &&
-                word !in setOf("usb20", "usb30", "usb32", "wifi6", "wifi7", "typec", "m3") &&
+                word !in setOf("usb20", "usb30", "usb32", "wifi6", "wifi7", "typec") &&
                 !Regex("""^\d+(gb|tb|mah|mp|hz|w|mm|cm|g)$""").matches(word)
             ) markers += word
         }
@@ -811,11 +811,17 @@ class SerpApiClient(
         return words.intersect(setOf("pro", "max", "plus", "ultra", "fe", "lite", "mini", "fold", "flip", "classic", "edge"))
     }
 
-    private fun memoryMarkers(value: String): Set<String> =
-        Regex("""\b(\d{1,4})\s?(gb|tb)\b""")
-            .findAll(normalize(value))
+    private fun memoryMarkers(value: String): Set<String> {
+        val standardized = Regex(
+            """(?i)\b(\d{1,2})\s*(?:gb)?\s*[+/]\s*(\d{2,4})\s*gb\b"""
+        ).replace(value) { match ->
+            "\${match.groupValues[1]}GB \${match.groupValues[2]}GB"
+        }
+        return Regex("""\b(\d{1,4})\s?(gb|tb)\b""")
+            .findAll(normalize(standardized))
             .map { it.groupValues[1] + it.groupValues[2] }
             .toSet()
+    }
 
     private fun tokens(value: String): Set<String> =
         normalize(value)

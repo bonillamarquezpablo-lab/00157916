@@ -373,7 +373,6 @@ private fun buildRetailerSearchUrl(result: SerpApiShoppingResult): String {
         "carrefour" in merchant -> "carrefour.es"
         "el corte ingles" in merchant -> "elcorteingles.es"
         "media markt" in merchant -> "mediamarkt.es"
-        "realcash" in merchant -> "tiendarealcash.es"
         else -> null
     }
     val query = if (domain != null) {

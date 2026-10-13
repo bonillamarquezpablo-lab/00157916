@@ -58,7 +58,7 @@ class ProductRepository(
         // that do not have real verified online observations and their orphaned watchlist/history.
         // The static Store.ALL_STORES directory is read-only metadata and does not need Room rows.
         externalScope.launch {
-            priceObservationDao.deleteObservationsWithoutVerifiedHistory()
+            priceObservationDao.deleteUnverifiedObservations()
             productDao.deleteProductsWithoutVerifiedObservations()
             trackedDao.deleteTrackingForMissingProducts()
             storeDao.deleteAll()

@@ -455,11 +455,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             onlineSearchProvider = provider,
             onlineSearchAmazonOnly = provider == OnlineSearchProvider.AMAZON
         )
+        // Invalidate cached results made before the stricter quality filters.
+        val cacheNamespace = "${provider.name}_quality_v2"
         viewModelScope.launch {
             try {
                 // Cache lookup comes first: saved results remain usable even if the quota is empty
                 // or the API key was removed after the previous search.
-                val cached = onlineSearchCache.read(provider.name, query)
+                val cached = onlineSearchCache.read(cacheNamespace, query)
                 if (cached != null && cached.results.isNotEmpty()) {
                     val ageMinutes = ((System.currentTimeMillis() - cached.savedAt) / 60_000L).coerceAtLeast(1L)
                     val base = onlineSearchResultMessage(cached.results, provider)
@@ -509,16 +511,31 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     ?: serpApiClient.searchAmazonOnline(token, query)
                 // Empty responses are not useful cache entries: allow a later retry to query
                 // SerpApi again instead of replaying a stale "no results" response for 55 minutes.
-                if (results.isNotEmpty()) onlineSearchCache.write(provider.name, query, results)
+                if (results.isNotEmpty()) onlineSearchCache.write(cacheNamespace, query, results)
                 val base = if (results.isEmpty() && googleReport != null) {
                     googleReport.emptyResultMessage(query)
                 } else {
                     onlineSearchResultMessage(results, provider)
                 }
+                val qualityNotes = mutableListOf<String>()
+                if (results.isNotEmpty() && googleReport != null) {
+                    if (googleReport.rejectedAsIrrelevant > 0) {
+                        qualityNotes += "${googleReport.rejectedAsIrrelevant} resultados que no coincidían suficientemente con el modelo se omitieron."
+                    }
+                    if (googleReport.rejectedAsSuspiciousPrice > 0) {
+                        qualityNotes += "${googleReport.rejectedAsSuspiciousPrice} precio(s) extremadamente bajo(s) respecto a los demás se omitieron por posible error, cuota o promoción no comparable."
+                    }
+                    if (googleReport.rejectedNonComparable > 0) {
+                        qualityNotes += "${googleReport.rejectedNonComparable} anuncios de alquiler o financiación se omitieron."
+                    }
+                }
+                val qualityNotice = qualityNotes.joinToString(" ").let { note ->
+                    if (note.isBlank()) "" else " Filtro de calidad: $note"
+                }
                 // The account endpoint is free; refresh the displayed balance after a live request.
                 val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
                 val quotaNote = quotaAfter?.let { " ${it.quotaSummary()}" }.orEmpty()
-                val message = base + quotaNote
+                val message = base + qualityNotice + quotaNote
                 _uiState.value = _uiState.value.copy(
                     onlineSearchResults = results,
                     onlineSearchStatus = message

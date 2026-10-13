@@ -3,9 +3,9 @@ package com.example
 import com.example.data.model.DealVerdict
 import com.example.data.model.PricePoint
 import com.example.data.model.Product
+import com.example.data.model.ProductCategory
 import com.example.data.model.Store
 import com.example.data.model.VerdictLevel
-import com.example.data.repository.SpanishMarketData
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
 import org.junit.Assert.assertEquals
@@ -37,7 +37,11 @@ class ExampleUnitTest {
             )
         )
 
-        assertEquals("Models, variants and accessory kits must not be merged together, but shoe sizes should be ignored", 6, groups.size)
+        assertEquals(
+            "Models, variants and accessories stay separate while identical offers group together",
+            6,
+            groups.size
+        )
         val redmi17 = groups.single { it.identityKey == "xiaomi|redmi17|memory:4gb+256gb" }
         assertEquals(2, redmi17.offers.size)
         assertEquals(179.99, redmi17.minPrice, 0.001)
@@ -46,25 +50,13 @@ class ExampleUnitTest {
         assertTrue(groups.any { it.identityKey.contains("variant:fe") })
         assertTrue(groups.any { it.identityKey.contains("variant:ultra") })
         val airForceOne = groups.single { it.title.contains("Air Force 1", ignoreCase = true) }
-        assertEquals("Different shoe sizes and gender words must merge into one product card", 2, airForceOne.offers.size)
+        assertEquals("Different shoe sizes and gender words must merge", 2, airForceOne.offers.size)
         assertEquals(94.99, airForceOne.minPrice, 0.001)
     }
 
     @Test
     fun addition_isCorrect() {
         assertEquals(4, 2 + 2)
-    }
-
-    @Test
-    fun bundledProductsAreNeverPresentedAsVerifiedPrices() {
-        val products = SpanishMarketData.getInitialProducts()
-        assertTrue(products.isNotEmpty())
-        products.forEach { product ->
-            assertFalse("Bundled sample must not be marked verified: ${product.title}", product.isPriceVerified)
-            assertFalse("Bundled sample must not claim an all-time low: ${product.title}", product.isAtAth)
-            assertEquals(VerdictLevel.UNVERIFIED, product.verdict.level)
-            assertEquals(0, product.verdict.confidenceScore)
-        }
     }
 
     @Test
@@ -81,7 +73,7 @@ class ExampleUnitTest {
 
     @Test
     fun livePriceNeedsNinetyDayHistoryBeforeHistoricalClaims() {
-        val seed = SpanishMarketData.getInitialProducts().first()
+        val store = Store.ALL_STORES.first()
         val now = System.currentTimeMillis()
         val day = 24L * 60L * 60L * 1000L
         fun point(daysAgo: Long, price: Double) = PricePoint(
@@ -89,18 +81,30 @@ class ExampleUnitTest {
             dateLabel = "$daysAgo días",
             price = price,
             storeName = "Comercio consultado",
-            eventLabel = "Consulta de prueba"
+            eventLabel = "Consulta real"
         )
 
-        val oneSnapshot: Product = seed.copy(
+        val oneSnapshot = Product(
+            id = "unit_test_online_product",
+            title = "Producto consultado para prueba",
+            brand = "Marca de prueba",
+            category = ProductCategory.SMARTPHONES,
             currentPrice = 199.0,
             athMinPrice = 199.0,
+            athMinDate = "Hoy",
+            athMinStore = store.name,
+            athMaxPrice = 199.0,
+            avg90dPrice = 0.0,
             officialPvp = 0.0,
-            priceObservedAt = now,
+            currentStore = store,
+            storeUrl = store.officialUrl,
+            ean = "",
+            priceHistory = listOf(point(0, 199.0)),
+            offers = emptyList(),
             isPriceVerified = true,
-            priceHistory = listOf(point(0, 199.0))
+            priceObservedAt = now
         )
-        assertFalse("One snapshot must not count as historical evidence", oneSnapshot.hasSufficientHistory)
+        assertFalse("One snapshot is not sufficient historical evidence", oneSnapshot.hasSufficientHistory)
         assertFalse("One snapshot must not be labelled a historic low", oneSnapshot.isAtAth)
         assertEquals(VerdictLevel.UNVERIFIED, oneSnapshot.verdict.level)
 
@@ -132,50 +136,13 @@ class ExampleUnitTest {
     }
 
     @Test
-    fun expandedCatalogueHasAtLeastSixtyUniqueUnverifiedFixtures() {
-        val products = SpanishMarketData.getInitialProducts()
-        assertTrue("The discovery catalogue should contain 60+ products", products.size >= 60)
-        assertEquals("Product IDs must be unique", products.size, products.map { it.id }.toSet().size)
-        assertTrue("Seeded items must remain unverified", products.none { it.isPriceVerified })
-    }
-
-    @Test
-    fun storeDirectoryContainsThirtyPlusOfficialWebsitesWithoutFalsePriceIntegration() {
-        assertTrue("At least 30 stores should be listed", Store.ALL_STORES.size >= 30)
+    fun storeDirectoryContainsThirtyPlusOfficialWebsitesWithoutFakePrices() {
+        assertTrue("The store directory is metadata, not a product catalogue", Store.ALL_STORES.size >= 30)
         assertEquals("Store IDs must be unique", Store.ALL_STORES.size, Store.ALL_STORES.map { it.id }.toSet().size)
         Store.ALL_STORES.forEach { store ->
             assertTrue("Missing official HTTPS URL for ${store.name}", store.officialUrl.startsWith("https://"))
             assertFalse("No live price connector configured for ${store.name}", store.hasLivePriceIntegration)
             assertTrue("Search should be restricted to retailer domain", store.searchUrlFor("test").contains("site%3A"))
         }
-    }
-
-    @Test
-    fun testSpanishMarketCatalogIntegrity() {
-        val products = SpanishMarketData.getInitialProducts()
-        assertTrue("Market products catalog should not be empty", products.isNotEmpty())
-        for (prod in products) {
-            assertTrue("Price should be positive for ${prod.title}", prod.currentPrice > 0)
-            assertTrue("ATH price should be <= currentPrice for ${prod.title}", prod.athMinPrice <= prod.currentPrice + 0.1)
-        }
-    }
-
-    @Test
-    fun testSpanishStoresDatabaseIntegrity() {
-        val storeEntities = SpanishMarketData.getInitialStoreEntities()
-        assertTrue("Store entities should contain at least 30 stores", storeEntities.size >= 30)
-        val names = storeEntities.map { it.name }
-        assertTrue(names.any { it.contains("Amazon", ignoreCase = true) })
-        assertTrue(names.any { it.contains("PcComponentes", ignoreCase = true) })
-        assertTrue(names.any { it.contains("MediaMarkt", ignoreCase = true) })
-        assertTrue(names.any { it.contains("El Corte Inglés", ignoreCase = true) })
-        assertTrue(names.any { it.contains("Carrefour", ignoreCase = true) })
-        assertTrue(names.any { it.contains("Decathlon", ignoreCase = true) })
-        assertTrue(names.any { it.contains("Leroy Merlin", ignoreCase = true) })
-        assertTrue(names.any { it.contains("Apple Store", ignoreCase = true) })
-        assertTrue(names.any { it.contains("Samsung Shop", ignoreCase = true) })
-        assertTrue(names.any { it.contains("Xiaomi", ignoreCase = true) })
-        assertTrue(names.any { it.contains("Fnac", ignoreCase = true) })
-        assertTrue(names.any { it.contains("Alcampo", ignoreCase = true) })
     }
 }

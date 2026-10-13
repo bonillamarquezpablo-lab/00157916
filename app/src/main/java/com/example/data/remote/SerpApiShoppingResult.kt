@@ -162,10 +162,31 @@ fun onlineProductIdentityKey(title: String): String {
         .map { it.value }
         .firstOrNull { it !in setOf("usb20", "usb30", "usb32", "wifi6", "wifi7", "typec", "4gb", "8gb", "16gb", "32gb", "64gb", "128gb", "256gb", "512gb", "1tb") }
 
+    // Capacity matters for power banks; wattage matters for chargers and power stations.
+    // Keep these specifications in the identity key so 20,000 mAh / 65 W and 100 W
+    // variants never collapse into one card just because the numeric token was normalized away.
+    val technicalSource = title.lowercase(Locale.ROOT)
+        .replace(Regex("""(?<=\d)[.,](?=\d{3}\b)"""), "")
+    val isPowerAccessory = Regex(
+        """\b(cargador|charger|charging|power\s*bank|bateria\s+externa|battery\s+pack|power\s+station|estacion\s+de\s+energia|fuente\s+de\s+alimentacion|adaptador\s+de\s+corriente)\b"""
+    ).containsMatchIn(productNameNormalized)
+    val technicalSpecs = Regex("""(?i)\b(\d+(?:[.,]\d+)?)\s*(mah|w)\b""")
+        .findAll(technicalSource)
+        .filter { match -> match.groupValues[2].equals("mah", ignoreCase = true) || isPowerAccessory }
+        .map { match ->
+            val number = match.groupValues[1].replace(",", ".")
+                .removeSuffix(".0")
+            number + match.groupValues[2].lowercase(Locale.ROOT)
+        }
+        .distinct()
+        .sorted()
+        .joinToString("+")
+    
     val suffix = listOf(
         accessoryType.takeIf { it.isNotBlank() }?.let { "accessory:$it" },
         variants.takeIf { it.isNotBlank() }?.let { "variant:$it" },
-        memorySpecs.takeIf { it.isNotBlank() }?.let { "memory:$it" }
+        memorySpecs.takeIf { it.isNotBlank() }?.let { "memory:$it" },
+        technicalSpecs.takeIf { it.isNotBlank() }?.let { "specs:$it" }
     ).filterNotNull().joinToString("|")
 
     if (model != null) return (listOf(brand, model).filter { it.isNotBlank() } + suffix)

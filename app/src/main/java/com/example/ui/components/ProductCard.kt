@@ -76,7 +76,7 @@ fun ProductCard(
             .clip(ProductCardShape)
             .border(
                 width = if (product.isAtAth) 1.5.dp else 1.dp,
-                color = if (product.isAtAth) Color(0xFF10B981).copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.55f),
+                color = if (product.isAtAth) Color(0xFF10B981).copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
                 shape = ProductCardShape
             )
             .clickable(onClick = onClick)

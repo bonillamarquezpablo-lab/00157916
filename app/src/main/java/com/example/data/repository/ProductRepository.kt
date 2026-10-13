@@ -642,7 +642,7 @@ class ProductRepository(
         val submittedUri = parseHttpUri(rawInput)
         val detectedStore = findStoreForUrl(submittedUri)
         val cleaned = rawInput.lowercase()
-        val catalog = _latestProducts.value.ifEmpty { SpanishMarketData.getInitialProducts() }
+        val catalog = _latestProducts.value
 
         val directMatch = if (submittedUri != null) {
             catalog.firstOrNull { product ->

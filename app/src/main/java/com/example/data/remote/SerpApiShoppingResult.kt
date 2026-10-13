@@ -75,7 +75,7 @@ fun onlineProductIdentityKey(title: String): String {
         """(?i)\b(\d{1,2})\s*(?:gb)?\s*[+/]\s*(\d{2,4})\s*gb\b"""
     ).replace(title.lowercase(Locale.ROOT)) { match ->
         match.groupValues[1] + "gb " + match.groupValues[2] + "gb"
-    }
+    }.replace(Regex("""(?i)\b(\d{1,3})[.,](\d{3})\b"""), "$1$2")
 
     // Remove target-gender and generic apparel words before trimming a trailing size,
     // so titles such as "Nike Air Force 1 Gris - 40.5 Hombre" normalize correctly.

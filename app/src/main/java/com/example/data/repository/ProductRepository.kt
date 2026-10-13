@@ -884,7 +884,8 @@ class ProductRepository(
             imageResName = imageResName,
             imageUrl = imageUrl.orEmpty(),
             isPriceVerified = priceIsVerified,
-            priceObservedAt = latestObservation?.observedAt.takeIf { priceIsVerified }
+            priceObservedAt = latestObservation?.observedAt.takeIf { priceIsVerified },
+            priceSource = latestObservation?.sourceType.takeIf { priceIsVerified }.orEmpty()
         )
     }
 

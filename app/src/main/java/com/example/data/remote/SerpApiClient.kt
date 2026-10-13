@@ -653,7 +653,7 @@ class SerpApiClient(
 
     private fun isClearlyNonNewListing(item: JSONObject, title: String): Boolean {
         val excludedTerms = Regex(
-            """(?i)\b(segunda[\s_-]+mano|second[\s_-]*hand|pre[\s_-]*owned|used|usad[oa]s?|seminuev[oa]s?|reacondicionad[oa]s?|refurbished|renewed|open[\s_-]*box|alquiler|rental|renting|rent|leasing|lease|financiacion|financing|subscription|monthly|cuota)\b"""
+            """(?i)\b(segunda[\s_-]+mano|second[\s_-]*hand|pre[\s_-]*owned|used|usad[oa]s?|seminuev[oa]s?|reacondicionad[oa]s?|refurbished|renewed|open[\s_-]*box|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b"""
         )
         if (excludedTerms.containsMatchIn(title)) return true
 

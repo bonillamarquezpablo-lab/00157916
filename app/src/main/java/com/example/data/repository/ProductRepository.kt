@@ -62,13 +62,20 @@ class ProductRepository(
             priceObservationDao.deleteExplicitDemoObservations()
             trackedDao.deleteTrackingForDemoProducts()
             productDao.deleteExplicitDemoProducts()
-            priceObservationDao.deleteIneligibleLegacyObservations()
-            priceObservationDao.deleteUnverifiedObservations()
+            // Evaluate legacy rows in Kotlin through one shared policy. Keeping the SQL simple
+            // avoids Room/KSP spending excessive time parsing huge nested LIKE predicates.
             val invalidObservationIds = priceObservationDao.getAllObservationsSnapshot()
                 .filterNot(::isEligibleObservationForHistory)
                 .map { it.id }
             if (invalidObservationIds.isNotEmpty()) {
                 priceObservationDao.deleteByIds(invalidObservationIds)
+            }
+            priceObservationDao.deleteUnverifiedObservations()
+            val remainingInvalidObservationIds = priceObservationDao.getAllObservationsSnapshot()
+                .filterNot(::isEligibleObservationForHistory)
+                .map { it.id }
+            if (remainingInvalidObservationIds.isNotEmpty()) {
+                priceObservationDao.deleteByIds(remainingInvalidObservationIds)
             }
             productDao.deleteProductsWithoutVerifiedObservations()
             productDao.markProductsWithVerifiedObservations()
@@ -160,10 +167,12 @@ class ProductRepository(
             val productTitle = titleById[quote.productId] ?: continue
             val storeId = canonicalStoreId(quote.storeName, quote.sourceUrl)
             val (dayStart, dayEnd) = localDayBounds(quote.observedAt)
-            if (priceObservationDao.getObservationForStoreProductDay(
+            val hasValidObservationToday = priceObservationDao
+                .getObservationsForStoreProductDay(
                     quote.productId, storeId, dayStart, dayEnd
-                ) != null
-            ) continue
+                )
+                .any(::isEligibleObservationForHistory)
+            if (hasValidObservationToday) continue
 
             priceObservationDao.insert(
                 PriceObservationEntity(

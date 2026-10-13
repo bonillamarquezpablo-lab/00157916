@@ -362,7 +362,7 @@ fun ProductDetailSheet(
                 )
             } else if (product.isPriceVerified) {
                 Text(
-                    text = "El historial se irá construyendo con nuevas consultas. No se inventan puntos anteriores.",
+                    text = "El historial queda guardado en este dispositivo. La evolución aparecerá cuando haya observaciones de días distintos; no se inventan precios anteriores.",
                     modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

@@ -473,16 +473,20 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 // or the API key was removed after the previous search.
                 val cached = onlineSearchCache.read(provider.name, query)
                 if (cached != null && cached.results.isNotEmpty()) {
-                    val ageMinutes = ((System.currentTimeMillis() - cached.savedAt) / 60_000L).coerceAtLeast(1L)
-                    val base = onlineSearchResultMessage(cached.results, provider)
-                    val cacheNotice = "Resultados guardados hace $ageMinutes min; no se ha consumido otra búsqueda."
-                    val savedObservations = repository.recordOnlineSearchResults(cached.results, provider.name)
-                    val historyNotice = onlineHistoryNotice(savedObservations, cached.results.size)
-                    _uiState.value = _uiState.value.copy(
-                        onlineSearchResults = cached.results,
-                        onlineSearchStatus = "$base $cacheNotice $historyNotice"
-                    )
-                    return@launch
+                    val safeCachedResults = repository.filterOnlineSearchResults(cached.results)
+                    if (safeCachedResults.isNotEmpty()) {
+                        val ageMinutes = ((System.currentTimeMillis() - cached.savedAt) / 60_000L).coerceAtLeast(1L)
+                        val base = onlineSearchResultMessage(safeCachedResults, provider)
+                        val cacheNotice = "Resultados guardados hace $ageMinutes min; no se ha consumido otra búsqueda."
+                        val savedObservations = repository.recordOnlineSearchResults(safeCachedResults, provider.name)
+                        val historyNotice = onlineHistoryNotice(savedObservations, safeCachedResults.size)
+                        val filterNotice = onlineFilterNotice(cached.results.size, safeCachedResults.size)
+                        _uiState.value = _uiState.value.copy(
+                            onlineSearchResults = safeCachedResults,
+                            onlineSearchStatus = "$base $cacheNotice$filterNotice $historyNotice"
+                        )
+                        return@launch
+                    }
                 }
 
                 val token = serpApiTokenStore.read()
@@ -519,15 +523,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 } else {
                     null
                 }
-                val results = googleReport?.results
+                val rawResults = googleReport?.results
                     ?: serpApiClient.searchAmazonOnline(token, query)
-                // Persist only real, validated offers; Room prevents another point for the same
-                // product/store on the same local calendar day.
+                // Use the same plausibility rules for visible cards, cache entries and Room history.
+                val results = repository.filterOnlineSearchResults(rawResults)
                 val savedObservations = if (results.isNotEmpty()) {
                     repository.recordOnlineSearchResults(results, provider.name)
                 } else 0
-                // Empty responses are not useful cache entries: allow a later retry to query
-                // SerpApi again instead of replaying a stale "no results" response for 55 minutes.
+                // Cache only filtered offers so a suspicious cached price cannot return later.
                 if (results.isNotEmpty()) onlineSearchCache.write(provider.name, query, results)
                 val base = if (results.isEmpty() && googleReport != null) {
                     googleReport.emptyResultMessage(query)
@@ -537,10 +540,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 // The account endpoint is free; refresh the displayed balance after a live request.
                 val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
                 val quotaNote = quotaAfter?.let { " ${it.quotaSummary()}" }.orEmpty()
+                val filterNote = onlineFilterNotice(rawResults.size, results.size)
                 val historyNote = if (results.isNotEmpty()) {
                     " " + onlineHistoryNotice(savedObservations, results.size)
                 } else ""
-                val message = base + quotaNote + historyNote
+                val message = base + quotaNote + filterNote + historyNote
                 _uiState.value = _uiState.value.copy(
                     onlineSearchResults = results,
                     onlineSearchStatus = message
@@ -560,6 +564,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             }
         }
     }
+
+    private fun onlineFilterNotice(rawCount: Int, acceptedCount: Int): String =
+        (rawCount - acceptedCount).takeIf { it > 0 }?.let {
+            " Se han omitido $it resultados por precio sospechoso o condición no válida."
+        }.orEmpty()
 
     private fun onlineHistoryNotice(saved: Int, resultCount: Int): String =
         if (saved > 0) {

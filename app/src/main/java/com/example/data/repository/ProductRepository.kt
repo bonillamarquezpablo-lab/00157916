@@ -129,7 +129,8 @@ class ProductRepository(
                 quote.price.isFinite() && quote.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
                 quote.currency == "EUR" &&
                 parseHttpUri(quote.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
-                isEligibleHistoryTitle(title)
+                isEligibleHistoryTitle(title) &&
+                isPlausibleHistoryPrice(title, quote.price)
         }
         if (validQuotes.isEmpty()) return 0
 
@@ -168,6 +169,72 @@ class ProductRepository(
     }
 
     /**
+     * Applies the same conservative quality rules to visible results and Room history.
+     * This keeps a suspicious price out of both the UI and the permanent price log.
+     */
+    fun filterOnlineSearchResults(results: List<SerpApiShoppingResult>): List<SerpApiShoppingResult> {
+        val eligible = results.filter { result ->
+            result.title.isNotBlank() &&
+                result.storeName.isNotBlank() &&
+                result.price.isFinite() &&
+                result.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
+                parseHttpUri(result.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
+                isEligibleHistoryTitle(result.title) &&
+                isPlausibleHistoryPrice(result.title, result.price)
+        }
+        val coded = eligible.map { result -> result to modelCode(result.title) }
+        return coded.filter { (candidate, code) ->
+            if (code == null) {
+                true
+            } else {
+                val comparablePrices = coded
+                    .filter { (_, otherCode) -> otherCode == code }
+                    .map { (other, _) -> other.price }
+                    .sorted()
+                if (comparablePrices.size < 3) {
+                    true
+                } else {
+                    val median = comparablePrices[comparablePrices.size / 2]
+                    candidate.price >= median * MIN_OUTLIER_PRICE_RATIO
+                }
+            }
+        }.map { (result, _) -> result }
+    }
+
+    private fun isPlausibleHistoryPrice(title: String, price: Double): Boolean {
+        if (!price.isFinite() || price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR) return false
+        val normalized = normalizedProductTitle(title)
+        // Low prices are normal for accessories; do not apply device floors to them.
+        val accessory = Regex(
+            """\b(funda|case|carcasa|protector|cristal|cable|cargador|adaptador|repuesto|replacement|cover|bumper|pantalla|bateria|solo caja|dummy)\b"""
+        ).containsMatchIn(normalized)
+        if (accessory) return true
+
+        val smartphone = Regex(
+            """\b(iphone|redmi|poco|pixel|oneplus|realme|oppo|vivo|honor|smartphone|galaxy\s+(s|a|z|m)\s?\d{1,2})\b"""
+        ).containsMatchIn(normalized)
+        if (smartphone && price < 45.0) return false
+
+        val tablet = Regex("""\b(ipad|tablet|galaxy\s+tab|lenovo\s+tab)\b""")
+            .containsMatchIn(normalized)
+        if (tablet && price < 50.0) return false
+
+        val laptop = Regex("""\b(laptop|portatil|macbook|chromebook|notebook)\b""")
+            .containsMatchIn(normalized)
+        if (laptop && price < 100.0) return false
+
+        val television = Regex("""\b(oled|qled|televisor|television|smart\s+tv|tv\s+(oled|qled|samsung|lg|sony))\b""")
+            .containsMatchIn(normalized)
+        if (television && price < 80.0) return false
+
+        val console = Regex("""\b(playstation\s*5|ps5|xbox\s+(series|one)|nintendo\s+switch)\b""")
+            .containsMatchIn(normalized)
+        if (console && price < 70.0) return false
+
+        return true
+    }
+
+    /**
      * Persist each valid "new in store" result returned by a manual online search.
      * Results are observations, not synthetic historical points. A known catalogue product
      * reuses its product ID; an unmatched result still gets a stable Room identity and title.
@@ -183,33 +250,11 @@ class ProductRepository(
             else -> return 0
         }
         val catalog = _latestProducts.value.ifEmpty { SpanishMarketData.getInitialProducts() }
-        val eligible = results.filter { result ->
-            result.title.isNotBlank() &&
-                result.storeName.isNotBlank() &&
-                result.price.isFinite() && result.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
-                parseHttpUri(result.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
-                isEligibleHistoryTitle(result.title)
-        }
+        val eligible = filterOnlineSearchResults(results)
         if (eligible.isEmpty()) return 0
 
-        val eligibleModels = eligible.map { result -> result to modelCode(result.title) }
         var inserted = 0
-        for ((result, code) in eligibleModels) {
-            // Very low price outliers are rejected only against at least three listings carrying
-            // the same identifiable model code. Broad searches such as "Samsung" remain usable.
-            if (code != null) {
-                val comparablePrices = eligibleModels
-                    .filter { (other, otherCode) ->
-                        otherCode == code && isEligibleHistoryTitle(other.title)
-                    }
-                    .map { (other, _) -> other.price }
-                    .sorted()
-                if (comparablePrices.size >= 3) {
-                    val median = comparablePrices[comparablePrices.size / 2]
-                    if (result.price < median * MIN_OUTLIER_PRICE_RATIO) continue
-                }
-            }
-
+        for (result in eligible) {
             val matchedProduct = catalog.firstOrNull { product ->
                 isSafeCatalogTitleMatch(result.title, product.title)
             }
@@ -274,10 +319,15 @@ class ProductRepository(
     private fun modelCode(title: String): String? = modelCodes(title).firstOrNull()
 
     private fun modelCodes(title: String): Set<String> =
-        Regex("""(?i)\b[a-z0-9-]{4,}\b""")
+        Regex("""(?i)\b[a-z0-9][a-z0-9-]{2,15}\b""")
             .findAll(title)
             .map { it.value.lowercase(Locale.ROOT).replace("-", "") }
-            .filter { value -> value.any(Char::isLetter) && value.any(Char::isDigit) }
+            .filter { value ->
+                value.any(Char::isLetter) &&
+                    value.any(Char::isDigit) &&
+                    !Regex("""(?i)^(?:\d+(?:gb|tb|mb|mah|w|hz|mp|mm|cm|v|g|kg|fps|mbps)|wifi\d*|usb\d*|[458]k|[45]g)$""")
+                        .matches(value)
+            }
             .toSet()
 
     private fun normalizedProductTitle(title: String): String =
@@ -501,15 +551,17 @@ class ProductRepository(
         verifiedObservations: List<PriceObservationEntity>
     ): Product {
         val sortedHistory = verifiedObservations.sortedBy { it.observedAt }
-        // Each explicit refresh can produce several retailer offers at the same observation time.
-        // Use the cheapest offer in the latest batch as the visible price, but retain all offers.
-        val latestObservedAt = sortedHistory.lastOrNull()?.observedAt
-        val latestBatch = sortedHistory.filter { it.observedAt == latestObservedAt }
+        // Room keeps each store observation, but the chart must be a daily time series, not a
+        // sequence of sellers from the same search. Plot the cheapest valid offer for each day.
+        val latestDayStart = sortedHistory.lastOrNull()?.let { localDayBounds(it.observedAt).first }
+        val latestBatch = sortedHistory.filter {
+            latestDayStart != null && localDayBounds(it.observedAt).first == latestDayStart
+        }
         val snapshotHistory = sortedHistory
-            .groupBy { it.observedAt }
+            .groupBy { localDayBounds(it.observedAt).first }
             .values
-            .mapNotNull { batch -> batch.minByOrNull { it.price } }
-            .sortedBy { it.observedAt }
+            .mapNotNull { dayOffers -> dayOffers.minByOrNull { it.price } }
+            .sortedBy { localDayBounds(it.observedAt).first }
         val latestObservation = latestBatch.minByOrNull { it.price }
         val minObservation = snapshotHistory.minByOrNull { it.price }
         val maxObservation = snapshotHistory.maxByOrNull { it.price }
@@ -525,16 +577,17 @@ class ProductRepository(
         val ninetyDaysMs = 90L * 24L * 60L * 60L * 1000L
         val ninetyDaysAgo = now - ninetyDaysMs
         val lastNinetyDays = effectiveHistory.filter { it.observedAt >= ninetyDaysAgo }
-        val uniqueTimestamps = snapshotHistory.map { it.observedAt }.distinct().sorted()
+        val uniqueTimestamps = snapshotHistory.map { localDayBounds(it.observedAt).first }.distinct().sorted()
         val hasSufficientHistory = priceIsVerified &&
             uniqueTimestamps.size >= 3 &&
             uniqueTimestamps.last() - uniqueTimestamps.first() >= ninetyDaysMs &&
             lastNinetyDays.map { it.observedAt }.distinct().size >= 3 &&
-            now - (uniqueTimestamps.lastOrNull() ?: 0L) <= 7L * 24L * 60L * 60L * 1000L
+            now - (sortedHistory.maxOfOrNull { it.observedAt } ?: 0L) <= 7L * 24L * 60L * 60L * 1000L
         val current = if (priceIsVerified) latestObservation!!.price else currentPrice
-        // Never present a single snapshot as an historical minimum or a 90-day average.
-        val lowest = if (hasSufficientHistory) minObservation!!.price else current
-        val highest = if (hasSufficientHistory) maxObservation!!.price else current
+        // These bounds describe the actual saved daily series; the 90-day average remains
+        // unavailable until enough dates have accumulated.
+        val lowest = minObservation?.price ?: current
+        val highest = maxObservation?.price ?: current
         val average = if (hasSufficientHistory) lastNinetyDays.map { it.price }.average() else 0.0
         val latestOffers = if (priceIsVerified) {
             latestBatch.distinctBy { "${it.storeId}|${it.sourceUrl}" }.map { observation ->
@@ -550,9 +603,8 @@ class ProductRepository(
             emptyList()
         }
         val dateFormatter = SimpleDateFormat("dd MMM yyyy", Locale("es", "ES"))
-        // The chart shows every source-backed store observation, including separate stores
-        // seen at the same search time. Summary calculations continue to use de-duplicated batches.
-        val historyPoints = if (priceIsVerified) sortedHistory.map { observation ->
+        // Plot just one genuine point per local date: the cheapest valid offer observed that day.
+        val historyPoints = if (priceIsVerified) snapshotHistory.map { observation ->
             PricePoint(
                 timestamp = observation.observedAt,
                 dateLabel = dateFormatter.format(Date(observation.observedAt)),

@@ -658,6 +658,32 @@ class ExampleRobolectricTest {
                 )
             )
 
+            val suspiciousRedmi = com.example.data.remote.SerpApiShoppingResult(
+                title = "Xiaomi Redmi 17 5G 4GB 128GB Negro",
+                price = 9.90,
+                storeName = "Rentik",
+                sourceUrl = "https://www.rentik.com/xiaomi-redmi-17",
+                observedAt = now
+            )
+            val cheapLegitimateAccessory = com.example.data.remote.SerpApiShoppingResult(
+                title = "UGREEN USB 2.0 Hub 4 Puertos",
+                price = 5.82,
+                storeName = "Wasserman.eu",
+                sourceUrl = "https://www.wasserman.eu/ugreen-usb-hub",
+                observedAt = now
+            )
+            val filteredResults = repository.filterOnlineSearchResults(
+                listOf(suspiciousRedmi, cheapLegitimateAccessory)
+            )
+            assertFalse(
+                "A €9.90 Redmi phone listing is implausible for a new-in-store offer",
+                filteredResults.any { it.title.contains("Redmi 17", ignoreCase = true) }
+            )
+            assertTrue(
+                "Low-priced real accessories should remain eligible",
+                filteredResults.any { it.title.contains("UGREEN USB 2.0 Hub") }
+            )
+
             val inserted = repository.recordOnlineSearchResults(results, "GOOGLE_SHOPPING")
             assertEquals("Only the two plausible new offers should be stored", 2, inserted)
             val stored = withTimeout<List<PriceObservationEntity>>(10_000) {
@@ -673,6 +699,26 @@ class ExampleRobolectricTest {
             val duplicate = results.first().copy(price = 245.00, observedAt = now + 60_000L)
             assertEquals(0, repository.recordOnlineSearchResults(listOf(duplicate), "GOOGLE_SHOPPING"))
             assertEquals(2, database.priceObservationDao().getVerifiedObservationCount())
+
+            // A following day's query must be retained as a second dated history point.
+            val nextDay = now + 24L * 60L * 60L * 1000L
+            val tomorrowResults = listOf(
+                results[0].copy(price = 229.99, observedAt = nextDay),
+                results[1].copy(price = 224.99, observedAt = nextDay)
+            )
+            assertEquals(2, repository.recordOnlineSearchResults(tomorrowResults, "GOOGLE_SHOPPING"))
+            val productWithDailyHistory = withTimeout<List<Product>>(10_000) {
+                repository.allProductsStream.first { rows ->
+                    rows.firstOrNull { it.id == "sony_wh1000xm5" }?.priceHistory?.size == 2
+                }
+            }.first { it.id == "sony_wh1000xm5" }
+            assertEquals("The graph has one real point per day, not one per retailer", 2, productWithDailyHistory.priceHistory.size)
+            assertNotEquals(
+                "Daily history points must come from distinct calendar dates",
+                java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date(productWithDailyHistory.priceHistory[0].timestamp)),
+                java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date(productWithDailyHistory.priceHistory[1].timestamp))
+            )
+            assertEquals(4, database.priceObservationDao().getVerifiedObservationCount())
         } finally {
             database.close()
         }

@@ -63,6 +63,7 @@ class ProductRepository(
             trackedDao.deleteTrackingForDemoProducts()
             productDao.deleteExplicitDemoProducts()
             priceObservationDao.deleteUnverifiedObservations()
+            sanitizeLegacyObservations()
             productDao.deleteProductsWithoutVerifiedObservations()
             productDao.markProductsWithVerifiedObservations()
             trackedDao.deleteTrackingForMissingProducts()
@@ -120,6 +121,40 @@ class ProductRepository(
 
     val todayAthDealsStream: Flow<List<Product>> = allProductsStream.map { list ->
         list.filter { it.isAtAth }
+    }
+
+    /**
+     * Remove persisted snapshots that older app versions accepted too loosely. This is a
+     * one-time, conservative cleanup: it removes only observations that fail current price,
+     * seller, currency, URL, or product-identity rules, never valid tracked history.
+     */
+    private suspend fun sanitizeLegacyObservations() {
+        val productsById = productDao.getAllProductsSnapshot().associateBy { it.id }
+        val invalidIds = priceObservationDao.getAllVerifiedSnapshot()
+            .filter { observation ->
+                val product = productsById[observation.productId]
+                product == null || !isSafeStoredObservation(observation, product.title)
+            }
+            .map { it.id }
+        if (invalidIds.isNotEmpty()) priceObservationDao.deleteByIds(invalidIds)
+    }
+
+    private fun isSafeStoredObservation(
+        observation: PriceObservationEntity,
+        catalogTitle: String
+    ): Boolean {
+        val observedTitle = observation.productTitle.ifBlank { catalogTitle }
+        val seller = observation.storeName.ifBlank { observation.storeId }
+        return observation.productId.isNotBlank() &&
+            observation.price.isFinite() &&
+            observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
+            observation.currency == "EUR" &&
+            parseHttpUri(observation.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
+            isEligibleHistoryTitle(observedTitle) &&
+            isEligibleSeller(seller) &&
+            isPlausibleHistoryPrice(observedTitle, observation.price) &&
+            isSafeCatalogTitleMatch(observedTitle, catalogTitle) &&
+            !hasStrictModelMismatch(catalogTitle, explicitModelMarkers(catalogTitle), observedTitle)
     }
 
     /**
@@ -432,7 +467,7 @@ class ProductRepository(
         if (title.isBlank()) return false
         val normalized = normalizedProductTitle(title)
         val excludedListing = Regex(
-            """\b(segunda\s+mano|usad[oa]s?|used|reacondicionad[oa]s?|refurbished|renewed|pre owned|seminuev[oa]s?|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|cuota|mensual|suscripcion|subscription|pago\s+a\s+plazos|monthly|por\s+mes|per\s+month|mes\s+a\s+mes)\b"""
+            """\b(segunda\s+mano|usad[oa]s?|used|reacondicionad[oa]s?|refurbished|renewed|pre owned|seminuev[oa]s?|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|cuota|mensual|suscripcion|subscription|pago\s+a\s+plazos|monthly|por\s+mes|per\s+month|mes\s+a\s+mes|personalizad[oa]s?|publicitari[oa]s?|merchandising|regalo\s+promocional|impreso\s+con\s+(?:su\s+)?logotipo|con\s+su\s+logotipo|logo\s+impreso)\b"""
         )
         return !excludedListing.containsMatchIn(normalized) &&
             !Regex("""(?i)/\s*mes\b""").containsMatchIn(title)
@@ -764,7 +799,12 @@ class ProductRepository(
         stores: List<Store>,
         verifiedObservations: List<PriceObservationEntity>
     ): Product {
-        val sortedHistory = verifiedObservations.sortedBy { it.observedAt }
+        // Re-validate persisted observations at read time too. This protects users who already
+        // have stale low-price, used-marketplace or wrong-variant rows from an older APK, even
+        // before the startup cleanup has completed.
+        val sortedHistory = verifiedObservations
+            .filter { isSafeStoredObservation(it, title) }
+            .sortedBy { it.observedAt }
         // Room keeps each store observation, but the chart must be a daily time series, not a
         // sequence of sellers from the same search. Plot the cheapest valid offer for each day.
         val latestDayStart = sortedHistory.lastOrNull()?.let { localDayBounds(it.observedAt).first }

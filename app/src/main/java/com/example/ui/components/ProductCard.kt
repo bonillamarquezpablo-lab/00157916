@@ -250,7 +250,7 @@ fun ProductCard(
                     }
                     if (product.isPriceVerified) {
                         Text(
-                            text = "Precio observado en Google Shopping; confirma el precio final en la tienda.",
+                            text = "Fuente: ${product.priceSource.ifBlank { "buscador online" }} · confirma precio final y stock.",
                             fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

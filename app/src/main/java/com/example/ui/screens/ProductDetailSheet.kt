@@ -346,7 +346,7 @@ fun ProductDetailSheet(
 
             // priceHistory is built only from verified Room observations. Never draw a
             // synthetic/demo series or the temporary simulation overlay as real market history.
-            product.priceHistory.minOfOrNull { it.timestamp }?.let { firstObservedAt ->
+            if (product.isPriceVerified) product.priceHistory.minOfOrNull { it.timestamp }?.let { firstObservedAt ->
                 Text(
                     text = "Historial desde ${SimpleDateFormat("dd MMM yyyy", Locale("es", "ES")).format(Date(firstObservedAt))}",
                     modifier = Modifier.fillMaxWidth(),

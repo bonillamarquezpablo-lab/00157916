@@ -61,6 +61,7 @@ fun PriceHistoryChart(
     priceHistory: List<PricePoint>,
     athMinPrice: Double,
     avg90dPrice: Double,
+    hasSufficientHistory: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     var selectedRange by remember { mutableStateOf(ChartRange.ALL) }
@@ -128,7 +129,7 @@ fun PriceHistoryChart(
                         .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
                     Text(
-                        text = "Mín. observado: ${String.format("%.0f", athMinPrice)}€",
+                        text = "${if (hasSufficientHistory) "Mín. histórico" else "Mín. registrado"}: ${String.format("%.0f", athMinPrice)}€",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF059669)

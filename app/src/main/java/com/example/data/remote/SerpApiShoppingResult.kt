@@ -131,6 +131,14 @@ data class OnlineProductGroup(
     val cheapestOffer: SerpApiShoppingResult
         get() = offers.minBy { it.price }
 
+    /**
+     * Prefer a direct seller link for the main purchase action. Google Shopping fallback
+     * pages are useful for discovery, but they are not the retailer's product page.
+     */
+    val bestPurchaseOffer: SerpApiShoppingResult
+        get() = offers.filterNot { it.isGoogleShoppingProductLink }
+            .minByOrNull { it.price } ?: cheapestOffer
+
     val minPrice: Double
         get() = cheapestOffer.price
 

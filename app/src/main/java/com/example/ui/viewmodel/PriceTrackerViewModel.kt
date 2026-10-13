@@ -97,6 +97,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState
     ) { allProducts, state ->
         allProducts
+            // Hide legacy static demo rows from Mercado. Actual searches create verified Room
+            // observations and tracking remains visible even before it has live price history.
+            .filter { product -> product.isPriceVerified || product.isTracked }
             .filter { product ->
                 // Category filter
                 (state.selectedCategory == ProductCategory.ALL || product.category == state.selectedCategory)

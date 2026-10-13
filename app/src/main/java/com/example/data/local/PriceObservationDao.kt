@@ -54,7 +54,7 @@ interface PriceObservationDao {
     @Query("SELECT COUNT(*) FROM price_observations WHERE productId = :productId")
     suspend fun getObservationCount(productId: String): Int
 
-    /** Keep observations only for products which have at least one verified source observation. */
-    @Query("DELETE FROM price_observations WHERE productId NOT IN (SELECT DISTINCT productId FROM price_observations WHERE isVerified = 1)")
-    suspend fun deleteObservationsWithoutVerifiedHistory(): Int
+    /** Demo/unverified points are never valid history in this app. */
+    @Query("DELETE FROM price_observations WHERE isVerified = 0")
+    suspend fun deleteUnverifiedObservations(): Int
 }

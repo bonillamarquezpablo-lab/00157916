@@ -129,7 +129,7 @@ class ExampleRobolectricTest {
                     isVerified = true,
                     productTitle = "Xiaomi Redmi 17 4GB 256GB",
                     storeName = "Amazon.es",
-                    sourceType = "Google Shopping"
+                    sourceType = "Amazon.es"
                 )
             )
 
@@ -183,7 +183,8 @@ class ExampleRobolectricTest {
             }
             assertEquals("Only the user-searched product with a real observation may remain", 1, products.size)
             assertEquals("online_product_redmi17", products.single().id)
-            assertTrue("The real online price must remain verified", products.single().isPriceVerified)
+            assertTrue("The real online price must remain source-verified", products.single().isPriceVerified)
+            assertEquals("The provider must match the saved observation", "Amazon.es", products.single().priceSource)
             assertEquals(1, products.single().priceHistory.size)
 
             withTimeout(10_000) {

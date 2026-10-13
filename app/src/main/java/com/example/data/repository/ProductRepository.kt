@@ -375,28 +375,29 @@ class ProductRepository(
             for (result in group.offers) {
                 val offerStoreId = canonicalStoreId(result.storeName, result.sourceUrl)
                 val (dayStart, dayEnd) = localDayBounds(result.observedAt)
-                if (priceObservationDao.getObservationForStoreProductDay(
-                        productId, offerStoreId, dayStart, dayEnd
-                    ) != null
-                ) continue
-
-                priceObservationDao.insert(
-                    PriceObservationEntity(
-                        productId = productId,
-                        storeId = offerStoreId,
-                        price = result.price,
-                        currency = "EUR",
-                        observedAt = result.observedAt,
-                        sourceUrl = result.sourceUrl,
-                        sourceName = normalizedSource,
-                        isVerified = true,
-                        verificationNote = "Resultado online válido en euros; precio y disponibilidad pendientes de confirmación en la tienda.",
-                        productTitle = result.title,
-                        storeName = result.storeName,
-                        sourceType = normalizedSource
-                    )
+                val observation = PriceObservationEntity(
+                    productId = productId,
+                    storeId = offerStoreId,
+                    price = result.price,
+                    currency = "EUR",
+                    observedAt = result.observedAt,
+                    sourceUrl = result.sourceUrl,
+                    sourceName = normalizedSource,
+                    isVerified = true,
+                    verificationNote = "Precio observado por proveedor; disponibilidad y precio final pendientes de confirmación en la tienda.",
+                    productTitle = result.title,
+                    storeName = result.storeName,
+                    sourceType = normalizedSource
                 )
-                inserted++
+                if (
+                    priceObservationDao.insertIfNoVerifiedStoreOfferForDay(
+                        observation = observation,
+                        dayStart = dayStart,
+                        dayEnd = dayEnd
+                    )
+                ) {
+                    inserted++
+                }
             }
         }
         return inserted

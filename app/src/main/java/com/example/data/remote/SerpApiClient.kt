@@ -699,17 +699,14 @@ class SerpApiClient(
 
         val variantsWanted = variantMarkers(requested)
         val variantsFound = variantMarkers(returned)
-        if (variantsWanted.isNotEmpty() &&
-            variantsFound.isNotEmpty() &&
-            variantsWanted.intersect(variantsFound).isEmpty()
-        ) return false
+        // Requested variant evidence must be present in the result; a generic title cannot
+        // safely stand in for an explicitly requested Ultra/FE/Pro/Max configuration.
+        if (variantsWanted.isNotEmpty() && !variantsFound.containsAll(variantsWanted)) return false
 
-        // If both sides expose storage/RAM configurations, do not cross-match those variants.
+        // Explicit RAM/storage details must also match. Unknown memory is not proof of a match.
         val memoryWanted = memoryMarkers(requested)
         val memoryFound = memoryMarkers(returned)
-        if (memoryWanted.isNotEmpty() && memoryFound.isNotEmpty() &&
-            !memoryFound.containsAll(memoryWanted)
-        ) return false
+        if (memoryWanted.isNotEmpty() && !memoryFound.containsAll(memoryWanted)) return false
 
         val containsModelCode = wanted.any { token -> token.length >= 4 && token.any(Char::isDigit) && token.any(Char::isLetter) }
 

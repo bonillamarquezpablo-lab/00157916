@@ -47,12 +47,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.PricePoint
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 enum class ChartRange(val label: String, val days: Int?) {
-    DAYS_30("30 Días", 30),
-    DAYS_90("90 Días", 90),
-    MONTHS_6("6 Meses", 183),
-    ALL("Histórico", null)
+    DAYS_30("30D", 30),
+    DAYS_90("90D", 90),
+    MONTHS_6("6M", 183),
+    YEARS_1("1A", 365),
+    YEARS_2("2A", 730),
+    YEARS_3("3A", 1095),
+    YEARS_4("4A", 1460),
+    ALL("Todo", null)
 }
 
 @Composable
@@ -64,6 +71,14 @@ fun PriceHistoryChart(
 ) {
     var selectedRange by remember { mutableStateOf(ChartRange.ALL) }
     var selectedPointIndex by remember { mutableIntStateOf(-1) }
+
+    // The first date comes from an actual observation supplied by Room, never from a generated series.
+    val firstObservationLabel = remember(priceHistory) {
+        priceHistory.minOfOrNull { it.timestamp }?.let { timestamp ->
+            "Historial desde " + SimpleDateFormat("dd MMM yyyy", Locale("es", "ES"))
+                .format(Date(timestamp))
+        }
+    }
 
     val filteredPoints = remember(priceHistory, selectedRange) {
         val sorted = priceHistory.sortedBy { it.timestamp }
@@ -112,14 +127,14 @@ fun PriceHistoryChart(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Registrado en mercado español sin sesgo",
+                    text = firstObservationLabel ?: "Sin datos todavía",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
-            // Stat pills
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Never show summary statistics based on demo/default product values.
+            if (priceHistory.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
@@ -216,16 +231,18 @@ fun PriceHistoryChart(
                     Offset(x, y)
                 }
 
-                // Draw Average price horizontal dotted guide line
-                val avgNormalized = ((avg90dPrice - minPriceInView) / priceRange).coerceIn(0.0, 1.0)
-                val avgY = paddingTop + usableHeight - (avgNormalized.toFloat() * usableHeight)
-                drawLine(
-                    color = Color.Gray.copy(alpha = 0.5f),
-                    start = Offset(0f, avgY),
-                    end = Offset(width, avgY),
-                    strokeWidth = 1.5.dp.toPx(),
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
-                )
+                // Draw an average guide only when an actual 90-day average exists.
+                if (avg90dPrice > 0.0) {
+                    val avgNormalized = ((avg90dPrice - minPriceInView) / priceRange).coerceIn(0.0, 1.0)
+                    val avgY = paddingTop + usableHeight - (avgNormalized.toFloat() * usableHeight)
+                    drawLine(
+                        color = Color.Gray.copy(alpha = 0.5f),
+                        start = Offset(0f, avgY),
+                        end = Offset(width, avgY),
+                        strokeWidth = 1.5.dp.toPx(),
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
+                    )
+                }
 
                 // Fill gradient under curve
                 val fillPath = Path().apply {
@@ -312,6 +329,15 @@ fun PriceHistoryChart(
                     }
                 }
             }
+            if (filteredPoints.isEmpty()) {
+                Text(
+                    text = "Sin datos todavía",
+                    modifier = Modifier.align(Alignment.Center),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp
+                )
+            }
         }
 
         // Tap inspection panel
@@ -386,7 +412,11 @@ fun PriceHistoryChart(
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "Toca sobre el gráfico para ver el precio exacto en cada fecha",
+                    text = if (filteredPoints.isEmpty()) {
+                        "No hay observaciones para este rango."
+                    } else {
+                        "Toca sobre el gráfico para ver el precio exacto en cada fecha"
+                    },
                     fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

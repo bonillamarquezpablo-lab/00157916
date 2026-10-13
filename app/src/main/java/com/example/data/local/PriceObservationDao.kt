@@ -94,7 +94,18 @@ interface PriceObservationDao {
             "AND lower(productTitle) NOT LIKE '%usado%' " +
             "AND lower(productTitle) NOT LIKE '%reacondicionad%' " +
             "AND lower(productTitle) NOT LIKE '%refurbished%' " +
+            "AND lower(productTitle) NOT LIKE '%renewed%' " +
+            "AND lower(productTitle) NOT LIKE '%open box%' " +
+            "AND lower(productTitle) NOT LIKE '%caja abierta%' " +
+            "AND lower(productTitle) NOT LIKE '%pre owned%' " +
+            "AND lower(productTitle) NOT LIKE '%seminuevo%' " +
+            "AND lower(productTitle) NOT LIKE '%alquiler%' " +
+            "AND lower(productTitle) NOT LIKE '%renting%' " +
+            "AND lower(productTitle) NOT LIKE '%cuota mensual%' " +
+            "AND lower(productTitle) NOT LIKE '%por mes%' " +
+            "AND lower(productTitle) NOT LIKE '%subscription%' " +
             "AND lower(productTitle) NOT LIKE '%impreso con su logotipo%' " +
+            "AND lower(productTitle) NOT LIKE '%impreso con el logotipo%' " +
             "AND lower(productTitle) NOT LIKE '%articulo publicitario%' " +
             "AND NOT ((lower(productTitle) LIKE '%macbook%' OR lower(productTitle) LIKE '%laptop%' OR lower(productTitle) LIKE '%chromebook%') AND price < 100) " +
             "AND NOT ((lower(productTitle) LIKE '%iphone%' OR lower(productTitle) LIKE '%smartphone%' OR lower(productTitle) LIKE '%redmi%' OR lower(productTitle) LIKE '%galaxy s%') AND price < 45) " +
@@ -152,6 +163,10 @@ interface PriceObservationDao {
             "lower(productTitle) LIKE '%reacondicionad%' OR " +
             "lower(productTitle) LIKE '%refurbished%' OR " +
             "lower(productTitle) LIKE '%renewed%' OR " +
+            "lower(productTitle) LIKE '%open box%' OR " +
+            "lower(productTitle) LIKE '%caja abierta%' OR " +
+            "lower(productTitle) LIKE '%pre owned%' OR " +
+            "lower(productTitle) LIKE '%seminuevo%' OR " +
             "lower(productTitle) LIKE '%usado%' OR " +
             "lower(productTitle) LIKE '%renting%' OR " +
             "lower(productTitle) LIKE '%alquiler%' OR " +

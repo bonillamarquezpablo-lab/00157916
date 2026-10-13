@@ -80,7 +80,7 @@ class SerpApiAmazonSearchTest {
               "search_metadata": {"status": "Success"},
               "organic_results": [
                 {
-                  "title": "Xiaomi Power Bank 20000mAh 35W",
+                  "title": "Batería portátil Xiaomi 20000mAh 35W",
                   "price": "39,99 €",
                   "extracted_price": 39.99,
                   "link": "https://www.amazon.es/dp/XIAOMI-POWERBANK"
@@ -104,7 +104,7 @@ class SerpApiAmazonSearchTest {
 
         val results = SerpApiClient().parseAmazonResults(
             payload,
-            query = "Xiaomi Power Bank 20000mAh 35W",
+            query = "Bateria portatil Xiaomi 20000mAh 35W",
             observedAt = 1_800_000_000_000L
         )
 

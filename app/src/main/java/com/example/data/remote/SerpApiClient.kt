@@ -54,7 +54,8 @@ data class SerpApiShoppingSearchReport(
     val rejectedAsIrrelevant: Int,
     val rejectedForPriceOrCurrency: Int,
     val rejectedForLink: Int,
-    val rejectedOther: Int
+    val rejectedOther: Int,
+    val firstResultFields: String = ""
 ) {
     fun emptyResultMessage(query: String): String {
         if (rawResultCount == 0) {
@@ -66,7 +67,13 @@ data class SerpApiShoppingSearchReport(
         if (rejectedForLink > 0) reasons += "$rejectedForLink no tenían un enlace HTTPS válido"
         if (rejectedOther > 0) reasons += "$rejectedOther estaban incompletos"
         val detail = reasons.joinToString("; ").ifBlank { "ninguno pasó los filtros de seguridad" }
-        return "Google Shopping devolvió $rawResultCount resultados para «$query», pero ninguno era utilizable: $detail. No se ha guardado ningún precio."
+        val fieldDiagnostic = if (
+            results.isEmpty() &&
+            rejectedForLink > 0 &&
+            rejectedForLink == rawResultCount &&
+            firstResultFields.isNotBlank()
+        ) " Campos recibidos: $firstResultFields." else ""
+        return "Google Shopping devolvió $rawResultCount resultados para «$query», pero ninguno era utilizable: $detail.$fieldDiagnostic No se ha guardado ningún precio."
     }
 }
 
@@ -354,10 +361,13 @@ class SerpApiClient(
             ).filter(::isHttpsUrl).toList()
             val url = candidateUrls.firstOrNull { !isGoogleDomainUrl(it) }
                 ?: candidateUrls.firstOrNull { isGoogleDomainUrl(it) }
-                ?: run {
-                    rejectedForLink++
-                    return@mapNotNull null
-                }
+                ?: "https://www.google.com/search".toHttpUrl().newBuilder()
+                    .addQueryParameter("tbm", "shop")
+                    .addQueryParameter("hl", "es")
+                    .addQueryParameter("gl", "es")
+                    .addQueryParameter("q", title)
+                    .build()
+                    .toString()
             val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()
             if (host.isBlank()) {
@@ -397,7 +407,12 @@ class SerpApiClient(
             rejectedAsIrrelevant = rejectedAsIrrelevant,
             rejectedForPriceOrCurrency = rejectedForPriceOrCurrency,
             rejectedForLink = rejectedForLink,
-            rejectedOther = rejectedOther
+            rejectedOther = rejectedOther,
+            firstResultFields = items.firstOrNull()
+                ?.keys()
+                ?.asSequence()
+                ?.joinToString(", ")
+                .orEmpty()
         )
     }
 

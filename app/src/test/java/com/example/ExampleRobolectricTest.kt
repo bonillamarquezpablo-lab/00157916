@@ -77,7 +77,7 @@ class ExampleRobolectricTest {
                     observedAt = now,
                     sourceUrl = "https://www.apple.com/es/",
                     sourceName = "Demo fixture",
-                    isVerified = false
+                    isVerified = true
                 )
             )
             database.trackedProductDao().insertOrUpdate(

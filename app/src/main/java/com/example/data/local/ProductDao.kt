@@ -24,6 +24,10 @@ interface ProductDao {
     @Query("DELETE FROM products WHERE id NOT IN (SELECT DISTINCT productId FROM price_observations WHERE isVerified = 1)")
     suspend fun deleteProductsWithoutVerifiedObservations(): Int
 
+    /** Reconcile legacy flags from the authoritative verified-observation table. */
+    @Query("UPDATE products SET isPriceVerified = 1 WHERE id IN (SELECT DISTINCT productId FROM price_observations WHERE isVerified = 1)")
+    suspend fun markProductsWithVerifiedObservations(): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(products: List<ProductEntity>)
 

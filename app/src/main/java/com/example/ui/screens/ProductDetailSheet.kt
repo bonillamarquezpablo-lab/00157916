@@ -190,7 +190,7 @@ fun ProductDetailSheet(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Los valores numéricos de esta ficha son datos de demostración. Se ocultan el precio, las ofertas y el gráfico hasta disponer de observaciones reales con fuente y fecha.",
+                            text = "Los valores numéricos de esta ficha son datos de ejemplo y no se presentan como precios reales. El gráfico permanecerá vacío hasta disponer de observaciones reales con fuente y fecha.",
                             fontSize = 12.sp,
                             lineHeight = 17.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -348,7 +348,7 @@ fun ProductDetailSheet(
             // Room observations are the only source for this chart. Empty/demo products show
             // an explicit empty state; no generated or simulated points are ever plotted.
             PriceHistoryChart(
-                priceHistory = product.priceHistory,
+                priceHistory = if (product.isPriceVerified) product.priceHistory else emptyList(),
                 athMinPrice = product.athMinPrice,
                 avg90dPrice = product.avg90dPrice
             )

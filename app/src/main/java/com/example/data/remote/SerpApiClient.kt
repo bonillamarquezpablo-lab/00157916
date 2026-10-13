@@ -206,11 +206,12 @@ class SerpApiClient(
             require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
             val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
             require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
-            parseAmazonResults(executeAmazonSearch(apiKey, normalizedQuery))
+            parseAmazonResults(executeAmazonSearch(apiKey, normalizedQuery), query = normalizedQuery)
         }
 
     internal fun parseAmazonResults(
         root: JSONObject,
+        query: String? = null,
         observedAt: Long = System.currentTimeMillis()
     ): List<SerpApiShoppingResult> {
         val error = root.optString("error").takeIf { it.isNotBlank() && it != "null" }
@@ -224,6 +225,10 @@ class SerpApiClient(
         return items.mapNotNull { item ->
             val title = item.optString("title").trim()
                 .takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
+            // Amazon's engine must obey the same query relevance rules as Google Shopping.
+            if ((!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) ||
+                isNonRetailPromotionalListing(title)
+            ) return@mapNotNull null
             // SerpApi's Amazon engine can expose the active offer as price/extracted_price,
             // or as primary_price/extracted_primary_price depending on the product layout.
             val priceText = sequenceOf(
@@ -328,6 +333,10 @@ class SerpApiClient(
                 }
             if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
                 rejectedAsIrrelevant++
+                return@mapNotNull null
+            }
+            if (isNonRetailPromotionalListing(title)) {
+                rejectedOther++
                 return@mapNotNull null
             }
 
@@ -511,7 +520,9 @@ class SerpApiClient(
 
         return results.mapNotNull { item ->
             val title = item.optString("title").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            if (!isPlausibleProductMatch(requested.queryTerm, title)) return@mapNotNull null
+            if (!isPlausibleProductMatch(requested.queryTerm, title) ||
+                isNonRetailPromotionalListing(title)
+            ) return@mapNotNull null
 
             val priceText = item.optString("price")
             val extractedPrice = item.opt("extracted_price")
@@ -718,6 +729,17 @@ class SerpApiClient(
         val compactTitle = normalize(returned).replace(" ", "")
         return compactQuery.length >= 8 && compactTitle.length >= 8 &&
             (compactTitle.contains(compactQuery) || compactQuery.contains(compactTitle))
+    }
+
+    /**
+     * Mínimo tracks consumer retail prices, not branded giveaways/custom merchandise
+     * whose price often reflects bulk printing or minimum order quantities.
+     */
+    private fun isNonRetailPromotionalListing(title: String): Boolean {
+        val normalized = normalize(title)
+        return Regex(
+            """\b(impreso con (su|el|tu) logotipo|con (su|tu) logo|regalo promocional|articulo publicitario|merchandising personalizado|personalizado con logo|para publicidad|precio por mayor|lote promocional)\b"""
+        ).containsMatchIn(normalized)
     }
 
     private fun tokens(value: String): Set<String> =

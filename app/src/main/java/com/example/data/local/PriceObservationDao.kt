@@ -83,6 +83,20 @@ interface PriceObservationDao {
         "SELECT * FROM price_observations " +
             "WHERE productId = :productId AND storeId = :storeId " +
             "AND observedAt >= :dayStart AND observedAt < :dayEnd " +
+            "AND isVerified = 1 AND currency = 'EUR' " +
+            "AND lower(storeName) NOT LIKE '%wallapop%' " +
+            "AND lower(storeName) NOT LIKE '%cash converters%' " +
+            "AND lower(storeName) NOT LIKE '%vinted%' " +
+            "AND lower(storeName) NOT LIKE '%cex%' " +
+            "AND lower(storeName) NOT LIKE '%rentik%' " +
+            "AND lower(productTitle) NOT LIKE '%segunda mano%' " +
+            "AND lower(productTitle) NOT LIKE '%usado%' " +
+            "AND lower(productTitle) NOT LIKE '%reacondicionad%' " +
+            "AND lower(productTitle) NOT LIKE '%refurbished%' " +
+            "AND lower(productTitle) NOT LIKE '%impreso con su logotipo%' " +
+            "AND lower(productTitle) NOT LIKE '%articulo publicitario%' " +
+            "AND NOT ((lower(productTitle) LIKE '%macbook%' OR lower(productTitle) LIKE '%laptop%' OR lower(productTitle) LIKE '%chromebook%') AND price < 100) " +
+            "AND NOT ((lower(productTitle) LIKE '%iphone%' OR lower(productTitle) LIKE '%smartphone%' OR lower(productTitle) LIKE '%redmi%' OR lower(productTitle) LIKE '%galaxy s%') AND price < 45) " +
             "LIMIT 1"
     )
     suspend fun getObservationForStoreProductDay(

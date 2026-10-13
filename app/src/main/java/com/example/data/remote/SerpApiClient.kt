@@ -47,6 +47,29 @@ data class SerpApiBatchResult(
     val failedQueries: Int
 )
 
+data class SerpApiAccountInfo(
+    val planName: String,
+    val accountStatus: String,
+    val monthlyLimit: Int,
+    val monthlySearchesUsed: Int,
+    val searchesRemaining: Int,
+    val hourlyLimit: Int,
+    val searchesThisHour: Int,
+    val renewalDate: String?
+) {
+    val remainingThisHour: Int?
+        get() = hourlyLimit.takeIf { it > 0 }?.let { (it - searchesThisHour).coerceAtLeast(0) }
+
+    fun quotaSummary(): String {
+        val plan = planName.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
+        return if (monthlyLimit > 0) {
+            "SerpApi$plan: quedan $searchesRemaining de $monthlyLimit búsquedas este mes."
+        } else {
+            "SerpApi$plan: quedan $searchesRemaining búsquedas disponibles."
+        }
+    }
+}
+
 class SerpApiException(
     message: String,
     val httpCode: Int? = null
@@ -55,8 +78,8 @@ class SerpApiException(
 /**
  * Queries Google Shopping results through SerpApi for Spain.
  *
- * Each product query consumes one search credit; this client caps a batch at 40 queries so a
- * single manual refresh stays below the free-plan throughput advertised by SerpApi. Nothing runs
+ * Each successful non-cached query consumes one search credit; the app reuses recent searches and
+ * checks the actual account balance/rate window before catalog batches. Nothing runs
  * automatically in the background. Results represent a Google Shopping snapshot, not a direct
  * retailer API guarantee; prices and availability must be rechecked at the seller before purchase.
  *
@@ -71,6 +94,235 @@ class SerpApiClient(
         .writeTimeout(20, TimeUnit.SECONDS)
         .build()
 ) {
+    /**
+     * Account usage lookup is free at SerpApi and is used to avoid hard-coded local quota guesses.
+     * It never exposes the key or email in app state.
+     */
+    suspend fun getAccountInfo(token: String): SerpApiAccountInfo = withContext(Dispatchers.IO) {
+        val apiKey = token.trim()
+        require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
+        val request = Request.Builder()
+            .url("https://serpapi.com/account.json".toHttpUrl().newBuilder()
+                .addQueryParameter("api_key", apiKey)
+                .build())
+            .get()
+            .header("Accept", "application/json")
+            .build()
+        http.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                val message = when (response.code) {
+                    401, 403 -> "La clave de SerpApi no es válida o no tiene acceso."
+                    429 -> "SerpApi está limitando temporalmente las consultas. Espera un poco y vuelve a intentarlo."
+                    else -> "No se pudo comprobar la cuenta SerpApi (HTTP ${response.code})."
+                }
+                throw SerpApiException(message, response.code)
+            }
+            val json = runCatching { JSONObject(body) }.getOrElse {
+                throw SerpApiException("SerpApi devolvió información de cuenta no válida.")
+            }
+            parseAccountInfo(json)
+        }
+    }
+
+    internal fun parseAccountInfo(root: JSONObject): SerpApiAccountInfo {
+        val apiError = root.optString("error").takeIf { it.isNotBlank() && it != "null" }
+        if (apiError != null) throw SerpApiException("SerpApi: $apiError")
+        val planLeft = root.optInt("plan_searches_left", -1)
+        val extras = root.optInt("extra_credits", 0).coerceAtLeast(0)
+        val remaining = root.optInt(
+            "total_searches_left",
+            if (planLeft >= 0) planLeft + extras else -1
+        )
+        if (remaining < 0) throw SerpApiException("La cuenta SerpApi no ha informado del saldo de búsquedas.")
+        return SerpApiAccountInfo(
+            planName = root.optString("plan_name").takeUnless { it == "null" }.orEmpty(),
+            accountStatus = root.optString("account_status").takeUnless { it == "null" }.orEmpty(),
+            monthlyLimit = root.optInt("searches_per_month", 0).coerceAtLeast(0),
+            monthlySearchesUsed = root.optInt("this_month_usage", 0).coerceAtLeast(0),
+            searchesRemaining = remaining,
+            hourlyLimit = root.optInt("account_rate_limit_per_hour", 0).coerceAtLeast(0),
+            searchesThisHour = root.optInt("this_hour_searches", root.optInt("last_hour_searches", 0)).coerceAtLeast(0),
+            renewalDate = root.optString("plan_renewal_date").takeIf { it.isNotBlank() && it != "null" && it != "0" }
+        )
+    }
+
+    /**
+     * Search any user-entered product phrase. Results are Google Shopping snapshots for Spain,
+     * not prices obtained from the user's Amazon Prime session or a direct Amazon API.
+     */
+    suspend fun searchOnline(token: String, query: String): List<SerpApiShoppingResult> =
+        withContext(Dispatchers.IO) {
+            val apiKey = token.trim()
+            require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
+            val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
+            require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
+            parseShoppingResults(executeSearch(apiKey, normalizedQuery))
+        }
+
+    /**
+     * Search Amazon.es itself, rather than Google Shopping. This still returns a public search
+     * snapshot through SerpApi; it cannot see the user's signed-in account or personalized coupons.
+     */
+    suspend fun searchAmazonOnline(token: String, query: String): List<SerpApiShoppingResult> =
+        withContext(Dispatchers.IO) {
+            val apiKey = token.trim()
+            require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
+            val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
+            require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
+            parseAmazonResults(executeAmazonSearch(apiKey, normalizedQuery))
+        }
+
+    internal fun parseAmazonResults(
+        root: JSONObject,
+        observedAt: Long = System.currentTimeMillis()
+    ): List<SerpApiShoppingResult> {
+        val error = root.optString("error").takeIf { it.isNotBlank() && it != "null" }
+        if (error != null) throw SerpApiException(error)
+        val status = root.optJSONObject("search_metadata")?.optString("status")
+        if (status.equals("Error", ignoreCase = true)) {
+            throw SerpApiException("SerpApi no pudo completar la búsqueda en Amazon.es.")
+        }
+
+        val items = root.optJSONArray("organic_results")?.toObjects().orEmpty()
+        return items.mapNotNull { item ->
+            val title = item.optString("title").trim()
+                .takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
+            // SerpApi's Amazon engine can expose the active offer as price/extracted_price,
+            // or as primary_price/extracted_primary_price depending on the product layout.
+            val priceText = sequenceOf(
+                item.optString("price"),
+                item.optString("primary_price"),
+                item.optString("extracted_price"),
+                item.optString("extracted_primary_price")
+            ).firstOrNull { it.isNotBlank() && it != "null" && it != "0" } ?: ""
+            val extractedPrice = sequenceOf("extracted_price", "extracted_primary_price")
+                .mapNotNull { key ->
+                    item.opt(key)?.takeIf { it !is JSONObject && it !is JSONArray }
+                        ?.toString()?.toDoubleOrNull()
+                }
+                .firstOrNull { it.isFinite() && it > 0.0 }
+            // Amazon.es is a Spanish storefront; when its structured numeric price is present,
+            // it is a EUR amount even if the formatted label is omitted by a result layout.
+            val price = extractedPrice ?: parsePrice(priceText)
+            if (price == null || !price.isFinite() || price <= 0.0) return@mapNotNull null
+            val isEuroPrice = priceText.contains("€") ||
+                priceText.contains("EUR", ignoreCase = true)
+            // A structured numeric price is useful even when SerpApi omits the formatted label,
+            // but never reinterpret an explicitly labelled foreign currency as euros.
+            val explicitlyForeignCurrency =
+                listOf('$', '£', '¥', '₹').any { priceText.contains(it) } ||
+                    listOf("USD", "GBP", "CAD", "AUD", "NZD", "JPY", "INR", "CHF")
+                        .any { currency -> priceText.contains(currency, ignoreCase = true) }
+            if (explicitlyForeignCurrency) return@mapNotNull null
+            if (extractedPrice == null && !isEuroPrice) return@mapNotNull null
+
+            val url = sequenceOf(item.optString("link_clean"), item.optString("link"))
+                .firstOrNull { isAmazonSpainUrl(it) } ?: return@mapNotNull null
+            val thumbnail = item.optString("thumbnail").takeIf { isHttpsUrl(it) }.orEmpty()
+            val delivery = when (val raw = item.opt("delivery")) {
+                is JSONArray -> (0 until raw.length())
+                    .mapNotNull { index -> raw.optString(index).takeIf { it.isNotBlank() && it != "null" } }
+                    .joinToString(" · ")
+                is JSONObject -> raw.optString("text").takeIf { it.isNotBlank() && it != "null" }.orEmpty()
+                else -> raw?.toString()?.takeIf { it.isNotBlank() && it != "null" }.orEmpty()
+            }
+            val rating = item.opt("rating")?.toString()?.toDoubleOrNull()
+                ?.takeIf { it.isFinite() && it in 0.0..5.0 }
+            val reviewCount = item.opt("reviews")?.toString()
+                ?.replace(Regex("[^0-9]"), "")
+                ?.toIntOrNull()
+                ?.takeIf { it >= 0 }
+
+            SerpApiShoppingResult(
+                title = title,
+                price = price,
+                storeName = "Amazon.es",
+                sourceUrl = url,
+                thumbnailUrl = thumbnail,
+                delivery = delivery,
+                rating = rating,
+                reviewCount = reviewCount,
+                observedAt = observedAt,
+                primeEligible = item.optBoolean("prime", false)
+            )
+        }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
+            .sortedBy { it.price }
+            .take(30)
+    }
+
+    internal fun parseShoppingResults(
+        root: JSONObject,
+        observedAt: Long = System.currentTimeMillis()
+    ): List<SerpApiShoppingResult> {
+        val error = root.optString("error").takeIf { it.isNotBlank() && it != "null" }
+        if (error != null) throw SerpApiException(error)
+        val status = root.optJSONObject("search_metadata")?.optString("status")
+        if (status.equals("Error", ignoreCase = true)) {
+            throw SerpApiException("SerpApi no pudo completar la búsqueda.")
+        }
+
+        val items = mutableListOf<JSONObject>()
+        root.optJSONArray("shopping_results")?.let { items += it.toObjects() }
+        root.optJSONArray("categorized_shopping_results")?.let { categories ->
+            for (index in 0 until categories.length()) {
+                categories.optJSONObject(index)?.optJSONArray("shopping_results")?.let {
+                    items += it.toObjects()
+                }
+            }
+        }
+
+        return items.mapNotNull { item ->
+            val title = item.optString("title").trim()
+                .takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
+            val priceText = item.optString("price")
+            val extractedPrice = item.opt("extracted_price")
+                ?.takeIf { it !is JSONObject && it !is JSONArray }
+                ?.toString()
+                ?.toDoubleOrNull()
+                ?.takeIf { it.isFinite() && it > 0.0 }
+            // Google Shopping is queried with gl=es. Prefer its structured numeric price when the
+            // formatted label omits €, but do not reinterpret a result explicitly priced abroad.
+            if (hasExplicitForeignCurrency(priceText)) return@mapNotNull null
+            val price = extractedPrice ?: parsePrice(priceText) ?: return@mapNotNull null
+            val isEuroPrice = priceText.contains("€") ||
+                priceText.contains("EUR", ignoreCase = true)
+            if (extractedPrice == null && !isEuroPrice) return@mapNotNull null
+            // Google Shopping API usually documents product_link (a Google product page);
+            // some layouts also expose a direct seller link. Prefer the direct link when present.
+            val url = sequenceOf(item.optString("link"), item.optString("product_link"))
+                .firstOrNull { isHttpsUrl(it) } ?: return@mapNotNull null
+            val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
+                .getOrNull().orEmpty()
+            if (host.isBlank()) return@mapNotNull null
+            val source = item.optString("source").trim()
+                .takeIf { it.isNotBlank() && it != "null" } ?: humanizeHost(host)
+            val thumbnail = item.optString("thumbnail").takeIf { isHttpsUrl(it) }.orEmpty()
+            val delivery = sequenceOf(item.optString("delivery"), item.optString("shipping"))
+                .firstOrNull { it.isNotBlank() && it != "null" }.orEmpty()
+            val rating = item.opt("rating")?.toString()?.toDoubleOrNull()
+                ?.takeIf { it.isFinite() && it in 0.0..5.0 }
+            val reviewCount = item.opt("reviews")?.toString()
+                ?.replace(Regex("[^0-9]"), "")
+                ?.toIntOrNull()
+                ?.takeIf { it >= 0 }
+
+            SerpApiShoppingResult(
+                title = title,
+                price = price,
+                storeName = source,
+                sourceUrl = url,
+                thumbnailUrl = thumbnail,
+                delivery = delivery,
+                rating = rating,
+                reviewCount = reviewCount,
+                observedAt = observedAt
+            )
+        }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
+            .sortedBy { it.price }
+            .take(30)
+    }
+
     suspend fun searchProducts(
         token: String,
         products: List<SerpApiRequestProduct>,
@@ -156,18 +408,23 @@ class SerpApiClient(
             if (!isPlausibleProductMatch(requested.queryTerm, title)) return@mapNotNull null
 
             val priceText = item.optString("price")
-            // Google Shopping can show other currencies depending on the result. Since this app is
-            // targeting Spain, require an explicit euro marker before accepting a quote.
-            if (!priceText.contains("€") && !priceText.contains("EUR", ignoreCase = true)) {
-                return@mapNotNull null
-            }
-            val price = parsePrice(
-                item.opt("extracted_price")?.takeIf { it !is JSONObject && it !is JSONArray }
-                    ?: priceText
-            ) ?: return@mapNotNull null
+            val extractedPrice = item.opt("extracted_price")
+                ?.takeIf { it !is JSONObject && it !is JSONArray }
+                ?.toString()
+                ?.toDoubleOrNull()
+                ?.takeIf { it.isFinite() && it > 0.0 }
+            // Google Shopping Spain may omit the € label even when extracted_price is present.
+            // Accept the structured Spanish-market value, but reject explicit foreign currencies.
+            if (hasExplicitForeignCurrency(priceText)) return@mapNotNull null
+            val price = extractedPrice ?: parsePrice(priceText) ?: return@mapNotNull null
+            val isEuroPrice = priceText.contains("€") ||
+                priceText.contains("EUR", ignoreCase = true)
+            if (extractedPrice == null && !isEuroPrice) return@mapNotNull null
 
-            val url = item.optString("link").takeIf { isHttpsUrl(it) }
-                ?: return@mapNotNull null
+            // Google Shopping API usually documents product_link (a Google product page);
+            // some layouts also expose a direct seller link. Prefer the direct link when present.
+            val url = sequenceOf(item.optString("link"), item.optString("product_link"))
+                .firstOrNull { isHttpsUrl(it) } ?: return@mapNotNull null
             val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()
             if (host.isBlank()) return@mapNotNull null
@@ -182,15 +439,20 @@ class SerpApiClient(
                 currency = "EUR",
                 observedAt = observedAt,
                 sourceUrl = url,
-                storeId = storeIdForHost(host),
+                storeId = storeIdForHost(host, merchant),
                 storeName = merchant,
                 sourceName = "SerpApi · Google Shopping España"
             )
         }.sortedBy { it.price }
     }
 
-    private suspend fun executeSearch(apiKey: String, query: String): JSONObject {
-        val url = buildUrl(apiKey, query)
+    private suspend fun executeSearch(apiKey: String, query: String): JSONObject =
+        executeJson(buildUrl(apiKey, query))
+
+    private suspend fun executeAmazonSearch(apiKey: String, query: String): JSONObject =
+        executeJson(buildAmazonUrl(apiKey, query))
+
+    private suspend fun executeJson(url: HttpUrl): JSONObject {
         val request = Request.Builder()
             .url(url)
             .get()
@@ -230,8 +492,26 @@ class SerpApiClient(
             .addQueryParameter("api_key", apiKey)
             .build()
 
+    private fun buildAmazonUrl(apiKey: String, query: String): HttpUrl =
+        "https://serpapi.com/search.json"
+            .toHttpUrl()
+            .newBuilder()
+            .addQueryParameter("engine", "amazon")
+            .addQueryParameter("k", query)
+            .addQueryParameter("amazon_domain", "amazon.es")
+            .addQueryParameter("language", "es_ES")
+            .addQueryParameter("shipping_location", "ES")
+            .addQueryParameter("s", "price-asc-rank")
+            .addQueryParameter("api_key", apiKey)
+            .build()
+
     private fun JSONArray.toObjects(): List<JSONObject> =
         (0 until length()).mapNotNull { optJSONObject(it) }
+
+    private fun hasExplicitForeignCurrency(value: String): Boolean =
+        listOf(36.toChar(), '£', '¥', '₹').any { value.contains(it) } ||
+            listOf("USD", "GBP", "CAD", "AUD", "NZD", "JPY", "INR", "CHF")
+                .any { currency -> value.contains(currency, ignoreCase = true) }
 
     private fun parsePrice(raw: Any?): Double? {
         if (raw == null || raw == JSONObject.NULL) return null
@@ -259,6 +539,13 @@ class SerpApiClient(
         uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank()
     }.getOrDefault(false)
 
+    private fun isAmazonSpainUrl(value: String): Boolean = runCatching {
+        val uri = URI(value)
+        val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+        uri.scheme.equals("https", ignoreCase = true) &&
+            (host == "amazon.es" || host.endsWith(".amazon.es"))
+    }.getOrDefault(false)
+
     private fun isPlausibleProductMatch(requested: String, returned: String): Boolean {
         val wanted = tokens(requested)
         val found = tokens(returned)
@@ -282,9 +569,43 @@ class SerpApiClient(
             .trim()
             .replace(Regex("\\s+"), " ")
 
-    private fun storeIdForHost(host: String): String =
-        host.split('.').joinToString("_").replace(Regex("[^a-zA-Z0-9_]"), "_")
+    private fun storeIdForHost(host: String, merchantName: String = ""): String {
+        if (host == "google.com" || host.endsWith(".google.com")) {
+            val merchant = normalize(merchantName)
+            val knownStoreId = when {
+                "amazon" in merchant -> "amazon_es"
+                "pccomponentes" in merchant -> "pccomponentes"
+                "mediamarkt" in merchant -> "mediamarkt"
+                "el corte ingles" in merchant -> "elcorteingles"
+                "carrefour" in merchant -> "carrefour"
+                "fnac" in merchant -> "fnac"
+                "alcampo" in merchant -> "alcampo"
+                "leroy merlin" in merchant -> "leroymerlin"
+                "decathlon" in merchant -> "decathlon"
+                "worten" in merchant -> "worten"
+                "miravia" in merchant -> "miravia"
+                "conforama" in merchant -> "conforama"
+                "bauhaus" in merchant -> "bauhaus"
+                "ikea" in merchant -> "ikea"
+                "lidl" in merchant -> "lidl"
+                "aliexpress" in merchant -> "aliexpress_plaza"
+                "sprinter" in merchant -> "sprinter"
+                "powerplanet" in merchant -> "powerplanet"
+                "apple" in merchant -> "apple_store"
+                "samsung" in merchant -> "samsung_store"
+                "xiaomi" in merchant -> "xiaomi_store"
+                "lenovo" in merchant -> "lenovo_store"
+                "dell" in merchant -> "dell_store"
+                "hp store" in merchant -> "hp_store"
+                else -> null
+            }
+            if (knownStoreId != null) return knownStoreId
+            val slug = merchant.replace(Regex("[^a-z0-9]+"), "_").trim('_')
+            return "retailer_${slug.ifBlank { "google_shopping" }}"
+        }
+        return host.split('.').joinToString("_").replace(Regex("[^a-zA-Z0-9_]"), "_")
             .let { "retailer_$it" }
+    }
 
     private fun humanizeHost(host: String): String =
         host.substringBefore('.')

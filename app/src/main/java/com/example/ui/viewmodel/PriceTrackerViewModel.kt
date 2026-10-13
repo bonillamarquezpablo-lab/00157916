@@ -5,9 +5,12 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
+import com.example.data.remote.OnlineSearchCache
+import com.example.data.remote.SerpApiAccountInfo
 import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiException
 import com.example.data.remote.SerpApiRequestProduct
+import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.SerpApiTokenStore
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
@@ -22,7 +25,10 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeout
+
+enum class OnlineSearchProvider { GOOGLE_SHOPPING, AMAZON }
 
 enum class SortOption(val label: String) {
     BEST_ATH_DISCOUNT("Mejores ofertas verificadas"),
@@ -47,6 +53,14 @@ data class TrackerUiState(
     val isVerifying: Boolean = false,
     val isRefreshingPrices: Boolean = false,
     val priceRefreshStatus: String? = null,
+    val onlineSearchQuery: String = "",
+    val onlineSearchResults: List<SerpApiShoppingResult> = emptyList(),
+    val isOnlineSearching: Boolean = false,
+    val onlineSearchStatus: String? = null,
+    val onlineSearchAmazonOnly: Boolean = false,
+    val onlineSearchProvider: OnlineSearchProvider = OnlineSearchProvider.GOOGLE_SHOPPING,
+    val isCheckingSerpApiAccount: Boolean = false,
+    val serpApiAccountStatus: String? = null,
     val snackbarMessage: String? = null
 )
 
@@ -63,6 +77,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     private val serpApiTokenStore = SerpApiTokenStore(application)
     private val serpApiClient = SerpApiClient()
+    private val onlineSearchCache = OnlineSearchCache(application)
     private val priceRefreshPreferences = application.getSharedPreferences(
         "minimo_serpapi_refresh_state",
         Context.MODE_PRIVATE
@@ -70,10 +85,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     private val _uiState = MutableStateFlow(TrackerUiState())
 
-    private companion object {
-        const val MAX_SEARCHES_PER_HOUR = 45
-        const val ONE_HOUR_MS = 60L * 60L * 1000L
-    }
     val uiState: StateFlow<TrackerUiState> = _uiState.asStateFlow()
 
     val spanishStores: StateFlow<List<Store>> = repository.allStoresStream
@@ -153,25 +164,46 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     /**
-     * Locally reserve calls in a rolling one-hour window, below SerpApi's published free-tier
-     * throughput. Failed calls are conservatively counted because the client cannot always know
-     * whether the provider counted a request before returning an error.
+     * Account checks are free at SerpApi. If the account endpoint is temporarily unavailable,
+     * manual single searches can still be attempted and the provider remains the final authority.
      */
-    private fun reserveSerpApiSearches(count: Int): Boolean {
-        val now = System.currentTimeMillis()
-        val windowStart = priceRefreshPreferences.getLong("hour_window_start", 0L)
-        val savedCount = priceRefreshPreferences.getInt("hourly_searches_reserved", 0)
-        val windowExpired = windowStart <= 0L || now < windowStart || now - windowStart >= ONE_HOUR_MS
-        val effectiveStart = if (windowExpired) now else windowStart
-        val used = if (windowExpired) 0 else savedCount
-        if (count !in 1..MAX_SEARCHES_PER_HOUR || used + count > MAX_SEARCHES_PER_HOUR) {
-            return false
+    private suspend fun readAccountInfo(token: String): SerpApiAccountInfo? = try {
+        serpApiClient.getAccountInfo(token)
+    } catch (error: SerpApiException) {
+        if (error.httpCode == 401 || error.httpCode == 403) throw error
+        null
+    }
+
+    private fun accountCapacity(info: SerpApiAccountInfo): Int {
+        val hourly = info.remainingThisHour ?: Int.MAX_VALUE
+        return minOf(info.searchesRemaining, hourly).coerceAtLeast(0)
+    }
+
+    private fun quotaMessage(info: SerpApiAccountInfo): String {
+        val renewal = info.renewalDate?.let { " Se renueva el $it." }.orEmpty()
+        val hourly = info.remainingThisHour?.let { " Disponibles esta hora: $it de ${info.hourlyLimit}." }.orEmpty()
+        return info.quotaSummary() + hourly + renewal
+    }
+
+    private fun quotaBlockMessage(info: SerpApiAccountInfo): String = when {
+        info.searchesRemaining <= 0 -> {
+            "Has agotado las búsquedas disponibles de tu cuenta SerpApi. Mínimo no hará nuevas consultas para evitar errores." +
+                (info.renewalDate?.let { " Tu cuota se renueva el $it." } ?: " Revisa el saldo o el plan de tu cuenta.")
         }
-        priceRefreshPreferences.edit()
-            .putLong("hour_window_start", effectiveStart)
-            .putInt("hourly_searches_reserved", used + count)
-            .apply()
-        return true
+        info.remainingThisHour == 0 -> {
+            "Has alcanzado el límite horario de SerpApi (${info.hourlyLimit} búsquedas/h). Espera a que se renueve. " +
+                info.quotaSummary()
+        }
+        else -> quotaMessage(info)
+    }
+
+    private fun accountStatusBlockMessage(info: SerpApiAccountInfo): String? {
+        val status = info.accountStatus.trim()
+        return if (status.isNotEmpty() && !status.equals("active", ignoreCase = true)) {
+            "La cuenta SerpApi figura como «$status». No se ha realizado ninguna búsqueda ni gastado cuota."
+        } else {
+            null
+        }
     }
 
     /**
@@ -212,7 +244,33 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             .thenBy { it.title.lowercase() }
                     ).take(40)
                 }
-                val requests = targets.map { product ->
+                // Account validation is free. Never spend a product search if the account
+                // endpoint cannot confirm that the key works and quota is available.
+                val accountInfo = readAccountInfo(token)
+                if (accountInfo == null) {
+                    val message = "No se ha podido validar la cuenta SerpApi. No se ha lanzado ninguna búsqueda ni gastado cuota. Comprueba la conexión e inténtalo de nuevo."
+                    _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+                accountStatusBlockMessage(accountInfo)?.let { message ->
+                    _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+                val capacity = accountCapacity(accountInfo)
+                if (capacity <= 0) {
+                    val message = quotaBlockMessage(accountInfo)
+                    _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+                val selectedTargets = targets.take(minOf(targets.size, capacity))
+                if (selectedTargets.size < targets.size) {
+                    val message = "Para respetar tu cuota actual, esta actualización consultará ${selectedTargets.size} de ${targets.size} productos."
+                    _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
+                }
+                val requests = selectedTargets.map { product ->
                     SerpApiRequestProduct(
                         id = product.id,
                         title = product.title,
@@ -220,19 +278,15 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         ean = product.ean
                     )
                 }
-                if (!reserveSerpApiSearches(requests.size)) {
-                    val message = "Para respetar el límite gratuito, Mínimo limita las consultas a 45 por hora en este dispositivo. Espera a que se renueve la ventana y vuelve a intentarlo."
-                    _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
-                    showSnackbar(message)
-                    return@launch
-                }
                 val batchResult = serpApiClient.searchProducts(token, requests) { stage ->
                     _uiState.value = _uiState.value.copy(priceRefreshStatus = stage)
                 }
                 val quotes = batchResult.quotes
+                val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
+                val quotaNote = quotaAfter?.let { " ${it.quotaSummary()}" }.orEmpty()
                 val attemptedAt = System.currentTimeMillis()
                 priceRefreshPreferences.edit().apply {
-                    targets.forEach { product ->
+                    selectedTargets.forEach { product ->
                         putLong("attempt_${product.id}", attemptedAt)
                     }
                 }.apply()
@@ -248,7 +302,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     } else {
                         ""
                     }
-                    val message = "Actualización terminada: precios guardados para $updatedProducts producto(s).$partialNotice Es una instantánea de Google Shopping; verifica el precio final y la disponibilidad en la tienda."
+                    val message = "Actualización terminada: precios guardados para $updatedProducts producto(s).$partialNotice Es una instantánea de Google Shopping; verifica el precio final y la disponibilidad en la tienda." + quotaNote
                     _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
                     showSnackbar(message)
                 }
@@ -264,6 +318,172 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 _uiState.value = _uiState.value.copy(isRefreshingPrices = false)
             }
         }
+    }
+
+    fun checkSerpApiAccount() {
+        if (_uiState.value.isCheckingSerpApiAccount || _uiState.value.isRefreshingPrices || _uiState.value.isOnlineSearching) return
+        _uiState.value = _uiState.value.copy(
+            isCheckingSerpApiAccount = true,
+            serpApiAccountStatus = "Comprobando la clave y el saldo de SerpApi…"
+        )
+        viewModelScope.launch {
+            try {
+                val token = serpApiTokenStore.read()
+                if (token.isNullOrBlank()) {
+                    val message = "No hay una clave de SerpApi guardada. Pégala arriba y pulsa «Guardar clave cifrada»."
+                    _uiState.value = _uiState.value.copy(serpApiAccountStatus = message)
+                    return@launch
+                }
+                val info = serpApiClient.getAccountInfo(token)
+                val message = if (info.accountStatus.isNotBlank() && !info.accountStatus.equals("active", ignoreCase = true)) {
+                    "Estado de la cuenta SerpApi: ${info.accountStatus}. ${info.quotaSummary()}"
+                } else {
+                    quotaMessage(info)
+                }
+                _uiState.value = _uiState.value.copy(serpApiAccountStatus = message)
+                showSnackbar(message)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: SerpApiException) {
+                val message = error.message ?: "No se pudo validar la clave de SerpApi."
+                _uiState.value = _uiState.value.copy(serpApiAccountStatus = message)
+                showSnackbar(message)
+            } catch (_: Exception) {
+                val message = "No se pudo consultar la cuenta. Comprueba la conexión e inténtalo de nuevo."
+                _uiState.value = _uiState.value.copy(serpApiAccountStatus = message)
+                showSnackbar(message)
+            } finally {
+                _uiState.value = _uiState.value.copy(isCheckingSerpApiAccount = false)
+            }
+        }
+    }
+
+    fun onOnlineSearchQueryChange(query: String) {
+        _uiState.value = _uiState.value.copy(
+            onlineSearchQuery = query,
+            onlineSearchResults = emptyList(),
+            onlineSearchStatus = null
+        )
+    }
+
+    fun onOnlineSearchAmazonOnlyChange(onlyAmazon: Boolean) {
+        _uiState.value = _uiState.value.copy(onlineSearchAmazonOnly = onlyAmazon)
+    }
+
+    fun searchOnlineShopping() = startOnlineSearch(OnlineSearchProvider.GOOGLE_SHOPPING)
+
+    fun searchAmazonShopping() = startOnlineSearch(OnlineSearchProvider.AMAZON)
+
+    /** Search Google Shopping or Amazon.es, reusing fresh local results whenever possible. */
+    private fun startOnlineSearch(provider: OnlineSearchProvider) {
+        val current = _uiState.value
+        val query = current.onlineSearchQuery.trim()
+        if (current.isOnlineSearching || current.isRefreshingPrices) return
+        if (query.length < 2) {
+            val message = "Escribe al menos 2 caracteres para buscar."
+            _uiState.value = current.copy(onlineSearchStatus = message)
+            showSnackbar(message)
+            return
+        }
+
+        val searchingMessage = if (provider == OnlineSearchProvider.AMAZON) {
+            "Consultando resultados públicos de Amazon.es…"
+        } else {
+            "Buscando ofertas en Google Shopping España…"
+        }
+        _uiState.value = current.copy(
+            isOnlineSearching = true,
+            onlineSearchStatus = searchingMessage,
+            onlineSearchResults = emptyList(),
+            onlineSearchProvider = provider,
+            onlineSearchAmazonOnly = provider == OnlineSearchProvider.AMAZON
+        )
+        viewModelScope.launch {
+            try {
+                // Cache lookup comes first: saved results remain usable even if the quota is empty
+                // or the API key was removed after the previous search.
+                val cached = onlineSearchCache.read(provider.name, query)
+                if (cached != null) {
+                    val ageMinutes = ((System.currentTimeMillis() - cached.savedAt) / 60_000L).coerceAtLeast(1L)
+                    val base = onlineSearchResultMessage(cached.results, provider)
+                    val cacheNotice = "Resultados guardados hace $ageMinutes min; no se ha consumido otra búsqueda."
+                    _uiState.value = _uiState.value.copy(
+                        onlineSearchResults = cached.results,
+                        onlineSearchStatus = "$base $cacheNotice"
+                    )
+                    return@launch
+                }
+
+                val token = serpApiTokenStore.read()
+                if (token.isNullOrBlank()) {
+                    val message = "Para mostrar precios dentro de Mínimo, guarda tu clave de SerpApi en Ajustes. También puedes abrir Amazon con tu sesión iniciada."
+                    _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+
+                // Validate the key and quota before the paid search request.
+                val accountInfo = readAccountInfo(token)
+                if (accountInfo == null) {
+                    val message = "No se ha podido validar la cuenta SerpApi. No se ha lanzado ninguna búsqueda ni gastado cuota. Comprueba la conexión e inténtalo de nuevo."
+                    _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+                accountStatusBlockMessage(accountInfo)?.let { message ->
+                    _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+                if (accountCapacity(accountInfo) <= 0) {
+                    val message = quotaBlockMessage(accountInfo)
+                    _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+
+                val results = when (provider) {
+                    OnlineSearchProvider.GOOGLE_SHOPPING -> serpApiClient.searchOnline(token, query)
+                    OnlineSearchProvider.AMAZON -> serpApiClient.searchAmazonOnline(token, query)
+                }
+                onlineSearchCache.write(provider.name, query, results)
+                val base = onlineSearchResultMessage(results, provider)
+                // The account endpoint is free; refresh the displayed balance after a live request.
+                val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
+                val quotaNote = quotaAfter?.let { " ${it.quotaSummary()}" }.orEmpty()
+                val message = base + quotaNote
+                _uiState.value = _uiState.value.copy(
+                    onlineSearchResults = results,
+                    onlineSearchStatus = message
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: SerpApiException) {
+                val message = error.message ?: "No se pudo completar la búsqueda."
+                _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                showSnackbar(message)
+            } catch (_: Exception) {
+                val message = "No se pudo buscar. Comprueba la conexión y la clave guardada en Ajustes."
+                _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                showSnackbar(message)
+            } finally {
+                _uiState.value = _uiState.value.copy(isOnlineSearching = false)
+            }
+        }
+    }
+
+    private fun onlineSearchResultMessage(
+        results: List<SerpApiShoppingResult>,
+        provider: OnlineSearchProvider
+    ): String = when {
+        results.isEmpty() && provider == OnlineSearchProvider.AMAZON ->
+            "Amazon.es no ha devuelto productos con precio en euros y enlace válido. Prueba con el nombre o modelo completo."
+        results.isEmpty() ->
+            "No se han encontrado ofertas con precio en euros y enlace seguro. Prueba con otra búsqueda."
+        provider == OnlineSearchProvider.AMAZON ->
+            "Amazon.es: ${results.size} productos encontrados, ordenados por precio. El precio final y los cupones se confirman en Amazon."
+        else ->
+            "Google Shopping: ${results.size} ofertas encontradas, ordenadas por precio. Confirma el precio final antes de comprar."
     }
 
     fun onSearchQueryChange(query: String) {

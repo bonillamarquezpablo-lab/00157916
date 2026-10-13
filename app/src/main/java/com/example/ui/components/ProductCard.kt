@@ -247,6 +247,15 @@ fun ProductCard(
                             fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        if (!product.isPriceFresh) {
+                            Text(
+                                text = "Precio posiblemente desactualizado · vuelve a consultar",
+                                fontSize = 11.sp,
+                                lineHeight = 14.sp,
+                                color = MaterialTheme.colorScheme.tertiary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                     if (product.isPriceVerified) {
                         Text(

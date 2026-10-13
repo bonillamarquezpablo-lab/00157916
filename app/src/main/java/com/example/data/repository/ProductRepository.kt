@@ -13,6 +13,7 @@ import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.StoreOffer
 import com.example.data.remote.SerpApiQuote
+import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.model.Store
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import java.net.URI
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -140,6 +142,117 @@ class ProductRepository(
         }
         return observations.map { it.productId }.distinct().size
     }
+
+    /**
+     * Save a point-in-time history snapshot for an explicit model search from the online finder.
+     * Broad brand searches are intentionally excluded so unrelated products are never merged into
+     * one price history. Marketplaces, used/refurbished listings, and rental/financing offers are
+     * shown in search but not mixed into the new-product price history.
+     */
+    suspend fun recordOnlineSearchSnapshot(
+        query: String,
+        results: List<SerpApiShoppingResult>
+    ): Int {
+        val normalizedQuery = normalizeHistoryKey(query)
+        if (!hasSpecificModelIdentifier(normalizedQuery)) return 0
+
+        val eligibleResults = results
+            .filter(::isEligibleForNewProductHistory)
+            .filter { it.price.isFinite() && it.price > 0.0 && parseHttpUri(it.sourceUrl)?.scheme.equals("https", ignoreCase = true) }
+            .distinctBy { "${it.storeName.lowercase(Locale.ROOT)}|${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
+        if (eligibleResults.isEmpty()) return 0
+
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(normalizedQuery.toByteArray(Charsets.UTF_8))
+            .joinToString("") { byte -> "%02x".format(byte) }
+        val productId = "online_${digest.take(24)}"
+        val currentProduct = productDao.getProductById(productId)
+        val bestResult = eligibleResults.minBy { it.price }
+
+        if (currentProduct == null) {
+            productDao.insert(
+                ProductEntity(
+                    id = productId,
+                    title = query.trim().replace(Regex("\\s+"), " "),
+                    brand = query.trim().split(Regex("\\s+")).firstOrNull().orEmpty(),
+                    category = ProductCategory.ALL.name,
+                    currentPrice = bestResult.price,
+                    athMinPrice = bestResult.price,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = bestResult.storeName,
+                    athMaxPrice = bestResult.price,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = onlineStoreId(bestResult.storeName),
+                    storeUrl = bestResult.sourceUrl,
+                    ean = "",
+                    imageResName = null,
+                    imageUrl = bestResult.thumbnailUrl.ifBlank { null },
+                    rating = 0.0,
+                    reviewCount = 0,
+                    wasRecentlyInflated = false,
+                    fakePriorPrice = null,
+                    isPriceVerified = false
+                )
+            )
+        }
+
+        val observations = eligibleResults.map { result ->
+            PriceObservationEntity(
+                productId = productId,
+                storeId = onlineStoreId(result.storeName),
+                price = result.price,
+                currency = "EUR",
+                observedAt = result.observedAt,
+                sourceUrl = result.sourceUrl,
+                sourceName = "${result.storeName} · SerpApi · Google Shopping España",
+                isVerified = true,
+                verificationNote = "Observación de búsqueda manual para el modelo «${query.trim()}». No garantiza precio final, stock, envío ni estado; confirma esos datos con el vendedor."
+            )
+        }
+        priceObservationDao.insertAll(observations)
+        productDao.updatePriceVerification(productId, true)
+        return observations.size
+    }
+
+    private fun hasSpecificModelIdentifier(normalizedQuery: String): Boolean =
+        normalizedQuery.split(' ').any { token ->
+            token.length >= 3 &&
+                token.any(Char::isLetter) &&
+                token.any(Char::isDigit)
+        }
+
+    private fun isEligibleForNewProductHistory(result: SerpApiShoppingResult): Boolean {
+        val merchant = normalizeHistoryKey(result.storeName)
+        val nonRetailMarketplaces = listOf(
+            "wallapop", "ebay", "vinted", "milanuncios", "facebookmarketplace",
+            "cashconverters", "realcash"
+        )
+        if (nonRetailMarketplaces.any { it in merchant }) return false
+
+        val condition = normalizeHistoryKey(result.condition)
+        if (condition.isNotBlank() && condition !in setOf("new", "nuevo", "brandnew", "nuevos")) return false
+
+        val title = normalizeHistoryKey(result.title)
+        val excludedTerms = listOf(
+            "segundamano", "usado", "reacondicionado", "refurbished",
+            "alquiler", "alquilar", "renting", "rental", "leasing",
+            "financiacion", "cuotamensual"
+        )
+        return excludedTerms.none { it in title }
+    }
+
+    private fun normalizeHistoryKey(value: String): String =
+        value.lowercase(Locale.ROOT)
+            .replace(Regex("[^a-z0-9]+"), " ")
+            .trim()
+            .replace(Regex("\\s+"), " ")
+
+    private fun onlineStoreId(storeName: String): String =
+        "online_store_" + normalizeHistoryKey(storeName)
+            .replace(" ", "_")
+            .take(48)
+            .ifBlank { "unknown" }
 
     suspend fun toggleTracking(productId: String, targetAlertPrice: Double? = null) {
         val existing = trackedDao.getById(productId)

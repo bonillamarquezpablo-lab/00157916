@@ -187,7 +187,7 @@ class ProductRepository(
                     storeUrl = bestResult.sourceUrl,
                     ean = "",
                     imageResName = null,
-                    imageUrl = bestResult.thumbnailUrl.ifBlank { null },
+                    imageUrl = bestResult.thumbnailUrl.takeIf { it.isNotBlank() },
                     rating = 0.0,
                     reviewCount = 0,
                     wasRecentlyInflated = false,

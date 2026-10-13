@@ -40,6 +40,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -86,6 +87,17 @@ fun SettingsScreen(
     var serpApiKeyInput by remember { mutableStateOf("") }
     var serpApiKeyConfigured by remember { mutableStateOf(serpApiTokenStore.isConfigured()) }
     var serpApiKeyMessage by remember { mutableStateOf<String?>(null) }
+
+    // A failed decrypt can clear only a confirmed-invalid token. Keep the Settings badge in sync
+    // with storage once the ViewModel surfaces that read error.
+    LaunchedEffect(priceRefreshStatus, serpApiAccountStatus) {
+        if (
+            priceRefreshStatus?.contains("Vuelve a introducir tu clave", ignoreCase = true) == true ||
+            serpApiAccountStatus?.contains("Vuelve a introducir tu clave", ignoreCase = true) == true
+        ) {
+            serpApiKeyConfigured = serpApiTokenStore.isConfigured()
+        }
+    }
 
     Column(
         modifier = modifier

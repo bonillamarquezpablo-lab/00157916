@@ -60,6 +60,16 @@ data class OnlineProductGroup(
     val minPrice: Double
         get() = cheapestOffer.price
 
+    /**
+     * Prefer the image belonging to the selected display title. The cheapest seller can have
+     * a missing or unrelated thumbnail, so it must not automatically dictate the product image.
+     */
+    val representativeImageUrl: String
+        get() = offers.firstOrNull {
+            it.title.equals(title, ignoreCase = true) && it.thumbnailUrl.isNotBlank()
+        }?.thumbnailUrl
+            ?: offers.firstOrNull { it.thumbnailUrl.isNotBlank() }?.thumbnailUrl.orEmpty()
+
     val storeCount: Int
         get() = offers.map { it.storeName.trim().lowercase(Locale.ROOT) }.distinct().size
 }

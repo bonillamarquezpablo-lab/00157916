@@ -62,6 +62,7 @@ private const val DEFAULT_PROFILE_NAME = "Usuario principal"
 fun SettingsScreen(
     storeCount: Int,
     isRefreshingPrices: Boolean,
+    isTestingSingleProduct: Boolean,
     priceRefreshStatus: String?,
     onRefreshPrices: (testOneProduct: Boolean) -> Unit,
     isCheckingSerpApiAccount: Boolean,
@@ -359,20 +360,28 @@ fun SettingsScreen(
                     enabled = serpApiKeyConfigured && !isRefreshingPrices,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    if (isRefreshingPrices) {
+                    if (isTestingSingleProduct) {
                         CircularProgressIndicator(modifier = Modifier.size(17.dp), strokeWidth = 2.dp)
                     } else {
                         Icon(Icons.Default.CloudDownload, null, Modifier.size(17.dp))
                     }
-                    Text("  Probar con 1 producto (1 búsqueda)")
+                    Text(if (isTestingSingleProduct) "  Probando 1 producto…" else "  Probar con 1 producto (1 búsqueda)")
                 }
                 Button(
                     onClick = { onRefreshPrices(false) },
                     enabled = serpApiKeyConfigured && !isRefreshingPrices,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(Icons.Default.CloudDownload, null, Modifier.size(17.dp))
-                    Text("  Actualizar hasta 40 productos")
+                    if (isRefreshingPrices && !isTestingSingleProduct) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(17.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    } else {
+                        Icon(Icons.Default.CloudDownload, null, Modifier.size(17.dp))
+                    }
+                    Text(if (isRefreshingPrices && !isTestingSingleProduct) "  Actualizando catálogo…" else "  Actualizar hasta 40 productos")
                 }
                 priceRefreshStatus?.let { status ->
                     Text(

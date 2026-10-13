@@ -756,8 +756,21 @@ class ExampleRobolectricTest {
                 sourceUrl = "https://www.wasserman.eu/ugreen-usb-hub",
                 observedAt = now
             )
+            val suspiciousPowerBank = com.example.data.remote.SerpApiShoppingResult(
+                title = "Anker Power Bank 20000mAh 65W",
+                price = 2.99,
+                storeName = "Amazon.es",
+                sourceUrl = "https://www.amazon.es/dp/SUSPICIOUSPOWERBANK",
+                observedAt = now
+            )
             val filteredResults = repository.filterOnlineSearchResults(
-                listOf(suspiciousRedmi, rentalPhoneWithNormalPrice, normalNewPhone, cheapLegitimateAccessory)
+                listOf(
+                    suspiciousRedmi,
+                    rentalPhoneWithNormalPrice,
+                    normalNewPhone,
+                    cheapLegitimateAccessory,
+                    suspiciousPowerBank
+                )
             )
             val prePolicySnapshot = normalNewPhone.copy(observedAt = 1_780_000_000_000L)
             assertFalse(
@@ -779,6 +792,10 @@ class ExampleRobolectricTest {
             assertTrue(
                 "Low-priced real accessories should remain eligible",
                 filteredResults.any { it.title.contains("UGREEN USB 2.0 Hub") }
+            )
+            assertFalse(
+                "A sub-€5 20,000mAh power bank is suspicious and must not be saved",
+                filteredResults.any { it.title.contains("Power Bank", ignoreCase = true) && it.price < 5.0 }
             )
 
             val excludedSellerResults = listOf(

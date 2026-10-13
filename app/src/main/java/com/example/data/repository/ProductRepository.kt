@@ -222,7 +222,21 @@ class ProductRepository(
     private fun isPlausibleHistoryPrice(title: String, price: Double): Boolean {
         if (!price.isFinite() || price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR) return false
         val normalized = normalizedProductTitle(title)
-        // Low prices are normal for accessories; do not apply device floors to them.
+
+        // Some items are accessories but still have a meaningful minimum price.
+        // Check these before the broad accessory rule so a suspiciously cheap power bank
+        // cannot pass merely because the title also contains "battery".
+        val portableBattery = Regex(
+            """\b(power\s*bank|powerbank|bateria\s+externa|bateria\s+portatil|portable\s+battery)\b"""
+        ).containsMatchIn(normalized)
+        if (portableBattery && price < 5.0) return false
+
+        val powerStation = Regex(
+            """\b(power\s+station|portable\s+power\s+station|estacion\s+de\s+energia|generador\s+solar\s+portatil)\b"""
+        ).containsMatchIn(normalized)
+        if (powerStation && price < 80.0) return false
+
+        // Low prices are normal for ordinary cables, hubs and replacement accessories.
         val accessory = Regex(
             """\b(funda|case|carcasa|protector|cristal|cable|cargador|adaptador|repuesto|replacement|cover|bumper|pantalla|bateria|solo caja|dummy|hub|usb|conector|enchufe)\b"""
         ).containsMatchIn(normalized)

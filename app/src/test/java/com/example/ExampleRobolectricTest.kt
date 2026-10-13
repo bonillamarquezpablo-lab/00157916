@@ -12,6 +12,7 @@ import com.example.data.repository.SpanishMarketData
 import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiQuote
 import com.example.data.remote.SerpApiRequestProduct
+import com.example.data.remote.groupOnlineShoppingResults
 import org.json.JSONObject
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -39,7 +40,7 @@ import org.robolectric.annotation.Config
 class ExampleRobolectricTest {
 
     @Test
-    fun `catalogue streams from Room and seeds missing products without replacing old rows`() = runBlocking<Unit> {
+    fun `catalogue streams only persisted products without seeding demo entries`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,
@@ -75,15 +76,15 @@ class ExampleRobolectricTest {
             )
 
             val products: List<Product> = withTimeout<List<Product>>(10_000) {
-                repository.allProductsStream.first { productRows -> productRows.size >= 60 }
+                repository.allProductsStream.first { productRows -> productRows.any { it.id == "sony_wh1000xm5" } }
             }
-            assertTrue("Catalog should load from Room and include 60+ entries", products.size >= 60)
+            assertEquals("A new database must not be populated with 75 demo products", 1, products.size)
             assertEquals("Product IDs must stay unique", products.size, products.map { it.id }.toSet().size)
             val preserved = products.first { it.id == "sony_wh1000xm5" }
-            assertEquals("Existing row should not be overwritten by seed data", "Producto Sony preservado por el usuario", preserved.title)
-            assertFalse("Existing sample should stay unverified", preserved.isPriceVerified)
-            assertTrue("Unverified product should not display sample history", preserved.priceHistory.isEmpty())
-            assertTrue("New catalogue IDs should be seeded", products.any { it.id == "demo_galaxy_s26_ultra" })
+            assertEquals("Existing user row must not be overwritten", "Producto Sony preservado por el usuario", preserved.title)
+            assertFalse("Unobserved product should stay unverified", preserved.isPriceVerified)
+            assertTrue("Unverified product should not display fake history", preserved.priceHistory.isEmpty())
+            assertFalse("New catalogue should not seed static demo rows", products.any { it.id == "demo_galaxy_s26_ultra" })
 
             database.priceObservationDao().insert(
                 PriceObservationEntity(
@@ -187,6 +188,37 @@ class ExampleRobolectricTest {
         val pcComponentesQuote = quotes.first { it.storeName == "PcComponentes" }
         assertEquals("pccomponentes", pcComponentesQuote.storeId)
         assertTrue(pcComponentesQuote.sourceUrl.contains("google.com/shopping/product"))
+    }
+
+    @Test
+    fun brandSearchesTolerateAMinorMilwaukeeTypo() {
+        val client = SerpApiClient()
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {
+                  "title": "Milwaukee M18 FUEL taladro percutor brushless",
+                  "price": "299,99 €",
+                  "extracted_price": 299.99,
+                  "link": "https://www.milwaukeetool.eu/product",
+                  "source": "Milwaukee Tool"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val report = client.parseShoppingResultsDetailed(
+            root = payload,
+            query = "Milwauke",
+            observedAt = 123L
+        )
+
+        assertEquals("A one-character misspelling must not discard a relevant brand result", 1, report.results.size)
+        assertEquals("Milwaukee Tool", report.results.single().storeName)
+        assertEquals(299.99, report.results.single().price, 0.001)
     }
 
     @Test
@@ -337,7 +369,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `migration 2 to 4 preserves watchlist and old products and stores verified price observations`() {
+    fun `migration 2 to 5 preserves watchlist and old products and stores verified price observations`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val databaseName = "minimo_migration_preservation_test.db"
         context.deleteDatabase(databaseName)
@@ -390,7 +422,7 @@ class ExampleRobolectricTest {
             AppDatabase::class.java,
             databaseName
         )
-            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
             .allowMainThreadQueries()
             .build()
 
@@ -603,6 +635,227 @@ class ExampleRobolectricTest {
             observedAt = 123L
         )
         assertTrue(result.isGoogleShoppingProductLink)
+    }
+
+
+    @Test
+    fun `online search stores real offers once per store and day and rejects used listings and low outliers`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = scope
+            )
+            val now = System.currentTimeMillis()
+            val results = listOf(
+                com.example.data.remote.SerpApiShoppingResult(
+                    title = "Sony WH-1000XM5 Wireless Headphones",
+                    price = 249.99,
+                    storeName = "PcComponentes",
+                    sourceUrl = "https://www.pccomponentes.com/sony-wh-1000xm5",
+                    observedAt = now
+                ),
+                com.example.data.remote.SerpApiShoppingResult(
+                    title = "Sony WH-1000XM5 Wireless Headphones",
+                    price = 239.99,
+                    storeName = "Amazon.es",
+                    sourceUrl = "https://www.amazon.es/dp/B0SONYTEST",
+                    observedAt = now
+                ),
+                com.example.data.remote.SerpApiShoppingResult(
+                    title = "Sony WH-1000XM5 Wireless Headphones",
+                    price = 12.00,
+                    storeName = "Fnac España",
+                    sourceUrl = "https://www.fnac.es/sony-wh-1000xm5",
+                    observedAt = now
+                ),
+                com.example.data.remote.SerpApiShoppingResult(
+                    title = "Sony WH-1000XM5 segunda mano",
+                    price = 119.99,
+                    storeName = "MediaMarkt España",
+                    sourceUrl = "https://www.mediamarkt.es/sony-wh-1000xm5",
+                    observedAt = now
+                )
+            )
+
+            val suspiciousRedmi = com.example.data.remote.SerpApiShoppingResult(
+                title = "Xiaomi Redmi 17 5G 4GB 128GB Negro",
+                price = 9.90,
+                storeName = "Rentik",
+                sourceUrl = "https://www.rentik.com/xiaomi-redmi-17",
+                observedAt = now
+            )
+            val rentalPhoneWithNormalPrice = suspiciousRedmi.copy(
+                price = 199.99,
+                sourceUrl = "https://www.rentik.com/xiaomi-redmi-17"
+            )
+            val normalNewPhone = suspiciousRedmi.copy(
+                price = 199.99,
+                storeName = "Amazon.es",
+                sourceUrl = "https://www.amazon.es/dp/REDFEATURETEST"
+            )
+            val cheapLegitimateAccessory = com.example.data.remote.SerpApiShoppingResult(
+                title = "UGREEN USB 2.0 Hub 4 Puertos",
+                price = 5.82,
+                storeName = "Wasserman.eu",
+                sourceUrl = "https://www.wasserman.eu/ugreen-usb-hub",
+                observedAt = now
+            )
+            val filteredResults = repository.filterOnlineSearchResults(
+                listOf(suspiciousRedmi, rentalPhoneWithNormalPrice, normalNewPhone, cheapLegitimateAccessory)
+            )
+            assertFalse(
+                "A €9.90 Redmi phone listing is implausible for a new-in-store offer",
+                filteredResults.any { it.title.contains("Redmi 17", ignoreCase = true) && it.price < 45.0 }
+            )
+            assertFalse(
+                "Offers from the Rentik renting provider must not be stored as new-in-store offers",
+                filteredResults.any { it.storeName.equals("Rentik", ignoreCase = true) }
+            )
+            assertTrue(
+                "A plausibly priced new phone from an ordinary retailer remains eligible",
+                filteredResults.any { it.storeName == "Amazon.es" && it.title.contains("Redmi 17", ignoreCase = true) }
+            )
+            assertTrue(
+                "Low-priced real accessories should remain eligible",
+                filteredResults.any { it.title.contains("UGREEN USB 2.0 Hub") }
+            )
+
+            val excludedSellerResults = listOf(
+                normalNewPhone.copy(storeName = "Wallapop", sourceUrl = "https://www.wallapop.com/xiaomi"),
+                normalNewPhone.copy(storeName = "Cash Converters España", sourceUrl = "https://www.cashconverters.es/xiaomi"),
+                normalNewPhone.copy(storeName = "Vinted", sourceUrl = "https://www.vinted.es/xiaomi"),
+                normalNewPhone.copy(storeName = "CeX España", sourceUrl = "https://www.webuy.com/xiaomi"),
+                normalNewPhone.copy(
+                    title = "Xiaomi Redmi 17 5G cuota 9,90 €/mes",
+                    storeName = "Tienda oficial",
+                    sourceUrl = "https://www.example.com/xiaomi-cuota"
+                )
+            )
+            assertTrue(
+                "Second-hand marketplaces and subscription listings must be excluded",
+                repository.filterOnlineSearchResults(excludedSellerResults, "Xiaomi Redmi 17").isEmpty()
+            )
+
+            val vacuumListings = listOf(
+                cheapLegitimateAccessory.copy(
+                    title = "Xiaomi Vacuum Cleaner G10",
+                    price = 299.00,
+                    storeName = "Amazon.es",
+                    sourceUrl = "https://www.amazon.es/dp/VACUUMG10"
+                ),
+                cheapLegitimateAccessory.copy(
+                    title = "Xiaomi Vacuum Cleaner G10",
+                    price = 279.00,
+                    storeName = "PcComponentes",
+                    sourceUrl = "https://www.pccomponentes.com/vacuum-g10"
+                ),
+                cheapLegitimateAccessory.copy(
+                    title = "Xiaomi Vacuum Cleaner G10",
+                    price = 319.00,
+                    storeName = "MediaMarkt",
+                    sourceUrl = "https://www.mediamarkt.es/vacuum-g10"
+                ),
+                cheapLegitimateAccessory.copy(
+                    title = "Xiaomi Vacuum Cleaner G10 Mop Kit",
+                    price = 12.99,
+                    storeName = "Amazon.es",
+                    sourceUrl = "https://www.amazon.es/dp/MOPKITG10"
+                )
+            )
+            val filteredVacuumListings = repository.filterOnlineSearchResults(
+                vacuumListings,
+                "Xiaomi Vacuum Cleaner G10"
+            )
+            assertFalse(
+                "An accessory must not appear as a whole device for a model-specific search",
+                filteredVacuumListings.any { it.title.contains("Mop Kit", ignoreCase = true) }
+            )
+            assertEquals(
+                "The three legitimate vacuum offers should remain",
+                3,
+                filteredVacuumListings.size
+            )
+            assertTrue(
+                "UGREEN brand searches should retain inexpensive legitimate cables and hubs",
+                repository.filterOnlineSearchResults(listOf(cheapLegitimateAccessory), "UGREEN")
+                    .any { it.title.contains("UGREEN USB 2.0 Hub") }
+            )
+
+            val deviceSearchListings = listOf(
+                normalNewPhone.copy(price = 189.99, storeName = "Amazon.es", sourceUrl = "https://www.amazon.es/redmi-17"),
+                normalNewPhone.copy(price = 179.99, storeName = "PcComponentes", sourceUrl = "https://www.pccomponentes.com/redmi-17"),
+                normalNewPhone.copy(
+                    title = "Xiaomi Redmi A5 Smartphone 4GB 128GB",
+                    price = 99.99,
+                    storeName = "MediaMarkt",
+                    sourceUrl = "https://www.mediamarkt.es/redmi-a5"
+                ),
+                normalNewPhone.copy(
+                    title = "Funda Xiaomi Redmi 17 con tapa",
+                    price = 7.99,
+                    storeName = "Apokin",
+                    sourceUrl = "https://www.example.com/redmi-17-case"
+                )
+            )
+            val strictMatches = repository.filterOnlineSearchResults(deviceSearchListings, "Xiaomi Redmi 17")
+            assertEquals("A model-specific query must exclude other models and cases", 2, strictMatches.size)
+            assertTrue(strictMatches.all { it.title.contains("Redmi 17", ignoreCase = true) })
+            val grouped = groupOnlineShoppingResults(strictMatches)
+            assertEquals("Repeated seller listings of one model make one product card", 1, grouped.size)
+            assertEquals(2, grouped.single().offers.size)
+            assertEquals(179.99, grouped.single().minPrice, 0.001)
+
+            val inserted = repository.recordOnlineSearchResults(results, "GOOGLE_SHOPPING")
+            assertEquals("Only the two plausible new offers should be stored", 2, inserted)
+            val stored = withTimeout<List<PriceObservationEntity>>(10_000) {
+                database.priceObservationDao().observeAllVerified().first { it.size >= 2 }
+            }
+            assertEquals(2, stored.size)
+            val sonyProductId = stored.first().productId
+            assertTrue("Both retailer offers must attach to one saved product", stored.all { it.productId == sonyProductId })
+            assertTrue(stored.all { it.productTitle == "Sony WH-1000XM5 Wireless Headphones" })
+            val persistedProduct = database.productDao().getProductById(sonyProductId)
+            assertNotNull("Online searches must add a real product row to Room", persistedProduct)
+            assertTrue("Searched products must be marked as source-verified", persistedProduct?.isPriceVerified == true)
+            assertTrue(stored.all { it.currency == "EUR" && it.sourceType == "Google Shopping" })
+            assertTrue(stored.any { it.storeName == "PcComponentes" && it.sourceUrl.contains("pccomponentes.com") })
+            assertTrue(stored.any { it.storeName == "Amazon.es" && it.sourceUrl.contains("amazon.es") })
+
+            val duplicate = results.first().copy(price = 245.00, observedAt = now + 60_000L)
+            assertEquals(0, repository.recordOnlineSearchResults(listOf(duplicate), "GOOGLE_SHOPPING"))
+            assertEquals(2, database.priceObservationDao().getVerifiedObservationCount())
+
+            // A following day's query must be retained as a second dated history point.
+            val nextDay = now + 24L * 60L * 60L * 1000L
+            val tomorrowResults = listOf(
+                results[0].copy(price = 229.99, observedAt = nextDay),
+                results[1].copy(price = 224.99, observedAt = nextDay)
+            )
+            assertEquals(2, repository.recordOnlineSearchResults(tomorrowResults, "GOOGLE_SHOPPING"))
+            val productWithDailyHistory = withTimeout<List<Product>>(10_000) {
+                repository.allProductsStream.first { rows ->
+                    rows.firstOrNull { it.id == sonyProductId }?.priceHistory?.size == 2
+                }
+            }.first { it.id == sonyProductId }
+            assertEquals("The graph has one real point per day, not one per retailer", 2, productWithDailyHistory.priceHistory.size)
+            val firstHistoryDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT)
+                .format(java.util.Date(productWithDailyHistory.priceHistory[0].timestamp))
+            val secondHistoryDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT)
+                .format(java.util.Date(productWithDailyHistory.priceHistory[1].timestamp))
+            assertTrue("Daily history points must come from distinct calendar dates", firstHistoryDate != secondHistoryDate)
+            assertEquals(4, database.priceObservationDao().getVerifiedObservationCount())
+        } finally {
+            database.close()
+        }
     }
 
 }

@@ -38,6 +38,19 @@ interface PriceObservationDao {
     @Query("SELECT COUNT(*) FROM price_observations WHERE isVerified = 1")
     suspend fun getVerifiedObservationCount(): Int
 
+    @Query(
+        "SELECT * FROM price_observations " +
+            "WHERE productId = :productId AND storeId = :storeId " +
+            "AND observedAt >= :dayStart AND observedAt < :dayEnd " +
+            "LIMIT 1"
+    )
+    suspend fun getObservationForStoreProductDay(
+        productId: String,
+        storeId: String,
+        dayStart: Long,
+        dayEnd: Long
+    ): PriceObservationEntity?
+
     @Query("SELECT COUNT(*) FROM price_observations WHERE productId = :productId")
     suspend fun getObservationCount(productId: String): Int
 }

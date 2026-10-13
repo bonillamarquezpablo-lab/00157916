@@ -48,11 +48,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.PricePoint
 
-enum class ChartRange(val label: String, val takePoints: Int) {
-    DAYS_30("30 Días", 3),
-    DAYS_90("90 Días", 6),
-    MONTHS_6("6 Meses", 8),
-    ALL("Histórico", 100)
+enum class ChartRange(val label: String, val days: Int?) {
+    DAYS_30("30 Días", 30),
+    DAYS_90("90 Días", 90),
+    MONTHS_6("6 Meses", 183),
+    ALL("Histórico", null)
 }
 
 @Composable
@@ -66,10 +66,12 @@ fun PriceHistoryChart(
     var selectedPointIndex by remember { mutableIntStateOf(-1) }
 
     val filteredPoints = remember(priceHistory, selectedRange) {
-        if (priceHistory.isEmpty()) emptyList()
+        val sorted = priceHistory.sortedBy { it.timestamp }
+        val days = selectedRange.days
+        if (days == null) sorted
         else {
-            val count = minOf(priceHistory.size, selectedRange.takePoints)
-            priceHistory.takeLast(count)
+            val cutoff = System.currentTimeMillis() - days.toLong() * 24L * 60L * 60L * 1000L
+            sorted.filter { it.timestamp >= cutoff }
         }
     }
 
@@ -125,7 +127,7 @@ fun PriceHistoryChart(
                         .padding(horizontal = 6.dp, vertical = 3.dp)
                 ) {
                     Text(
-                        text = "Mín: ${String.format("%.0f", athMinPrice)}€",
+                        text = "Mín. observado: ${String.format("%.0f", athMinPrice)}€",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF059669)
@@ -139,7 +141,7 @@ fun PriceHistoryChart(
                         .padding(horizontal = 6.dp, vertical = 3.dp)
                 ) {
                     Text(
-                        text = "Media: ${String.format("%.0f", avg90dPrice)}€",
+                        text = "Media 90 d: ${if (avg90dPrice > 0.0) String.format("%.0f", avg90dPrice) + "€" else "—"}",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -202,7 +204,9 @@ fun PriceHistoryChart(
                 val usableHeight = height - paddingBottom - paddingTop
 
                 val priceRange = (maxPriceInView - minPriceInView).coerceAtLeast(1.0)
-                val pointSpacing = if (filteredPoints.size > 1) width / (filteredPoints.size - 1) else width
+                // A single real observation is plotted in the center until later days
+                // extend it into a time series.
+                val pointSpacing = if (filteredPoints.size > 1) width / (filteredPoints.size - 1) else width / 2f
 
                 // Calculate point coordinates
                 val coords = filteredPoints.mapIndexed { index, pt ->

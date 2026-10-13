@@ -274,13 +274,17 @@ fun ProductDetailSheet(
                                 )
                             } else {
                                 Text(
-                                    text = "Historial en construcción",
+                                    text = if (product.priceHistory.isNotEmpty()) "Primer registro guardado" else "Historial en curso",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = "3 consultas · cobertura de 90 días",
+                                    text = when {
+                                        product.priceHistory.size == 1 -> "1 observación real · la gráfica ya está disponible"
+                                        product.priceHistory.size > 1 -> "${product.priceHistory.size} fechas registradas · evolución en curso"
+                                        else -> "Se necesitan observaciones reales para mostrar la evolución"
+                                    },
                                     fontSize = 10.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -344,8 +348,17 @@ fun ProductDetailSheet(
                 }
             }
 
-            // A single snapshot is a price point, not a useful historical chart.
-            if (product.priceHistory.map { it.timestamp }.distinct().size >= 2) {
+            // priceHistory is built only from verified Room observations. Never draw a
+            // synthetic/demo series or the temporary simulation overlay as real market history.
+            if (product.isPriceVerified) product.priceHistory.minOfOrNull { it.timestamp }?.let { firstObservedAt ->
+                Text(
+                    text = "Historial desde ${SimpleDateFormat("dd MMM yyyy", Locale("es", "ES")).format(Date(firstObservedAt))}",
+                    modifier = Modifier.fillMaxWidth(),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (product.isPriceVerified && product.priceHistory.isNotEmpty()) {
                 PriceHistoryChart(
                     priceHistory = product.priceHistory,
                     athMinPrice = product.athMinPrice,
@@ -353,7 +366,7 @@ fun ProductDetailSheet(
                 )
             } else if (product.isPriceVerified) {
                 Text(
-                    text = "El historial se irá construyendo con nuevas consultas. No se inventan puntos anteriores.",
+                    text = "El historial queda guardado en este dispositivo. La evolución aparecerá cuando haya observaciones de días distintos; no se inventan precios anteriores.",
                     modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

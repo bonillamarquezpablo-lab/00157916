@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,7 +50,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.SerpApiShoppingResult
+import com.example.data.remote.groupOnlineShoppingResults
 import com.example.ui.viewmodel.OnlineSearchProvider
 import com.example.ui.viewmodel.TrackerUiState
 import java.text.NumberFormat
@@ -63,12 +66,15 @@ fun OnlineSearchScreen(
     onAmazonSearch: () -> Unit,
     onAmazonOnlyChange: (Boolean) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenProduct: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val visibleResults = state.onlineSearchResults.filter {
-        !state.onlineSearchAmazonOnly || it.isAmazonOffer
-    }
+    val allGroups = groupOnlineShoppingResults(state.onlineSearchResults)
+    val amazonGroups = groupOnlineShoppingResults(
+        state.onlineSearchResults.filter { it.isAmazonOffer }
+    )
+    val visibleGroups = if (state.onlineSearchAmazonOnly) amazonGroups else allGroups
 
     LazyColumn(
         modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
@@ -87,7 +93,7 @@ fun OnlineSearchScreen(
                         Spacer(Modifier.width(9.dp))
                         Text("Encuentra productos y ofertas", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
                     }
-                    Text("Busca cualquier producto aunque no exista en el catálogo. Consulta Google Shopping o Amazon.es y muestra los precios aquí mismo.")
+                    Text("Busca cualquier producto. Las ofertas válidas se guardan en Mercado; toca una tarjeta para comparar tiendas y consultar el historial real.")
                     OutlinedTextField(
                         value = state.onlineSearchQuery,
                         onValueChange = onQueryChange,
@@ -171,18 +177,18 @@ fun OnlineSearchScreen(
                             FilterChip(
                                 selected = !state.onlineSearchAmazonOnly,
                                 onClick = { onAmazonOnlyChange(false) },
-                                label = { Text("Todos (${state.onlineSearchResults.size})") }
+                                label = { Text("Todos (${allGroups.size})") }
                             )
                             FilterChip(
                                 selected = state.onlineSearchAmazonOnly,
                                 onClick = { onAmazonOnlyChange(true) },
-                                label = { Text("Solo Amazon (${state.onlineSearchResults.count { it.isAmazonOffer }})") }
+                                label = { Text("Solo Amazon (${amazonGroups.size})") }
                             )
                         }
                     }
                 }
             }
-            if (visibleResults.isEmpty()) {
+            if (visibleGroups.isEmpty()) {
                 item {
                     Text(
                         if (state.onlineSearchProvider == OnlineSearchProvider.AMAZON)
@@ -192,10 +198,15 @@ fun OnlineSearchScreen(
                     )
                 }
             }
-            items(visibleResults, key = { "${it.sourceUrl}|${it.price}" }) { result ->
-                ShoppingResultCard(result = result) {
-                    openStoreUrl(context, result.sourceUrl, preferAmazonApp = result.isAmazonOffer)
-                }
+            items(visibleGroups, key = { it.identityKey }) { group ->
+                ShoppingResultCard(
+                    group = group,
+                    onOpenProduct = { onOpenProduct(group.identityKey) },
+                    onOpenBestOffer = {
+                        val best = group.cheapestOffer
+                        openStoreUrl(context, best.sourceUrl, preferAmazonApp = best.isAmazonOffer)
+                    }
+                )
             }
             item {
                 Text(
@@ -209,18 +220,23 @@ fun OnlineSearchScreen(
 }
 
 @Composable
-private fun ShoppingResultCard(result: SerpApiShoppingResult, onOpen: () -> Unit) {
+private fun ShoppingResultCard(
+    group: OnlineProductGroup,
+    onOpenProduct: () -> Unit,
+    onOpenBestOffer: () -> Unit
+) {
+    val best = group.cheapestOffer
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenProduct),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
-                if (result.thumbnailUrl.isNotBlank()) {
+                if (best.thumbnailUrl.isNotBlank()) {
                     AsyncImage(
-                        model = result.thumbnailUrl,
-                        contentDescription = "Imagen de ${result.title}",
+                        model = best.thumbnailUrl,
+                        contentDescription = "Imagen de ${group.title}",
                         modifier = Modifier.size(94.dp).clip(RoundedCornerShape(14.dp)),
                         contentScale = ContentScale.Crop
                     )
@@ -233,41 +249,32 @@ private fun ShoppingResultCard(result: SerpApiShoppingResult, onOpen: () -> Unit
                     }
                 }
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text(result.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    Text(group.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     Text(
-                        NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(result.price),
+                        "Desde " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(group.minPrice),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        if (result.isGoogleShoppingProductLink) {
-                            "Vendedor indicado: ${result.storeName} · enlace de Google Shopping"
-                        } else {
-                            result.storeName
-                        },
+                        "${group.storeCount} tiendas · precio más bajo en ${best.storeName}",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium
                     )
-                    result.rating?.let { rating ->
-                        Text(
-                            "★ ${String.format(Locale("es", "ES"), "%.1f", rating)}" + (result.reviewCount?.let { " · $it opiniones" } ?: ""),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Text(
+                        "${group.offers.size} ofertas · toca para ver tiendas e historial",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
-            if (result.primeEligible) {
-                Text("Entrega Prime disponible", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+            if (best.primeEligible) {
+                Text("Entrega Prime disponible en la oferta más barata", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
             }
-            if (result.delivery.isNotBlank()) {
-                Text(result.delivery, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
-            OutlinedButton(onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = onOpenBestOffer, modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    if (result.isGoogleShoppingProductLink) "Abrir resultado en Google Shopping"
-                    else "Ver oferta en ${result.storeName}"
+                    if (best.isGoogleShoppingProductLink) "Abrir oferta más barata en Google Shopping"
+                    else "Abrir oferta más barata · ${best.storeName}"
                 )
                 Spacer(Modifier.width(8.dp))
                 Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))

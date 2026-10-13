@@ -97,6 +97,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState
     ) { allProducts, state ->
         allProducts
+            // Hide legacy static demo rows from Mercado. Actual searches create verified Room
+            // observations and tracking remains visible even before it has live price history.
+            .filter { product -> product.isPriceVerified || product.isTracked }
             .filter { product ->
                 // Category filter
                 (state.selectedCategory == ProductCategory.ALL || product.category == state.selectedCategory)
@@ -243,10 +246,20 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     repository.allProductsStream.first { products -> products.isNotEmpty() }
                 }
                 val targets = if (testOneProduct) {
-                    // Prefer a real catalog product with a barcode so the one-search test uses
-                    // the strongest available identity instead of a hard-coded demo item.
-                    listOf(allProducts.firstOrNull { product -> !product.ean.isNullOrBlank() }
-                        ?: allProducts.first())
+                    // Prefer a product with a distinctive alphanumeric model identifier and a
+                    // brand. A barcode is useful only if the provider indexes it; querying the
+                    // first EAN-bearing demo item can otherwise produce a false-negative test.
+                    val bestIdentified = allProducts
+                        .filter { it.brand.isNotBlank() }
+                        .maxByOrNull { product ->
+                            val identity = "${product.brand} ${product.title}"
+                            val modelCode = Regex("""\b(?=[a-z0-9-]*[a-z])(?=[a-z0-9-]*\d)[a-z0-9-]{4,}\b""", RegexOption.IGNORE_CASE)
+                                .find(identity)?.value
+                            (if (modelCode != null) 100 else 0) +
+                                (if (!product.ean.isNullOrBlank()) 10 else 0) +
+                                product.title.length.coerceAtMost(80)
+                        }
+                    listOf(bestIdentified ?: allProducts.first())
                 } else {
                     // Spread catalog lookups over multiple manual batches, prioritizing products
                     // never queried or queried longest ago. This keeps one tap within 40 searches
@@ -309,7 +322,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
                 if (quotes.isEmpty()) {
                     val message = if (testOneProduct) {
-                        "La prueba respondió, pero no encontró una oferta que coincidiera de forma segura con ese producto. No se ha cambiado ningún precio y el lote de 40 sigue bloqueado para proteger tu cuota."
+                        val tested = selectedTargets.firstOrNull()?.let { "${it.brand} ${it.title}".trim() }
+                            ?: "el producto seleccionado"
+                        "La prueba de «$tested» respondió, pero SerpApi no devolvió una oferta que coincidiera de forma segura. No se ha cambiado ningún precio ni creado un punto de historial. El lote de 40 sigue bloqueado para proteger tu cuota. Prueba la búsqueda manual con el nombre/modelo exacto."
                     } else {
                         "SerpApi respondió, pero ${batchResult.queriesWithoutMatches} de ${batchResult.requestedQueries - batchResult.failedQueries} consultas no produjeron ofertas con coincidencia segura. No se han cambiado los precios."
                     }
@@ -427,6 +442,23 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(onlineSearchAmazonOnly = onlyAmazon)
     }
 
+    /** Open the Room-backed detail sheet for a grouped online product card. */
+    fun onOnlineProductSelected(identityKey: String) {
+        if (identityKey.isBlank()) return
+        viewModelScope.launch {
+            try {
+                val product = withTimeout(10_000L) {
+                    repository.awaitProductForOnlineIdentity(identityKey)
+                }
+                _uiState.value = _uiState.value.copy(selectedProduct = product)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                showSnackbar("No se ha podido abrir la ficha guardada. Repite la búsqueda para sincronizar el producto.")
+            }
+        }
+    }
+
     fun searchOnlineShopping() = startOnlineSearch(OnlineSearchProvider.GOOGLE_SHOPPING)
 
     fun searchAmazonShopping() = startOnlineSearch(OnlineSearchProvider.AMAZON)
@@ -461,14 +493,20 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 // or the API key was removed after the previous search.
                 val cached = onlineSearchCache.read(provider.name, query)
                 if (cached != null && cached.results.isNotEmpty()) {
-                    val ageMinutes = ((System.currentTimeMillis() - cached.savedAt) / 60_000L).coerceAtLeast(1L)
-                    val base = onlineSearchResultMessage(cached.results, provider)
-                    val cacheNotice = "Resultados guardados hace $ageMinutes min; no se ha consumido otra búsqueda."
-                    _uiState.value = _uiState.value.copy(
-                        onlineSearchResults = cached.results,
-                        onlineSearchStatus = "$base $cacheNotice"
-                    )
-                    return@launch
+                    val safeCachedResults = repository.filterOnlineSearchResults(cached.results, query)
+                    if (safeCachedResults.isNotEmpty()) {
+                        val ageMinutes = ((System.currentTimeMillis() - cached.savedAt) / 60_000L).coerceAtLeast(1L)
+                        val base = onlineSearchResultMessage(safeCachedResults, provider)
+                        val cacheNotice = "Resultados guardados hace $ageMinutes min; no se ha consumido otra búsqueda."
+                        val savedObservations = repository.recordOnlineSearchResults(safeCachedResults, provider.name, query)
+                        val historyNotice = onlineHistoryNotice(savedObservations, safeCachedResults.size)
+                        val filterNotice = onlineFilterNotice(cached.results.size, safeCachedResults.size)
+                        _uiState.value = _uiState.value.copy(
+                            onlineSearchResults = safeCachedResults,
+                            onlineSearchStatus = "$base $cacheNotice$filterNotice $historyNotice"
+                        )
+                        return@launch
+                    }
                 }
 
                 val token = serpApiTokenStore.read()
@@ -505,10 +543,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 } else {
                     null
                 }
-                val results = googleReport?.results
+                val rawResults = googleReport?.results
                     ?: serpApiClient.searchAmazonOnline(token, query)
-                // Empty responses are not useful cache entries: allow a later retry to query
-                // SerpApi again instead of replaying a stale "no results" response for 55 minutes.
+                // Use the same plausibility rules for visible cards, cache entries and Room history.
+                val results = repository.filterOnlineSearchResults(rawResults, query)
+                val savedObservations = if (results.isNotEmpty()) {
+                    repository.recordOnlineSearchResults(results, provider.name, query)
+                } else 0
+                // Cache only filtered offers so a suspicious cached price cannot return later.
                 if (results.isNotEmpty()) onlineSearchCache.write(provider.name, query, results)
                 val base = if (results.isEmpty() && googleReport != null) {
                     googleReport.emptyResultMessage(query)
@@ -518,7 +560,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 // The account endpoint is free; refresh the displayed balance after a live request.
                 val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
                 val quotaNote = quotaAfter?.let { " ${it.quotaSummary()}" }.orEmpty()
-                val message = base + quotaNote
+                val filterNote = onlineFilterNotice(rawResults.size, results.size)
+                val historyNote = if (results.isNotEmpty()) {
+                    " " + onlineHistoryNotice(savedObservations, results.size)
+                } else ""
+                val message = base + quotaNote + filterNote + historyNote
                 _uiState.value = _uiState.value.copy(
                     onlineSearchResults = results,
                     onlineSearchStatus = message
@@ -538,6 +584,18 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             }
         }
     }
+
+    private fun onlineFilterNotice(rawCount: Int, acceptedCount: Int): String =
+        (rawCount - acceptedCount).takeIf { it > 0 }?.let {
+            " Se han omitido $it resultados por precio sospechoso o condición no válida."
+        }.orEmpty()
+
+    private fun onlineHistoryNotice(saved: Int, resultCount: Int): String =
+        if (saved > 0) {
+            "Historial real: $saved nuevas observaciones guardadas en Room; los productos se han incorporado a Mercado."
+        } else {
+            "Los productos válidos siguen guardados en Mercado; no se añadieron puntos nuevos al historial porque ya estaban registrados hoy o no pasaron los filtros ($resultCount resultados revisados)."
+        }
 
     private fun onlineSearchResultMessage(
         results: List<SerpApiShoppingResult>,

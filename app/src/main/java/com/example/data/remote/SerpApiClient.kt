@@ -404,7 +404,11 @@ class SerpApiClient(
                 delivery = delivery,
                 rating = rating,
                 reviewCount = reviewCount,
-                observedAt = observedAt
+                observedAt = observedAt,
+                immersiveProductApiUrl = item.optString("serpapi_immersive_product_api")
+                    .takeIf(::isSerpApiImmersiveProductUrl),
+                condition = item.optString("second_hand_condition")
+                    .takeIf { it.isNotBlank() && it != "null" }.orEmpty()
             )
         }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
 
@@ -512,6 +516,52 @@ class SerpApiClient(
             failedQueries = failedQueries,
             queriesWithoutMatches = queriesWithoutMatches
         )
+    }
+
+    /**
+     * Resolve a Google Shopping result to the specific retailer offer when the result payload
+     * provides SerpApi's Google Immersive Product endpoint. This is deliberately called on tap,
+     * not for every card, because a detail lookup can consume another provider search credit.
+     */
+    suspend fun resolveRetailerUrl(
+        token: String,
+        result: SerpApiShoppingResult
+    ): String? = withContext(Dispatchers.IO) {
+        val apiKey = token.trim()
+        require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
+        val endpoint = result.immersiveProductApiUrl
+            ?.let { runCatching { it.toHttpUrl() }.getOrNull() }
+            ?: return@withContext null
+        if (!isSerpApiImmersiveUrl(endpoint)) return@withContext null
+
+        val requestUrl = endpoint.newBuilder()
+            .setQueryParameter("api_key", apiKey)
+            .setQueryParameter("more_stores", "1")
+            .build()
+        val root = executeJson(requestUrl)
+        val stores = root.optJSONObject("product_results")?.optJSONArray("stores")
+            ?: return@withContext null
+        data class DirectOffer(
+            val name: String,
+            val url: String,
+            val price: Double?
+        )
+        val offers = (0 until stores.length()).mapNotNull { index ->
+            val store = stores.optJSONObject(index) ?: return@mapNotNull null
+            val name = store.optString("name").trim()
+                .takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
+            val url = store.optString("link")
+                .takeIf { isHttpsUrl(it) && !isGoogleDomainUrl(it) } ?: return@mapNotNull null
+            val price = store.opt("extracted_price")
+                ?.takeIf { it !is JSONObject && it !is JSONArray }
+                ?.toString()?.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 }
+                ?: parsePrice(store.optString("price"))
+            DirectOffer(name = name, url = url, price = price)
+        }
+        val matchingMerchant = offers.filter { merchantNamesMatch(result.storeName, it.name) }
+        matchingMerchant.minByOrNull { offer ->
+            if (offer.price != null) kotlin.math.abs(offer.price - result.price) else Double.MAX_VALUE
+        }?.url
     }
 
     internal fun parseQuotes(
@@ -665,6 +715,39 @@ class SerpApiClient(
             else -> numeric
         }
         return numeric.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 }
+    }
+
+    private fun isSerpApiImmersiveProductUrl(value: String): Boolean = runCatching {
+        isSerpApiImmersiveUrl(value.toHttpUrl())
+    }.getOrDefault(false)
+
+    private fun isSerpApiImmersiveUrl(url: HttpUrl): Boolean =
+        url.isHttps &&
+            url.host.equals("serpapi.com", ignoreCase = true) &&
+            url.encodedPath in setOf("/search", "/search.json") &&
+            url.queryParameter("engine") == "google_immersive_product" &&
+            !url.queryParameter("page_token").isNullOrBlank()
+
+    private fun merchantNamesMatch(first: String, second: String): Boolean {
+        fun canonical(raw: String): String {
+            val value = normalize(raw)
+                .replace(Regex("\\b(www|com|es|espana|online|tienda|store|seller)\\b"), " ")
+                .trim()
+                .replace(Regex("\\s+"), " ")
+            return when {
+                value.startsWith("mi ") || value == "mi" || "xiaomi" in value -> "xiaomi"
+                "amazon" in value -> "amazon"
+                "pccomponentes" in value -> "pccomponentes"
+                "media markt" in value || "mediamarkt" in value -> "mediamarkt"
+                "el corte ingles" in value -> "el corte ingles"
+                "cash converters" in value || "realcash" in value -> "cash converters"
+                else -> value
+            }
+        }
+        val left = canonical(first)
+        val right = canonical(second)
+        return left.isNotBlank() && right.isNotBlank() &&
+            (left == right || left.contains(right) || right.contains(left))
     }
 
     private fun isGoogleDomainUrl(value: String): Boolean = runCatching {

@@ -18,13 +18,13 @@ private val DarkColorScheme = darkColorScheme(
     onPrimaryContainer = Color.White,
     secondary = CyanAccent,
     onSecondary = DeepNavy,
-    background = DarkBg,
+    background = OledBlack,
     onBackground = DarkOnSurface,
-    surface = DarkSurface,
+    surface = OledSurface,
     onSurface = DarkOnSurface,
-    surfaceVariant = DarkSurfaceVariant,
+    surfaceVariant = OledSurfaceVariant,
     onSurfaceVariant = Color(0xFF94A3B8),
-    outline = DarkOutline,
+    outline = OledHairline,
     error = DangerRed,
     onError = Color.White
 )

@@ -73,7 +73,7 @@ fun onlineProductIdentityKey(title: String): String {
     val normalized = java.text.Normalizer.normalize(
         title.lowercase(Locale.ROOT),
         java.text.Normalizer.Form.NFD
-    ).replace(Regex("\p{Mn}+"), "")
+    ).replace(Regex("\\p{Mn}+"), "")
         .replace(Regex("""compatible (con|para) .*"""), " ")
         .replace(Regex("""\b\d+(?:[.,]\d+)?\s*(?:gb|tb|mah|mp|hz|w|mm|cm|inch|pulgadas|pulgada)\b"""), " ")
         .replace(Regex("""\b(?:4g|5g|wifi|wi-fi|bluetooth|nfc)\b"""), " ")

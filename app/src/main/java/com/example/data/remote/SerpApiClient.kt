@@ -64,7 +64,7 @@ data class SerpApiShoppingSearchReport(
         val reasons = mutableListOf<String>()
         if (rejectedAsIrrelevant > 0) reasons += "$rejectedAsIrrelevant no coincidían suficientemente con la búsqueda"
         if (rejectedForPriceOrCurrency > 0) reasons += "$rejectedForPriceOrCurrency no tenían un precio en euros verificable"
-        if (rejectedForLink > 0) reasons += "$rejectedForLink no tenían un enlace HTTPS válido"
+        if (rejectedForLink > 0) reasons += "$rejectedForLink no tenían un enlace HTTPS directo a la ficha del comercio"
         if (rejectedOther > 0) reasons += "$rejectedOther estaban incompletos"
         val detail = reasons.joinToString("; ").ifBlank { "ninguno pasó los filtros de seguridad" }
         val fieldDiagnostic = if (

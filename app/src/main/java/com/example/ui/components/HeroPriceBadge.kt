@@ -42,7 +42,7 @@ fun HeroPriceBadge(
 ) {
     val palette = paletteFor(state.type)
     Surface(
-        modifier = modifier.testTag("hero_price_badge_\u0024{state.type.name}"),
+        modifier = modifier.testTag("hero_price_badge_${state.type.name}"),
         shape = RoundedCornerShape(50),
         color = palette.background,
         contentColor = palette.foreground,

@@ -267,7 +267,7 @@ class ProductRepository(
     private fun modelCode(title: String): String? = modelCodes(title).firstOrNull()
 
     private fun modelCodes(title: String): Set<String> =
-        Regex("""(?i)\\b[a-z0-9-]{4,}\\b""")
+        Regex("""(?i)\b[a-z0-9-]{4,}\b""")
             .findAll(title)
             .map { it.value.lowercase(Locale.ROOT).replace("-", "") }
             .filter { value -> value.any(Char::isLetter) && value.any(Char::isDigit) }
@@ -288,6 +288,9 @@ class ProductRepository(
                 val knownHost = normalizeHost(store.domain.substringBefore('/'))
                 knownHost.isNotBlank() && (host == knownHost || host.endsWith(".$knownHost"))
             }?.let { return it.id }
+            // For retailers not in the bundled store list, a stable URL host is a better
+            // deduplication key than the provider's inconsistent display name.
+            return stableOnlineId("online_store_", host)
         }
 
         val normalizedName = normalizedProductTitle(storeName)

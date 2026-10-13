@@ -20,6 +20,15 @@ data class SerpApiShoppingResult(
     /** Whether Amazon reports Prime delivery eligibility; not a personalized account price. */
     val primeEligible: Boolean = false
 ) {
+    /** True when the accepted URL opens the Google Shopping product page rather than the seller directly. */
+    val isGoogleShoppingProductLink: Boolean
+        get() {
+            val uri = runCatching { URI(sourceUrl) }.getOrNull() ?: return false
+            val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+            return (host == "google.com" || host.endsWith(".google.com")) &&
+                uri.path.orEmpty().startsWith("/shopping/product/")
+        }
+
     val isAmazonOffer: Boolean
         get() {
             val host = runCatching {

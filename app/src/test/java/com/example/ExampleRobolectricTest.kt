@@ -683,23 +683,35 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `missing shopping links report the received result field names`() {
-        val report = com.example.data.remote.SerpApiShoppingSearchReport(
-            results = emptyList(),
-            rawResultCount = 2,
-            rejectedAsIrrelevant = 0,
-            rejectedForPriceOrCurrency = 0,
-            rejectedForLink = 2,
-            rejectedOther = 0,
-            firstResultFields = "title, price, link"
+    fun `missing shopping links receive a Google Shopping fallback instead of being rejected`() {
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "search_metadata": {"status": "Success"},
+                  "shopping_results": [
+                    {
+                      "title": "Sony WH-1000XM5 Wireless Headphones",
+                      "price": "229,99 €",
+                      "extracted_price": 229.99,
+                      "source": "Fnac"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "Sony WH-1000XM5",
+            observedAt = 123L
         )
 
-        assertTrue(
-            report.emptyResultMessage("Sony WH-1000XM5")
-                .contains("Campos recibidos: title, price, link")
-        )
+        assertEquals(1, report.results.size)
+        val result = report.results.single()
+        assertTrue(result.sourceUrl.startsWith("https://www.google.com/search?"))
+        assertEquals("Google Shopping", result.linkType)
+        assertEquals(0, report.rejectedForLink)
     }
 
+    @Test
     @Test
     fun `Google search URL is labelled as an indirect Shopping link`() {
         val result = com.example.data.remote.SerpApiShoppingResult(

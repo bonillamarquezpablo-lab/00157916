@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TrackedProductEntity::class,
         PriceObservationEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -66,6 +66,40 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Stores the source title, merchant name and provider for real online search observations.
+         * Existing verified rows are enriched from the existing catalogue without manufacturing
+         * timestamps or prices.
+         */
+        val MIGRATION_4_5: Migration = object : Migration(4, 5) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE `price_observations` ADD COLUMN `productTitle` TEXT NOT NULL DEFAULT ''"
+                )
+                database.execSQL(
+                    "ALTER TABLE `price_observations` ADD COLUMN `storeName` TEXT NOT NULL DEFAULT ''"
+                )
+                database.execSQL(
+                    "ALTER TABLE `price_observations` ADD COLUMN `sourceType` TEXT NOT NULL DEFAULT 'Google Shopping'"
+                )
+                database.execSQL(
+                    "UPDATE price_observations SET productTitle = COALESCE(" +
+                        "(SELECT title FROM products WHERE products.id = price_observations.productId), '') " +
+                        "WHERE productTitle = ''"
+                )
+                database.execSQL(
+                    "UPDATE price_observations SET storeName = COALESCE(" +
+                        "(SELECT name FROM spanish_stores WHERE spanish_stores.id = price_observations.storeId), storeId) " +
+                        "WHERE storeName = ''"
+                )
+                database.execSQL(
+                    "UPDATE price_observations SET sourceType = CASE " +
+                        "WHEN lower(sourceName) LIKE '%amazon%' THEN 'Amazon.es' " +
+                        "ELSE 'Google Shopping' END"
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -76,7 +110,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "minimo_spanish_market.db"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                 INSTANCE = instance
                 instance

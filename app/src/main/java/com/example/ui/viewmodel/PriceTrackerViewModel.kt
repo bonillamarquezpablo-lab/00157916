@@ -301,6 +301,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }.apply()
                 }
                 val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
+                if (quotaAfter != null) {
+                    _uiState.value = _uiState.value.copy(serpApiAccountStatus = quotaMessage(quotaAfter))
+                }
                 val quotaNote = quotaAfter?.let { " ${it.quotaSummary()}" }.orEmpty()
                 val attemptedAt = System.currentTimeMillis()
                 priceRefreshPreferences.edit().apply {

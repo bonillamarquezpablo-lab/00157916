@@ -21,7 +21,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddAlert
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -50,7 +49,6 @@ fun AlertsScreen(
     onProductClick: (Product) -> Unit,
     onToggleTrack: (Product) -> Unit,
     onEditAlert: (Product) -> Unit,
-    onSimulatePriceDrop: (String) -> Unit,
     onNavigateToMarket: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -221,18 +219,6 @@ fun AlertsScreen(
                                 )
                             }
 
-                            // Simulation tool
-                            IconButton(
-                                onClick = { onSimulatePriceDrop(product.id) },
-                                modifier = Modifier.size(30.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.FlashOn,
-                                    contentDescription = "Simulación de demostración; no es un precio real",
-                                    tint = Color(0xFFD97706),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
                         }
                     }
                 }

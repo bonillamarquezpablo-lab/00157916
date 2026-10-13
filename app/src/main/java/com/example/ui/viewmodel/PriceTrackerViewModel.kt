@@ -197,6 +197,15 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         else -> quotaMessage(info)
     }
 
+    private fun accountStatusBlockMessage(info: SerpApiAccountInfo): String? {
+        val status = info.accountStatus.trim()
+        return if (status.isNotEmpty() && !status.equals("active", ignoreCase = true)) {
+            "La cuenta SerpApi figura como «$status». No se ha realizado ninguna búsqueda ni gastado cuota."
+        } else {
+            null
+        }
+    }
+
     /**
      * Run a manual price refresh. A single-product test is offered first so the user can verify
      * the provider configuration before spending credits on the full catalogue.
@@ -235,17 +244,23 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             .thenBy { it.title.lowercase() }
                     ).take(40)
                 }
+                // Account validation is free. Never spend a product search if the account
+                // endpoint cannot confirm that the key works and quota is available.
                 val accountInfo = readAccountInfo(token)
-                if (accountInfo == null && !testOneProduct) {
-                    val message = "No hemos podido comprobar el saldo de SerpApi. Para evitar gastar consultas sin control, prueba primero con 1 producto o vuelve a intentarlo cuando haya conexión."
+                if (accountInfo == null) {
+                    val message = "No se ha podido validar la cuenta SerpApi. No se ha lanzado ninguna búsqueda ni gastado cuota. Comprueba la conexión e inténtalo de nuevo."
                     _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
                     showSnackbar(message)
                     return@launch
                 }
-                val capacity = accountInfo?.let(::accountCapacity) ?: 1
+                accountStatusBlockMessage(accountInfo)?.let { message ->
+                    _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+                val capacity = accountCapacity(accountInfo)
                 if (capacity <= 0) {
-                    val message = accountInfo?.let(::quotaBlockMessage)
-                        ?: "SerpApi no tiene consultas disponibles en este momento."
+                    val message = quotaBlockMessage(accountInfo)
                     _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
                     showSnackbar(message)
                     return@launch
@@ -407,8 +422,20 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     return@launch
                 }
 
+                // Validate the key and quota before the paid search request.
                 val accountInfo = readAccountInfo(token)
-                if (accountInfo != null && accountCapacity(accountInfo) <= 0) {
+                if (accountInfo == null) {
+                    val message = "No se ha podido validar la cuenta SerpApi. No se ha lanzado ninguna búsqueda ni gastado cuota. Comprueba la conexión e inténtalo de nuevo."
+                    _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+                accountStatusBlockMessage(accountInfo)?.let { message ->
+                    _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+                if (accountCapacity(accountInfo) <= 0) {
                     val message = quotaBlockMessage(accountInfo)
                     _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
                     showSnackbar(message)

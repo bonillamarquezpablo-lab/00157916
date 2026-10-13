@@ -77,14 +77,17 @@ fun onlineProductIdentityKey(title: String): String {
         .replace(Regex("""[^a-z0-9]+"""), " ")
         .trim()
         .replace(Regex("""\s+"""), " ")
+    val productNameNormalized = rawNormalized
+        .substringBefore(" compatible con ")
+        .substringBefore(" compatible para ")
     val memorySpecs = Regex("""\b\d+\s?(?:gb|tb)\b""")
-        .findAll(rawNormalized)
+        .findAll(productNameNormalized)
         .map { it.value.replace(" ", "") }
         .distinct()
         .sorted()
         .joinToString("+")
     val variants = setOf("pro", "max", "plus", "ultra", "fe", "lite", "mini", "fold", "flip", "classic", "edge")
-        .filter { Regex("""\b""" + it + """\b""").containsMatchIn(rawNormalized) }
+        .filter { Regex("""\b""" + it + """\b""").containsMatchIn(productNameNormalized) }
         .distinct()
         .sorted()
         .joinToString("+")
@@ -93,7 +96,7 @@ fun onlineProductIdentityKey(title: String): String {
         "carcasa", "case", "cover", "protector", "cable", "cargador", "adaptador", "hub",
         "filtro", "recambio", "repuesto", "soporte"
     ).firstOrNull { type ->
-        Regex("""\b""" + Regex.escape(type) + """\b""").containsMatchIn(rawNormalized)
+        Regex("""\b""" + Regex.escape(type) + """\b""").containsMatchIn(productNameNormalized)
     }.orEmpty()
 
     val normalized = rawNormalized

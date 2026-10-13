@@ -95,7 +95,7 @@ fun PriceHistoryChart(
             .fillMaxWidth()
             .clip(FloatingSurfaceShape)
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f))
-            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.55f), FloatingSurfaceShape)
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), FloatingSurfaceShape)
             .padding(14.dp)
             .testTag("price_history_chart_container")
     ) {

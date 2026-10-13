@@ -49,10 +49,9 @@ class ProductRepository(
     private val priceObservationDao: PriceObservationDao,
     externalScope: CoroutineScope = CoroutineScope(Dispatchers.IO)
 ) {
-    // Room is the catalogue source of truth. This cache is only for URL analysis and explicitly
-    // labelled local demo simulations; it does not replace the persisted product catalogue.
+    // Room is the catalogue source of truth; only persisted products and verified observations
+    // may affect the product UI or its price history.
     private val _latestProducts = MutableStateFlow<List<Product>>(emptyList())
-    private val _simulationOverrides = MutableStateFlow<Map<String, Product>>(emptyMap())
 
     init {
         // Store metadata is bundled; product rows are not. The user's online searches populate
@@ -74,14 +73,13 @@ class ProductRepository(
     }
 
     // Persisted Room rows + verified observations + local tracking are the canonical stream.
-    // A simulation is a temporary, clearly unverified overlay and never becomes a recorded price.
+    // No demo or simulated price points are composed into this flow.
     val allProductsStream: Flow<List<Product>> = combine(
         productDao.getAllProducts(),
         storeDao.getAllStores(),
         trackedDao.getAllTracked(),
-        priceObservationDao.observeAllVerified(),
-        _simulationOverrides
-    ) { productEntities, storeEntities, trackedEntities, observations, simulations ->
+        priceObservationDao.observeAllVerified()
+    ) { productEntities, storeEntities, trackedEntities, observations ->
         val stores = storeEntities.map { it.toDomainStore() }.ifEmpty { Store.ALL_STORES }
         val trackingMap = trackedEntities.associateBy { it.productId }
         val observationsByProduct = observations.groupBy { it.productId }
@@ -91,9 +89,8 @@ class ProductRepository(
                 stores = stores,
                 verifiedObservations = observationsByProduct[entity.id].orEmpty()
             )
-            val shownProduct = simulations[product.id] ?: product
             val trackingInfo = trackingMap[product.id]
-            shownProduct.copy(
+            product.copy(
                 isTracked = trackingInfo != null,
                 alertTargetPrice = trackingInfo?.targetAlertPrice
             )
@@ -628,28 +625,6 @@ class ProductRepository(
                 )
             )
         }
-    }
-
-    fun simulatePriceDrop(productId: String, newLowPrice: Double? = null) {
-        val source = _latestProducts.value.firstOrNull { it.id == productId } ?: return
-        val droppedPrice = newLowPrice ?: (source.athMinPrice * 0.95)
-        val newPoint = PricePoint(
-            timestamp = System.currentTimeMillis(),
-            dateLabel = "Simulación",
-            price = droppedPrice,
-            storeName = source.currentStore.name,
-            eventLabel = "SIMULACIÓN DE DEMOSTRACIÓN — NO ES UN PRECIO REAL"
-        )
-        _simulationOverrides.value = _simulationOverrides.value + (
-            productId to source.copy(
-                currentPrice = droppedPrice,
-                athMinPrice = minOf(source.athMinPrice, droppedPrice),
-                athMinDate = "Simulación de demostración",
-                athMinStore = source.currentStore.name,
-                priceHistory = source.priceHistory + newPoint,
-                isPriceVerified = false
-            )
-        )
     }
 
     fun analyzeSpanishUrlOrQuery(input: String): UrlAnalysisResult {

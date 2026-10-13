@@ -222,9 +222,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 return@launch
             }
 
-            val tokenFingerprint = tokenFingerprint(token)
+            val currentTokenFingerprint = tokenFingerprint(token)
             if (!testOneProduct &&
-                priceRefreshPreferences.getString("single_product_test_fingerprint", null) != tokenFingerprint
+                priceRefreshPreferences.getString("single_product_test_fingerprint", null) != currentTokenFingerprint
             ) {
                 val message = "Por seguridad, primero usa «Probar con 1 producto» y confirma que se guarda una oferta. No se ha lanzado el lote de 40 búsquedas."
                 _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
@@ -296,7 +296,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 val quotes = batchResult.quotes
                 if (testOneProduct) {
                     priceRefreshPreferences.edit().apply {
-                        if (quotes.isNotEmpty()) putString("single_product_test_fingerprint", tokenFingerprint)
+                        if (quotes.isNotEmpty()) putString("single_product_test_fingerprint", currentTokenFingerprint)
                         else remove("single_product_test_fingerprint")
                     }.apply()
                 }
@@ -357,8 +357,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     private suspend fun refreshAccountStatusAfterFailure(token: String) {
         // The account endpoint is free. Refresh displayed quota even when product queries fail,
         // so the UI never leaves a stale pre-batch balance after an unsuccessful batch.
-        val info = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull() ?: return
-        _uiState.value = _uiState.value.copy(serpApiAccountStatus = quotaMessage(info))
+        val info = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
+        val status = info?.let(::quotaMessage)
+            ?: "No se pudo actualizar el saldo tras el fallo; la cifra anterior puede estar desactualizada."
+        _uiState.value = _uiState.value.copy(serpApiAccountStatus = status)
     }
 
     private fun tokenFingerprint(token: String): String {

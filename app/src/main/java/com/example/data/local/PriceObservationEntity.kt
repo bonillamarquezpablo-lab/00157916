@@ -29,5 +29,11 @@ data class PriceObservationEntity(
     val sourceUrl: String,
     val sourceName: String,
     val isVerified: Boolean = false,
-    val verificationNote: String? = null
+    val verificationNote: String? = null,
+    /** Full title captured from the live search result; blank only for legacy rows. */
+    val productTitle: String = "",
+    /** Merchant presented by the provider, kept separate from the provider name. */
+    val storeName: String = "",
+    /** Provider that yielded this observation: Google Shopping or Amazon.es. */
+    val sourceType: String = "Google Shopping"
 )

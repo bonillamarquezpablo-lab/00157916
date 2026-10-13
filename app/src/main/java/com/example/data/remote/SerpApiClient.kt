@@ -689,6 +689,28 @@ class SerpApiClient(
         val found = tokens(returned)
         if (wanted.isEmpty() || found.isEmpty()) return false
 
+        // If the query identifies a model, require compatible model evidence before allowing
+        // fuzzy token overlap. Otherwise a search for Redmi 17 could accidentally attach a Redmi A5.
+        val wantedModels = modelMarkers(requested)
+        val foundModels = modelMarkers(returned)
+        if (wantedModels.isNotEmpty() &&
+            (foundModels.isEmpty() || wantedModels.intersect(foundModels).isEmpty())
+        ) return false
+
+        val variantsWanted = variantMarkers(requested)
+        val variantsFound = variantMarkers(returned)
+        if (variantsWanted.isNotEmpty() &&
+            variantsFound.isNotEmpty() &&
+            variantsWanted.intersect(variantsFound).isEmpty()
+        ) return false
+
+        // If both sides expose storage/RAM configurations, do not cross-match those variants.
+        val memoryWanted = memoryMarkers(requested)
+        val memoryFound = memoryMarkers(returned)
+        if (memoryWanted.isNotEmpty() && memoryFound.isNotEmpty() &&
+            memoryWanted.intersect(memoryFound).isEmpty()
+        ) return false
+
         val containsModelCode = wanted.any { token -> token.length >= 4 && token.any(Char::isDigit) && token.any(Char::isLetter) }
 
         // Permit a small number of spelling mistakes in longer brand/product tokens, without
@@ -762,6 +784,38 @@ class SerpApiClient(
             """\b(impreso con (su|el|tu) logotipo|con (su|tu) logo|regalo promocional|articulo publicitario|merchandising personalizado|personalizado con logo|para publicidad|precio por mayor|lote promocional)\b"""
         ).containsMatchIn(normalized)
     }
+
+    private fun modelMarkers(value: String): Set<String> {
+        val words = normalize(value).split(' ').filter { it.isNotBlank() }
+        val markers = linkedSetOf<String>()
+        val families = setOf("redmi", "poco", "iphone", "pixel", "galaxy", "wh", "dyson", "roborock", "playstation", "xbox")
+        for (index in words.indices) {
+            val word = words[index]
+            if (word in families) {
+                words.getOrNull(index + 1)?.let { next ->
+                    if (Regex("""^[a-z]{0,3}\d+[a-z0-9]*$""").matches(next) &&
+                        !Regex("""^\d+(gb|tb|mah|mp|hz|w|mm|cm|g)$""").matches(next)
+                    ) markers += word + next
+                }
+            }
+            if (Regex("""^[a-z]{1,8}\d[a-z0-9]{1,12}$""").matches(word) &&
+                word !in setOf("usb20", "usb30", "usb32", "wifi6", "wifi7", "typec", "m3") &&
+                !Regex("""^\d+(gb|tb|mah|mp|hz|w|mm|cm|g)$""").matches(word)
+            ) markers += word
+        }
+        return markers
+    }
+
+    private fun variantMarkers(value: String): Set<String> {
+        val words = tokens(value)
+        return words.intersect(setOf("pro", "max", "plus", "ultra", "fe", "lite", "mini", "fold", "flip", "classic", "edge"))
+    }
+
+    private fun memoryMarkers(value: String): Set<String> =
+        Regex("""\b(\d{1,4})\s?(gb|tb)\b""")
+            .findAll(normalize(value))
+            .map { it.groupValues[1] + it.groupValues[2] }
+            .toSet()
 
     private fun tokens(value: String): Set<String> =
         normalize(value)

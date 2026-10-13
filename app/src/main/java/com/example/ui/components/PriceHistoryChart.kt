@@ -113,7 +113,7 @@ fun PriceHistoryChart(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Registrado en mercado español sin sesgo",
+                    text = "Consultas registradas por fuente y fecha",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

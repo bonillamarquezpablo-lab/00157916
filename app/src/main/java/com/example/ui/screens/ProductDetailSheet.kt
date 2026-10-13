@@ -354,7 +354,7 @@ fun ProductDetailSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            if (product.isPriceVerified && product.priceHistory.map { it.timestamp }.distinct().size >= 2) {
+            if (product.isPriceVerified && product.priceHistory.size >= 2) {
                 PriceHistoryChart(
                     priceHistory = product.priceHistory,
                     athMinPrice = product.athMinPrice,

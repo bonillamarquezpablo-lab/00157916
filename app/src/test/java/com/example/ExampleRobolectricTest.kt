@@ -86,6 +86,22 @@ class ExampleRobolectricTest {
             assertTrue("Unverified product should not display fake history", preserved.priceHistory.isEmpty())
             assertFalse("New catalogue should not seed static demo rows", products.any { it.id == "demo_galaxy_s26_ultra" })
 
+            // Legacy rows from before 13 October 2026 may remain in Room, but must not
+            // contribute to current price or history even if they were marked verified.
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "sony_wh1000xm5",
+                    storeId = "amazon_es",
+                    price = 179.99,
+                    observedAt = 1_780_000_000_000L,
+                    sourceUrl = "https://www.amazon.es/dp/LEGACY",
+                    sourceName = "Legacy unit-test source",
+                    isVerified = true,
+                    productTitle = "Sony WH-1000XM5 Wireless Headphones",
+                    storeName = "Amazon.es",
+                    sourceType = "Google Shopping"
+                )
+            )
             database.priceObservationDao().insert(
                 PriceObservationEntity(
                     productId = "sony_wh1000xm5",
@@ -94,7 +110,10 @@ class ExampleRobolectricTest {
                     observedAt = System.currentTimeMillis(),
                     sourceUrl = "https://www.amazon.es/dp/TEST",
                     sourceName = "Authorized unit-test source",
-                    isVerified = true
+                    isVerified = true,
+                    productTitle = "Sony WH-1000XM5 Wireless Headphones",
+                    storeName = "Amazon.es",
+                    sourceType = "Google Shopping"
                 )
             )
             database.priceObservationDao().insert(
@@ -118,8 +137,9 @@ class ExampleRobolectricTest {
             val sourceBackedSony = sourceBackedProducts.first { it.id == "sony_wh1000xm5" }
             assertEquals(222.50, sourceBackedSony.currentPrice, 0.001)
             assertEquals(222.50, sourceBackedSony.athMinPrice, 0.001)
-            assertEquals(1, sourceBackedSony.priceHistory.size)
+            assertEquals("The legacy verified row must not appear in current history", 1, sourceBackedSony.priceHistory.size)
             assertEquals(222.50, sourceBackedSony.priceHistory.single().price, 0.001)
+            assertFalse(sourceBackedSony.priceHistory.any { it.price == 179.99 })
         } finally {
             database.close()
         }

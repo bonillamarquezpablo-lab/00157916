@@ -114,6 +114,49 @@ class SerpApiAmazonSearchTest {
     }
 
     @Test
+    fun rejectsUsedAndRefurbishedItemsEvenWhenConditionIsOnlyInMetadata() {
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "organic_results": [
+                {
+                  "title": "Apple MacBook Air M3 16GB 256GB",
+                  "price": "1.199,00 €",
+                  "extracted_price": 1199.0,
+                  "link": "https://www.amazon.es/dp/NEW-MACBOOK",
+                  "condition": "new"
+                },
+                {
+                  "title": "Apple MacBook Air M3 16GB 256GB",
+                  "price": "749,00 €",
+                  "extracted_price": 749.0,
+                  "link": "https://www.amazon.es/dp/USED-MACBOOK",
+                  "condition": "used"
+                },
+                {
+                  "title": "Apple MacBook Air M3 16GB 256GB",
+                  "price": "899,00 €",
+                  "extracted_price": 899.0,
+                  "link": "https://www.amazon.es/dp/REFURB-MACBOOK",
+                  "condition_description": "Refurbished - Like New"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val results = SerpApiClient().parseAmazonResults(
+            payload,
+            query = "Apple MacBook Air M3 16GB 256GB",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals("Only a new retail offer should pass the condition filter", 1, results.size)
+        assertTrue(results.single().sourceUrl.endsWith("NEW-MACBOOK"))
+    }
+
+    @Test
     fun acceptsStructuredShoppingPricesWithoutEuroLabelAndRejectsForeignCurrency() {
         val payload = JSONObject(
             """

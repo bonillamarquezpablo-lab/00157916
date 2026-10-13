@@ -489,15 +489,22 @@ class ExampleRobolectricTest {
 
         val results = client.parseShoppingResults(payload, observedAt = 123L)
 
-        assertEquals(2, results.size)
-        assertEquals("PcComponentes", results[0].storeName)
-        assertEquals(79.99, results[0].price, 0.001)
+        assertEquals(3, results.size)
+        assertEquals("Unsafe HTTP", results[0].storeName)
+        assertEquals(49.99, results[0].price, 0.001)
         assertTrue(results[0].isGoogleShoppingProductLink)
-        assertEquals("Amazon.es", results[1].storeName)
-        assertTrue(!results[1].isGoogleShoppingProductLink)
-        assertTrue(results[1].isAmazonOffer)
-        assertEquals(123L, results[1].observedAt)
-        assertEquals("https://images.example.test/sony.jpg", results[1].thumbnailUrl)
+        assertTrue(results[0].sourceUrl.startsWith("https://www.google.com/search?"))
+        assertTrue(results[0].sourceUrl.contains("tbm=shop"))
+        assertTrue(results[0].sourceUrl.contains("q=Auriculares%20Sony%20WH-1000XM5"))
+
+        assertEquals("PcComponentes", results[1].storeName)
+        assertEquals(79.99, results[1].price, 0.001)
+        assertTrue(results[1].isGoogleShoppingProductLink)
+        assertEquals("Amazon.es", results[2].storeName)
+        assertTrue(!results[2].isGoogleShoppingProductLink)
+        assertTrue(results[2].isAmazonOffer)
+        assertEquals(123L, results[2].observedAt)
+        assertEquals("https://images.example.test/sony.jpg", results[2].thumbnailUrl)
     }
 
     @Test

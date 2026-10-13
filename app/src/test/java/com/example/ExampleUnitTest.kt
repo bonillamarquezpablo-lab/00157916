@@ -123,6 +123,16 @@ class ExampleUnitTest {
         val stale = oneSnapshot.copy(priceObservedAt = now - 2L * day)
         assertFalse("A two-day-old observation must not be described as fresh", stale.isPriceFresh)
         assertTrue("Stale snapshot should display an explicit age", stale.priceFreshnessLabel.contains("2 días"))
+        val staleWithLongHistory = enoughHistory.copy(priceObservedAt = now - 2L * day)
+        assertEquals(
+            "An old current quote must not carry a live deal verdict even if historical samples exist",
+            VerdictLevel.UNVERIFIED,
+            staleWithLongHistory.verdict.level
+        )
+        assertFalse(
+            "A stale quote must not display the current minimum badge",
+            staleWithLongHistory.isAtAth
+        )
     }
 
     @Test

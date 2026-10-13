@@ -40,6 +40,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,6 +63,7 @@ private const val DEFAULT_PROFILE_NAME = "Usuario principal"
 fun SettingsScreen(
     storeCount: Int,
     isRefreshingPrices: Boolean,
+    isTestingSingleProduct: Boolean,
     priceRefreshStatus: String?,
     onRefreshPrices: (testOneProduct: Boolean) -> Unit,
     isCheckingSerpApiAccount: Boolean,
@@ -85,6 +87,17 @@ fun SettingsScreen(
     var serpApiKeyInput by remember { mutableStateOf("") }
     var serpApiKeyConfigured by remember { mutableStateOf(serpApiTokenStore.isConfigured()) }
     var serpApiKeyMessage by remember { mutableStateOf<String?>(null) }
+
+    // A failed decrypt can clear only a confirmed-invalid token. Keep the Settings badge in sync
+    // with storage once the ViewModel surfaces that read error.
+    LaunchedEffect(priceRefreshStatus, serpApiAccountStatus) {
+        if (
+            priceRefreshStatus?.contains("Vuelve a introducir tu clave", ignoreCase = true) == true ||
+            serpApiAccountStatus?.contains("Vuelve a introducir tu clave", ignoreCase = true) == true
+        ) {
+            serpApiKeyConfigured = serpApiTokenStore.isConfigured()
+        }
+    }
 
     Column(
         modifier = modifier
@@ -359,20 +372,28 @@ fun SettingsScreen(
                     enabled = serpApiKeyConfigured && !isRefreshingPrices,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    if (isRefreshingPrices) {
+                    if (isTestingSingleProduct) {
                         CircularProgressIndicator(modifier = Modifier.size(17.dp), strokeWidth = 2.dp)
                     } else {
                         Icon(Icons.Default.CloudDownload, null, Modifier.size(17.dp))
                     }
-                    Text("  Probar con 1 producto (1 búsqueda)")
+                    Text(if (isTestingSingleProduct) "  Probando 1 producto…" else "  Probar con 1 producto (1 búsqueda)")
                 }
                 Button(
                     onClick = { onRefreshPrices(false) },
                     enabled = serpApiKeyConfigured && !isRefreshingPrices,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(Icons.Default.CloudDownload, null, Modifier.size(17.dp))
-                    Text("  Actualizar hasta 40 productos")
+                    if (isRefreshingPrices && !isTestingSingleProduct) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(17.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    } else {
+                        Icon(Icons.Default.CloudDownload, null, Modifier.size(17.dp))
+                    }
+                    Text(if (isRefreshingPrices && !isTestingSingleProduct) "  Actualizando catálogo…" else "  Actualizar hasta 40 productos")
                 }
                 priceRefreshStatus?.let { status ->
                     Text(

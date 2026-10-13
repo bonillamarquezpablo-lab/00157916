@@ -240,7 +240,15 @@ private fun ShoppingResultCard(result: SerpApiShoppingResult, onOpen: () -> Unit
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.primary
                     )
-                    Text(result.storeName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    Text(
+                        if (result.isGoogleShoppingProductLink) {
+                            "Vendedor indicado: ${result.storeName} · enlace de Google Shopping"
+                        } else {
+                            result.storeName
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
                     result.rating?.let { rating ->
                         Text(
                             "★ ${String.format(Locale("es", "ES"), "%.1f", rating)}" + (result.reviewCount?.let { " · $it opiniones" } ?: ""),
@@ -258,7 +266,7 @@ private fun ShoppingResultCard(result: SerpApiShoppingResult, onOpen: () -> Unit
             }
             OutlinedButton(onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    if (result.isGoogleShoppingProductLink) "Ver oferta en Google Shopping"
+                    if (result.isGoogleShoppingProductLink) "Abrir resultado en Google Shopping"
                     else "Ver oferta en ${result.storeName}"
                 )
                 Spacer(Modifier.width(8.dp))

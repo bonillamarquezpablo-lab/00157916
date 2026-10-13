@@ -52,6 +52,7 @@ data class TrackerUiState(
     val verifierResult: UrlAnalysisResult? = null,
     val isVerifying: Boolean = false,
     val isRefreshingPrices: Boolean = false,
+    val isTestingSingleProduct: Boolean = false,
     val priceRefreshStatus: String? = null,
     val onlineSearchQuery: String = "",
     val onlineSearchResults: List<SerpApiShoppingResult> = emptyList(),
@@ -215,7 +216,18 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             val token = serpApiTokenStore.read()
             if (token.isNullOrBlank()) {
-                val message = "Guarda una clave de SerpApi cifrada en Ajustes antes de consultar precios."
+                val message = serpApiTokenStore.lastReadErrorMessage()
+                    ?: "Guarda una clave de SerpApi cifrada en Ajustes antes de consultar precios."
+                _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
+                showSnackbar(message)
+                return@launch
+            }
+
+            val currentTokenFingerprint = tokenFingerprint(token)
+            if (!testOneProduct &&
+                priceRefreshPreferences.getString("single_product_test_fingerprint", null) != currentTokenFingerprint
+            ) {
+                val message = "Por seguridad, primero usa «Probar con 1 producto» y confirma que se guarda una oferta. No se ha lanzado el lote de 40 búsquedas."
                 _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
                 showSnackbar(message)
                 return@launch
@@ -223,6 +235,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
             _uiState.value = _uiState.value.copy(
                 isRefreshingPrices = true,
+                isTestingSingleProduct = testOneProduct,
                 priceRefreshStatus = if (testOneProduct) "Preparando una prueba de 1 producto…" else "Preparando la actualización del catálogo…"
             )
             try {
@@ -230,10 +243,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     repository.allProductsStream.first { products -> products.isNotEmpty() }
                 }
                 val targets = if (testOneProduct) {
-                    listOf(
-                        allProducts.firstOrNull { product -> product.id == "demo_galaxy_s26_ultra" }
-                            ?: allProducts.first()
-                    )
+                    // Prefer a real catalog product with a barcode so the one-search test uses
+                    // the strongest available identity instead of a hard-coded demo item.
+                    listOf(allProducts.firstOrNull { product -> !product.ean.isNullOrBlank() }
+                        ?: allProducts.first())
                 } else {
                     // Spread catalog lookups over multiple manual batches, prioritizing products
                     // never queried or queried longest ago. This keeps one tap within 40 searches
@@ -283,6 +296,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
                 val quotes = batchResult.quotes
                 val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
+                if (quotaAfter != null) {
+                    _uiState.value = _uiState.value.copy(serpApiAccountStatus = quotaMessage(quotaAfter))
+                }
                 val quotaNote = quotaAfter?.let { " ${it.quotaSummary()}" }.orEmpty()
                 val attemptedAt = System.currentTimeMillis()
                 priceRefreshPreferences.edit().apply {
@@ -292,11 +308,24 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }.apply()
 
                 if (quotes.isEmpty()) {
-                    val message = "La fuente no devolvió ofertas que coincidan con seguridad con los productos consultados. No se han cambiado los precios."
+                    val message = if (testOneProduct) {
+                        "La prueba respondió, pero no encontró una oferta que coincidiera de forma segura con ese producto. No se ha cambiado ningún precio y el lote de 40 sigue bloqueado para proteger tu cuota."
+                    } else {
+                        "SerpApi respondió, pero ${batchResult.queriesWithoutMatches} de ${batchResult.requestedQueries - batchResult.failedQueries} consultas no produjeron ofertas con coincidencia segura. No se han cambiado los precios."
+                    }
                     _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
                     showSnackbar(message)
                 } else {
                     val updatedProducts = repository.recordSerpApiQuotes(quotes)
+                    if (testOneProduct) {
+                        priceRefreshPreferences.edit().apply {
+                            if (updatedProducts > 0) {
+                                putString("single_product_test_fingerprint", currentTokenFingerprint)
+                            } else {
+                                remove("single_product_test_fingerprint")
+                            }
+                        }.apply()
+                    }
                     val partialNotice = if (batchResult.failedQueries > 0) {
                         " Consulta parcial: fallaron ${batchResult.failedQueries} de ${batchResult.requestedQueries} consultas; se han conservado y guardado las ofertas válidas."
                     } else {
@@ -307,17 +336,44 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     showSnackbar(message)
                 }
             } catch (e: SerpApiException) {
+                if (testOneProduct) priceRefreshPreferences.edit().remove("single_product_test_fingerprint").apply()
+                refreshAccountStatusAfterFailure(token)
                 val message = e.message ?: "No se pudo consultar SerpApi."
                 _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
                 showSnackbar(message)
-            } catch (_: Exception) {
-                val message = "No se pudo actualizar el catálogo. Comprueba tu clave, la conexión y vuelve a intentarlo más tarde."
+            } catch (e: Exception) {
+                if (testOneProduct) priceRefreshPreferences.edit().remove("single_product_test_fingerprint").apply()
+                refreshAccountStatusAfterFailure(token)
+                val message = when (e) {
+                    is java.net.SocketTimeoutException -> "Se agotó el tiempo de espera de SerpApi. No se ha guardado ningún precio."
+                    is java.net.UnknownHostException -> "No se pudo localizar SerpApi. Comprueba la conexión a Internet y vuelve a probar."
+                    is java.io.IOException -> "Falló la conexión con SerpApi (${e.javaClass.simpleName}). No se ha guardado ningún precio."
+                    else -> "Error técnico al actualizar el catálogo (${e.javaClass.simpleName}). No se ha guardado ningún precio."
+                }
                 _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
                 showSnackbar(message)
             } finally {
-                _uiState.value = _uiState.value.copy(isRefreshingPrices = false)
+                _uiState.value = _uiState.value.copy(
+                    isRefreshingPrices = false,
+                    isTestingSingleProduct = false
+                )
             }
         }
+    }
+
+    private suspend fun refreshAccountStatusAfterFailure(token: String) {
+        // The account endpoint is free. Refresh displayed quota even when product queries fail,
+        // so the UI never leaves a stale pre-batch balance after an unsuccessful batch.
+        val info = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
+        val status = info?.let(::quotaMessage)
+            ?: "No se pudo actualizar el saldo tras el fallo; la cifra anterior puede estar desactualizada."
+        _uiState.value = _uiState.value.copy(serpApiAccountStatus = status)
+    }
+
+    private fun tokenFingerprint(token: String): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(token.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
     }
 
     fun checkSerpApiAccount() {
@@ -330,7 +386,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             try {
                 val token = serpApiTokenStore.read()
                 if (token.isNullOrBlank()) {
-                    val message = "No hay una clave de SerpApi guardada. Pégala arriba y pulsa «Guardar clave cifrada»."
+                    val message = serpApiTokenStore.lastReadErrorMessage()
+                        ?: "No hay una clave de SerpApi guardada. Pégala arriba y pulsa «Guardar clave cifrada»."
                     _uiState.value = _uiState.value.copy(serpApiAccountStatus = message)
                     return@launch
                 }
@@ -403,7 +460,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 // Cache lookup comes first: saved results remain usable even if the quota is empty
                 // or the API key was removed after the previous search.
                 val cached = onlineSearchCache.read(provider.name, query)
-                if (cached != null) {
+                if (cached != null && cached.results.isNotEmpty()) {
                     val ageMinutes = ((System.currentTimeMillis() - cached.savedAt) / 60_000L).coerceAtLeast(1L)
                     val base = onlineSearchResultMessage(cached.results, provider)
                     val cacheNotice = "Resultados guardados hace $ageMinutes min; no se ha consumido otra búsqueda."
@@ -416,7 +473,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
                 val token = serpApiTokenStore.read()
                 if (token.isNullOrBlank()) {
-                    val message = "Para mostrar precios dentro de Mínimo, guarda tu clave de SerpApi en Ajustes. También puedes abrir Amazon con tu sesión iniciada."
+                    val message = serpApiTokenStore.lastReadErrorMessage()
+                        ?: "Para mostrar precios dentro de Mínimo, guarda tu clave de SerpApi en Ajustes. También puedes abrir Amazon con tu sesión iniciada."
                     _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
                     showSnackbar(message)
                     return@launch
@@ -442,12 +500,21 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     return@launch
                 }
 
-                val results = when (provider) {
-                    OnlineSearchProvider.GOOGLE_SHOPPING -> serpApiClient.searchOnline(token, query)
-                    OnlineSearchProvider.AMAZON -> serpApiClient.searchAmazonOnline(token, query)
+                val googleReport = if (provider == OnlineSearchProvider.GOOGLE_SHOPPING) {
+                    serpApiClient.searchOnlineWithDiagnostics(token, query)
+                } else {
+                    null
                 }
-                onlineSearchCache.write(provider.name, query, results)
-                val base = onlineSearchResultMessage(results, provider)
+                val results = googleReport?.results
+                    ?: serpApiClient.searchAmazonOnline(token, query)
+                // Empty responses are not useful cache entries: allow a later retry to query
+                // SerpApi again instead of replaying a stale "no results" response for 55 minutes.
+                if (results.isNotEmpty()) onlineSearchCache.write(provider.name, query, results)
+                val base = if (results.isEmpty() && googleReport != null) {
+                    googleReport.emptyResultMessage(query)
+                } else {
+                    onlineSearchResultMessage(results, provider)
+                }
                 // The account endpoint is free; refresh the displayed balance after a live request.
                 val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
                 val quotaNote = quotaAfter?.let { " ${it.quotaSummary()}" }.orEmpty()

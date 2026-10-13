@@ -259,6 +259,7 @@ fun MainScreen(
                 SettingsScreen(
                     storeCount = spanishStores.size,
                     isRefreshingPrices = uiState.isRefreshingPrices,
+                    isTestingSingleProduct = uiState.isTestingSingleProduct,
                     priceRefreshStatus = uiState.priceRefreshStatus,
                     onRefreshPrices = viewModel::refreshLivePrices,
                     isCheckingSerpApiAccount = uiState.isCheckingSerpApiAccount,

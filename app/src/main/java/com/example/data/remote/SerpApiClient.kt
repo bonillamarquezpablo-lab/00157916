@@ -44,8 +44,31 @@ data class SerpApiQuote(
 data class SerpApiBatchResult(
     val quotes: List<SerpApiQuote>,
     val requestedQueries: Int,
-    val failedQueries: Int
+    val failedQueries: Int,
+    val queriesWithoutMatches: Int = 0
 )
+
+data class SerpApiShoppingSearchReport(
+    val results: List<SerpApiShoppingResult>,
+    val rawResultCount: Int,
+    val rejectedAsIrrelevant: Int,
+    val rejectedForPriceOrCurrency: Int,
+    val rejectedForLink: Int,
+    val rejectedOther: Int
+) {
+    fun emptyResultMessage(query: String): String {
+        if (rawResultCount == 0) {
+            return "Google Shopping no devolvió productos para «$query». Prueba con el modelo exacto o inténtalo más tarde; no se ha guardado ningún precio."
+        }
+        val reasons = mutableListOf<String>()
+        if (rejectedAsIrrelevant > 0) reasons += "$rejectedAsIrrelevant no coincidían suficientemente con la búsqueda"
+        if (rejectedForPriceOrCurrency > 0) reasons += "$rejectedForPriceOrCurrency no tenían un precio en euros verificable"
+        if (rejectedForLink > 0) reasons += "$rejectedForLink no tenían un enlace HTTPS válido"
+        if (rejectedOther > 0) reasons += "$rejectedOther estaban incompletos"
+        val detail = reasons.joinToString("; ").ifBlank { "ninguno pasó los filtros de seguridad" }
+        return "Google Shopping devolvió $rawResultCount resultados para «$query», pero ninguno era utilizable: $detail. No se ha guardado ningún precio."
+    }
+}
 
 data class SerpApiAccountInfo(
     val planName: String,
@@ -152,13 +175,19 @@ class SerpApiClient(
      * not prices obtained from the user's Amazon Prime session or a direct Amazon API.
      */
     suspend fun searchOnline(token: String, query: String): List<SerpApiShoppingResult> =
-        withContext(Dispatchers.IO) {
-            val apiKey = token.trim()
-            require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
-            val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
-            require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
-            parseShoppingResults(executeSearch(apiKey, normalizedQuery))
-        }
+        searchOnlineWithDiagnostics(token, query).results
+
+    /** Same search with counts of results rejected by the safety/relevance filters. */
+    suspend fun searchOnlineWithDiagnostics(
+        token: String,
+        query: String
+    ): SerpApiShoppingSearchReport = withContext(Dispatchers.IO) {
+        val apiKey = token.trim()
+        require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
+        val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
+        require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
+        parseShoppingResultsDetailed(executeSearch(apiKey, normalizedQuery), normalizedQuery)
+    }
 
     /**
      * Search Amazon.es itself, rather than Google Shopping. This still returns a public search
@@ -254,7 +283,14 @@ class SerpApiClient(
     internal fun parseShoppingResults(
         root: JSONObject,
         observedAt: Long = System.currentTimeMillis()
-    ): List<SerpApiShoppingResult> {
+    ): List<SerpApiShoppingResult> =
+        parseShoppingResultsDetailed(root, query = null, observedAt = observedAt).results
+
+    internal fun parseShoppingResultsDetailed(
+        root: JSONObject,
+        query: String?,
+        observedAt: Long = System.currentTimeMillis()
+    ): SerpApiShoppingSearchReport {
         val error = root.optString("error").takeIf { it.isNotBlank() && it != "null" }
         if (error != null) throw SerpApiException(error)
         val status = root.optJSONObject("search_metadata")?.optString("status")
@@ -272,29 +308,62 @@ class SerpApiClient(
             }
         }
 
-        return items.mapNotNull { item ->
+        var rejectedAsIrrelevant = 0
+        var rejectedForPriceOrCurrency = 0
+        var rejectedForLink = 0
+        var rejectedOther = 0
+        val parsed = items.mapNotNull { item ->
             val title = item.optString("title").trim()
-                .takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
+                .takeIf { it.isNotBlank() && it != "null" }
+                ?: run {
+                    rejectedOther++
+                    return@mapNotNull null
+                }
+            if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
+                rejectedAsIrrelevant++
+                return@mapNotNull null
+            }
+
             val priceText = item.optString("price")
             val extractedPrice = item.opt("extracted_price")
                 ?.takeIf { it !is JSONObject && it !is JSONArray }
                 ?.toString()
                 ?.toDoubleOrNull()
                 ?.takeIf { it.isFinite() && it > 0.0 }
-            // Google Shopping is queried with gl=es. Prefer its structured numeric price when the
-            // formatted label omits €, but do not reinterpret a result explicitly priced abroad.
-            if (hasExplicitForeignCurrency(priceText)) return@mapNotNull null
-            val price = extractedPrice ?: parsePrice(priceText) ?: return@mapNotNull null
+            if (hasExplicitForeignCurrency(priceText)) {
+                rejectedForPriceOrCurrency++
+                return@mapNotNull null
+            }
+            val price = extractedPrice ?: parsePrice(priceText)
             val isEuroPrice = priceText.contains("€") ||
                 priceText.contains("EUR", ignoreCase = true)
-            if (extractedPrice == null && !isEuroPrice) return@mapNotNull null
-            // Google Shopping API usually documents product_link (a Google product page);
-            // some layouts also expose a direct seller link. Prefer the direct link when present.
-            val url = sequenceOf(item.optString("link"), item.optString("product_link"))
-                .firstOrNull { isHttpsUrl(it) } ?: return@mapNotNull null
+            if (price == null || !price.isFinite() || price <= 0.0 ||
+                (extractedPrice == null && !isEuroPrice)
+            ) {
+                rejectedForPriceOrCurrency++
+                return@mapNotNull null
+            }
+
+            // Prefer a real retailer URL whenever SerpApi supplies one. Standard Google Shopping
+            // product_link values often point to Google itself, so retain those only as a clearly
+            // labelled fallback rather than pretending they're direct seller links.
+            val candidateUrls = sequenceOf(
+                item.optString("link"),
+                item.optString("link_clean"),
+                item.optString("product_link")
+            ).filter(::isHttpsUrl).toList()
+            val url = candidateUrls.firstOrNull { !isGoogleDomainUrl(it) }
+                ?: candidateUrls.firstOrNull { isGoogleDomainUrl(it) }
+                ?: run {
+                    rejectedForLink++
+                    return@mapNotNull null
+                }
             val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()
-            if (host.isBlank()) return@mapNotNull null
+            if (host.isBlank()) {
+                rejectedForLink++
+                return@mapNotNull null
+            }
             val source = item.optString("source").trim()
                 .takeIf { it.isNotBlank() && it != "null" } ?: humanizeHost(host)
             val thumbnail = item.optString("thumbnail").takeIf { isHttpsUrl(it) }.orEmpty()
@@ -321,6 +390,15 @@ class SerpApiClient(
         }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
             .sortedBy { it.price }
             .take(30)
+
+        return SerpApiShoppingSearchReport(
+            results = parsed,
+            rawResultCount = items.size,
+            rejectedAsIrrelevant = rejectedAsIrrelevant,
+            rejectedForPriceOrCurrency = rejectedForPriceOrCurrency,
+            rejectedForLink = rejectedForLink,
+            rejectedOther = rejectedOther
+        )
     }
 
     suspend fun searchProducts(
@@ -346,12 +424,18 @@ class SerpApiClient(
 
         val quotes = mutableListOf<SerpApiQuote>()
         var failedQueries = 0
+        var queriesWithoutMatches = 0
         var firstFailure: Exception? = null
         requested.forEachIndexed { index, product ->
             onStage("Consultando Google Shopping España: ${index + 1}/${requested.size}…")
             try {
                 val json = executeSearch(apiKey, product.queryTerm)
-                quotes += parseQuotes(json, product)
+                val productQuotes = parseQuotes(json, product)
+                if (productQuotes.isEmpty()) {
+                    queriesWithoutMatches++
+                } else {
+                    quotes += productQuotes
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -365,10 +449,16 @@ class SerpApiClient(
         }
 
         if (quotes.isEmpty() && failedQueries > 0) {
-            val providerFailure = firstFailure as? SerpApiException
-            if (providerFailure != null) throw providerFailure
+            val failureDetail = when (val failure = firstFailure) {
+                is SerpApiException -> failure.message ?: "Error devuelto por SerpApi."
+                is java.net.SocketTimeoutException -> "Se agotó el tiempo de espera al conectar con SerpApi."
+                is java.net.UnknownHostException -> "No se pudo localizar el servidor de SerpApi; comprueba la conexión."
+                is java.io.IOException -> "Fallo de red (${failure.javaClass.simpleName})."
+                else -> "Error técnico (${firstFailure?.javaClass?.simpleName ?: "desconocido"})."
+            }
             throw SerpApiException(
-                "No se pudo consultar ningún producto (${failedQueries} de ${requested.size} consultas fallidas)."
+                "No se pudo consultar ningún producto (${failedQueries} de ${requested.size} consultas fallidas). Motivo del primer fallo: $failureDetail",
+                (firstFailure as? SerpApiException)?.httpCode
             )
         }
 
@@ -377,7 +467,8 @@ class SerpApiClient(
                 .distinctBy { "${it.productId}|${it.storeId}|${it.price}|${it.sourceUrl}" }
                 .sortedWith(compareBy<SerpApiQuote> { it.productId }.thenBy { it.price }),
             requestedQueries = requested.size,
-            failedQueries = failedQueries
+            failedQueries = failedQueries,
+            queriesWithoutMatches = queriesWithoutMatches
         )
     }
 
@@ -534,6 +625,11 @@ class SerpApiClient(
         return numeric.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 }
     }
 
+    private fun isGoogleDomainUrl(value: String): Boolean = runCatching {
+        val host = URI(value).host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+        host.startsWith("google.") || host.endsWith(".google.com") || host.endsWith(".google.es")
+    }.getOrDefault(false)
+
     private fun isHttpsUrl(value: String): Boolean = runCatching {
         val uri = URI(value)
         uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank()
@@ -550,9 +646,30 @@ class SerpApiClient(
         val wanted = tokens(requested)
         val found = tokens(returned)
         if (wanted.isEmpty() || found.isEmpty()) return false
-        val overlap = wanted.intersect(found).size
+
+        val containsModelCode = wanted.any { token -> token.length >= 4 && token.any(Char::isDigit) && token.any(Char::isLetter) }
+        fun tokenMatches(token: String): Boolean = found.any { candidate ->
+            when {
+                token == candidate -> true
+                containsModelCode && token.length in 2..3 &&
+                    candidate.length >= token.length + 3 && candidate.startsWith(token) -> true
+                token.length >= 4 && candidate.length >= 4 &&
+                    (candidate.contains(token) || token.contains(candidate)) &&
+                    minOf(token.length, candidate.length).toDouble() /
+                        maxOf(token.length, candidate.length).toDouble() >= 0.65 -> true
+                else -> false
+            }
+        }
+
+        val overlap = wanted.count(::tokenMatches)
         val required = if (wanted.size <= 2) wanted.size else maxOf(2, ceil(wanted.size * 0.45).toInt())
-        return overlap >= required
+        if (overlap >= required) return true
+
+        // Product codes such as WH-1000XM5 can be split differently by retailer titles.
+        val compactQuery = normalize(requested).replace(" ", "")
+        val compactTitle = normalize(returned).replace(" ", "")
+        return compactQuery.length >= 8 && compactTitle.length >= 8 &&
+            (compactTitle.contains(compactQuery) || compactQuery.contains(compactTitle))
     }
 
     private fun tokens(value: String): Set<String> =

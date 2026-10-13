@@ -500,4 +500,73 @@ class ExampleRobolectricTest {
         assertEquals("https://images.example.test/sony.jpg", results[1].thumbnailUrl)
     }
 
+    @Test
+    fun `manual Google Shopping search filters unrelated products and reports why offers were rejected`() {
+        val client = SerpApiClient()
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {
+                  "title": "Sony WH1000XM5 Wireless Noise Canceling Headphones",
+                  "price": "249,99 €",
+                  "extracted_price": 249.99,
+                  "link": "https://www.amazon.es/dp/B0SONYTEST",
+                  "source": "Amazon.es"
+                },
+                {
+                  "title": "Anker Solix portable power station",
+                  "price": "267,41 €",
+                  "extracted_price": 267.41,
+                  "product_link": "https://www.google.com/search?prds=anker",
+                  "source": "Cctv & Alarmas"
+                },
+                {
+                  "title": "Sony WH-1000XM5 headphones",
+                  "price": "$239.00",
+                  "extracted_price": 239.00,
+                  "link": "https://shop.example.test/sony",
+                  "source": "Foreign currency"
+                },
+                {
+                  "title": "Sony WH-1000XM5 headphones",
+                  "price": "229,99 €",
+                  "extracted_price": 229.99,
+                  "link": "http://unsafe.example.test/sony",
+                  "source": "Unsafe HTTP"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val report = client.parseShoppingResultsDetailed(
+            root = payload,
+            query = "Sony WH-1000XM5",
+            observedAt = 123L
+        )
+
+        assertEquals(4, report.rawResultCount)
+        assertEquals(1, report.results.size)
+        assertEquals("Sony WH1000XM5 Wireless Noise Canceling Headphones", report.results.single().title)
+        assertEquals(249.99, report.results.single().price, 0.001)
+        assertEquals(1, report.rejectedAsIrrelevant)
+        assertEquals(1, report.rejectedForPriceOrCurrency)
+        assertEquals(1, report.rejectedForLink)
+        assertTrue(report.emptyResultMessage("Sony WH-1000XM5").isNotBlank())
+    }
+
+    @Test
+    fun `Google search URL is labelled as an indirect Shopping link`() {
+        val result = com.example.data.remote.SerpApiShoppingResult(
+            title = "Cargador Anker",
+            price = 59.95,
+            storeName = "Apple",
+            sourceUrl = "https://www.google.com/search?prds=anker",
+            observedAt = 123L
+        )
+        assertTrue(result.isGoogleShoppingProductLink)
+    }
+
 }

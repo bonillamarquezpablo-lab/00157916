@@ -276,13 +276,16 @@ class SerpApiClient(
             val title = item.optString("title").trim()
                 .takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
             val priceText = item.optString("price")
-            if (!priceText.contains("€") && !priceText.contains("EUR", ignoreCase = true)) {
-                return@mapNotNull null
-            }
-            val price = parsePrice(
-                item.opt("extracted_price")?.takeIf { it !is JSONObject && it !is JSONArray }
-                    ?: priceText
-            ) ?: return@mapNotNull null
+            val extractedPrice = item.opt("extracted_price")
+                ?.takeIf { it !is JSONObject && it !is JSONArray }
+                ?.toString()?.toDoubleOrNull()
+                ?.takeIf { it.isFinite() && it > 0.0 }
+            if (hasExplicitForeignCurrency(priceText)) return@mapNotNull null
+            val hasEuroLabel = priceText.contains("€") || priceText.contains("EUR", ignoreCase = true)
+            // Google Shopping is requested with gl=es. Trust its structured numeric price when
+            // the localized result omits the formatted euro symbol, but reject explicit FX labels.
+            if (extractedPrice == null && !hasEuroLabel) return@mapNotNull null
+            val price = extractedPrice ?: parsePrice(priceText) ?: return@mapNotNull null
             val url = item.optString("link").takeIf { isHttpsUrl(it) }
                 ?: return@mapNotNull null
             val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
@@ -348,7 +351,15 @@ class SerpApiClient(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                // A single bad product must not discard offers already collected for this batch.
+                // If no offer has been collected yet, stop on the first transport/provider failure.
+                // Continuing through 40 products would waste time and potentially burn quota.
+                if (quotes.isEmpty()) {
+                    if (error is SerpApiException) throw error
+                    throw SerpApiException(
+                        "No se pudo conectar con SerpApi al consultar el catálogo. Comprueba la conexión e inténtalo de nuevo."
+                    )
+                }
+                // Preserve valid offers already collected if a later product fails.
                 failedQueries++
                 if (firstFailure == null) firstFailure = error
                 onStage("Falló una consulta (${failedQueries}/${requested.size}); conservando los resultados válidos…")
@@ -401,15 +412,15 @@ class SerpApiClient(
             if (!isPlausibleProductMatch(requested.queryTerm, title)) return@mapNotNull null
 
             val priceText = item.optString("price")
-            // Google Shopping can show other currencies depending on the result. Since this app is
-            // targeting Spain, require an explicit euro marker before accepting a quote.
-            if (!priceText.contains("€") && !priceText.contains("EUR", ignoreCase = true)) {
-                return@mapNotNull null
-            }
-            val price = parsePrice(
-                item.opt("extracted_price")?.takeIf { it !is JSONObject && it !is JSONArray }
-                    ?: priceText
-            ) ?: return@mapNotNull null
+            val extractedPrice = item.opt("extracted_price")
+                ?.takeIf { it !is JSONObject && it !is JSONArray }
+                ?.toString()?.toDoubleOrNull()
+                ?.takeIf { it.isFinite() && it > 0.0 }
+            if (hasExplicitForeignCurrency(priceText)) return@mapNotNull null
+            val hasEuroLabel = priceText.contains("€") || priceText.contains("EUR", ignoreCase = true)
+            // Spain-localized Shopping can return a numeric extracted_price without the € label.
+            if (extractedPrice == null && !hasEuroLabel) return@mapNotNull null
+            val price = extractedPrice ?: parsePrice(priceText) ?: return@mapNotNull null
 
             val url = item.optString("link").takeIf { isHttpsUrl(it) }
                 ?: return@mapNotNull null
@@ -453,7 +464,8 @@ class SerpApiClient(
                 val body = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
                     val message = when (response.code) {
-                        401, 403 -> "La clave de SerpApi no es válida o no tiene acceso."
+                        401 -> "SerpApi ha rechazado la clave (HTTP 401). Comprueba que sea la clave privada correcta."
+                        403 -> "SerpApi ha rechazado el acceso a este motor (HTTP 403). La cuenta puede mostrar saldo y aun así tener el acceso bloqueado; comprueba el estado de la cuenta o una posible incidencia del servicio."
                         429 -> "Has alcanzado el límite de consultas de SerpApi. Espera antes de volver a intentarlo."
                         else -> "SerpApi respondió con el código HTTP ${response.code}."
                     }
@@ -495,6 +507,86 @@ class SerpApiClient(
 
     private fun JSONArray.toObjects(): List<JSONObject> =
         (0 until length()).mapNotNull { optJSONObject(it) }
+
+    private fun hasExplicitForeignCurrency(value: String): Boolean =
+        listOf('
+        if (raw == null || raw == JSONObject.NULL) return null
+        if (raw is Number) return raw.toDouble().takeIf { it.isFinite() && it > 0.0 }
+        var numeric = raw.toString().replace(Regex("[^0-9,.-]"), "")
+        if (numeric.isBlank()) return null
+        val comma = numeric.lastIndexOf(',')
+        val dot = numeric.lastIndexOf('.')
+        numeric = when {
+            comma >= 0 && dot >= 0 && comma > dot ->
+                numeric.replace(".", "").replace(',', '.')
+            comma >= 0 && dot >= 0 && dot > comma ->
+                numeric.replace(",", "")
+            comma >= 0 && dot < 0 -> {
+                val decimalDigits = numeric.length - comma - 1
+                if (decimalDigits in 1..2) numeric.replace(',', '.') else numeric.replace(",", "")
+            }
+            else -> numeric
+        }
+        return numeric.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 }
+    }
+
+    private fun isHttpsUrl(value: String): Boolean = runCatching {
+        val uri = URI(value)
+        uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank()
+    }.getOrDefault(false)
+
+    private fun isAmazonSpainUrl(value: String): Boolean = runCatching {
+        val uri = URI(value)
+        val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+        uri.scheme.equals("https", ignoreCase = true) &&
+            (host == "amazon.es" || host.endsWith(".amazon.es"))
+    }.getOrDefault(false)
+
+    private fun isPlausibleProductMatch(requested: String, returned: String): Boolean {
+        val wanted = tokens(requested)
+        val found = tokens(returned)
+        if (wanted.isEmpty() || found.isEmpty()) return false
+        val overlap = wanted.intersect(found).size
+        val required = if (wanted.size <= 2) wanted.size else maxOf(2, ceil(wanted.size * 0.45).toInt())
+        return overlap >= required
+    }
+
+    private fun tokens(value: String): Set<String> =
+        normalize(value)
+            .replace(Regex("(\\d+)\\s?(gb|tb|mb)\\b"), "$1 $2")
+            .split(' ')
+            .filter { it.length > 1 && it !in STOP_WORDS }
+            .toSet()
+
+    private fun normalize(value: String): String =
+        Normalizer.normalize(value.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+            .replace(Regex("[^a-z0-9]+"), " ")
+            .trim()
+            .replace(Regex("\\s+"), " ")
+
+    private fun storeIdForHost(host: String): String =
+        host.split('.').joinToString("_").replace(Regex("[^a-zA-Z0-9_]"), "_")
+            .let { "retailer_$it" }
+
+    private fun humanizeHost(host: String): String =
+        host.substringBefore('.')
+            .replace('-', ' ')
+            .replace('_', ' ')
+            .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale("es", "ES")) else it.toString() }
+
+    private companion object {
+        const val MAX_PRODUCTS_PER_BATCH = 40
+        const val INTER_REQUEST_DELAY_MS = 1_200L
+        val STOP_WORDS = setOf(
+            "the", "and", "for", "with", "in", "on", "de", "del", "la", "el", "los", "las",
+            "para", "con", "por", "nuevo", "nueva", "original", "oficial", "gb", "tb", "mb"
+        )
+    }
+}
+, '£', '¥', '₹').any { value.contains(it) } ||
+            listOf("USD", "GBP", "CAD", "AUD", "NZD", "JPY", "INR", "CHF")
+                .any { currency -> value.contains(currency, ignoreCase = true) }
 
     private fun parsePrice(raw: Any?): Double? {
         if (raw == null || raw == JSONObject.NULL) return null

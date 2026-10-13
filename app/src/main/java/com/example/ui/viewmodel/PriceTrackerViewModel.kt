@@ -52,6 +52,7 @@ data class TrackerUiState(
     val verifierResult: UrlAnalysisResult? = null,
     val isVerifying: Boolean = false,
     val isRefreshingPrices: Boolean = false,
+    val isTestingSingleProduct: Boolean = false,
     val priceRefreshStatus: String? = null,
     val onlineSearchQuery: String = "",
     val onlineSearchResults: List<SerpApiShoppingResult> = emptyList(),
@@ -221,8 +222,19 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 return@launch
             }
 
+            val tokenFingerprint = tokenFingerprint(token)
+            if (!testOneProduct &&
+                priceRefreshPreferences.getString("single_product_test_fingerprint", null) != tokenFingerprint
+            ) {
+                val message = "Por seguridad, primero usa «Probar con 1 producto» y confirma que se guarda una oferta. No se ha lanzado el lote de 40 búsquedas."
+                _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
+                showSnackbar(message)
+                return@launch
+            }
+
             _uiState.value = _uiState.value.copy(
                 isRefreshingPrices = true,
+                isTestingSingleProduct = testOneProduct,
                 priceRefreshStatus = if (testOneProduct) "Preparando una prueba de 1 producto…" else "Preparando la actualización del catálogo…"
             )
             try {
@@ -282,6 +294,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     _uiState.value = _uiState.value.copy(priceRefreshStatus = stage)
                 }
                 val quotes = batchResult.quotes
+                if (testOneProduct) {
+                    priceRefreshPreferences.edit().apply {
+                        if (quotes.isNotEmpty()) putString("single_product_test_fingerprint", tokenFingerprint)
+                        else remove("single_product_test_fingerprint")
+                    }.apply()
+                }
                 val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
                 val quotaNote = quotaAfter?.let { " ${it.quotaSummary()}" }.orEmpty()
                 val attemptedAt = System.currentTimeMillis()
@@ -292,7 +310,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }.apply()
 
                 if (quotes.isEmpty()) {
-                    val message = "La fuente no devolvió ofertas que coincidan con seguridad con los productos consultados. No se han cambiado los precios."
+                    val message = if (testOneProduct) {
+                        "La prueba respondió, pero no encontró una oferta que coincidiera de forma segura con ese producto. No se ha cambiado ningún precio y el lote de 40 sigue bloqueado para proteger tu cuota."
+                    } else {
+                        "SerpApi respondió, pero ${batchResult.queriesWithoutMatches} de ${batchResult.requestedQueries - batchResult.failedQueries} consultas no produjeron ofertas con coincidencia segura. No se han cambiado los precios."
+                    }
                     _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
                     showSnackbar(message)
                 } else {
@@ -307,17 +329,33 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     showSnackbar(message)
                 }
             } catch (e: SerpApiException) {
+                if (testOneProduct) priceRefreshPreferences.edit().remove("single_product_test_fingerprint").apply()
                 val message = e.message ?: "No se pudo consultar SerpApi."
                 _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
                 showSnackbar(message)
-            } catch (_: Exception) {
-                val message = "No se pudo actualizar el catálogo. Comprueba tu clave, la conexión y vuelve a intentarlo más tarde."
+            } catch (e: Exception) {
+                if (testOneProduct) priceRefreshPreferences.edit().remove("single_product_test_fingerprint").apply()
+                val message = when (e) {
+                    is java.net.SocketTimeoutException -> "Se agotó el tiempo de espera de SerpApi. No se ha guardado ningún precio."
+                    is java.net.UnknownHostException -> "No se pudo localizar SerpApi. Comprueba la conexión a Internet y vuelve a probar."
+                    is java.io.IOException -> "Falló la conexión con SerpApi (${e.javaClass.simpleName}). No se ha guardado ningún precio."
+                    else -> "Error técnico al actualizar el catálogo (${e.javaClass.simpleName}). No se ha guardado ningún precio."
+                }
                 _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
                 showSnackbar(message)
             } finally {
-                _uiState.value = _uiState.value.copy(isRefreshingPrices = false)
+                _uiState.value = _uiState.value.copy(
+                    isRefreshingPrices = false,
+                    isTestingSingleProduct = false
+                )
             }
         }
+    }
+
+    private fun tokenFingerprint(token: String): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(token.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
     }
 
     fun checkSerpApiAccount() {

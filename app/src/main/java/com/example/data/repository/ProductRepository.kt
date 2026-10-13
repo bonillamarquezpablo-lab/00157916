@@ -16,6 +16,7 @@ import com.example.data.remote.SerpApiQuote
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.groupOnlineShoppingResults
+import com.example.data.remote.isIrrelevantMultiProductBundle
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.model.Store
 import kotlinx.coroutines.CompletableDeferred
@@ -222,6 +223,7 @@ class ProductRepository(
                 isEligibleHistoryTitle(result.title) &&
                 isEligibleSeller(result.storeName, result.sourceUrl) &&
                 !isPromotionalBulkListing(result.title, searchQuery) &&
+                !isIrrelevantMultiProductBundle(searchQuery, result.title) &&
                 isPlausibleHistoryPrice(result.title, result.price) &&
                 !hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title) &&
                 // A device-specific query should never show cases, filters, mop kits or other

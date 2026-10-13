@@ -52,6 +52,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import com.example.ui.components.DealVerdictBadge
+import com.example.ui.components.HeroPriceBadge
 import com.example.ui.components.PriceHistoryChart
 import com.example.ui.components.ProductImageView
 import com.example.ui.components.StoreComparisonView
@@ -181,7 +182,13 @@ fun ProductDetailSheet(
                 color = MaterialTheme.colorScheme.onSurface
             )
 
-            // Verdict Certificate Badge
+            // Prominent price classification backed by previous saved observations.
+            HeroPriceBadge(
+                state = product.priceBadgeState,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            // Existing analysis certificate.
             DealVerdictBadge(verdict = product.verdict, compact = false)
 
             if (!product.isPriceVerified) {

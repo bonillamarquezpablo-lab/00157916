@@ -73,14 +73,6 @@ fun PriceHistoryChart(
     var selectedRange by remember { mutableStateOf(ChartRange.ALL) }
     var selectedPointIndex by remember { mutableIntStateOf(-1) }
 
-    // The first date comes from an actual observation supplied by Room, never from a generated series.
-    val firstObservationLabel = remember(priceHistory) {
-        priceHistory.minOfOrNull { it.timestamp }?.let { timestamp ->
-            "Historial desde " + SimpleDateFormat("dd MMM yyyy", Locale("es", "ES"))
-                .format(Date(timestamp))
-        }
-    }
-
     val filteredPoints = remember(priceHistory, selectedRange) {
         val sorted = priceHistory.sortedBy { it.timestamp }
         val days = selectedRange.days
@@ -88,6 +80,19 @@ fun PriceHistoryChart(
         else {
             val cutoff = System.currentTimeMillis() - days.toLong() * 24L * 60L * 60L * 1000L
             sorted.filter { it.timestamp >= cutoff }
+        }
+    }
+
+    // The header must agree with the selected range instead of showing a global date when
+    // that range has no observations.
+    val firstObservationLabel = remember(priceHistory, filteredPoints) {
+        when {
+            filteredPoints.isEmpty() && priceHistory.isEmpty() -> "Sin datos todavía"
+            filteredPoints.isEmpty() -> "Sin datos en este rango"
+            else -> priceHistory.minOfOrNull { it.timestamp }?.let { timestamp ->
+                "Historial desde " + SimpleDateFormat("dd MMM yyyy", Locale("es", "ES"))
+                    .format(Date(timestamp))
+            } ?: "Sin datos todavía"
         }
     }
 
@@ -128,7 +133,7 @@ fun PriceHistoryChart(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = firstObservationLabel ?: "Solo observaciones reales",
+                    text = firstObservationLabel,
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -247,14 +252,12 @@ fun PriceHistoryChart(
                     )
                 }
 
-                // Fill gradient under curve
+                // Use straight segments between observed dates; do not imply unobserved prices.
                 val fillPath = Path().apply {
                     moveTo(coords.first().x, coords.first().y)
                     for (i in 1 until coords.size) {
-                        val prev = coords[i - 1]
                         val curr = coords[i]
-                        val cx = (prev.x + curr.x) / 2f
-                        cubicTo(cx, prev.y, cx, curr.y, curr.x, curr.y)
+                        lineTo(curr.x, curr.y)
                     }
                     lineTo(coords.last().x, height - paddingBottom)
                     lineTo(coords.first().x, height - paddingBottom)
@@ -277,10 +280,8 @@ fun PriceHistoryChart(
                 val strokePath = Path().apply {
                     moveTo(coords.first().x, coords.first().y)
                     for (i in 1 until coords.size) {
-                        val prev = coords[i - 1]
                         val curr = coords[i]
-                        val cx = (prev.x + curr.x) / 2f
-                        cubicTo(cx, prev.y, cx, curr.y, curr.x, curr.y)
+                        lineTo(curr.x, curr.y)
                     }
                 }
 

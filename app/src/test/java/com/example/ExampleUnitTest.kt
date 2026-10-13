@@ -6,6 +6,7 @@ import com.example.data.model.Product
 import com.example.data.model.Store
 import com.example.data.model.VerdictLevel
 import com.example.data.repository.SpanishMarketData
+import com.example.ui.components.ChartRange
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
 import org.junit.Assert.assertEquals
@@ -51,6 +52,18 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun chartRangesCoverThirtyDaysThroughFourYearsAndAllTime() {
+        assertEquals(
+            listOf("30D", "90D", "6M", "1A", "2A", "3A", "4A", "Todo"),
+            ChartRange.values().map { it.label }
+        )
+        assertEquals(
+            listOf(30, 90, 183, 365, 730, 1095, 1460, null),
+            ChartRange.values().map { it.days }
+        )
+    }
+
+    @Test
     fun addition_isCorrect() {
         assertEquals(4, 2 + 2)
     }
@@ -64,6 +77,7 @@ class ExampleUnitTest {
             assertFalse("Bundled sample must not claim an all-time low: ${product.title}", product.isAtAth)
             assertEquals(VerdictLevel.UNVERIFIED, product.verdict.level)
             assertEquals(0, product.verdict.confidenceScore)
+            assertTrue("Example catalogue entries must not include generated history points: ${product.title}", product.priceHistory.isEmpty())
         }
     }
 
@@ -119,6 +133,7 @@ class ExampleUnitTest {
 
     @Test
     fun testDealVerdictInflatedFakeDeal() {
+        // EJEMPLO sintético del algoritmo de clasificación; no representa ni persiste precios reales.
         val verdict = DealVerdict.analyze(
             currentPrice = 429.0,
             athMinPrice = 329.0,

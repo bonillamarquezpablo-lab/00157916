@@ -123,6 +123,23 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun testProductsHaveMoreThan4YearsOfPriceHistory() {
+        val products = SpanishMarketData.getInitialProducts()
+        val fourYearsMillis = 4L * 365L * 86400000L // 1460 days
+        val now = System.currentTimeMillis()
+
+        for (prod in products) {
+            val oldestPoint = prod.priceHistory.minByOrNull { it.timestamp }
+            assertTrue("Product ${prod.title} must have price history", oldestPoint != null)
+            val spanMillis = now - oldestPoint!!.timestamp
+            assertTrue(
+                "Product ${prod.title} price history should cover more than 4 years (found ${spanMillis / 86400000L} days)",
+                spanMillis >= fourYearsMillis
+            )
+        }
+    }
+
+    @Test
     fun testSpanishStoresDatabaseIntegrity() {
         val storeEntities = SpanishMarketData.getInitialStoreEntities()
         assertTrue("Store entities should contain at least 30 stores", storeEntities.size >= 30)

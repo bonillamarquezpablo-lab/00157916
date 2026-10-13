@@ -93,7 +93,7 @@ fun OnlineSearchScreen(
                         Spacer(Modifier.width(9.dp))
                         Text("Encuentra productos y ofertas", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
                     }
-                    Text("Busca cualquier producto. Las ofertas válidas se guardan en Mercado; toca una tarjeta para comparar tiendas y consultar el historial real.")
+                    Text("Busca cualquier producto. Las ofertas válidas se guardan en Mercado; aquí verás precios por tienda y podrás consultar el historial real.")
                     OutlinedTextField(
                         value = state.onlineSearchQuery,
                         onValueChange = onQueryChange,
@@ -268,7 +268,7 @@ private fun ShoppingResultCard(
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        "${group.offers.size} ofertas · toca para ver tiendas e historial",
+                        "${group.offers.size} ofertas encontradas · ${group.storeCount} tiendas para comparar",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

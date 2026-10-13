@@ -83,11 +83,37 @@ data class Product(
             ((currentPrice - athMinPrice) / athMinPrice) * 100
         } else 0.0
 
+    /** Provider observations are snapshots, not a promise that a retailer still honours the price. */
+    val priceAgeMillis: Long?
+        get() = priceObservedAt?.let {
+            (System.currentTimeMillis() - it).coerceAtLeast(0L)
+        }
+
+    /** A price is considered fresh for 24 hours; older prices remain visible but must be flagged. */
+    val isPriceFresh: Boolean
+        get() = isPriceVerified && (priceAgeMillis?.let { it <= PRICE_FRESHNESS_WINDOW_MS } == true)
+
+    val priceFreshnessLabel: String
+        get() {
+            if (!isPriceVerified) return "Sin observación online válida"
+            val age = priceAgeMillis ?: return "Fecha de observación desconocida"
+            return when {
+                age < 60_000L -> "Consultado hace menos de 1 min"
+                age < HOUR_MS -> "Consultado hace ${age / HOUR_MS} h"
+                age < DAY_MS -> "Consultado hace ${age / HOUR_MS} h"
+                age < 2L * DAY_MS -> "Consultado hace 1 día · conviene confirmar"
+                else -> "Consultado hace ${age / DAY_MS} días · conviene volver a consultar"
+            }
+        }
+
     val isAtAth: Boolean
         get() = hasSufficientHistory && currentPrice <= athMinPrice + 0.05
 
     private companion object {
         const val MIN_HISTORY_POINTS = 3
-        const val MAX_PRICE_AGE_FOR_HISTORICAL_CLAIMS = 7L * 24L * 60L * 60L * 1000L
+        const val HOUR_MS = 60L * 60L * 1000L
+        const val DAY_MS = 24L * HOUR_MS
+        const val PRICE_FRESHNESS_WINDOW_MS = DAY_MS
+        const val MAX_PRICE_AGE_FOR_HISTORICAL_CLAIMS = 7L * DAY_MS
     }
 }

@@ -55,7 +55,8 @@ data class SerpApiShoppingSearchReport(
     val rejectedForPriceOrCurrency: Int,
     val rejectedForLink: Int,
     val rejectedOther: Int,
-    val firstResultFields: String = ""
+    val firstResultFields: String = "",
+    val queriesExecuted: Int = 1
 ) {
     fun emptyResultMessage(query: String): String {
         if (rawResultCount == 0) {
@@ -187,14 +188,82 @@ class SerpApiClient(
     /** Same search with counts of results rejected by the safety/relevance filters. */
     suspend fun searchOnlineWithDiagnostics(
         token: String,
-        query: String
+        query: String,
+        relevanceQuery: String = query
     ): SerpApiShoppingSearchReport = withContext(Dispatchers.IO) {
         val apiKey = token.trim()
         require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
         val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
         require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
-        parseShoppingResultsDetailed(executeSearch(apiKey, normalizedQuery), normalizedQuery)
+        parseShoppingResultsDetailed(executeSearch(apiKey, normalizedQuery), relevanceQuery.trim().ifBlank { normalizedQuery })
     }
+
+    /**
+     * When the first Google Shopping query returns few acceptable offers, run up to two
+     * controlled alternate phrasings and merge genuine merchant listings. The caller supplies
+     * the available quota so the method never makes more requests than allowed.
+     */
+    suspend fun searchOnlineWithExpandedDiagnostics(
+        token: String,
+        query: String,
+        maxAdditionalQueries: Int
+    ): SerpApiShoppingSearchReport {
+        val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
+        val initial = searchOnlineWithDiagnostics(token, normalizedQuery)
+        if (maxAdditionalQueries <= 0 || initial.results.size >= EXPAND_BELOW_RESULT_COUNT) {
+            return initial
+        }
+
+        val followUps = additionalShoppingQueries(normalizedQuery).take(maxAdditionalQueries.coerceAtMost(MAX_ADDITIONAL_SEARCHES))
+        if (followUps.isEmpty()) return initial
+
+        val reports = mutableListOf(initial)
+        for (alternateQuery in followUps) {
+            // Keep the original query as the relevance anchor so alternate wording does not
+            // cause otherwise valid product titles to be rejected.
+            delay(EXPANDED_QUERY_DELAY_MS)
+            reports += searchOnlineWithDiagnostics(token, alternateQuery, relevanceQuery = normalizedQuery)
+            val uniqueCount = reports.flatMap { it.results }
+                .distinctBy { offerIdentity(it) }.size
+            if (uniqueCount >= TARGET_EXPANDED_RESULT_COUNT) break
+        }
+
+        val combined = reports.flatMap { it.results }
+            .distinctBy { offerIdentity(it) }
+            .sortedBy { it.price }
+            .take(MAX_ONLINE_RESULTS)
+        return SerpApiShoppingSearchReport(
+            results = combined,
+            rawResultCount = reports.sumOf { it.rawResultCount },
+            rejectedAsIrrelevant = reports.sumOf { it.rejectedAsIrrelevant },
+            rejectedForPriceOrCurrency = reports.sumOf { it.rejectedForPriceOrCurrency },
+            rejectedForLink = reports.sumOf { it.rejectedForLink },
+            rejectedOther = reports.sumOf { it.rejectedOther },
+            firstResultFields = initial.firstResultFields,
+            queriesExecuted = reports.size
+        )
+    }
+
+    private fun additionalShoppingQueries(query: String): List<String> {
+        val normalized = query.trim().replace(Regex("\\s+"), " ")
+        val lower = normalized.lowercase(Locale.ROOT)
+        val modelCode = Regex("""\b[a-z]{1,8}\s*\d[a-z0-9-]{1,12}\b""", RegexOption.IGNORE_CASE)
+            .containsMatchIn(normalized)
+        val candidates = when {
+            lower.contains("logitech") && Regex("""\bg\s*\d{2,4}\b""", RegexOption.IGNORE_CASE).containsMatchIn(normalized) ->
+                listOf("$normalized Lightsync", "$normalized gaming mouse")
+            modelCode ->
+                listOf("$normalized ofertas", "$normalized precio en tiendas")
+            else ->
+                listOf("$normalized ofertas", "$normalized en tiendas")
+        }
+        return candidates.map { it.trim().take(120) }
+            .filter { it.length >= 2 && !it.equals(normalized, ignoreCase = true) }
+            .distinctBy { it.lowercase(Locale.ROOT) }
+    }
+
+    private fun offerIdentity(result: SerpApiShoppingResult): String =
+        "\${result.storeName.trim().lowercase(Locale.ROOT)}|\${result.price}|\${result.sourceUrl.trim().lowercase(Locale.ROOT)}"
 
     /**
      * Search Amazon.es itself, rather than Google Shopping. This still returns a public search
@@ -882,6 +951,10 @@ class SerpApiClient(
     private companion object {
         const val MAX_PRODUCTS_PER_BATCH = 40
         const val MAX_ONLINE_RESULTS = 100
+        const val EXPAND_BELOW_RESULT_COUNT = 12
+        const val TARGET_EXPANDED_RESULT_COUNT = 15
+        const val MAX_ADDITIONAL_SEARCHES = 2
+        const val EXPANDED_QUERY_DELAY_MS = 350L
         const val INTER_REQUEST_DELAY_MS = 1_200L
         val STOP_WORDS = setOf(
             "the", "and", "for", "with", "in", "on", "de", "del", "la", "el", "los", "las",

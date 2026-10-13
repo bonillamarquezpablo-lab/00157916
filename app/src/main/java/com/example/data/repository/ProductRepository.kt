@@ -324,7 +324,10 @@ class ProductRepository(
             }
             val productId = existingProduct?.id
                 ?: stableOnlineId("online_product_", group.identityKey)
-            val displayTitle = existingProduct?.title?.takeIf { it.isNotBlank() } ?: group.title
+            // Keep the persisted title and thumbnail from the same representative listing.
+            // If the provider changes the title and returns no image, discard a potentially stale
+            // image instead of showing artwork that may belong to a different colour/variant.
+            val displayTitle = group.title
             val currentMinimum = group.minPrice
             val highestToday = group.offers.maxOfOrNull { it.price } ?: currentMinimum
             val productEntity = if (existingProduct != null) {
@@ -342,7 +345,10 @@ class ProductRepository(
                     athMaxPrice = maxOf(existingProduct.athMaxPrice, highestToday),
                     currentStoreId = storeId,
                     storeUrl = bestOffer.sourceUrl,
-                    imageUrl = group.representativeImageUrl.takeIf { it.isNotBlank() } ?: existingProduct.imageUrl,
+                    imageUrl = group.representativeImageUrl.takeIf { it.isNotBlank() }
+                        ?: existingProduct.imageUrl.takeIf {
+                            existingProduct.title.equals(displayTitle, ignoreCase = true)
+                        },
                     isPriceVerified = true
                 )
             } else {

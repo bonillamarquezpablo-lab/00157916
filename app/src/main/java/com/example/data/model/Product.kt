@@ -59,6 +59,7 @@ data class Product(
     val verdict: DealVerdict
         get() = when {
             !isPriceVerified -> DealVerdict.unverified()
+            !isPriceFresh -> DealVerdict.insufficientHistory()
             !hasSufficientHistory -> DealVerdict.insufficientHistory()
             else -> DealVerdict.analyze(
                 currentPrice = currentPrice,
@@ -107,7 +108,7 @@ data class Product(
         }
 
     val isAtAth: Boolean
-        get() = hasSufficientHistory && currentPrice <= athMinPrice + 0.05
+        get() = isPriceFresh && hasSufficientHistory && currentPrice <= athMinPrice + 0.05
 
     private companion object {
         const val MIN_HISTORY_POINTS = 3

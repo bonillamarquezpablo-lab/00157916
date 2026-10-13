@@ -572,9 +572,15 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 val historyNote = if (results.isNotEmpty()) {
                     " " + onlineHistoryNotice(savedObservations, results.size)
                 } else ""
-                val expandedQueryNote = googleReport?.queriesExecuted
-                    ?.takeIf { it > 1 }
-                    ?.let { " Se combinaron $it búsquedas de Google Shopping para ampliar las ofertas." }
+                val expandedQueryNote = googleReport
+                    ?.takeIf { it.queriesExecuted > 1 }
+                    ?.let { report ->
+                        if (report.failedAdditionalQueries > 0) {
+                            " Se intentaron ${report.queriesExecuted} búsquedas de Google Shopping; ${report.failedAdditionalQueries} consulta(s) adicional(es) fallaron y se conservan las ofertas válidas."
+                        } else {
+                            " Se combinaron ${report.queriesExecuted} búsquedas de Google Shopping para ampliar las ofertas."
+                        }
+                    }
                     .orEmpty()
                 val message = base + expandedQueryNote + quotaNote + filterNote + historyNote
                 _uiState.value = _uiState.value.copy(

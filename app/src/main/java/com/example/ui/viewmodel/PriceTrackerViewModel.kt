@@ -243,10 +243,20 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     repository.allProductsStream.first { products -> products.isNotEmpty() }
                 }
                 val targets = if (testOneProduct) {
-                    // Prefer a real catalog product with a barcode so the one-search test uses
-                    // the strongest available identity instead of a hard-coded demo item.
-                    listOf(allProducts.firstOrNull { product -> !product.ean.isNullOrBlank() }
-                        ?: allProducts.first())
+                    // Prefer a product with a distinctive alphanumeric model identifier and a
+                    // brand. A barcode is useful only if the provider indexes it; querying the
+                    // first EAN-bearing demo item can otherwise produce a false-negative test.
+                    val bestIdentified = allProducts
+                        .filter { it.brand.isNotBlank() }
+                        .maxByOrNull { product ->
+                            val identity = "${product.brand} ${product.title}"
+                            val modelCode = Regex("""\b(?=[a-z0-9-]*[a-z])(?=[a-z0-9-]*\d)[a-z0-9-]{4,}\b""", RegexOption.IGNORE_CASE)
+                                .find(identity)?.value
+                            (if (modelCode != null) 100 else 0) +
+                                (if (!product.ean.isNullOrBlank()) 10 else 0) +
+                                product.title.length.coerceAtMost(80)
+                        }
+                    listOf(bestIdentified ?: allProducts.first())
                 } else {
                     // Spread catalog lookups over multiple manual batches, prioritizing products
                     // never queried or queried longest ago. This keeps one tap within 40 searches
@@ -309,7 +319,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
                 if (quotes.isEmpty()) {
                     val message = if (testOneProduct) {
-                        "La prueba respondió, pero no encontró una oferta que coincidiera de forma segura con ese producto. No se ha cambiado ningún precio y el lote de 40 sigue bloqueado para proteger tu cuota."
+                        val tested = selectedTargets.firstOrNull()?.let { "${it.brand} ${it.title}".trim() }
+                            ?: "el producto seleccionado"
+                        "La prueba de «$tested» respondió, pero SerpApi no devolvió una oferta que coincidiera de forma segura. No se ha cambiado ningún precio ni creado un punto de historial. El lote de 40 sigue bloqueado para proteger tu cuota. Prueba la búsqueda manual con el nombre/modelo exacto."
                     } else {
                         "SerpApi respondió, pero ${batchResult.queriesWithoutMatches} de ${batchResult.requestedQueries - batchResult.failedQueries} consultas no produjeron ofertas con coincidencia segura. No se han cambiado los precios."
                     }

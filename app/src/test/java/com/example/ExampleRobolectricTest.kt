@@ -870,6 +870,22 @@ class ExampleRobolectricTest {
                 sourceUrl = "https://www.wasserman.eu/ugreen-usb-hub",
                 observedAt = now
             )
+            val promotionalBattery = com.example.data.remote.SerpApiShoppingResult(
+                title = "3x Batería portátil de 20.000 mAh y 35W - Pueyo impreso con su logotipo",
+                price = 297.91,
+                storeName = "Zaprinta.es",
+                sourceUrl = "https://www.zaprinta.es/baterias-promocionales",
+                observedAt = now
+            )
+            val filteredPromotionalBattery = repository.filterOnlineSearchResults(
+                listOf(promotionalBattery),
+                "Batería portátil 20000mAh 35W"
+            )
+            assertTrue(
+                "Promotional custom-logo bulk merchandise must not be reported as a regular retail offer",
+                filteredPromotionalBattery.isEmpty()
+            )
+
             val filteredResults = repository.filterOnlineSearchResults(
                 listOf(suspiciousRedmi, rentalPhoneWithNormalPrice, normalNewPhone, cheapLegitimateAccessory)
             )
@@ -895,6 +911,7 @@ class ExampleRobolectricTest {
                 normalNewPhone.copy(storeName = "Cash Converters España", sourceUrl = "https://www.cashconverters.es/xiaomi"),
                 normalNewPhone.copy(storeName = "Vinted", sourceUrl = "https://www.vinted.es/xiaomi"),
                 normalNewPhone.copy(storeName = "CeX España", sourceUrl = "https://www.webuy.com/xiaomi"),
+                normalNewPhone.copy(storeName = "Tienda oficial", sourceUrl = "https://www.wallapop.com/item/xiaomi"),
                 normalNewPhone.copy(
                     title = "Xiaomi Redmi 17 5G cuota 9,90 €/mes",
                     storeName = "Tienda oficial",

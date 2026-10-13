@@ -500,14 +500,21 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     return@launch
                 }
 
-                val results = when (provider) {
-                    OnlineSearchProvider.GOOGLE_SHOPPING -> serpApiClient.searchOnline(token, query)
-                    OnlineSearchProvider.AMAZON -> serpApiClient.searchAmazonOnline(token, query)
+                val googleReport = if (provider == OnlineSearchProvider.GOOGLE_SHOPPING) {
+                    serpApiClient.searchOnlineWithDiagnostics(token, query)
+                } else {
+                    null
                 }
+                val results = googleReport?.results
+                    ?: serpApiClient.searchAmazonOnline(token, query)
                 // Empty responses are not useful cache entries: allow a later retry to query
                 // SerpApi again instead of replaying a stale "no results" response for 55 minutes.
                 if (results.isNotEmpty()) onlineSearchCache.write(provider.name, query, results)
-                val base = onlineSearchResultMessage(results, provider)
+                val base = if (results.isEmpty() && googleReport != null) {
+                    googleReport.emptyResultMessage(query)
+                } else {
+                    onlineSearchResultMessage(results, provider)
+                }
                 // The account endpoint is free; refresh the displayed balance after a live request.
                 val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
                 val quotaNote = quotaAfter?.let { " ${it.quotaSummary()}" }.orEmpty()

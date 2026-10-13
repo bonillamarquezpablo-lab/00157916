@@ -20,6 +20,10 @@ interface ProductDao {
     @Query("SELECT * FROM products WHERE id = :productId LIMIT 1")
     suspend fun getProductById(productId: String): ProductEntity?
 
+    /** Remove legacy catalogue rows which never acquired a real, source-backed observation. */
+    @Query("DELETE FROM products WHERE id NOT IN (SELECT DISTINCT productId FROM price_observations WHERE isVerified = 1)")
+    suspend fun deleteProductsWithoutVerifiedObservations(): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(products: List<ProductEntity>)
 

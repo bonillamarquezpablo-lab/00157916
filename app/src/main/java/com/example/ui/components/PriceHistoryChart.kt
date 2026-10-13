@@ -335,7 +335,7 @@ fun PriceHistoryChart(
             }
             if (filteredPoints.isEmpty()) {
                 Text(
-                    text = "Sin datos todavía",
+                    text = if (priceHistory.isEmpty()) "Sin datos todavía" else "Sin datos en este rango",
                     modifier = Modifier.align(Alignment.Center),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.SemiBold,

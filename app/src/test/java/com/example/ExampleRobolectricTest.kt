@@ -22,6 +22,7 @@ import okhttp3.Response
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
@@ -813,6 +814,51 @@ class ExampleRobolectricTest {
         assertTrue(result.isGoogleShoppingProductLink)
     }
 
+
+    @Test
+    fun `concurrent same-day searches create only one observation per product and store`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val observedAt = System.currentTimeMillis()
+            val first = com.example.data.remote.SerpApiShoppingResult(
+                title = "Sony WH-1000XM5 Wireless Headphones",
+                price = 239.99,
+                storeName = "Amazon.es",
+                sourceUrl = "https://www.amazon.es/dp/B0SONY-CONCURRENT-A",
+                observedAt = observedAt
+            )
+            val second = first.copy(
+                price = 234.99,
+                sourceUrl = "https://www.amazon.es/dp/B0SONY-CONCURRENT-B"
+            )
+
+            val outcomes = listOf(first, second).map { result ->
+                async(Dispatchers.Default) {
+                    repository.recordOnlineSearchResults(
+                        results = listOf(result),
+                        sourceType = "GOOGLE_SHOPPING",
+                        searchQuery = "Sony WH-1000XM5"
+                    )
+                }
+            }.map { it.await() }
+
+            assertEquals("Only one concurrent search may insert for this product/store/day", 1, outcomes.sum())
+            assertEquals("Room should contain a single observation for this daily key", 1, database.priceObservationDao().getVerifiedObservationCount())
+        } finally {
+            database.close()
+        }
+    }
 
     @Test
     fun `online search stores real offers once per store and day and rejects used listings and low outliers`() = runBlocking<Unit> {

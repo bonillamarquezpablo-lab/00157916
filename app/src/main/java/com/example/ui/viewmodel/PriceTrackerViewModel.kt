@@ -680,11 +680,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(verifierResult = null, verifierInput = "")
     }
 
-    fun simulatePriceDrop(productId: String) {
-        repository.simulatePriceDrop(productId)
-        showSnackbar("Simulación local de demostración. No se ha registrado un mínimo real ni se enviará ninguna alerta.")
-    }
-
     fun clearSnackbarMessage() {
         _uiState.value = _uiState.value.copy(snackbarMessage = null)
     }

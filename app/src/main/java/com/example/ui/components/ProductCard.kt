@@ -272,7 +272,7 @@ fun ProductCard(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Buscar ofertas en ${Store.ALL_STORES.size} tiendas",
+                    text = "Explorar tiendas",
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 12.sp
                 )

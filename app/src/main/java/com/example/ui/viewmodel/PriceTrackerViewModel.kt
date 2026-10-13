@@ -97,8 +97,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState
     ) { allProducts, state ->
         allProducts
-            // Hide legacy static demo rows from Mercado. Actual searches create verified Room
-            // observations and tracking remains visible even before it has live price history.
+            // Only the products with real, verified online observations survive into Mercado.
             .filter { product -> product.isPriceVerified || product.isTracked }
             .filter { product ->
                 // Category filter
@@ -248,7 +247,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 val targets = if (testOneProduct) {
                     // Prefer a product with a distinctive alphanumeric model identifier and a
                     // brand. A barcode is useful only if the provider indexes it; querying the
-                    // first EAN-bearing demo item can otherwise produce a false-negative test.
+                    // first EAN-bearing product from the user's saved online catalogue can otherwise produce a false-negative test.
                     val bestIdentified = allProducts
                         .filter { it.brand.isNotBlank() }
                         .maxByOrNull { product ->

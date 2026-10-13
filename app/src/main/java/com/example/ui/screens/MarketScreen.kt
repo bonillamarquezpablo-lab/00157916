@@ -138,7 +138,7 @@ fun MarketScreen(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "${stores.size} tiendas configuradas",
+                            text = "${stores.size} comercios en directorio",
                             color = Color(0xFF10B981),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold

@@ -21,7 +21,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Share
@@ -32,7 +31,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -62,8 +60,7 @@ import com.example.ui.components.StoreComparisonView
 fun ProductDetailSheet(
     product: Product,
     onDismiss: () -> Unit,
-    onOpenSetAlert: () -> Unit,
-    onSimulatePriceDrop: () -> Unit
+    onOpenSetAlert: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
@@ -348,30 +345,13 @@ fun ProductDetailSheet(
                 }
             }
 
-            // priceHistory is built only from verified Room observations. Never draw a
-            // synthetic/demo series or the temporary simulation overlay as real market history.
-            if (product.isPriceVerified) product.priceHistory.minOfOrNull { it.timestamp }?.let { firstObservedAt ->
-                Text(
-                    text = "Historial desde ${SimpleDateFormat("dd MMM yyyy", Locale("es", "ES")).format(Date(firstObservedAt))}",
-                    modifier = Modifier.fillMaxWidth(),
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            if (product.isPriceVerified && product.priceHistory.isNotEmpty()) {
-                PriceHistoryChart(
-                    priceHistory = product.priceHistory,
-                    athMinPrice = product.athMinPrice,
-                    avg90dPrice = product.avg90dPrice
-                )
-            } else if (product.isPriceVerified) {
-                Text(
-                    text = "El historial queda guardado en este dispositivo. La evolución aparecerá cuando haya observaciones de días distintos; no se inventan precios anteriores.",
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            // Room observations are the only source for this chart. Empty/demo products show
+            // an explicit empty state; no generated or simulated points are ever plotted.
+            PriceHistoryChart(
+                priceHistory = product.priceHistory,
+                athMinPrice = product.athMinPrice,
+                avg90dPrice = product.avg90dPrice
+            )
 
             // Only show offers that came back from the latest provider query.
             if (product.offers.isNotEmpty()) {
@@ -458,22 +438,6 @@ fun ProductDetailSheet(
                         )
                     }
 
-                    OutlinedButton(
-                        onClick = onSimulatePriceDrop,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.FlashOn,
-                            contentDescription = null,
-                            tint = Color(0xFFD97706),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Simular caída (demo)", fontSize = 10.sp)
-                    }
                 }
             }
         }

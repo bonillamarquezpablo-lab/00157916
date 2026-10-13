@@ -224,7 +224,7 @@ private fun ShoppingResultCard(
     onOpenProduct: () -> Unit,
     onOpenOffer: (SerpApiShoppingResult) -> Unit
 ) {
-    val best = group.bestPurchaseOffer
+    val cheapest = group.cheapestOffer
     val displayedStoreOffers = group.offers
         .distinctBy { it.storeName.trim().lowercase(Locale.ROOT) }
         .take(MAX_VISIBLE_STORE_OFFERS)
@@ -235,9 +235,9 @@ private fun ShoppingResultCard(
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
-                if (best.thumbnailUrl.isNotBlank()) {
+                if (group.representativeImageUrl.isNotBlank()) {
                     AsyncImage(
-                        model = best.thumbnailUrl,
+                        model = group.representativeImageUrl,
                         contentDescription = "Imagen de ${group.title}",
                         modifier = Modifier.size(94.dp).clip(RoundedCornerShape(14.dp)),
                         contentScale = ContentScale.Crop
@@ -253,16 +253,16 @@ private fun ShoppingResultCard(
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(group.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     Text(
-                        "Desde " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(best.price),
+                        "Desde " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(group.minPrice),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        if (best.isGoogleShoppingProductLink) {
-                            "${group.storeCount} tiendas · menor precio listado en Google Shopping"
+                        if (cheapest.isGoogleShoppingProductLink) {
+                            "${group.storeCount} tiendas · precio más bajo listado en Google Shopping"
                         } else {
-                            "${group.storeCount} tiendas · mejor precio con enlace directo en ${best.storeName}"
+                            "${group.storeCount} tiendas · precio más bajo en ${cheapest.storeName}"
                         },
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium
@@ -274,7 +274,7 @@ private fun ShoppingResultCard(
                     )
                 }
             }
-            if (best.primeEligible) {
+            if (cheapest.primeEligible) {
                 Text("Entrega Prime disponible en la oferta más barata", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
             }
             Text(

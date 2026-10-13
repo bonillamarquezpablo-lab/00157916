@@ -5,23 +5,23 @@ import java.text.Normalizer
 import java.util.Locale
 
 private val BUNDLE_TERMS = Regex(
-    """\\b(pack|paquete|combo|bundle|kit|set|conjunto|combinacion|combinado)\\b"""
+    """\b(pack|paquete|combo|bundle|kit|set|conjunto|combinacion|combinado)\b"""
 )
 private val ONLINE_PRODUCT_TYPES = listOf(
-    "keyboard" to Regex("""\\b(teclado|teclados|keyboard|keyboards)\\b"""),
-    "mouse" to Regex("""\\b(raton|ratones|mouse|mice)\\b"""),
-    "headphones" to Regex("""\\b(auricular|auriculares|headphones?|headsets?|cascos)\\b"""),
-    "monitor" to Regex("""\\b(monitores?|pantallas?|monitors?|display)\\b"""),
-    "laptop" to Regex("""\\b(portatil|portatiles|laptop|notebook|chromebook)\\b"""),
-    "phone" to Regex("""\\b(smartphone|movil|moviles|telefono|telefonos|phone)\\b"""),
-    "controller" to Regex("""\\b(mandos?|controllers?|gamepad)\\b"""),
-    "webcam" to Regex("""\\b(webcams?|camara web)\\b"""),
-    "camera" to Regex("""\\b(camaras?|cameras?)\\b"""),
-    "microphone" to Regex("""\\b(microfonos?|microphones?)\\b"""),
-    "speaker" to Regex("""\\b(altavoces?|speakers?|soundbar|barra de sonido)\\b"""),
-    "console" to Regex("""\\b(consolas?|playstation|xbox|nintendo switch)\\b""")
+    "keyboard" to Regex("""\b(teclado|teclados|keyboard|keyboards)\b"""),
+    "mouse" to Regex("""\b(raton|ratones|mouse|mice)\b"""),
+    "headphones" to Regex("""\b(auricular|auriculares|headphones?|headsets?|cascos)\b"""),
+    "monitor" to Regex("""\b(monitores?|pantallas?|monitors?|display)\b"""),
+    "laptop" to Regex("""\b(portatil|portatiles|laptop|notebook|chromebook)\b"""),
+    "phone" to Regex("""\b(smartphone|movil|moviles|telefono|telefonos|phone)\b"""),
+    "controller" to Regex("""\b(mandos?|controllers?|gamepad)\b"""),
+    "webcam" to Regex("""\b(webcams?|camara web)\b"""),
+    "camera" to Regex("""\b(camaras?|cameras?)\b"""),
+    "microphone" to Regex("""\b(microfonos?|microphones?)\b"""),
+    "speaker" to Regex("""\b(altavoces?|speakers?|soundbar|barra de sonido)\b"""),
+    "console" to Regex("""\b(consolas?|playstation|xbox|nintendo switch)\b""")
 )
-private val ONLINE_MODEL_CODE = Regex("""\\b[a-z]{1,8}\\d[a-z0-9]{1,12}\\b""")
+private val ONLINE_MODEL_CODE = Regex("""\b[a-z]{1,8}\d[a-z0-9]{1,12}\b""")
 private val NON_MODEL_CODES = setOf(
     "usb20", "usb30", "usb32", "wifi6", "wifi7", "typec", "nvme",
     "4gb", "8gb", "16gb", "32gb", "64gb", "128gb", "256gb", "512gb",
@@ -33,7 +33,7 @@ private fun normalizeOnlineSearchText(value: String): String =
         .replace(Regex("\\p{Mn}+"), "")
         .replace(Regex("""[^a-z0-9]+"""), " ")
         .trim()
-        .replace(Regex("""\\s+"""), " ")
+        .replace(Regex("""\s+"""), " ")
 
 private fun explicitOnlineModelCodes(value: String): Set<String> =
     ONLINE_MODEL_CODE.findAll(normalizeOnlineSearchText(value))

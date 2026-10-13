@@ -8,12 +8,29 @@ import com.example.data.model.Store
 import com.example.data.model.VerdictLevel
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
+import com.example.data.remote.isIrrelevantMultiProductBundle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ExampleUnitTest {
+    @Test
+    fun preciseModelSearchRejectsBundlesButKeepsStandaloneItemsAndExplicitPackQueries() {
+        val keyboardAndMousePack =
+            "Teclados Logitech Pack G213 Prodigy Teclado Gaming + Logitech G203 Lightsync Ratón Gaming"
+
+        assertTrue(
+            isIrrelevantMultiProductBundle("Logitech G203", keyboardAndMousePack)
+        )
+        assertFalse(
+            isIrrelevantMultiProductBundle("Logitech G203", "Logitech G203 Lightsync ratón gaming")
+        )
+        assertFalse(
+            isIrrelevantMultiProductBundle("Logitech G203 pack", "Pack Logitech G203 x 2 ratones gaming")
+        )
+    }
+
     @Test
     fun groupedOnlineSearchCombinesRetailersButKeepsModelsVariantsAndAccessoriesSeparate() {
         fun result(title: String, price: Double, store: String) = SerpApiShoppingResult(

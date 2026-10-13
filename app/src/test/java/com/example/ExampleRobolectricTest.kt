@@ -701,6 +701,67 @@ class ExampleRobolectricTest {
                 filteredResults.any { it.title.contains("UGREEN USB 2.0 Hub") }
             )
 
+            val excludedSellerResults = listOf(
+                normalNewPhone.copy(storeName = "Wallapop", sourceUrl = "https://www.wallapop.com/xiaomi"),
+                normalNewPhone.copy(storeName = "Cash Converters España", sourceUrl = "https://www.cashconverters.es/xiaomi"),
+                normalNewPhone.copy(storeName = "Vinted", sourceUrl = "https://www.vinted.es/xiaomi"),
+                normalNewPhone.copy(storeName = "CeX España", sourceUrl = "https://www.webuy.com/xiaomi"),
+                normalNewPhone.copy(
+                    title = "Xiaomi Redmi 17 5G cuota 9,90 €/mes",
+                    storeName = "Tienda oficial",
+                    sourceUrl = "https://www.example.com/xiaomi-cuota"
+                )
+            )
+            assertTrue(
+                "Second-hand marketplaces and subscription listings must be excluded",
+                repository.filterOnlineSearchResults(excludedSellerResults, "Xiaomi Redmi 17").isEmpty()
+            )
+
+            val vacuumListings = listOf(
+                cheapLegitimateAccessory.copy(
+                    title = "Xiaomi Vacuum Cleaner G10",
+                    price = 299.00,
+                    storeName = "Amazon.es",
+                    sourceUrl = "https://www.amazon.es/dp/VACUUMG10"
+                ),
+                cheapLegitimateAccessory.copy(
+                    title = "Xiaomi Vacuum Cleaner G10",
+                    price = 279.00,
+                    storeName = "PcComponentes",
+                    sourceUrl = "https://www.pccomponentes.com/vacuum-g10"
+                ),
+                cheapLegitimateAccessory.copy(
+                    title = "Xiaomi Vacuum Cleaner G10",
+                    price = 319.00,
+                    storeName = "MediaMarkt",
+                    sourceUrl = "https://www.mediamarkt.es/vacuum-g10"
+                ),
+                cheapLegitimateAccessory.copy(
+                    title = "Xiaomi Vacuum Cleaner G10 Mop Kit",
+                    price = 12.99,
+                    storeName = "Amazon.es",
+                    sourceUrl = "https://www.amazon.es/dp/MOPKITG10"
+                )
+            )
+            val filteredVacuumListings = repository.filterOnlineSearchResults(
+                vacuumListings,
+                "Xiaomi Vacuum Cleaner G10"
+            )
+            assertFalse(
+                "An accessory below 25% of the full device reference price is not a full vacuum offer",
+                filteredVacuumListings.any { it.title.contains("Mop Kit", ignoreCase = true) }
+            )
+            assertEquals(
+                "The three legitimate vacuum offers should remain",
+                3,
+                filteredVacuumListings.size
+            )
+            assertTrue(
+                "UGREEN brand searches should retain inexpensive legitimate cables and hubs",
+                repository.filterOnlineSearchResults(listOf(cheapLegitimateAccessory), "UGREEN")
+                    .any { it.title.contains("UGREEN USB 2.0 Hub") }
+            )
+
             val inserted = repository.recordOnlineSearchResults(results, "GOOGLE_SHOPPING")
             assertEquals("Only the two plausible new offers should be stored", 2, inserted)
             val stored = withTimeout<List<PriceObservationEntity>>(10_000) {

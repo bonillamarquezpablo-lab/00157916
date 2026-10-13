@@ -186,7 +186,7 @@ class ProductRepository(
                 isEligibleHistoryTitle(result.title) &&
                 isEligibleSeller(result.storeName) &&
                 isPlausibleHistoryPrice(result.title, result.price) &&
-                !hasStrictModelMismatch(queryModelMarkers, result.title) &&
+                !hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title) &&
                 // A device-specific query should never show cases, filters, mop kits or other
                 // accessories as if they were the requested device. Brand-only accessory searches
                 // remain unrestricted, preserving UGREEN cable/hub deals.
@@ -456,11 +456,26 @@ class ProductRepository(
         return markers
     }
 
-    private fun hasStrictModelMismatch(queryMarkers: Set<String>, resultTitle: String): Boolean {
+    private fun hasStrictModelMismatch(
+        query: String,
+        queryMarkers: Set<String>,
+        resultTitle: String
+    ): Boolean {
         if (queryMarkers.isEmpty()) return false
         val resultMarkers = explicitModelMarkers(resultTitle)
-        // Only enforce a model marker if the provider title provides any model evidence.
-        return resultMarkers.isEmpty() || queryMarkers.intersect(resultMarkers).isEmpty()
+        if (resultMarkers.isEmpty() || queryMarkers.intersect(resultMarkers).isEmpty()) return true
+
+        val variantWords = setOf("pro", "max", "plus", "ultra", "fe", "lite", "mini", "fold", "flip", "classic", "edge")
+        val requestedVariants = normalizedProductTitle(query).split(' ').filter { it in variantWords }.toSet()
+        val resultVariants = normalizedProductTitle(resultTitle).split(' ').filter { it in variantWords }.toSet()
+        if (!resultVariants.containsAll(requestedVariants)) return true
+
+        val memoryPattern = Regex("""\b\d+\s?(?:gb|tb)\b""")
+        val requestedMemory = memoryPattern.findAll(normalizedProductTitle(query))
+            .map { it.value.replace(" ", "") }.toSet()
+        val availableMemory = memoryPattern.findAll(normalizedProductTitle(resultTitle))
+            .map { it.value.replace(" ", "") }.toSet()
+        return requestedMemory.isNotEmpty() && !availableMemory.containsAll(requestedMemory)
     }
 
     private fun isAccessorySearchQuery(query: String): Boolean =

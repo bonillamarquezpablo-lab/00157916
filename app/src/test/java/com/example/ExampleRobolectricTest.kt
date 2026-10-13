@@ -730,11 +730,11 @@ class ExampleRobolectricTest {
                 }
             }.first { it.id == "sony_wh1000xm5" }
             assertEquals("The graph has one real point per day, not one per retailer", 2, productWithDailyHistory.priceHistory.size)
-            assertNotEquals(
-                "Daily history points must come from distinct calendar dates",
-                java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date(productWithDailyHistory.priceHistory[0].timestamp)),
-                java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date(productWithDailyHistory.priceHistory[1].timestamp))
-            )
+            val firstHistoryDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT)
+                .format(java.util.Date(productWithDailyHistory.priceHistory[0].timestamp))
+            val secondHistoryDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT)
+                .format(java.util.Date(productWithDailyHistory.priceHistory[1].timestamp))
+            assertTrue("Daily history points must come from distinct calendar dates", firstHistoryDate != secondHistoryDate)
             assertEquals(4, database.priceObservationDao().getVerifiedObservationCount())
         } finally {
             database.close()

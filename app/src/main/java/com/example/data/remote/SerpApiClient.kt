@@ -265,11 +265,16 @@ class SerpApiClient(
             .containsMatchIn(normalized)
         val candidates = when {
             lower.contains("logitech") && Regex("""\bg\s*\d{2,4}\b""", RegexOption.IGNORE_CASE).containsMatchIn(normalized) ->
-                listOf("$normalized Lightsync", "$normalized gaming mouse")
+                listOf(
+                    "$normalized Lightsync",
+                    "$normalized gaming mouse",
+                    "$normalized raton gaming",
+                    "$normalized precio tiendas España"
+                )
             modelCode ->
-                listOf("$normalized ofertas", "$normalized precio en tiendas")
+                listOf("$normalized ofertas", "$normalized precio en tiendas", "$normalized comprar", "$normalized tiendas España")
             else ->
-                listOf("$normalized ofertas", "$normalized en tiendas")
+                listOf("$normalized ofertas", "$normalized en tiendas", "$normalized comprar", "$normalized precio tiendas España")
         }
         return candidates.map { it.trim().take(120) }
             .filter { it.length >= 2 && !it.equals(normalized, ignoreCase = true) }
@@ -965,9 +970,9 @@ class SerpApiClient(
     private companion object {
         const val MAX_PRODUCTS_PER_BATCH = 40
         const val MAX_ONLINE_RESULTS = 100
-        const val EXPAND_BELOW_RESULT_COUNT = 12
-        const val TARGET_EXPANDED_RESULT_COUNT = 15
-        const val MAX_ADDITIONAL_SEARCHES = 2
+        const val EXPAND_BELOW_RESULT_COUNT = 20
+        const val TARGET_EXPANDED_RESULT_COUNT = 24
+        const val MAX_ADDITIONAL_SEARCHES = 4
         const val EXPANDED_QUERY_DELAY_MS = 350L
         const val INTER_REQUEST_DELAY_MS = 1_200L
         val STOP_WORDS = setOf(

@@ -39,5 +39,8 @@ data class PriceObservationEntity(
     val storeName: String = "",
     /** Provider that yielded this observation: Google Shopping or Amazon.es. */
     @ColumnInfo(defaultValue = "'Google Shopping'")
-    val sourceType: String = "Google Shopping"
+    val sourceType: String = "Google Shopping",
+    /** Where the saved URL opens: the merchant directly or an intermediate Google page. */
+    @ColumnInfo(defaultValue = "'directo'")
+    val linkType: String = "directo"
 )

@@ -4,6 +4,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,7 +20,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -47,12 +48,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.PricePoint
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 enum class ChartRange(val label: String, val days: Int?) {
-    DAYS_30("30 Días", 30),
-    DAYS_90("90 Días", 90),
-    MONTHS_6("6 Meses", 183),
-    ALL("Histórico", null)
+    DAYS_30("30D", 30),
+    DAYS_90("90D", 90),
+    MONTHS_6("6M", 183),
+    YEARS_1("1A", 365),
+    YEARS_2("2A", 730),
+    YEARS_3("3A", 1095),
+    YEARS_4("4A", 1460),
+    ALL("Todo", null)
 }
 
 @Composable
@@ -75,12 +83,30 @@ fun PriceHistoryChart(
         }
     }
 
+    // The header must agree with the selected range instead of showing a global date when
+    // that range has no observations.
+    val firstObservationLabel = remember(priceHistory, filteredPoints) {
+        when {
+            filteredPoints.isEmpty() && priceHistory.isEmpty() -> "Sin datos todavía"
+            filteredPoints.isEmpty() -> "Sin datos en este rango"
+            else -> priceHistory.minOfOrNull { it.timestamp }?.let { timestamp ->
+                "Historial desde " + SimpleDateFormat("dd MMM yyyy", Locale("es", "ES"))
+                    .format(Date(timestamp))
+            } ?: "Sin datos todavía"
+        }
+    }
+
     val minPriceInView = remember(filteredPoints) {
-        filteredPoints.minOfOrNull { it.price } ?: athMinPrice
+        val min = filteredPoints.minOfOrNull { it.price } ?: athMinPrice
+        val max = filteredPoints.maxOfOrNull { it.price } ?: (athMinPrice * 1.3)
+        // With only one observation (or identical prices), give the point vertical breathing
+        // room instead of pinning it to the bottom edge of the chart.
+        if (filteredPoints.isNotEmpty() && min == max) (min * 0.9).coerceAtLeast(0.0) else min
     }
     val maxPriceInView = remember(filteredPoints) {
+        val min = filteredPoints.minOfOrNull { it.price } ?: athMinPrice
         val max = filteredPoints.maxOfOrNull { it.price } ?: (athMinPrice * 1.3)
-        if (max == minPriceInView) max * 1.1 else max
+        if (filteredPoints.isNotEmpty() && min == max) max * 1.1 else max
     }
 
     val selectedPoint = remember(selectedPointIndex, filteredPoints) {
@@ -112,14 +138,14 @@ fun PriceHistoryChart(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Registrado en mercado español sin sesgo",
+                    text = firstObservationLabel,
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
-            // Stat pills
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Never show summary statistics based on demo/default product values.
+            if (filteredPoints.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
@@ -154,7 +180,9 @@ fun PriceHistoryChart(
 
         // Time Range Filter Chips
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             ChartRange.values().forEach { range ->
@@ -216,25 +244,25 @@ fun PriceHistoryChart(
                     Offset(x, y)
                 }
 
-                // Draw Average price horizontal dotted guide line
-                val avgNormalized = ((avg90dPrice - minPriceInView) / priceRange).coerceIn(0.0, 1.0)
-                val avgY = paddingTop + usableHeight - (avgNormalized.toFloat() * usableHeight)
-                drawLine(
-                    color = Color.Gray.copy(alpha = 0.5f),
-                    start = Offset(0f, avgY),
-                    end = Offset(width, avgY),
-                    strokeWidth = 1.5.dp.toPx(),
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
-                )
+                // Draw an average guide only when an actual 90-day average exists.
+                if (avg90dPrice > 0.0) {
+                    val avgNormalized = ((avg90dPrice - minPriceInView) / priceRange).coerceIn(0.0, 1.0)
+                    val avgY = paddingTop + usableHeight - (avgNormalized.toFloat() * usableHeight)
+                    drawLine(
+                        color = Color.Gray.copy(alpha = 0.5f),
+                        start = Offset(0f, avgY),
+                        end = Offset(width, avgY),
+                        strokeWidth = 1.5.dp.toPx(),
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
+                    )
+                }
 
-                // Fill gradient under curve
+                // Use straight segments between observed dates; do not imply unobserved prices.
                 val fillPath = Path().apply {
                     moveTo(coords.first().x, coords.first().y)
                     for (i in 1 until coords.size) {
-                        val prev = coords[i - 1]
                         val curr = coords[i]
-                        val cx = (prev.x + curr.x) / 2f
-                        cubicTo(cx, prev.y, cx, curr.y, curr.x, curr.y)
+                        lineTo(curr.x, curr.y)
                     }
                     lineTo(coords.last().x, height - paddingBottom)
                     lineTo(coords.first().x, height - paddingBottom)
@@ -257,10 +285,8 @@ fun PriceHistoryChart(
                 val strokePath = Path().apply {
                     moveTo(coords.first().x, coords.first().y)
                     for (i in 1 until coords.size) {
-                        val prev = coords[i - 1]
                         val curr = coords[i]
-                        val cx = (prev.x + curr.x) / 2f
-                        cubicTo(cx, prev.y, cx, curr.y, curr.x, curr.y)
+                        lineTo(curr.x, curr.y)
                     }
                 }
 
@@ -311,6 +337,15 @@ fun PriceHistoryChart(
                         }
                     }
                 }
+            }
+            if (filteredPoints.isEmpty()) {
+                Text(
+                    text = if (priceHistory.isEmpty()) "Sin datos todavía" else "Sin datos en este rango",
+                    modifier = Modifier.align(Alignment.Center),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp
+                )
             }
         }
 
@@ -386,7 +421,11 @@ fun PriceHistoryChart(
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "Toca sobre el gráfico para ver el precio exacto en cada fecha",
+                    text = if (filteredPoints.isEmpty()) {
+                        "No hay observaciones para este rango."
+                    } else {
+                        "Toca sobre el gráfico para ver el precio exacto en cada fecha"
+                    },
                     fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

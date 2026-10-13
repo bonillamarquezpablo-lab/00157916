@@ -328,8 +328,8 @@ fun MainScreen(
                         onProductClick = viewModel::onSelectProduct,
                         onToggleTrack = { prod -> viewModel.toggleTracking(prod) },
                         onEditAlert = viewModel::onOpenAlertSetting,
-                        onSimulatePriceDrop = viewModel::simulatePriceDrop,
-                        onNavigateToMarket = { currentTab = MainTab.MARKET }
+                        onNavigateToMarket = { currentTab = MainTab.MARKET },
+                        onCheckPricesNow = viewModel::checkPriceAlertsNow
                     )
                 }
             }
@@ -343,9 +343,6 @@ fun MainScreen(
             onDismiss = { viewModel.onSelectProduct(null) },
             onOpenSetAlert = {
                 viewModel.onOpenAlertSetting(product)
-            },
-            onSimulatePriceDrop = {
-                viewModel.simulatePriceDrop(product.id)
             }
         )
     }

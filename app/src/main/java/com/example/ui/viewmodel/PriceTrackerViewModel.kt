@@ -16,6 +16,7 @@ import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.Store
 import com.example.data.repository.ProductRepository
+import com.example.notifications.PriceAlertScheduler
 import com.example.data.repository.UrlAnalysisResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -87,6 +88,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     private val _uiState = MutableStateFlow(TrackerUiState())
 
     val uiState: StateFlow<TrackerUiState> = _uiState.asStateFlow()
+
+    init {
+        // Register one daily, quota-capped monitor; it remains idle without price targets.
+        runCatching { PriceAlertScheduler.ensureScheduled(application) }
+    }
 
     val spanishStores: StateFlow<List<Store>> = repository.allStoresStream
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Store.ALL_STORES)
@@ -645,7 +651,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             val msg = if (product.isTracked) {
                 "Producto eliminado del seguimiento local"
             } else {
-                "Producto guardado localmente. Los avisos automáticos aún no están disponibles."
+                "Producto guardado. Fija un precio objetivo para activar los avisos automáticos."
             }
             showSnackbar(msg)
         }
@@ -655,8 +661,23 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             repository.updateAlertTarget(product.id, targetPrice)
             _uiState.value = _uiState.value.copy(isSettingAlert = null)
-            val targetStr = if (targetPrice != null) "${String.format("%.2f", targetPrice)} €" else "nuevo mínimo"
-            showSnackbar(if (targetPrice != null) "Objetivo guardado: $targetStr. Aún no hay monitorización ni avisos automáticos." else "Seguimiento guardado. Aún no hay monitorización ni avisos automáticos.")
+            runCatching { PriceAlertScheduler.ensureScheduled(getApplication()) }
+            val targetStr = if (targetPrice != null) "${String.format("%.2f", targetPrice)} €" else "sin objetivo"
+            showSnackbar(
+                if (targetPrice != null) "Objetivo guardado: $targetStr. Mínimo revisará precios automáticamente a diario; hasta 3 productos por día para cuidar tu cuota."
+                else "Seguimiento guardado sin objetivo de precio. Edita el aviso para indicar a qué precio quieres recibir la notificación."
+            )
+        }
+    }
+
+    fun checkPriceAlertsNow() {
+        try {
+            val context = getApplication<Application>()
+            PriceAlertScheduler.ensureScheduled(context)
+            PriceAlertScheduler.enqueueImmediate(context)
+            showSnackbar("Comprobación solicitada. Puede consumir hasta 3 búsquedas de SerpApi; Android puede retrasar la ejecución.")
+        } catch (_: Exception) {
+            showSnackbar("No se pudo programar la revisión de precios. Vuelve a abrir Mínimo e inténtalo de nuevo.")
         }
     }
 
@@ -678,11 +699,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     fun clearVerifierResult() {
         _uiState.value = _uiState.value.copy(verifierResult = null, verifierInput = "")
-    }
-
-    fun simulatePriceDrop(productId: String) {
-        repository.simulatePriceDrop(productId)
-        showSnackbar("Simulación local de demostración. No se ha registrado un mínimo real ni se enviará ninguna alerta.")
     }
 
     fun clearSnackbarMessage() {

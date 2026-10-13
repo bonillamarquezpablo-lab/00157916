@@ -86,6 +86,22 @@ class ExampleRobolectricTest {
             assertTrue("Unverified product should not display fake history", preserved.priceHistory.isEmpty())
             assertFalse("New catalogue should not seed static demo rows", products.any { it.id == "demo_galaxy_s26_ultra" })
 
+            // Legacy rows from before 13 October 2026 may remain in Room, but must not
+            // contribute to current price or history even if they were marked verified.
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "sony_wh1000xm5",
+                    storeId = "amazon_es",
+                    price = 179.99,
+                    observedAt = 1_780_000_000_000L,
+                    sourceUrl = "https://www.amazon.es/dp/LEGACY",
+                    sourceName = "Legacy unit-test source",
+                    isVerified = true,
+                    productTitle = "Sony WH-1000XM5 Wireless Headphones",
+                    storeName = "Amazon.es",
+                    sourceType = "Google Shopping"
+                )
+            )
             database.priceObservationDao().insert(
                 PriceObservationEntity(
                     productId = "sony_wh1000xm5",
@@ -94,7 +110,10 @@ class ExampleRobolectricTest {
                     observedAt = System.currentTimeMillis(),
                     sourceUrl = "https://www.amazon.es/dp/TEST",
                     sourceName = "Authorized unit-test source",
-                    isVerified = true
+                    isVerified = true,
+                    productTitle = "Sony WH-1000XM5 Wireless Headphones",
+                    storeName = "Amazon.es",
+                    sourceType = "Google Shopping"
                 )
             )
             database.priceObservationDao().insert(
@@ -118,15 +137,16 @@ class ExampleRobolectricTest {
             val sourceBackedSony = sourceBackedProducts.first { it.id == "sony_wh1000xm5" }
             assertEquals(222.50, sourceBackedSony.currentPrice, 0.001)
             assertEquals(222.50, sourceBackedSony.athMinPrice, 0.001)
-            assertEquals(1, sourceBackedSony.priceHistory.size)
+            assertEquals("The legacy verified row must not appear in current history", 1, sourceBackedSony.priceHistory.size)
             assertEquals(222.50, sourceBackedSony.priceHistory.single().price, 0.001)
+            assertFalse(sourceBackedSony.priceHistory.any { it.price == 179.99 })
         } finally {
             database.close()
         }
     }
 
     @Test
-    fun `SerpApi parser accepts matching euro HTTPS offers and rejects unsafe results`() {
+    fun `SerpApi quotes accept direct and Google links while rejecting invalid price currency and model`() {
         val requested = SerpApiRequestProduct(
             id = "demo_galaxy_s26_ultra",
             title = "Samsung Galaxy S26 Ultra 512 GB",
@@ -179,15 +199,16 @@ class ExampleRobolectricTest {
 
         val quotes = SerpApiClient().parseQuotes(payload, requested, observedAt = 123L)
 
-        assertEquals("Only matching EUR offers with HTTPS merchant URLs should survive", 2, quotes.size)
-        assertEquals(1249.50, quotes.first().price, 0.001)
-        assertEquals("EUR", quotes.first().currency)
-        assertEquals(123L, quotes.first().observedAt)
+        assertEquals("A matching Google Shopping URL and an HTTP merchant URL are not rejected by link type", 3, quotes.size)
+        assertEquals(899.99, quotes[0].price, 0.001)
+        assertEquals("directo", com.example.data.remote.linkTypeForUrl(quotes[0].sourceUrl))
+        assertEquals(1249.50, quotes[1].price, 0.001)
+        assertEquals("Amazon España", quotes[1].storeName)
+        assertEquals(1299.99, quotes[2].price, 0.001)
+        assertTrue(quotes[2].sourceUrl.contains("google.com/shopping/product"))
+        assertEquals("Google Shopping", com.example.data.remote.linkTypeForUrl(quotes[2].sourceUrl))
+        assertTrue(quotes.all { it.currency == "EUR" && it.observedAt == 123L })
         assertTrue(quotes.all { it.productId == "demo_galaxy_s26_ultra" })
-        assertTrue(quotes.all { it.sourceUrl.startsWith("https://") })
-        val pcComponentesQuote = quotes.first { it.storeName == "PcComponentes" }
-        assertEquals("pccomponentes", pcComponentesQuote.storeId)
-        assertTrue(pcComponentesQuote.sourceUrl.contains("google.com/shopping/product"))
     }
 
     @Test
@@ -369,7 +390,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `migration 2 to 5 preserves watchlist and old products and stores verified price observations`() {
+    fun `migration 2 to 6 preserves watchlist and stores link destination types`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val databaseName = "minimo_migration_preservation_test.db"
         context.deleteDatabase(databaseName)
@@ -422,7 +443,7 @@ class ExampleRobolectricTest {
             AppDatabase::class.java,
             databaseName
         )
-            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
+            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6)
             .allowMainThreadQueries()
             .build()
 
@@ -446,9 +467,10 @@ class ExampleRobolectricTest {
                         storeId = "sample-store",
                         price = 42.50,
                         observedAt = 1000L,
-                        sourceUrl = "https://example.com/product",
+                        sourceUrl = "https://www.google.com/shopping/product/123456",
                         sourceName = "Unit-test source",
-                        isVerified = true
+                        isVerified = true,
+                        linkType = "Google Shopping"
                     )
                 )
                 migratedDatabase.priceObservationDao().insert(
@@ -467,6 +489,7 @@ class ExampleRobolectricTest {
                 val latestVerified = migratedDatabase.priceObservationDao().getLatestVerified("sample-product")
                 assertNotNull(latestVerified)
                 assertEquals(42.50, latestVerified?.price ?: 0.0, 0.001)
+                assertEquals("Google Shopping", latestVerified?.linkType)
             }
         } finally {
             migratedDatabase.close()
@@ -521,19 +544,17 @@ class ExampleRobolectricTest {
 
         val results = client.parseShoppingResults(payload, observedAt = 123L)
 
-        assertEquals(3, results.size)
+        assertEquals("Eligible offers survive whether the URL is direct, HTTP, or Google Shopping", 3, results.size)
         assertEquals("Unsafe HTTP", results[0].storeName)
         assertEquals(49.99, results[0].price, 0.001)
-        assertTrue(results[0].isGoogleShoppingProductLink)
-        assertTrue(results[0].sourceUrl.startsWith("https://www.google.com/search?"))
-        assertTrue(results[0].sourceUrl.contains("tbm=shop"))
-        assertTrue(results[0].sourceUrl.contains("q=Auriculares%20Sony%20WH-1000XM5"))
-
+        assertEquals("directo", results[0].linkType)
         assertEquals("PcComponentes", results[1].storeName)
         assertEquals(79.99, results[1].price, 0.001)
         assertTrue(results[1].isGoogleShoppingProductLink)
+        assertEquals("Google Shopping", results[1].linkType)
         assertEquals("Amazon.es", results[2].storeName)
-        assertTrue(!results[2].isGoogleShoppingProductLink)
+        assertEquals(89.99, results[2].price, 0.001)
+        assertFalse(results[2].isGoogleShoppingProductLink)
         assertTrue(results[2].isAmazonOffer)
         assertEquals(123L, results[2].observedAt)
         assertEquals("https://images.example.test/sony.jpg", results[2].thumbnailUrl)
@@ -563,6 +584,13 @@ class ExampleRobolectricTest {
                 },
                 {
                   "title": "Sony WH-1000XM5 headphones",
+                  "price": "239,99 €",
+                  "extracted_price": 239.99,
+                  "product_link": "https://www.google.com/shopping/product/SONY123",
+                  "source": "Fnac"
+                },
+                {
+                  "title": "Sony WH-1000XM5 headphones",
                   "price": "$239.00",
                   "extracted_price": 239.00,
                   "link": "https://shop.example.test/sony",
@@ -586,20 +614,21 @@ class ExampleRobolectricTest {
             observedAt = 123L
         )
 
-        assertEquals(4, report.rawResultCount)
-        assertEquals(2, report.results.size)
+        assertEquals(5, report.rawResultCount)
+        assertEquals("Matching Google Shopping and HTTP offers remain available", 3, report.results.size)
         val amazonResult = report.results.single { it.storeName == "Amazon.es" }
         assertEquals("Sony WH1000XM5 Wireless Noise Canceling Headphones", amazonResult.title)
         assertEquals(249.99, amazonResult.price, 0.001)
+        assertEquals("directo", amazonResult.linkType)
 
-        val fallbackResult = report.results.single { it.price == 229.99 }
-        assertEquals("Sony WH-1000XM5 headphones", fallbackResult.title)
-        assertTrue(fallbackResult.sourceUrl.startsWith("https://www.google.com/search?"))
-        assertTrue(fallbackResult.sourceUrl.contains("tbm=shop"))
-        assertTrue(fallbackResult.sourceUrl.contains("hl=es"))
-        assertTrue(fallbackResult.sourceUrl.contains("gl=es"))
-        assertTrue(fallbackResult.sourceUrl.contains("q=Sony%20WH-1000XM5%20headphones"))
-        assertTrue(fallbackResult.isGoogleShoppingProductLink)
+        val googleResult = report.results.single { it.storeName == "Fnac" }
+        assertEquals(239.99, googleResult.price, 0.001)
+        assertTrue(googleResult.isGoogleShoppingProductLink)
+        assertEquals("Google Shopping", googleResult.linkType)
+
+        val httpResult = report.results.single { it.storeName == "Unsafe HTTP" }
+        assertEquals(229.99, httpResult.price, 0.001)
+        assertEquals("directo", httpResult.linkType)
 
         assertEquals(1, report.rejectedAsIrrelevant)
         assertEquals(1, report.rejectedForPriceOrCurrency)
@@ -608,21 +637,78 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `missing shopping links report the received result field names`() {
-        val report = com.example.data.remote.SerpApiShoppingSearchReport(
-            results = emptyList(),
-            rawResultCount = 2,
-            rejectedAsIrrelevant = 0,
-            rejectedForPriceOrCurrency = 0,
-            rejectedForLink = 2,
-            rejectedOther = 0,
-            firstResultFields = "title, price, link"
+    fun `condition metadata blocks used and refurbished listings even if titles omit it`() {
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "search_metadata": {"status": "Success"},
+                  "shopping_results": [
+                    {
+                      "title": "Sony WH-1000XM5 Wireless Headphones",
+                      "price": "199,99 €",
+                      "extracted_price": 199.99,
+                      "second_hand_condition": "used",
+                      "source": "Amazon.es",
+                      "link": "https://www.amazon.es/dp/USEDTEST"
+                    },
+                    {
+                      "title": "Sony WH-1000XM5 Wireless Headphones",
+                      "price": "219,99 €",
+                      "extracted_price": 219.99,
+                      "condition": "refurbished",
+                      "source": "PcComponentes",
+                      "link": "https://www.pccomponentes.com/refurbished-test"
+                    },
+                    {
+                      "title": "Sony WH-1000XM5 Wireless Headphones",
+                      "price": "249,99 €",
+                      "extracted_price": 249.99,
+                      "condition": "new",
+                      "source": "Amazon.es",
+                      "link": "https://www.amazon.es/dp/NEWTEST"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "Sony WH-1000XM5",
+            observedAt = 123L
         )
 
-        assertTrue(
-            report.emptyResultMessage("Sony WH-1000XM5")
-                .contains("Campos recibidos: title, price, link")
+        assertEquals(3, report.rawResultCount)
+        assertEquals(1, report.results.size)
+        assertEquals(249.99, report.results.single().price, 0.001)
+        assertEquals(2, report.rejectedOther)
+    }
+
+    @Test
+    fun `missing shopping links receive a Google Shopping fallback instead of being rejected`() {
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "search_metadata": {"status": "Success"},
+                  "shopping_results": [
+                    {
+                      "title": "Sony WH-1000XM5 Wireless Headphones",
+                      "price": "229,99 €",
+                      "extracted_price": 229.99,
+                      "source": "Fnac"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "Sony WH-1000XM5",
+            observedAt = 123L
         )
+
+        assertEquals(1, report.results.size)
+        val result = report.results.single()
+        assertTrue(result.sourceUrl.startsWith("https://www.google.com/search?"))
+        assertEquals("Google Shopping", result.linkType)
+        assertEquals(0, report.rejectedForLink)
     }
 
     @Test
@@ -635,6 +721,7 @@ class ExampleRobolectricTest {
             observedAt = 123L
         )
         assertTrue(result.isGoogleShoppingProductLink)
+        assertEquals("Google Shopping", result.linkType)
     }
 
 
@@ -658,9 +745,9 @@ class ExampleRobolectricTest {
             val results = listOf(
                 com.example.data.remote.SerpApiShoppingResult(
                     title = "Sony WH-1000XM5 Wireless Headphones",
-                    price = 249.99,
+                    price = 229.99,
                     storeName = "PcComponentes",
-                    sourceUrl = "https://www.pccomponentes.com/sony-wh-1000xm5",
+                    sourceUrl = "https://www.google.com/shopping/product/SONYWH1000XM5",
                     observedAt = now
                 ),
                 com.example.data.remote.SerpApiShoppingResult(
@@ -704,13 +791,31 @@ class ExampleRobolectricTest {
             )
             val cheapLegitimateAccessory = com.example.data.remote.SerpApiShoppingResult(
                 title = "UGREEN USB 2.0 Hub 4 Puertos",
-                price = 5.82,
+                price = 3.49,
                 storeName = "Wasserman.eu",
                 sourceUrl = "https://www.wasserman.eu/ugreen-usb-hub",
                 observedAt = now
             )
+            val suspiciousPowerBank = com.example.data.remote.SerpApiShoppingResult(
+                title = "Anker Power Bank 20000mAh 65W",
+                price = 2.99,
+                storeName = "Amazon.es",
+                sourceUrl = "https://www.amazon.es/dp/SUSPICIOUSPOWERBANK",
+                observedAt = now
+            )
             val filteredResults = repository.filterOnlineSearchResults(
-                listOf(suspiciousRedmi, rentalPhoneWithNormalPrice, normalNewPhone, cheapLegitimateAccessory)
+                listOf(
+                    suspiciousRedmi,
+                    rentalPhoneWithNormalPrice,
+                    normalNewPhone,
+                    cheapLegitimateAccessory,
+                    suspiciousPowerBank
+                )
+            )
+            val prePolicySnapshot = normalNewPhone.copy(observedAt = 1_780_000_000_000L)
+            assertFalse(
+                "A result stamped before 13 October 2026 must not enter live history",
+                repository.filterOnlineSearchResults(listOf(prePolicySnapshot)).isNotEmpty()
             )
             assertFalse(
                 "A €9.90 Redmi phone listing is implausible for a new-in-store offer",
@@ -727,6 +832,10 @@ class ExampleRobolectricTest {
             assertTrue(
                 "Low-priced real accessories should remain eligible",
                 filteredResults.any { it.title.contains("UGREEN USB 2.0 Hub") }
+            )
+            assertFalse(
+                "A sub-€5 20,000mAh power bank is suspicious and must not be saved",
+                filteredResults.any { it.title.contains("Power Bank", ignoreCase = true) && it.price < 5.0 }
             )
 
             val excludedSellerResults = listOf(
@@ -809,6 +918,21 @@ class ExampleRobolectricTest {
             val strictMatches = repository.filterOnlineSearchResults(deviceSearchListings, "Xiaomi Redmi 17")
             assertEquals("A model-specific query must exclude other models and cases", 2, strictMatches.size)
             assertTrue(strictMatches.all { it.title.contains("Redmi 17", ignoreCase = true) })
+
+            val sonyFormattingVariant = results.first().copy(
+                title = "Sony 1000XM5 Wireless Headphones",
+                price = 229.99,
+                storeName = "Worten",
+                sourceUrl = "https://www.worten.es/sony-1000xm5"
+            )
+            assertTrue(
+                "Equivalent retailer formatting of the WH-1000XM5 model should remain eligible",
+                repository.filterOnlineSearchResults(
+                    listOf(sonyFormattingVariant),
+                    "Sony WH-1000XM5"
+                ).isNotEmpty()
+            )
+
             val grouped = groupOnlineShoppingResults(strictMatches)
             assertEquals("Repeated seller listings of one model make one product card", 1, grouped.size)
             assertEquals(2, grouped.single().offers.size)
@@ -827,12 +951,29 @@ class ExampleRobolectricTest {
             assertNotNull("Online searches must add a real product row to Room", persistedProduct)
             assertTrue("Searched products must be marked as source-verified", persistedProduct?.isPriceVerified == true)
             assertTrue(stored.all { it.currency == "EUR" && it.sourceType == "Google Shopping" })
-            assertTrue(stored.any { it.storeName == "PcComponentes" && it.sourceUrl.contains("pccomponentes.com") })
-            assertTrue(stored.any { it.storeName == "Amazon.es" && it.sourceUrl.contains("amazon.es") })
+            val savedGoogleOffer = stored.single { it.storeName == "PcComponentes" }
+            assertTrue(savedGoogleOffer.sourceUrl.contains("google.com/shopping/product"))
+            assertEquals("Google Shopping", savedGoogleOffer.linkType)
+            assertEquals("directo", stored.single { it.storeName == "Amazon.es" }.linkType)
+
+            val productAfterGoogleObservation = withTimeout<List<Product>>(10_000) {
+                repository.allProductsStream.first { rows ->
+                    rows.firstOrNull { it.id == sonyProductId }?.priceHistory?.size == 1
+                }
+            }.first { it.id == sonyProductId }
+            assertEquals("Google Shopping", productAfterGoogleObservation.priceHistory.single().linkType)
+            assertTrue(productAfterGoogleObservation.offers.any {
+                it.store.name == "PcComponentes" && it.linkType == "Google Shopping"
+            })
 
             val duplicate = results.first().copy(price = 245.00, observedAt = now + 60_000L)
-            assertEquals(0, repository.recordOnlineSearchResults(listOf(duplicate), "GOOGLE_SHOPPING"))
+            assertEquals("A changed same-day quote updates the existing row, not a second row",
+                1, repository.recordOnlineSearchResults(listOf(duplicate), "GOOGLE_SHOPPING"))
             assertEquals(2, database.priceObservationDao().getVerifiedObservationCount())
+            val refreshedPcComponentes = database.priceObservationDao().observeAllVerified().first {
+                observations -> observations.any { it.storeName == "PcComponentes" && it.price == 245.00 }
+            }
+            assertEquals(245.00, refreshedPcComponentes.single { it.storeName == "PcComponentes" }.price, 0.001)
 
             // A following day's query must be retained as a second dated history point.
             val nextDay = now + 24L * 60L * 60L * 1000L

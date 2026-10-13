@@ -6,8 +6,10 @@ import com.example.data.model.Product
 import com.example.data.model.Store
 import com.example.data.model.VerdictLevel
 import com.example.data.repository.SpanishMarketData
+import com.example.ui.components.ChartRange
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
+import com.example.data.remote.onlineProductIdentityKey
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -51,6 +53,55 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun powerBankCapacityAndChargerWattageStayDistinctWhileColourVariantsMerge() {
+        fun result(title: String, price: Double, store: String) = SerpApiShoppingResult(
+            title = title,
+            price = price,
+            storeName = store,
+            sourceUrl = "https://${store.lowercase().replace(" ", "")}.example/product",
+            observedAt = 1_800_000_000_000L
+        )
+
+        val groups = groupOnlineShoppingResults(
+            listOf(
+                result("Anker Power Bank 20000mAh 65W Black", 59.99, "Tienda A"),
+                result("Anker Power Bank 20.000 mAh 65 W Negro", 54.99, "Tienda B"),
+                result("Anker Power Bank 20000mAh 100W", 79.99, "Tienda C"),
+                result("Anker Power Bank 10000mAh 65W", 39.99, "Tienda D")
+            )
+        )
+
+        assertEquals("Capacity and wattage change the product variant, colour does not", 3, groups.size)
+        val twentyK65W = groups.single { it.identityKey.contains("20000mah") && it.identityKey.contains("65w") }
+        assertEquals(2, twentyK65W.offers.size)
+        assertEquals(54.99, twentyK65W.minPrice, 0.001)
+        assertTrue(groups.any { it.identityKey.contains("100w") })
+        assertTrue(groups.any { it.identityKey.contains("10000mah") })
+    }
+
+    @Test
+    fun sonyHeadphoneModelFormattingDoesNotCreateDuplicateCards() {
+        val formatted = onlineProductIdentityKey("Sony WH-1000XM5 Wireless Headphones")
+        val compact = onlineProductIdentityKey("Sony WH1000XM5 Wireless Noise Canceling Headphones")
+        val withoutPrefix = onlineProductIdentityKey("Sony 1000XM5 Wireless Headphones")
+
+        assertEquals(formatted, compact)
+        assertEquals(formatted, withoutPrefix)
+    }
+
+    @Test
+    fun chartRangesCoverThirtyDaysThroughFourYearsAndAllTime() {
+        assertEquals(
+            listOf("30D", "90D", "6M", "1A", "2A", "3A", "4A", "Todo"),
+            ChartRange.values().map { it.label }
+        )
+        assertEquals(
+            listOf(30, 90, 183, 365, 730, 1095, 1460, null),
+            ChartRange.values().map { it.days }
+        )
+    }
+
+    @Test
     fun addition_isCorrect() {
         assertEquals(4, 2 + 2)
     }
@@ -64,6 +115,7 @@ class ExampleUnitTest {
             assertFalse("Bundled sample must not claim an all-time low: ${product.title}", product.isAtAth)
             assertEquals(VerdictLevel.UNVERIFIED, product.verdict.level)
             assertEquals(0, product.verdict.confidenceScore)
+            assertTrue("Example catalogue entries must not include generated history points: ${product.title}", product.priceHistory.isEmpty())
         }
     }
 
@@ -119,6 +171,7 @@ class ExampleUnitTest {
 
     @Test
     fun testDealVerdictInflatedFakeDeal() {
+        // EJEMPLO sintético del algoritmo de clasificación; no representa ni persiste precios reales.
         val verdict = DealVerdict.analyze(
             currentPrice = 429.0,
             athMinPrice = 329.0,

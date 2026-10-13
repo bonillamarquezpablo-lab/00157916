@@ -5,5 +5,6 @@ data class StoreOffer(
     val price: Double,
     val inStock: Boolean = true,
     val shippingInfo: String = "Envío gratis",
-    val url: String = ""
+    val url: String = "",
+    val linkType: String = "directo"
 )

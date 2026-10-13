@@ -448,14 +448,14 @@ fun MarketScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "${products.size} productos · ${products.count { it.isPriceVerified }} precios verificados",
+                    text = "${products.size} productos · ${products.count { it.isPriceVerified }} precios observados",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 Text(
-                    text = if (products.any { it.isPriceVerified }) "Precios verificados disponibles" else "Sin precios en directo",
+                    text = if (products.any { it.isPriceVerified }) "Precios online observados" else "Sin precios observados",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold

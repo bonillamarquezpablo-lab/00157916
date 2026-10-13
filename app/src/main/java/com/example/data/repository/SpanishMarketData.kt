@@ -246,6 +246,11 @@ object SpanishMarketData {
         StoreEntity("ldlc", "LDLC España", "ldlc.com/es-es", "#303030", "Informática & Gaming", false, 0, "Web oficial", "Tienda online de informática; precios aún no consultados por Mínimo.")
     )
 
+    /**
+     * EJEMPLOS DE CATÁLOGO para pruebas/vistas previas; no son observaciones de mercado.
+     * Todos los productos permanecen sin verificar y con priceHistory vacío. Nunca deben
+     * sembrarse como precios reales ni utilizarse para rellenar retrospectivamente un gráfico.
+     */
     fun getInitialProducts(): List<Product> = listOf(
         // 1. Sony WH-1000XM5 (At absolute ATH record today)
         Product(
@@ -422,7 +427,8 @@ object SpanishMarketData {
             reviewCount = 8900
         ),
 
-        // 7. Cecotec Mambo CooKing (OFERTA ENGAÑOSA DETECTADA / TRUCO PRE-DESCUENTO)
+        // EJEMPLO sintético para probar etiquetas de clasificación; no representa una oferta real.
+        // 7. Cecotec Mambo CooKing (EJEMPLO NO VERIFICADO — NO USAR COMO HISTORIAL)
         Product(
             id = "cecotec_mambo_inflado",
             title = "Cecotec Robot de Cocina Multifunción Mambo CooKing Total Gourmet",

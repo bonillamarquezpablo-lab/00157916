@@ -5,5 +5,6 @@ data class PricePoint(
     val dateLabel: String,
     val price: Double,
     val storeName: String,
-    val eventLabel: String? = null
+    val eventLabel: String? = null,
+    val linkType: String = "directo"
 )

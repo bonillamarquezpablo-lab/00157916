@@ -113,12 +113,18 @@ fun onlineProductIdentityKey(title: String): String {
         .trim()
         .replace(Regex("""\s+"""), " ")
 
-    val brand = listOf(
-        "xiaomi", "samsung", "apple", "sony", "ugreen", "anker", "baseus", "google",
-        "huawei", "honor", "motorola", "oppo", "oneplus", "dyson", "roborock", "jbl",
-        "logitech", "nintendo", "microsoft", "lenovo", "hp", "asus", "acer", "dell",
-        "philips", "rowenta", "cecotec", "ecovacs", "bosch", "lg", "tcl"
-    ).firstOrNull { Regex("""\b""" + Regex.escape(it) + """\b""").containsMatchIn(normalized) }.orEmpty()
+    val brand = when {
+        Regex("""\b(xiaomi|redmi|poco)\b""").containsMatchIn(normalized) -> "xiaomi"
+        Regex("""\b(samsung|galaxy)\b""").containsMatchIn(normalized) -> "samsung"
+        Regex("""\b(apple|iphone)\b""").containsMatchIn(normalized) -> "apple"
+        Regex("""\b(google|pixel)\b""").containsMatchIn(normalized) -> "google"
+        Regex("""\b(sony|wh)\b""").containsMatchIn(normalized) -> "sony"
+        else -> listOf(
+            "ugreen", "anker", "baseus", "huawei", "honor", "motorola", "oppo", "oneplus",
+            "dyson", "roborock", "jbl", "logitech", "nintendo", "microsoft", "lenovo", "hp",
+            "asus", "acer", "dell", "philips", "rowenta", "cecotec", "ecovacs", "bosch", "lg", "tcl"
+        ).firstOrNull { Regex("""\b""" + Regex.escape(it) + """\b""").containsMatchIn(normalized) }.orEmpty()
+    }
 
     val model = Regex(
         """\b(redmi|poco|iphone|pixel|galaxy|wh|dyson|roborock)\s*([a-z]{0,3}\d+[a-z0-9]*)\b"""

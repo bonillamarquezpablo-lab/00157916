@@ -66,6 +66,11 @@ fun ProductDetailSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     val scrollState = rememberScrollState()
+    val currentSourceLabel = product.priceHistory
+        .maxByOrNull { it.timestamp }
+        ?.eventLabel
+        ?.takeIf { it.isNotBlank() }
+        ?: "Fuente no disponible"
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -235,7 +240,7 @@ fun ProductDetailSheet(
                                 )
                             }
                             Text(
-                                text = "Google Shopping · confirma precio final y stock en la tienda.",
+                                text = "$currentSourceLabel · confirma precio final y stock en la tienda.",
                                 fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

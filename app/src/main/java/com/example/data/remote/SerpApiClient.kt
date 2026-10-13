@@ -288,8 +288,10 @@ class SerpApiClient(
             val isEuroPrice = priceText.contains("€") ||
                 priceText.contains("EUR", ignoreCase = true)
             if (extractedPrice == null && !isEuroPrice) return@mapNotNull null
-            val url = item.optString("link").takeIf { isHttpsUrl(it) }
-                ?: return@mapNotNull null
+            // Google Shopping API usually documents product_link (a Google product page);
+            // some layouts also expose a direct seller link. Prefer the direct link when present.
+            val url = sequenceOf(item.optString("link"), item.optString("product_link"))
+                .firstOrNull { isHttpsUrl(it) } ?: return@mapNotNull null
             val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()
             if (host.isBlank()) return@mapNotNull null
@@ -419,8 +421,10 @@ class SerpApiClient(
                 priceText.contains("EUR", ignoreCase = true)
             if (extractedPrice == null && !isEuroPrice) return@mapNotNull null
 
-            val url = item.optString("link").takeIf { isHttpsUrl(it) }
-                ?: return@mapNotNull null
+            // Google Shopping API usually documents product_link (a Google product page);
+            // some layouts also expose a direct seller link. Prefer the direct link when present.
+            val url = sequenceOf(item.optString("link"), item.optString("product_link"))
+                .firstOrNull { isHttpsUrl(it) } ?: return@mapNotNull null
             val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()
             if (host.isBlank()) return@mapNotNull null
@@ -435,7 +439,7 @@ class SerpApiClient(
                 currency = "EUR",
                 observedAt = observedAt,
                 sourceUrl = url,
-                storeId = storeIdForHost(host),
+                storeId = storeIdForHost(host, merchant),
                 storeName = merchant,
                 sourceName = "SerpApi · Google Shopping España"
             )
@@ -565,9 +569,43 @@ class SerpApiClient(
             .trim()
             .replace(Regex("\\s+"), " ")
 
-    private fun storeIdForHost(host: String): String =
-        host.split('.').joinToString("_").replace(Regex("[^a-zA-Z0-9_]"), "_")
+    private fun storeIdForHost(host: String, merchantName: String = ""): String {
+        if (host == "google.com" || host.endsWith(".google.com")) {
+            val merchant = normalize(merchantName)
+            val knownStoreId = when {
+                "amazon" in merchant -> "amazon_es"
+                "pccomponentes" in merchant -> "pccomponentes"
+                "mediamarkt" in merchant -> "mediamarkt"
+                "el corte ingles" in merchant -> "elcorteingles"
+                "carrefour" in merchant -> "carrefour"
+                "fnac" in merchant -> "fnac"
+                "alcampo" in merchant -> "alcampo"
+                "leroy merlin" in merchant -> "leroymerlin"
+                "decathlon" in merchant -> "decathlon"
+                "worten" in merchant -> "worten"
+                "miravia" in merchant -> "miravia"
+                "conforama" in merchant -> "conforama"
+                "bauhaus" in merchant -> "bauhaus"
+                "ikea" in merchant -> "ikea"
+                "lidl" in merchant -> "lidl"
+                "aliexpress" in merchant -> "aliexpress_plaza"
+                "sprinter" in merchant -> "sprinter"
+                "powerplanet" in merchant -> "powerplanet"
+                "apple" in merchant -> "apple_store"
+                "samsung" in merchant -> "samsung_store"
+                "xiaomi" in merchant -> "xiaomi_store"
+                "lenovo" in merchant -> "lenovo_store"
+                "dell" in merchant -> "dell_store"
+                "hp store" in merchant -> "hp_store"
+                else -> null
+            }
+            if (knownStoreId != null) return knownStoreId
+            val slug = merchant.replace(Regex("[^a-z0-9]+"), "_").trim('_')
+            return "retailer_${slug.ifBlank { "google_shopping" }}"
+        }
+        return host.split('.').joinToString("_").replace(Regex("[^a-zA-Z0-9_]"), "_")
             .let { "retailer_$it" }
+    }
 
     private fun humanizeHost(host: String): String =
         host.substringBefore('.')

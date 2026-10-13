@@ -491,7 +491,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 // Cache lookup comes first: saved results remain usable even if the quota is empty
                 // or the API key was removed after the previous search.
                 val cached = onlineSearchCache.read(provider.name, query)
-                if (cached != null && cached.results.isNotEmpty()) {
+                val lowResultCacheIsOld = cached != null &&
+                    provider == OnlineSearchProvider.GOOGLE_SHOPPING &&
+                    cached.results.size < LOW_RESULT_EXPANSION_THRESHOLD &&
+                    System.currentTimeMillis() - cached.savedAt >= LOW_RESULT_CACHE_BYPASS_AGE_MS
+                if (cached != null && cached.results.isNotEmpty() && !lowResultCacheIsOld) {
                     val safeCachedResults = repository.filterOnlineSearchResults(cached.results, query)
                     if (safeCachedResults.isNotEmpty()) {
                         val ageMinutes = ((System.currentTimeMillis() - cached.savedAt) / 60_000L).coerceAtLeast(1L)
@@ -538,7 +542,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
 
                 val googleReport = if (provider == OnlineSearchProvider.GOOGLE_SHOPPING) {
-                    serpApiClient.searchOnlineWithDiagnostics(token, query)
+                    serpApiClient.searchOnlineWithExpandedDiagnostics(
+                        token = token,
+                        query = query,
+                        maxAdditionalQueries = (accountCapacity(accountInfo) - 1)
+                            .coerceIn(0, MAX_EXTRA_MANUAL_SEARCHES)
+                    )
                 } else {
                     null
                 }
@@ -563,7 +572,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 val historyNote = if (results.isNotEmpty()) {
                     " " + onlineHistoryNotice(savedObservations, results.size)
                 } else ""
-                val message = base + quotaNote + filterNote + historyNote
+                val expandedQueryNote = googleReport?.queriesExecuted
+                    ?.takeIf { it > 1 }
+                    ?.let { " Se combinaron $it búsquedas de Google Shopping para ampliar las ofertas." }
+                    .orEmpty()
+                val message = base + expandedQueryNote + quotaNote + filterNote + historyNote
                 _uiState.value = _uiState.value.copy(
                     onlineSearchResults = results,
                     onlineSearchStatus = message
@@ -582,6 +595,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 _uiState.value = _uiState.value.copy(isOnlineSearching = false)
             }
         }
+    }
+
+    private companion object {
+        const val LOW_RESULT_CACHE_BYPASS_AGE_MS = 15L * 60L * 1000L
+        const val LOW_RESULT_EXPANSION_THRESHOLD = 12
+        const val MAX_EXTRA_MANUAL_SEARCHES = 2
     }
 
     private fun onlineFilterNotice(rawCount: Int, acceptedCount: Int): String =

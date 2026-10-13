@@ -370,9 +370,20 @@ class ProductRepository(
 
     /** Resolve a persisted online product when a grouped result card is tapped. */
     suspend fun awaitProductForOnlineIdentity(identityKey: String): Product {
+        // Wait until Room has emitted the saved observation as well as the product row. That way
+        // opening a result immediately after a search shows the first point instead of a transient
+        // empty-history state caused by Room flows emitting on separate table invalidations.
         return allProductsStream.first { products ->
-            products.any { onlineProductIdentityKey(it.title) == identityKey }
-        }.first { onlineProductIdentityKey(it.title) == identityKey }
+            products.any { product ->
+                onlineProductIdentityKey(product.title) == identityKey &&
+                    product.isPriceVerified &&
+                    product.priceHistory.isNotEmpty()
+            }
+        }.first { product ->
+            onlineProductIdentityKey(product.title) == identityKey &&
+                product.isPriceVerified &&
+                product.priceHistory.isNotEmpty()
+        }
     }
 
     private fun inferProductBrand(title: String): String {

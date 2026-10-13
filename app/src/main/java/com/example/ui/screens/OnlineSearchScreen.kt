@@ -210,6 +210,18 @@ fun OnlineSearchScreen(
 
 @Composable
 private fun ShoppingResultCard(result: SerpApiShoppingResult, onOpen: () -> Unit) {
+    val isMarketplaceListing = listOf(
+        "wallapop", "ebay", "vinted", "milanuncios", "facebook marketplace", "cash converters"
+    ).any { result.storeName.contains(it, ignoreCase = true) }
+    val sellerDescription = when {
+        isMarketplaceListing && result.isGoogleShoppingProductLink ->
+            "Marketplace: ${result.storeName} · estado del artículo por confirmar · enlace de Google Shopping"
+        isMarketplaceListing ->
+            "Marketplace: ${result.storeName} · estado del artículo por confirmar"
+        result.isGoogleShoppingProductLink ->
+            "Vendedor indicado: ${result.storeName} · enlace de Google Shopping"
+        else -> result.storeName
+    }
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
@@ -241,11 +253,7 @@ private fun ShoppingResultCard(result: SerpApiShoppingResult, onOpen: () -> Unit
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        if (result.isGoogleShoppingProductLink) {
-                            "Vendedor indicado: ${result.storeName} · enlace de Google Shopping"
-                        } else {
-                            result.storeName
-                        },
+                        sellerDescription,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium
                     )

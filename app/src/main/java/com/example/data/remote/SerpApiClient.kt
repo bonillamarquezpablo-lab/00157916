@@ -276,13 +276,18 @@ class SerpApiClient(
             val title = item.optString("title").trim()
                 .takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
             val priceText = item.optString("price")
-            if (!priceText.contains("€") && !priceText.contains("EUR", ignoreCase = true)) {
-                return@mapNotNull null
-            }
-            val price = parsePrice(
-                item.opt("extracted_price")?.takeIf { it !is JSONObject && it !is JSONArray }
-                    ?: priceText
-            ) ?: return@mapNotNull null
+            val extractedPrice = item.opt("extracted_price")
+                ?.takeIf { it !is JSONObject && it !is JSONArray }
+                ?.toString()
+                ?.toDoubleOrNull()
+                ?.takeIf { it.isFinite() && it > 0.0 }
+            // Google Shopping is queried with gl=es. Prefer its structured numeric price when the
+            // formatted label omits €, but do not reinterpret a result explicitly priced abroad.
+            if (hasExplicitForeignCurrency(priceText)) return@mapNotNull null
+            val price = extractedPrice ?: parsePrice(priceText) ?: return@mapNotNull null
+            val isEuroPrice = priceText.contains("€") ||
+                priceText.contains("EUR", ignoreCase = true)
+            if (extractedPrice == null && !isEuroPrice) return@mapNotNull null
             val url = item.optString("link").takeIf { isHttpsUrl(it) }
                 ?: return@mapNotNull null
             val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
@@ -401,15 +406,18 @@ class SerpApiClient(
             if (!isPlausibleProductMatch(requested.queryTerm, title)) return@mapNotNull null
 
             val priceText = item.optString("price")
-            // Google Shopping can show other currencies depending on the result. Since this app is
-            // targeting Spain, require an explicit euro marker before accepting a quote.
-            if (!priceText.contains("€") && !priceText.contains("EUR", ignoreCase = true)) {
-                return@mapNotNull null
-            }
-            val price = parsePrice(
-                item.opt("extracted_price")?.takeIf { it !is JSONObject && it !is JSONArray }
-                    ?: priceText
-            ) ?: return@mapNotNull null
+            val extractedPrice = item.opt("extracted_price")
+                ?.takeIf { it !is JSONObject && it !is JSONArray }
+                ?.toString()
+                ?.toDoubleOrNull()
+                ?.takeIf { it.isFinite() && it > 0.0 }
+            // Google Shopping Spain may omit the € label even when extracted_price is present.
+            // Accept the structured Spanish-market value, but reject explicit foreign currencies.
+            if (hasExplicitForeignCurrency(priceText)) return@mapNotNull null
+            val price = extractedPrice ?: parsePrice(priceText) ?: return@mapNotNull null
+            val isEuroPrice = priceText.contains("€") ||
+                priceText.contains("EUR", ignoreCase = true)
+            if (extractedPrice == null && !isEuroPrice) return@mapNotNull null
 
             val url = item.optString("link").takeIf { isHttpsUrl(it) }
                 ?: return@mapNotNull null
@@ -495,6 +503,11 @@ class SerpApiClient(
 
     private fun JSONArray.toObjects(): List<JSONObject> =
         (0 until length()).mapNotNull { optJSONObject(it) }
+
+    private fun hasExplicitForeignCurrency(value: String): Boolean =
+        listOf(36.toChar(), '£', '¥', '₹').any { value.contains(it) } ||
+            listOf("USD", "GBP", "CAD", "AUD", "NZD", "JPY", "INR", "CHF")
+                .any { currency -> value.contains(currency, ignoreCase = true) }
 
     private fun parsePrice(raw: Any?): Double? {
         if (raw == null || raw == JSONObject.NULL) return null

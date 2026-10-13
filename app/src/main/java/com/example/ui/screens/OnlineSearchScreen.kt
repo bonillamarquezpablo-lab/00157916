@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +40,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,6 +60,8 @@ import com.example.ui.viewmodel.OnlineSearchProvider
 import com.example.ui.viewmodel.TrackerUiState
 import java.text.NumberFormat
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 @Composable
 fun OnlineSearchScreen(
@@ -63,9 +71,12 @@ fun OnlineSearchScreen(
     onAmazonSearch: () -> Unit,
     onAmazonOnlyChange: (Boolean) -> Unit,
     onOpenSettings: () -> Unit,
+    onResolveRetailerUrl: suspend (SerpApiShoppingResult) -> String?,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var openingResultKey by remember { mutableStateOf<String?>(null) }
     val visibleResults = state.onlineSearchResults.filter {
         !state.onlineSearchAmazonOnly || it.isAmazonOffer
     }
@@ -192,9 +203,41 @@ fun OnlineSearchScreen(
                     )
                 }
             }
-            items(visibleResults, key = { "${it.sourceUrl}|${it.price}" }) { result ->
-                ShoppingResultCard(result = result) {
-                    openStoreUrl(context, result.sourceUrl, preferAmazonApp = result.isAmazonOffer)
+            items(visibleResults, key = { "${it.sourceUrl}|${it.storeName}|${it.price}" }) { result ->
+                val resultKey = "${result.sourceUrl}|${result.storeName}|${result.price}"
+                ShoppingResultCard(
+                    result = result,
+                    isOpening = openingResultKey == resultKey
+                ) {
+                    if (openingResultKey != resultKey) {
+                        scope.launch {
+                            openingResultKey = resultKey
+                            try {
+                                val directUrl = if (result.isGoogleShoppingProductLink) {
+                                    onResolveRetailerUrl(result)
+                                } else {
+                                    result.sourceUrl
+                                }
+                                val destination = directUrl
+                                    ?.takeIf(::isHttpsUrl)
+                                    ?: buildRetailerSearchUrl(result)
+                                val isAmazonDirectUrl = Uri.parse(destination).host
+                                    ?.lowercase(Locale.ROOT)
+                                    ?.let { it == "amazon.es" || it.endsWith(".amazon.es") } == true
+                                openStoreUrl(
+                                    context,
+                                    destination,
+                                    preferAmazonApp = result.isAmazonOffer && isAmazonDirectUrl
+                                )
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                openStoreUrl(context, buildRetailerSearchUrl(result), preferAmazonApp = false)
+                            } finally {
+                                openingResultKey = null
+                            }
+                        }
+                    }
                 }
             }
             item {
@@ -209,21 +252,29 @@ fun OnlineSearchScreen(
 }
 
 @Composable
-private fun ShoppingResultCard(result: SerpApiShoppingResult, onOpen: () -> Unit) {
+private fun ShoppingResultCard(
+    result: SerpApiShoppingResult,
+    isOpening: Boolean,
+    onOpen: () -> Unit
+) {
     val isMarketplaceListing = listOf(
         "wallapop", "ebay", "vinted", "milanuncios", "facebook marketplace", "cash converters"
     ).any { result.storeName.contains(it, ignoreCase = true) }
     val sellerDescription = when {
+        isMarketplaceListing && result.isGoogleShoppingProductLink && result.immersiveProductApiUrl != null ->
+            "Marketplace: ${result.storeName} · estado del artículo por confirmar · enlace directo al abrir"
         isMarketplaceListing && result.isGoogleShoppingProductLink ->
-            "Marketplace: ${result.storeName} · estado del artículo por confirmar · enlace de Google Shopping"
+            "Marketplace: ${result.storeName} · estado del artículo por confirmar · búsqueda por tienda"
         isMarketplaceListing ->
             "Marketplace: ${result.storeName} · estado del artículo por confirmar"
+        result.isGoogleShoppingProductLink && result.immersiveProductApiUrl != null ->
+            "Vendedor indicado: ${result.storeName} · enlace directo al abrir"
         result.isGoogleShoppingProductLink ->
-            "Vendedor indicado: ${result.storeName} · enlace de Google Shopping"
+            "Vendedor indicado: ${result.storeName} · búsqueda por tienda"
         else -> result.storeName
     }
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
@@ -272,19 +323,68 @@ private fun ShoppingResultCard(result: SerpApiShoppingResult, onOpen: () -> Unit
             if (result.delivery.isNotBlank()) {
                 Text(result.delivery, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-            OutlinedButton(onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    if (result.isGoogleShoppingProductLink) "Abrir resultado en Google Shopping"
-                    else "Ver oferta en ${result.storeName}"
-                )
+            OutlinedButton(
+                onClick = onOpen,
+                enabled = !isOpening,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (isOpening) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                }
                 Spacer(Modifier.width(8.dp))
-                Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                Text(
+                    when {
+                        isOpening -> "Buscando enlace de tienda…"
+                        !result.isGoogleShoppingProductLink -> "Ver oferta en ${result.storeName}"
+                        result.immersiveProductApiUrl != null -> "Abrir oferta en ${result.storeName}"
+                        else -> "Buscar en ${result.storeName}"
+                    }
+                )
             }
         }
     }
 }
 
-private const val AMAZON_SHOPPING_PACKAGE = "com.amazon.mShop.android.shopping"
+private fun isHttpsUrl(value: String): Boolean = runCatching {
+    val uri = Uri.parse(value)
+    uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank()
+}.getOrDefault(false)
+
+/**
+ * Fallback only when SerpApi cannot supply a direct offer URL. Keep the query scoped to the
+ * merchant indicated by Shopping instead of opening a generic Google Shopping landing page.
+ */
+private fun buildRetailerSearchUrl(result: SerpApiShoppingResult): String {
+    val merchant = result.storeName.lowercase(Locale.ROOT)
+    val domain = when {
+        "wallapop" in merchant -> "wallapop.com"
+        "amazon" in merchant -> "amazon.es"
+        "fnac" in merchant -> "fnac.es"
+        "pccomponentes" in merchant -> "pccomponentes.com"
+        "mediamarkt" in merchant || "media markt" in merchant -> "mediamarkt.es"
+        "movistar" in merchant -> "movistar.es"
+        "grover" in merchant -> "grover.com"
+        "xiaomi" in merchant || "mi.com" in merchant -> "mi.com"
+        "apple" in merchant -> "apple.com/es"
+        "samsung" in merchant -> "samsung.com/es"
+        "worten" in merchant -> "worten.es"
+        "carrefour" in merchant -> "carrefour.es"
+        "el corte ingles" in merchant -> "elcorteingles.es"
+        "media markt" in merchant -> "mediamarkt.es"
+        "realcash" in merchant -> "tiendarealcash.es"
+        else -> null
+    }
+    val query = if (domain != null) {
+        "site:$domain \"${result.title}\""
+    } else {
+        "\"${result.title}\" \"${result.storeName}\""
+    }
+    return "https://www.google.com/search?q=${Uri.encode(query)}"
+}
+
+private const val AMAZON_SHOPPING_PACKAGE = "com.amazon.mShop.android.shopping"private const val AMAZON_SHOPPING_PACKAGE = "com.amazon.mShop.android.shopping"
 
 /**
  * Prefer the official Amazon Shopping app so the user's existing sign-in can be used.

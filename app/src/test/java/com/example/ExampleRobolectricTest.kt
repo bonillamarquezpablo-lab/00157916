@@ -6,14 +6,16 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.AppDatabase
 import com.example.data.local.PriceObservationEntity
 import com.example.data.local.ProductEntity
+import com.example.data.local.StoreEntity
+import com.example.data.local.TrackedProductEntity
 import com.example.data.model.Product
 import com.example.data.repository.ProductRepository
-import com.example.data.repository.SpanishMarketData
 import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiQuote
 import com.example.data.remote.SerpApiRequestProduct
 import com.example.data.remote.groupOnlineShoppingResults
 import org.json.JSONObject
+import org.json.JSONArray
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Response
@@ -40,32 +42,97 @@ import org.robolectric.annotation.Config
 class ExampleRobolectricTest {
 
     @Test
-    fun `catalogue streams only persisted products without seeding demo entries`() = runBlocking<Unit> {
+    fun `Room startup removes legacy mock rows and keeps only real online products`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,
             AppDatabase::class.java
         ).allowMainThreadQueries().build()
         try {
+            val now = System.currentTimeMillis()
             database.productDao().insert(
                 ProductEntity(
-                    id = "sony_wh1000xm5",
-                    title = "Producto Sony preservado por el usuario",
-                    brand = "Sony",
-                    category = "TV_AUDIO",
-                    currentPrice = 888.0,
-                    athMinPrice = 888.0,
-                    athMinDate = "Sin datos",
-                    athMinStore = "Amazon España",
-                    athMaxPrice = 888.0,
-                    avg90dPrice = 888.0,
-                    officialPvp = 888.0,
-                    currentStoreId = "amazon_es",
-                    storeUrl = "https://www.amazon.es/",
+                    id = "demo_iphone_17_pro_max",
+                    title = "Apple iPhone 17 Pro Max",
+                    brand = "Apple",
+                    category = "SMARTPHONES",
+                    currentPrice = 6.53,
+                    athMinPrice = 6.53,
+                    athMinDate = "Datos de demostración",
+                    athMinStore = "Datos de demostración",
+                    athMaxPrice = 6.53,
+                    avg90dPrice = 6.53,
+                    officialPvp = 6.53,
+                    currentStoreId = "apple_store",
+                    storeUrl = "https://www.apple.com/es/",
                     ean = "",
                     isPriceVerified = false
                 )
             )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "demo_iphone_17_pro_max",
+                    storeId = "apple_store",
+                    price = 6.53,
+                    observedAt = now,
+                    sourceUrl = "https://www.apple.com/es/",
+                    sourceName = "Demo fixture",
+                    isVerified = false
+                )
+            )
+            database.trackedProductDao().insertOrUpdate(
+                TrackedProductEntity(productId = "demo_iphone_17_pro_max")
+            )
+            database.storeDao().insertAll(
+                listOf(
+                    StoreEntity(
+                        id = "apple_store",
+                        name = "Apple Store",
+                        domain = "apple.com",
+                        brandColorHex = "#000000",
+                        category = "Electrónica",
+                        physicalStoresInSpain = true,
+                        storeCountApprox = 1,
+                        headquartersInSpain = "España",
+                        description = "Legacy row for cleanup test"
+                    )
+                )
+            )
+
+            database.productDao().insert(
+                ProductEntity(
+                    id = "online_product_redmi17",
+                    title = "Xiaomi Redmi 17 4GB 256GB",
+                    brand = "Xiaomi",
+                    category = "SMARTPHONES",
+                    currentPrice = 199.99,
+                    athMinPrice = 199.99,
+                    athMinDate = "Historial en curso",
+                    athMinStore = "Amazon.es",
+                    athMaxPrice = 199.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "amazon_es",
+                    storeUrl = "https://www.amazon.es/dp/TEST",
+                    ean = "",
+                    isPriceVerified = true
+                )
+            )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "online_product_redmi17",
+                    storeId = "amazon_es",
+                    price = 199.99,
+                    observedAt = now,
+                    sourceUrl = "https://www.amazon.es/dp/TEST",
+                    sourceName = "Amazon.es",
+                    isVerified = true,
+                    productTitle = "Xiaomi Redmi 17 4GB 256GB",
+                    storeName = "Amazon.es",
+                    sourceType = "Google Shopping"
+                )
+            )
+
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
             val repository = ProductRepository(
                 storeDao = database.storeDao(),
@@ -76,50 +143,47 @@ class ExampleRobolectricTest {
             )
 
             val products: List<Product> = withTimeout<List<Product>>(10_000) {
-                repository.allProductsStream.first { productRows -> productRows.any { it.id == "sony_wh1000xm5" } }
+                repository.allProductsStream.first { rows -> rows.any { it.id == "online_product_redmi17" } }
             }
-            assertEquals("A new database must not be populated with 75 demo products", 1, products.size)
-            assertEquals("Product IDs must stay unique", products.size, products.map { it.id }.toSet().size)
-            val preserved = products.first { it.id == "sony_wh1000xm5" }
-            assertEquals("Existing user row must not be overwritten", "Producto Sony preservado por el usuario", preserved.title)
-            assertFalse("Unobserved product should stay unverified", preserved.isPriceVerified)
-            assertTrue("Unverified product should not display fake history", preserved.priceHistory.isEmpty())
-            assertFalse("New catalogue should not seed static demo rows", products.any { it.id == "demo_galaxy_s26_ultra" })
+            assertEquals("Only the user-searched product with a real observation may remain", 1, products.size)
+            assertEquals("online_product_redmi17", products.single().id)
+            assertTrue("The real online price must remain verified", products.single().isPriceVerified)
+            assertEquals(1, products.single().priceHistory.size)
 
-            database.priceObservationDao().insert(
-                PriceObservationEntity(
-                    productId = "sony_wh1000xm5",
-                    storeId = "amazon_es",
-                    price = 222.50,
-                    observedAt = System.currentTimeMillis(),
-                    sourceUrl = "https://www.amazon.es/dp/TEST",
-                    sourceName = "Authorized unit-test source",
-                    isVerified = true
-                )
-            )
-            database.priceObservationDao().insert(
-                PriceObservationEntity(
-                    productId = "sony_wh1000xm5",
-                    storeId = "amazon_es",
-                    price = 1.00,
-                    observedAt = System.currentTimeMillis() + 1000,
-                    sourceUrl = "https://example.com/demo",
-                    sourceName = "Demo fixture",
-                    isVerified = false
-                )
-            )
-            database.productDao().updatePriceVerification("sony_wh1000xm5", true)
-
-            val sourceBackedProducts: List<Product> = withTimeout<List<Product>>(10_000) {
-                repository.allProductsStream.first { rows ->
-                    rows.firstOrNull { row -> row.id == "sony_wh1000xm5" }?.isPriceVerified == true
-                }
+            withTimeout(10_000) {
+                while (database.productDao().getProductCount() != 1) kotlinx.coroutines.delay(10)
             }
-            val sourceBackedSony = sourceBackedProducts.first { it.id == "sony_wh1000xm5" }
-            assertEquals(222.50, sourceBackedSony.currentPrice, 0.001)
-            assertEquals(222.50, sourceBackedSony.athMinPrice, 0.001)
-            assertEquals(1, sourceBackedSony.priceHistory.size)
-            assertEquals(222.50, sourceBackedSony.priceHistory.single().price, 0.001)
+            assertEquals(0, database.productDao().getObservationCount("demo_iphone_17_pro_max"))
+            assertEquals(1, database.productDao().getObservationCount("online_product_redmi17"))
+            assertTrue("Legacy mock tracking must be purged", database.trackedProductDao().getAllTracked().first().isEmpty())
+            assertEquals("Room's static store rows must also be empty", 0, database.storeDao().getStoreCount())
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun `a fresh Room database contains no bundled product or store rows`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val products = withTimeout<List<Product>>(10_000) {
+                repository.allProductsStream.first { it.isEmpty() }
+            }
+            assertTrue(products.isEmpty())
+            assertEquals(0, database.productDao().getProductCount())
+            assertEquals(0, database.storeDao().getStoreCount())
+            assertEquals(0, database.priceObservationDao().getVerifiedObservationCount())
         } finally {
             database.close()
         }
@@ -286,7 +350,6 @@ class ExampleRobolectricTest {
         ).allowMainThreadQueries().build()
 
         try {
-            database.storeDao().insertAll(SpanishMarketData.getInitialStoreEntities())
             database.productDao().insert(
                 ProductEntity(
                     id = "live-test-product",

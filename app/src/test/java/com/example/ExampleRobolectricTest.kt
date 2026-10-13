@@ -355,6 +355,52 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `Google Shopping rejects used and open-box metadata before recording offers`() {
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {
+                  "title": "Sony WH-1000XM5 Wireless Headphones",
+                  "price": "249,99 €",
+                  "extracted_price": 249.99,
+                  "link": "https://www.amazon.es/dp/NEW-SONY",
+                  "source": "Amazon.es",
+                  "condition": "new"
+                },
+                {
+                  "title": "Sony WH-1000XM5 Wireless Headphones",
+                  "price": "139,99 €",
+                  "extracted_price": 139.99,
+                  "link": "https://www.amazon.es/dp/USED-SONY",
+                  "source": "Amazon.es",
+                  "condition": "used"
+                },
+                {
+                  "title": "Sony WH-1000XM5 Wireless Headphones",
+                  "price": "179,99 €",
+                  "extracted_price": 179.99,
+                  "link": "https://www.amazon.es/dp/OPEN-BOX-SONY",
+                  "source": "Amazon.es",
+                  "condition_description": "Open box"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = payload,
+            query = "Sony WH-1000XM5",
+            observedAt = 123L
+        )
+
+        assertEquals("Only the new-in-store offer should be kept", 1, report.results.size)
+        assertTrue(report.results.single().sourceUrl.endsWith("NEW-SONY"))
+    }
+
+    @Test
     fun brandSearchesTolerateAMinorMilwaukeeTypo() {
         val client = SerpApiClient()
         val payload = JSONObject(

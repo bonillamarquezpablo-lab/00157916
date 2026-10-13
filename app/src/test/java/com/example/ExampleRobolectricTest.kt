@@ -376,7 +376,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `manual price refresh displays current seller quotes without fake stock or history`() = runBlocking<Unit> {
+    fun `manual price refresh displays current seller quotes without fake stock or historical claims`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,
@@ -384,23 +384,38 @@ class ExampleRobolectricTest {
         ).allowMainThreadQueries().build()
 
         try {
+            val observedAt = System.currentTimeMillis()
             database.productDao().insert(
                 ProductEntity(
-                    id = "live-test-product",
+                    id = "online_product_live_test",
                     title = "Sony WH-1000XM5",
                     brand = "Sony",
                     category = "TV_AUDIO",
-                    currentPrice = 888.0,
-                    athMinPrice = 888.0,
-                    athMinDate = "Sin datos",
-                    athMinStore = "Sin datos",
-                    athMaxPrice = 888.0,
-                    avg90dPrice = 888.0,
+                    currentPrice = 240.0,
+                    athMinPrice = 240.0,
+                    athMinDate = "Ayer",
+                    athMinStore = "Amazon España",
+                    athMaxPrice = 240.0,
+                    avg90dPrice = 0.0,
                     officialPvp = 0.0,
                     currentStoreId = "amazon_es",
                     storeUrl = "https://www.amazon.es/",
                     ean = "",
-                    isPriceVerified = false
+                    isPriceVerified = true
+                )
+            )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "online_product_live_test",
+                    storeId = "amazon_es",
+                    price = 240.0,
+                    observedAt = observedAt - 24L * 60L * 60L * 1000L,
+                    sourceUrl = "https://www.amazon.es/dp/TEST-YESTERDAY",
+                    sourceName = "Amazon.es",
+                    isVerified = true,
+                    productTitle = "Sony WH-1000XM5",
+                    storeName = "Amazon España",
+                    sourceType = "Google Shopping"
                 )
             )
             val repository = ProductRepository(
@@ -410,11 +425,10 @@ class ExampleRobolectricTest {
                 priceObservationDao = database.priceObservationDao(),
                 externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
             )
-            val observedAt = System.currentTimeMillis()
             val changedProducts = repository.recordSerpApiQuotes(
                 listOf(
                     SerpApiQuote(
-                        productId = "live-test-product",
+                        productId = "online_product_live_test",
                         price = 222.50,
                         currency = "EUR",
                         observedAt = observedAt,
@@ -437,10 +451,10 @@ class ExampleRobolectricTest {
             assertEquals("Returns the count of products refreshed", 1, changedProducts)
             val rows: List<Product> = withTimeout<List<Product>>(10_000) {
                 repository.allProductsStream.first { items ->
-                    items.firstOrNull { item -> item.id == "live-test-product" }?.offers?.size == 2
+                    items.firstOrNull { item -> item.id == "online_product_live_test" }?.offers?.size == 2
                 }
             }
-            val product = rows.first { it.id == "live-test-product" }
+            val product = rows.first { it.id == "online_product_live_test" }
             assertTrue(product.isPriceVerified)
             assertEquals(222.50, product.currentPrice, 0.001)
             assertEquals(2, product.offers.size)

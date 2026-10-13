@@ -6,6 +6,7 @@ import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.Store
 import com.example.data.model.VerdictLevel
+import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.isIrrelevantMultiProductBundle

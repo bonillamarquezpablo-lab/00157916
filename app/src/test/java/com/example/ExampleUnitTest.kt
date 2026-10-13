@@ -55,6 +55,56 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun groupedProductUsesThumbnailThatMatchesRepresentativeTitle() {
+        val cheapest = SerpApiShoppingResult(
+            title = "Smartphone Sony WH-1000XM5 Wireless Headphones",
+            price = 199.99,
+            storeName = "Tienda barata",
+            sourceUrl = "https://cheap.example/sony",
+            thumbnailUrl = "https://images.example/other-colour.jpg",
+            observedAt = 1_800_000_000_000L
+        )
+        val representative = SerpApiShoppingResult(
+            title = "Sony WH-1000XM5 Wireless Headphones",
+            price = 219.99,
+            storeName = "Tienda representativa",
+            sourceUrl = "https://retailer.example/sony",
+            thumbnailUrl = "https://images.example/sony-black.jpg",
+            observedAt = 1_800_000_000_000L
+        )
+
+        val group = groupOnlineShoppingResults(listOf(cheapest, representative)).single()
+
+        assertEquals("The cheapest offer still determines the starting price", 199.99, group.minPrice, 0.001)
+        assertEquals("The selected title and image must refer to the same listing", representative.title, group.title)
+        assertEquals("Use the representative listing image rather than the cheapest seller's image",
+            representative.thumbnailUrl, group.representativeImageUrl)
+    }
+
+    @Test
+    fun groupedProductFallsBackToAnotherAvailableThumbnailWhenRepresentativeHasNone() {
+        val noImage = SerpApiShoppingResult(
+            title = "Sony WH-1000XM5 Wireless Headphones",
+            price = 199.99,
+            storeName = "Tienda barata",
+            sourceUrl = "https://cheap.example/sony",
+            observedAt = 1_800_000_000_000L
+        )
+        val withImage = noImage.copy(
+            title = "Smartphone Sony WH-1000XM5 Wireless Headphones",
+            price = 219.99,
+            storeName = "Tienda con imagen",
+            sourceUrl = "https://retailer.example/sony",
+            thumbnailUrl = "https://images.example/sony.jpg"
+        )
+
+        val group = groupOnlineShoppingResults(listOf(noImage, withImage)).single()
+
+        assertEquals("Use another image from the same grouped product if the representative has none",
+            withImage.thumbnailUrl, group.representativeImageUrl)
+    }
+
+    @Test
     fun addition_isCorrect() {
         assertEquals(4, 2 + 2)
     }

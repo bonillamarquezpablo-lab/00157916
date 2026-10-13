@@ -328,7 +328,8 @@ fun MainScreen(
                         onProductClick = viewModel::onSelectProduct,
                         onToggleTrack = { prod -> viewModel.toggleTracking(prod) },
                         onEditAlert = viewModel::onOpenAlertSetting,
-                        onNavigateToMarket = { currentTab = MainTab.MARKET }
+                        onNavigateToMarket = { currentTab = MainTab.MARKET },
+                        onCheckPricesNow = viewModel::checkPriceAlertsNow
                     )
                 }
             }

@@ -62,6 +62,7 @@ class ProductRepository(
             priceObservationDao.deleteExplicitDemoObservations()
             trackedDao.deleteTrackingForDemoProducts()
             productDao.deleteExplicitDemoProducts()
+            priceObservationDao.deleteIneligibleLegacyObservations()
             priceObservationDao.deleteUnverifiedObservations()
             productDao.deleteProductsWithoutVerifiedObservations()
             productDao.markProductsWithVerifiedObservations()
@@ -139,7 +140,7 @@ class ProductRepository(
                 quote.currency == "EUR" &&
                 parseHttpUri(quote.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
                 isEligibleHistoryTitle(title) &&
-                isEligibleSeller(quote.storeName) &&
+                isEligibleSeller(quote.storeName, quote.sourceUrl) &&
                 isPlausibleHistoryPrice(title, quote.price)
         }
         if (validQuotes.isEmpty()) return 0
@@ -195,7 +196,8 @@ class ProductRepository(
                 result.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
                 parseHttpUri(result.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
                 isEligibleHistoryTitle(result.title) &&
-                isEligibleSeller(result.storeName) &&
+                isEligibleSeller(result.storeName, result.sourceUrl) &&
+                !isPromotionalBulkListing(result.title, searchQuery) &&
                 isPlausibleHistoryPrice(result.title, result.price) &&
                 !hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title) &&
                 // A device-specific query should never show cases, filters, mop kits or other
@@ -434,15 +436,41 @@ class ProductRepository(
         val excludedListing = Regex(
             """\b(segunda\s+mano|usad[oa]s?|used|reacondicionad[oa]s?|refurbished|renewed|pre owned|seminuev[oa]s?|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|cuota|mensual|suscripcion|subscription|pago\s+a\s+plazos|monthly|por\s+mes|per\s+month|mes\s+a\s+mes)\b"""
         )
+        val nonRetailPromotional = Regex(
+            """\b(impreso\s+con\s+(su|el|tu)\s+logotipo|con\s+(su|tu)\s+logo|regalo\s+promocional|articulo\s+publicitario|merchandising\s+personalizado|personalizado\s+con\s+logo|para\s+publicidad)\b"""
+        )
         return !excludedListing.containsMatchIn(normalized) &&
+            !nonRetailPromotional.containsMatchIn(normalized) &&
             !Regex("""(?i)/\s*mes\b""").containsMatchIn(title)
     }
 
-    private fun isEligibleSeller(storeName: String): Boolean {
+    private fun isPromotionalBulkListing(title: String, searchQuery: String): Boolean {
+        val titleNormalized = normalizedProductTitle(title)
+        val queryNormalized = normalizedProductTitle(searchQuery)
+        val explicitlyRequested = Regex(
+            """\b(personalizado|personalizada|logotipo|logo|publicitario|promocional|por mayor|lote)\b"""
+        ).containsMatchIn(queryNormalized)
+        if (explicitlyRequested) return false
+        val logoOrPromo = Regex(
+            """\b(impreso con (su|el|tu) logotipo|con (su|tu) logo|regalo promocional|articulo publicitario|merchandising personalizado|personalizado con logo|para publicidad)\b"""
+        )
+        val bulk = Regex(
+            """\b(\d+\s*x\s*(?:bateria|baterias|powerbank|power bank|cargador|auriculares)|pack\s+promocional|lote\s+promocional|por\s+mayor)\b"""
+        )
+        return logoOrPromo.containsMatchIn(titleNormalized) || bulk.containsMatchIn(titleNormalized)
+    }
+
+    private fun isEligibleSeller(storeName: String, sourceUrl: String): Boolean {
         if (storeName.isBlank() || !isEligibleHistoryTitle(storeName)) return false
         val normalized = " " + normalizedProductTitle(storeName) + " "
         val excludedSellers = listOf("rentik", "wallapop", "cash converters", "vinted", "cex")
-        return excludedSellers.none { seller -> (" " + seller + " ") in normalized }
+        if (excludedSellers.any { seller -> (" " + seller + " ") in normalized }) return false
+        val host = parseHttpUri(sourceUrl)?.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+        val excludedHosts = listOf(
+            "wallapop.com", "vinted.es", "vinted.com", "cashconverters.es",
+            "cashconverters.co.uk", "webuy.com", "cex.es", "cex.co.uk", "rentik.com"
+        )
+        return excludedHosts.none { domain -> host == domain || host.endsWith(".$domain") }
     }
 
     private fun isAccessoryListing(title: String): Boolean =

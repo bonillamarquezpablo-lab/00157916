@@ -97,11 +97,16 @@ fun PriceHistoryChart(
     }
 
     val minPriceInView = remember(filteredPoints) {
-        filteredPoints.minOfOrNull { it.price } ?: athMinPrice
+        val min = filteredPoints.minOfOrNull { it.price } ?: athMinPrice
+        val max = filteredPoints.maxOfOrNull { it.price } ?: (athMinPrice * 1.3)
+        // With only one observation (or identical prices), give the point vertical breathing
+        // room instead of pinning it to the bottom edge of the chart.
+        if (filteredPoints.isNotEmpty() && min == max) (min * 0.9).coerceAtLeast(0.0) else min
     }
     val maxPriceInView = remember(filteredPoints) {
+        val min = filteredPoints.minOfOrNull { it.price } ?: athMinPrice
         val max = filteredPoints.maxOfOrNull { it.price } ?: (athMinPrice * 1.3)
-        if (max == minPriceInView) max * 1.1 else max
+        if (filteredPoints.isNotEmpty() && min == max) max * 1.1 else max
     }
 
     val selectedPoint = remember(selectedPointIndex, filteredPoints) {

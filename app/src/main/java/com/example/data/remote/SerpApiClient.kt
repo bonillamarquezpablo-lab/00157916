@@ -528,9 +528,8 @@ class SerpApiClient(
                 priceText.contains("EUR", ignoreCase = true)
             if (extractedPrice == null && !isEuroPrice) return@mapNotNull null
 
-            // SerpApi can expose a direct merchant URL as link/link_clean and a Google
-            // product page as product_link. Prefer a non-Google HTTPS destination whenever one
-            // exists; use the Google product page only as an explicitly labelled fallback.
+            // Only a direct HTTPS retailer destination can back a persisted price observation.
+            // A Google product page is indirect, not a merchant product URL.
             val candidateUrls = sequenceOf(
                 item.optString("link_clean"),
                 item.optString("link"),
@@ -654,7 +653,7 @@ class SerpApiClient(
 
     private fun isClearlyNonNewListing(item: JSONObject, title: String): Boolean {
         val excludedTerms = Regex(
-            """(?i)\b(segunda[\s_-]+mano|second[\s_-]*hand|pre[\s_-]*owned|used|usad[oa]s?|seminuev[oa]s?|reacondicionad[oa]s?|refurbished|renewed|open[\s_-]*box|alquiler|renting|leasing)\b"""
+            """(?i)\b(segunda[\s_-]+mano|second[\s_-]*hand|pre[\s_-]*owned|used|usad[oa]s?|seminuev[oa]s?|reacondicionad[oa]s?|refurbished|renewed|open[\s_-]*box|alquiler|rental|renting|rent|leasing|lease|financiacion|financing|subscription|monthly|cuota)\b"""
         )
         if (excludedTerms.containsMatchIn(title)) return true
 

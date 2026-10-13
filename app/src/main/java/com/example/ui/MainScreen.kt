@@ -2,6 +2,7 @@ package com.example.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -9,6 +10,8 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmark
@@ -63,6 +66,7 @@ import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.StoresScreen
 import com.example.ui.screens.VerifierScreen
 import com.example.ui.viewmodel.PriceTrackerViewModel
+import com.example.ui.theme.FloatingSurfaceShape
 
 enum class MainTab(
     val title: String,
@@ -178,9 +182,16 @@ fun MainScreen(
             NavigationBar(
                 modifier = Modifier
                     .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(horizontal = 12.dp, vertical = 5.dp)
+                    .clip(FloatingSurfaceShape)
+                    .border(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
+                        shape = FloatingSurfaceShape
+                    )
                     .testTag("main_bottom_nav"),
-                containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 6.dp
+                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+                tonalElevation = 3.dp
             ) {
                 MainTab.values().forEach { tab ->
                     val isSelected = currentTab == tab

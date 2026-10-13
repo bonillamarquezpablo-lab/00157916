@@ -281,7 +281,7 @@ fun ProductDetailSheet(
                                 )
                                 Text(
                                     text = when {
-                                        product.priceHistory.size == 1 -> "1 observación real · la gráfica ya está disponible"
+                                        product.priceHistory.size == 1 -> "1 observación guardada · la gráfica ya está disponible"
                                         product.priceHistory.size > 1 -> "${product.priceHistory.size} fechas registradas · evolución en curso"
                                         else -> "Se necesitan observaciones reales para mostrar la evolución"
                                     },

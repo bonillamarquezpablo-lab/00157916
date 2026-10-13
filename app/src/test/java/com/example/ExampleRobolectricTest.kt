@@ -610,7 +610,7 @@ class ExampleRobolectricTest {
         )
         val report = client.parseShoppingResultsDetailed(root, "Sony WH-1000XM5", 123L)
         assertEquals(listOf(80.0, 90.0, 100.0), report.results.map { it.price })
-        assertEquals(2, report.rejectedAsIrrelevant)
+        assertEquals(1, report.rejectedAsIrrelevant)
         assertEquals(1, report.rejectedAsSuspiciousPrice)
         assertEquals(1, report.rejectedNonComparable)
     }

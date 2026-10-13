@@ -203,7 +203,7 @@ fun OnlineSearchScreen(
                     group = group,
                     onOpenProduct = { onOpenProduct(group.identityKey) },
                     onOpenBestOffer = {
-                        val best = group.cheapestOffer
+                        val best = group.bestPurchaseOffer
                         openStoreUrl(context, best.sourceUrl, preferAmazonApp = best.isAmazonOffer)
                     }
                 )
@@ -225,7 +225,7 @@ private fun ShoppingResultCard(
     onOpenProduct: () -> Unit,
     onOpenBestOffer: () -> Unit
 ) {
-    val best = group.cheapestOffer
+    val best = group.bestPurchaseOffer
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenProduct),
         shape = RoundedCornerShape(20.dp),
@@ -251,13 +251,17 @@ private fun ShoppingResultCard(
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(group.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     Text(
-                        "Desde " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(group.minPrice),
+                        "Desde " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(best.price),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        "${group.storeCount} tiendas · precio más bajo en ${best.storeName}",
+                        if (best.isGoogleShoppingProductLink) {
+                            "${group.storeCount} tiendas · menor precio listado en Google Shopping"
+                        } else {
+                            "${group.storeCount} tiendas · mejor precio con enlace directo en ${best.storeName}"
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium
                     )
@@ -273,8 +277,8 @@ private fun ShoppingResultCard(
             }
             OutlinedButton(onClick = onOpenBestOffer, modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    if (best.isGoogleShoppingProductLink) "Abrir oferta más barata en Google Shopping"
-                    else "Abrir oferta más barata · ${best.storeName}"
+                    if (best.isGoogleShoppingProductLink) "Ver ofertas en Google Shopping"
+                    else "Abrir oferta en ${best.storeName}"
                 )
                 Spacer(Modifier.width(8.dp))
                 Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))

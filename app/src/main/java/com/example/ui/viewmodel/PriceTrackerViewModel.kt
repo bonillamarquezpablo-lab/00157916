@@ -243,10 +243,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     repository.allProductsStream.first { products -> products.isNotEmpty() }
                 }
                 val targets = if (testOneProduct) {
-                    listOf(
-                        allProducts.firstOrNull { product -> product.id == "demo_galaxy_s26_ultra" }
-                            ?: allProducts.first()
-                    )
+                    // Prefer a real catalog product with a barcode so the one-search test uses
+                    // the strongest available identity instead of a hard-coded demo item.
+                    listOf(allProducts.firstOrNull { product -> !product.ean.isNullOrBlank() }
+                        ?: allProducts.first())
                 } else {
                     // Spread catalog lookups over multiple manual batches, prioritizing products
                     // never queried or queried longest ago. This keeps one tap within 40 searches
@@ -457,7 +457,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 // Cache lookup comes first: saved results remain usable even if the quota is empty
                 // or the API key was removed after the previous search.
                 val cached = onlineSearchCache.read(provider.name, query)
-                if (cached != null) {
+                if (cached != null && cached.results.isNotEmpty()) {
                     val ageMinutes = ((System.currentTimeMillis() - cached.savedAt) / 60_000L).coerceAtLeast(1L)
                     val base = onlineSearchResultMessage(cached.results, provider)
                     val cacheNotice = "Resultados guardados hace $ageMinutes min; no se ha consumido otra búsqueda."
@@ -501,7 +501,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     OnlineSearchProvider.GOOGLE_SHOPPING -> serpApiClient.searchOnline(token, query)
                     OnlineSearchProvider.AMAZON -> serpApiClient.searchAmazonOnline(token, query)
                 }
-                onlineSearchCache.write(provider.name, query, results)
+                // Empty responses are not useful cache entries: allow a later retry to query
+                // SerpApi again instead of replaying a stale "no results" response for 55 minutes.
+                if (results.isNotEmpty()) onlineSearchCache.write(provider.name, query, results)
                 val base = onlineSearchResultMessage(results, provider)
                 // The account endpoint is free; refresh the displayed balance after a live request.
                 val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()

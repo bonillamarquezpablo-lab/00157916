@@ -242,7 +242,7 @@ class ProductRepository(
     private fun isEligibleHistoryTitle(title: String): Boolean {
         if (title.isBlank()) return false
         val excludedListing = Regex(
-            """(?i)\\b(segunda\\s+mano|usad[oa]s?|reacondicionad[oa]s?|refurbished|renewed|pre-owned|seminuev[oa]s?|alquiler|renting|rent|financiaci[oó]n|financiar|cuota\\s+mensual|pago\\s+mensual|por\\s+mes|\\d+\\s*€/mes)\\b"""
+            """(?i)\b(segunda\s+mano|usad[oa]s?|used|reacondicionad[oa]s?|refurbished|renewed|pre-owned|seminuev[oa]s?|alquiler|renting|rent|leasing|lease|hire|financiaci[oó]n|financiar|cuota\s+mensual|pago\s+mensual|pago\s+a\s+plazos|monthly|por\s+mes|\d+\s*€/mes)\b"""
         )
         return !excludedListing.containsMatchIn(title)
     }

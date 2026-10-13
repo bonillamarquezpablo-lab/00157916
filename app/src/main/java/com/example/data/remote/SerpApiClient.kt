@@ -416,7 +416,11 @@ class SerpApiClient(
             sortedPrices.size % 2 == 1 -> sortedPrices[sortedPrices.size / 2]
             else -> (sortedPrices[sortedPrices.size / 2 - 1] + sortedPrices[sortedPrices.size / 2]) / 2.0
         }
-        val suspiciousPriceFloor = if (sortedPrices.size >= 3 && medianPrice >= 20.0) medianPrice * 0.10 else 0.0
+        val suspiciousPriceFloor = when {
+            sortedPrices.size >= 3 && medianPrice >= 20.0 -> medianPrice * 0.10
+            sortedPrices.size >= 2 && sortedPrices.first() < 5.0 && sortedPrices.last() >= 20.0 -> 5.0
+            else -> 0.0
+        }
         val rejectedAsSuspiciousPrice = parsedCandidates.count { it.price < suspiciousPriceFloor }
         val parsed = parsedCandidates
             .filter { it.price >= suspiciousPriceFloor }
@@ -719,7 +723,7 @@ class SerpApiClient(
 
     private fun isRentalOrFinancingListing(title: String, query: String): Boolean {
         val markers = listOf(
-            "alquiler", "alquilar", "renting", "rental", "leasing",
+            "alquiler", "alquilar", "rent", "renting", "rental", "leasing",
             "por dia", "por mes", "al mes", "mensual", "cuota", "cuotas",
             "financiacion", "financiado", "contrato", "permanencia"
         )

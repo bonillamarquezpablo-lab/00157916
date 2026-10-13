@@ -617,6 +617,43 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `Samsung S26 Ultra search rejects the S26 FE variant`() {
+        val client = SerpApiClient()
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {
+                  "title": "Samsung Galaxy S26 FE 5G 256GB",
+                  "price": "539,99 €",
+                  "extracted_price": 539.99,
+                  "link": "https://www.fnac.es/samsung-s26-fe",
+                  "source": "Fnac"
+                },
+                {
+                  "title": "Samsung Galaxy S26 Ultra 512GB",
+                  "price": "1.499,00 €",
+                  "extracted_price": 1499.0,
+                  "link": "https://www.samsung.com/es/smartphones/galaxy-s26-ultra/",
+                  "source": "Samsung Shop"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val report = client.parseShoppingResultsDetailed(
+            root = payload,
+            query = "Samsung Galaxy S26 Ultra 512 GB",
+            observedAt = 123L
+        )
+
+        assertEquals(1, report.results.size)
+        assertEquals("Samsung Galaxy S26 Ultra 512GB", report.results.single().title)
+    }
+
+    @Test
     fun `immersive product lookup returns the direct URL for the requested merchant`() = runBlocking<Unit> {
         var requestEngine: String? = null
         var requestToken: String? = null

@@ -115,7 +115,7 @@ class ExampleRobolectricTest {
                     currentStoreId = "amazon_es",
                     storeUrl = "https://www.amazon.es/dp/TEST",
                     ean = "",
-                    isPriceVerified = true
+                    isPriceVerified = false
                 )
             )
             database.priceObservationDao().insert(
@@ -151,12 +151,21 @@ class ExampleRobolectricTest {
             assertEquals(1, products.single().priceHistory.size)
 
             withTimeout(10_000) {
-                while (database.productDao().getProductCount() != 1) kotlinx.coroutines.delay(10)
+                while (
+                    database.productDao().getProductCount() != 1 ||
+                    database.storeDao().getStoreCount() != 0 ||
+                    database.priceObservationDao().getObservationCount("demo_iphone_17_pro_max") != 0 ||
+                    database.trackedProductDao().getAllTracked().first().isNotEmpty()
+                ) kotlinx.coroutines.delay(10)
             }
             assertEquals(0, database.priceObservationDao().getObservationCount("demo_iphone_17_pro_max"))
             assertEquals(1, database.priceObservationDao().getObservationCount("online_product_redmi17"))
             assertTrue("Legacy mock tracking must be purged", database.trackedProductDao().getAllTracked().first().isEmpty())
             assertEquals("Room's static store rows must also be empty", 0, database.storeDao().getStoreCount())
+            assertTrue(
+                "A real verified observation must repair a stale product verification flag",
+                database.productDao().getProductById("online_product_redmi17")?.isPriceVerified == true
+            )
         } finally {
             database.close()
         }

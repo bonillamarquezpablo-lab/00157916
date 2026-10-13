@@ -476,9 +476,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     val ageMinutes = ((System.currentTimeMillis() - cached.savedAt) / 60_000L).coerceAtLeast(1L)
                     val base = onlineSearchResultMessage(cached.results, provider)
                     val cacheNotice = "Resultados guardados hace $ageMinutes min; no se ha consumido otra búsqueda."
+                    val savedObservations = repository.recordOnlineSearchResults(cached.results, provider.name)
+                    val historyNotice = onlineHistoryNotice(savedObservations, cached.results.size)
                     _uiState.value = _uiState.value.copy(
                         onlineSearchResults = cached.results,
-                        onlineSearchStatus = "$base $cacheNotice"
+                        onlineSearchStatus = "$base $cacheNotice $historyNotice"
                     )
                     return@launch
                 }
@@ -519,6 +521,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
                 val results = googleReport?.results
                     ?: serpApiClient.searchAmazonOnline(token, query)
+                // Persist only real, validated offers; Room prevents another point for the same
+                // product/store on the same local calendar day.
+                val savedObservations = if (results.isNotEmpty()) {
+                    repository.recordOnlineSearchResults(results, provider.name)
+                } else 0
                 // Empty responses are not useful cache entries: allow a later retry to query
                 // SerpApi again instead of replaying a stale "no results" response for 55 minutes.
                 if (results.isNotEmpty()) onlineSearchCache.write(provider.name, query, results)
@@ -530,7 +537,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 // The account endpoint is free; refresh the displayed balance after a live request.
                 val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
                 val quotaNote = quotaAfter?.let { " ${it.quotaSummary()}" }.orEmpty()
-                val message = base + quotaNote
+                val historyNote = if (results.isNotEmpty()) {
+                    " " + onlineHistoryNotice(savedObservations, results.size)
+                } else ""
+                val message = base + quotaNote + historyNote
                 _uiState.value = _uiState.value.copy(
                     onlineSearchResults = results,
                     onlineSearchStatus = message
@@ -550,6 +560,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             }
         }
     }
+
+    private fun onlineHistoryNotice(saved: Int, resultCount: Int): String =
+        if (saved > 0) {
+            "Historial real: $saved nuevas observaciones guardadas en Room."
+        } else {
+            "Sin puntos nuevos en el historial: ya estaban registrados hoy o no pasaron los filtros de producto nuevo/precio seguro ($resultCount resultados revisados)."
+        }
 
     private fun onlineSearchResultMessage(
         results: List<SerpApiShoppingResult>,

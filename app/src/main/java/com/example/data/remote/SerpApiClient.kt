@@ -210,10 +210,11 @@ class SerpApiClient(
                 priceText.contains("EUR", ignoreCase = true)
             // A structured numeric price is useful even when SerpApi omits the formatted label,
             // but never reinterpret an explicitly labelled foreign currency as euros.
-            val explicitlyForeignCurrency = Regex(
-                "(?i)(\\\\$|£|¥|₹|\\\\b(USD|GBP|CAD|AUD|NZD|JPY|INR|CHF)\\\\b)"
-            ).containsMatchIn(priceText)
-            if (explicitlyForeignCurrency && !isEuroPrice) return@mapNotNull null
+            val explicitlyForeignCurrency =
+                listOf('$', '£', '¥', '₹').any { priceText.contains(it) } ||
+                    listOf("USD", "GBP", "CAD", "AUD", "NZD", "JPY", "INR", "CHF")
+                        .any { currency -> priceText.contains(currency, ignoreCase = true) }
+            if (explicitlyForeignCurrency) return@mapNotNull null
             if (extractedPrice == null && !isEuroPrice) return@mapNotNull null
 
             val url = sequenceOf(item.optString("link_clean"), item.optString("link"))

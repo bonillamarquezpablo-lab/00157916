@@ -39,42 +39,7 @@ interface PriceObservationDao {
     )
     suspend fun getLatestVerified(productId: String): PriceObservationEntity?
 
-    @Query(
-        "SELECT * FROM price_observations WHERE isVerified = 1 " +
-            "AND lower(storeName) NOT LIKE '%wallapop%' " +
-            "AND lower(storeName) NOT LIKE '%cash converters%' " +
-            "AND lower(storeName) NOT LIKE '%vinted%' " +
-            "AND lower(storeName) NOT LIKE '%cex%' " +
-            "AND lower(storeName) NOT LIKE '%rentik%' " +
-            "AND lower(sourceUrl) NOT LIKE '%wallapop.%' " +
-            "AND lower(sourceUrl) NOT LIKE '%cashconverters.%' " +
-            "AND lower(sourceUrl) NOT LIKE '%vinted.%' " +
-            "AND lower(sourceUrl) NOT LIKE '%webuy.com%' " +
-            "AND lower(sourceUrl) NOT LIKE '%cex.%' " +
-            "AND lower(productTitle) NOT LIKE '%segunda mano%' " +
-            "AND lower(productTitle) NOT LIKE '%usado%' " +
-            "AND lower(productTitle) NOT LIKE '%reacondicionad%' " +
-            "AND lower(productTitle) NOT LIKE '%refurbished%' " +
-            "AND lower(productTitle) NOT LIKE '%renewed%' " +
-            "AND lower(productTitle) NOT LIKE '%alquiler%' " +
-            "AND lower(productTitle) NOT LIKE '%renting%' " +
-            "AND lower(productTitle) NOT LIKE '%cuota mensual%' " +
-            "AND lower(productTitle) NOT LIKE '%suscripcion%' " +
-            "AND lower(productTitle) NOT LIKE '%subscription%' " +
-            "AND lower(productTitle) NOT LIKE '%por mes%' " +
-            "AND lower(productTitle) NOT LIKE '%impreso con su logotipo%' " +
-            "AND lower(productTitle) NOT LIKE '%impreso con el logotipo%' " +
-            "AND lower(productTitle) NOT LIKE '%regalo promocional%' " +
-            "AND lower(productTitle) NOT LIKE '%articulo publicitario%' " +
-            "AND lower(productTitle) NOT LIKE '%merchandising personalizado%' " +
-            "AND NOT ((lower(productTitle) LIKE '%macbook%' OR lower(productTitle) LIKE '%laptop%' OR " +
-                "lower(productTitle) LIKE '%chromebook%' OR lower(productTitle) LIKE '%portatil%') AND price < 100) " +
-            "AND NOT ((lower(productTitle) LIKE '%iphone%' OR lower(productTitle) LIKE '%smartphone%' OR " +
-                "lower(productTitle) LIKE '%redmi%' OR lower(productTitle) LIKE '%pixel%' OR lower(productTitle) LIKE '%galaxy s%') AND price < 45) " +
-            "AND NOT ((lower(productTitle) LIKE '%playstation 5%' OR lower(productTitle) LIKE '%ps5%' OR " +
-                "lower(productTitle) LIKE '%xbox series%' OR lower(productTitle) LIKE '%nintendo switch%') AND price < 70) " +
-            "ORDER BY observedAt ASC"
-    )
+    @Query("SELECT * FROM price_observations WHERE isVerified = 1 ORDER BY observedAt ASC")
     fun observeAllVerified(): Flow<List<PriceObservationEntity>>
 
     @Query("SELECT COUNT(*) FROM price_observations WHERE isVerified = 1")
@@ -84,43 +49,18 @@ interface PriceObservationDao {
         "SELECT * FROM price_observations " +
             "WHERE productId = :productId AND storeId = :storeId " +
             "AND observedAt >= :dayStart AND observedAt < :dayEnd " +
-            "AND isVerified = 1 AND currency = 'EUR' " +
-            "AND lower(storeName) NOT LIKE '%wallapop%' " +
-            "AND lower(storeName) NOT LIKE '%cash converters%' " +
-            "AND lower(storeName) NOT LIKE '%vinted%' " +
-            "AND lower(storeName) NOT LIKE '%cex%' " +
-            "AND lower(storeName) NOT LIKE '%rentik%' " +
-            "AND lower(productTitle) NOT LIKE '%segunda mano%' " +
-            "AND lower(productTitle) NOT LIKE '%usado%' " +
-            "AND lower(productTitle) NOT LIKE '%reacondicionad%' " +
-            "AND lower(productTitle) NOT LIKE '%refurbished%' " +
-            "AND lower(productTitle) NOT LIKE '%renewed%' " +
-            "AND lower(productTitle) NOT LIKE '%open box%' " +
-            "AND lower(productTitle) NOT LIKE '%caja abierta%' " +
-            "AND lower(productTitle) NOT LIKE '%pre owned%' " +
-            "AND lower(productTitle) NOT LIKE '%seminuevo%' " +
-            "AND lower(productTitle) NOT LIKE '%alquiler%' " +
-            "AND lower(productTitle) NOT LIKE '%renting%' " +
-            "AND lower(productTitle) NOT LIKE '%cuota mensual%' " +
-            "AND lower(productTitle) NOT LIKE '%por mes%' " +
-            "AND lower(productTitle) NOT LIKE '%subscription%' " +
-            "AND lower(productTitle) NOT LIKE '%impreso con su logotipo%' " +
-            "AND lower(productTitle) NOT LIKE '%impreso con el logotipo%' " +
-            "AND lower(productTitle) NOT LIKE '%articulo publicitario%' " +
-            "AND NOT ((lower(productTitle) LIKE '%macbook%' OR lower(productTitle) LIKE '%laptop%' OR lower(productTitle) LIKE '%chromebook%') AND price < 100) " +
-            "AND NOT ((lower(productTitle) LIKE '%iphone%' OR lower(productTitle) LIKE '%smartphone%' OR lower(productTitle) LIKE '%redmi%' OR lower(productTitle) LIKE '%galaxy s%') AND price < 45) " +
-            "LIMIT 1"
+            "ORDER BY observedAt DESC"
     )
-    suspend fun getObservationForStoreProductDay(
+    suspend fun getObservationsForStoreProductDay(
         productId: String,
         storeId: String,
         dayStart: Long,
         dayEnd: Long
-    ): PriceObservationEntity?
+    ): List<PriceObservationEntity>
 
     /**
-     * Atomically deduplicate and insert a daily offer. The transaction prevents two overlapping
-     * search callbacks from both observing "no row" and writing duplicate history points.
+     * Insert at most one valid source-backed observation for a product/store/local-day.
+     * Invalid legacy rows do not block a fresh valid observation.
      */
     @Transaction
     suspend fun insertIfNoVerifiedStoreOfferForDay(
@@ -128,63 +68,40 @@ interface PriceObservationDao {
         dayStart: Long,
         dayEnd: Long
     ): Boolean {
-        val existing = getObservationForStoreProductDay(
+        val existing = getObservationsForStoreProductDay(
             productId = observation.productId,
             storeId = observation.storeId,
             dayStart = dayStart,
             dayEnd = dayEnd
         )
-        if (existing != null) return false
+        val hasValidExisting = existing.any { old ->
+            val title = old.productTitle.lowercase()
+            val seller = old.storeName.lowercase()
+            val source = old.sourceUrl.lowercase()
+            old.isVerified &&
+                old.currency == "EUR" &&
+                old.price.isFinite() &&
+                old.price in 5.0..10000.0 &&
+                source.startsWith("https://") &&
+                listOf("wallapop", "cash converters", "vinted", "cex", "rentik").none { it in seller || it in source } &&
+                listOf(
+                    "segunda mano", "usado", "reacondicionad", "refurbished", "renewed",
+                    "open box", "caja abierta", "pre owned", "seminuevo", "renting",
+                    "alquiler", "cuota mensual", "subscription", "por mes",
+                    "impreso con su logotipo", "impreso con el logotipo",
+                    "regalo promocional", "articulo publicitario", "merchandising personalizado"
+                ).none { it in title } &&
+                !((listOf("macbook", "laptop", "chromebook", "portatil").any { it in title }) && old.price < 100.0) &&
+                !((listOf("iphone", "smartphone", "redmi", "pixel", "galaxy s").any { it in title }) && old.price < 45.0) &&
+                !((listOf("playstation 5", "ps5", "xbox series", "nintendo switch").any { it in title }) && old.price < 70.0)
+        }
+        if (hasValidExisting) return false
         insert(observation)
         return true
     }
 
     @Query("SELECT COUNT(*) FROM price_observations WHERE productId = :productId")
     suspend fun getObservationCount(productId: String): Int
-
-    /**
-     * Purge legacy rows known to be incompatible with the app's "new in store" price history.
-     * This is intentionally conservative: these sellers/conditions were never eligible for
-     * the consumer-price history, and some old builds persisted them before today's filters.
-     */
-    @Query(
-        "DELETE FROM price_observations WHERE " +
-            "lower(storeName) LIKE '%wallapop%' OR " +
-            "lower(storeName) LIKE '%cash converters%' OR " +
-            "lower(storeName) LIKE '%vinted%' OR " +
-            "lower(storeName) LIKE '%cex%' OR " +
-            "lower(storeName) LIKE '%rentik%' OR " +
-            "lower(sourceUrl) LIKE '%wallapop.%' OR " +
-            "lower(sourceUrl) LIKE '%cashconverters.%' OR " +
-            "lower(sourceUrl) LIKE '%vinted.%' OR " +
-            "lower(sourceUrl) LIKE '%webuy.com%' OR " +
-            "lower(sourceUrl) LIKE '%cex.%' OR " +
-            "lower(productTitle) LIKE '%segunda mano%' OR " +
-            "lower(productTitle) LIKE '%reacondicionad%' OR " +
-            "lower(productTitle) LIKE '%refurbished%' OR " +
-            "lower(productTitle) LIKE '%renewed%' OR " +
-            "lower(productTitle) LIKE '%open box%' OR " +
-            "lower(productTitle) LIKE '%caja abierta%' OR " +
-            "lower(productTitle) LIKE '%pre owned%' OR " +
-            "lower(productTitle) LIKE '%seminuevo%' OR " +
-            "lower(productTitle) LIKE '%usado%' OR " +
-            "lower(productTitle) LIKE '%renting%' OR " +
-            "lower(productTitle) LIKE '%alquiler%' OR " +
-            "lower(productTitle) LIKE '%cuota mensual%' OR " +
-            "lower(productTitle) LIKE '%suscripción%' OR " +
-            "lower(productTitle) LIKE '%subscription%' OR " +
-            "lower(productTitle) LIKE '%impreso con su logotipo%' OR " +
-            "lower(productTitle) LIKE '%impreso con el logotipo%' OR " +
-            "lower(productTitle) LIKE '%regalo promocional%' OR " +
-            "lower(productTitle) LIKE '%artículo publicitario%' OR " +
-            "lower(productTitle) LIKE '%articulo publicitario%' OR " +
-            "lower(productTitle) LIKE '%merchandising personalizado%' OR " +
-            "((lower(productTitle) LIKE '%macbook%' OR lower(productTitle) LIKE '%laptop%' OR " +
-            "lower(productTitle) LIKE '%chromebook%' OR lower(productTitle) LIKE '%portátil%' OR lower(productTitle) LIKE '%portatil%') AND price < 100) OR " +
-            "((lower(productTitle) LIKE '%iphone%' OR lower(productTitle) LIKE '%smartphone%' OR lower(productTitle) LIKE '%redmi%' OR lower(productTitle) LIKE '%pixel%' OR lower(productTitle) LIKE '%galaxy s%') AND price < 45) OR " +
-            "((lower(productTitle) LIKE '%playstation 5%' OR lower(productTitle) LIKE '%ps5%' OR lower(productTitle) LIKE '%xbox series%' OR lower(productTitle) LIKE '%nintendo switch%') AND price < 70)"
-    )
-    suspend fun deleteIneligibleLegacyObservations(): Int
 
     /** Demo/unverified points are never valid history in this app. */
     @Query("DELETE FROM price_observations WHERE isVerified = 0")

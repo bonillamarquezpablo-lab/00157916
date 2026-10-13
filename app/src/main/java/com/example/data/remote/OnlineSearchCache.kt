@@ -56,7 +56,10 @@ class OnlineSearchCache(context: Context) {
                     rating = rating,
                     reviewCount = reviewCount,
                     observedAt = item.optLong("observedAt", savedAt),
-                    primeEligible = item.optBoolean("primeEligible", false)
+                    primeEligible = item.optBoolean("primeEligible", false),
+                    immersiveProductApiUrl = item.optString("immersiveProductApiUrl")
+                        .takeIf { it.startsWith("https://serpapi.com/search") },
+                    condition = item.optString("condition").takeUnless { it == "null" }.orEmpty()
                 )
             }
             CachedOnlineSearch(results = results, savedAt = savedAt)
@@ -82,6 +85,8 @@ class OnlineSearchCache(context: Context) {
                 put("reviewCount", result.reviewCount ?: JSONObject.NULL)
                 put("observedAt", result.observedAt)
                 put("primeEligible", result.primeEligible)
+                put("immersiveProductApiUrl", result.immersiveProductApiUrl ?: JSONObject.NULL)
+                put("condition", result.condition)
             })
         }
         preferences.edit()

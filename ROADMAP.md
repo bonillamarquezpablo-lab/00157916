@@ -1,54 +1,134 @@
-# Mínimo — hoja de ruta de producto
+# Mínimo — hoja de ruta en 20 fases
 
-**Estado de la rama del buscador:** consulta manual de Google Shopping y Amazon.es mediante SerpApi integrada; falta confirmar clave y consulta real en el móvil · 33 comercios en el directorio · actualización en segundo plano y alertas automáticas no implementadas.
+**Orden:** de menor a mayor dificultad. Cada fase debe cerrarse con pruebas y evidencia; que una función exista parcialmente no equivale a que esté terminada en producción.
 
-**Progreso global provisional: 1%** se mantiene hasta completar el primer flujo de precio real de extremo a extremo en el móvil. El código del conector está integrado, pero falta la clave del proveedor y validar una búsqueda real; el porcentaje se actualiza por resultados funcionales, no por líneas de código.
+**Situación actual conocida:** el catálogo usa Room y existe almacenamiento de observaciones verificables. El buscador manual de Google Shopping España y Amazon.es mediante SerpApi está implementado en el código, pero requiere clave configurada y una prueba real en el móvil. El arreglo de enlaces alternativos está propuesto en el PR #15 y todavía no debe considerarse integrado en `main`. Las actualizaciones de fondo, las alertas automáticas y las cuentas sincronizadas no están completas.
 
-## 16 mejoras planificadas
+## Las 20 fases, de fácil a difícil
 
-- [x] **M01 — Base de integridad y procedencia.** Existe una tabla persistente de observaciones con producto, comercio, precio, moneda, fecha/hora, URL y estado de verificación; queda pendiente alimentarla con un proveedor real.
-- [~] **M02 — Primer proveedor real (código preparado).** La app incluye consultas manuales de Google Shopping España a través de SerpApi, con almacenamiento local de la clave cifrada. Falta crear/configurar la cuenta, guardar la clave en Ajustes y probar una consulta real. No es una actualización continua.
-- [ ] **M03 — Más proveedores autorizados.** Integrar fuentes oficiales o feeds con permiso explícito por comercio; no confundir una lista de webs con conectores.
-- [ ] **M04 — Identidad de producto.** Normalizar EAN/GTIN, MPN/SKU, variante, capacidad, color y estado nuevo/reacondicionado.
-- [~] **M05 — Ingesta fiable (parcial).** Se valida la respuesta, se consulta el saldo real/límite horario de SerpApi antes de los lotes, se adaptan los lotes a la cuota disponible y se reutilizan búsquedas recientes desde caché local (hasta 40 entradas / 55 min). Falta backend compartido para una app multiusuario, gestión central de cuotas, registros y tareas programadas.
-- [ ] **M06 — Historial y mínimos reales.** Calcular mínimos y descuentos solo desde observaciones verificadas y fechadas.
-- [ ] **M07 — Comparación de coste final.** Incluir envío, disponibilidad, vendedor, IVA, condición y fecha de comprobación.
-- [ ] **M08 — Actualizaciones de fondo.** Programar consultas respetando batería, conectividad y condiciones de los proveedores.
-- [ ] **M09 — Alertas reales.** Activar avisos solo con monitorización funcional, permisos y preferencias claras del usuario.
-- [ ] **M10 — Cuenta online.** Autenticación segura, sincronización y recuperación; el perfil local actual no es una cuenta.
-- [~] **M11 — Catálogo escalable (parcial).** Room es la fuente de verdad y las instalaciones existentes añaden solo los IDs que faltan sin sobrescribir filas. Quedan pendientes paginación y filtros escalables.
-- [~] **M12 — Ordenación comprobable (parcial).** Ya hay orden por nombre/categoría y por precio verificado; falta ampliar por comercio y frescura del dato.
-- [ ] **M13 — Seguimiento y objetivos.** Favoritos, objetivos de precio, exportación e historial por usuario.
-- [ ] **M14 — Interfaz moderna y accesible.** Cargas, errores, estados vacíos, diseño adaptable y accesibilidad.
-- [ ] **M15 — Calidad y publicación.** Pruebas de integración, privacidad, seguridad, observabilidad, copias y flujo de publicación.
-- [x] **M16 — Buscador online manual.** Búsqueda libre en Google Shopping España y búsqueda directa de Amazon.es a través de SerpApi; ambas muestran resultados con precio en euros dentro de Mínimo. Los resultados de Amazon.es incluyen, cuando se informa, la elegibilidad de entrega Prime. No leen precios/cupones personalizados de la sesión personal y requieren SerpApi; no hay monitorización automática.
+### Fase 01 — Distinguir siempre datos de muestra y datos reales
+**Estado:** 🟡 Parcial.  
+**Trabajo:** unificar las etiquetas de demostración, precios consultados, precios verificados e historial simulado en todas las pantallas. Evitar que una simulación parezca una oferta real.  
+**Cierre:** pruebas que demuestren que los datos de muestra no se guardan ni se muestran como observaciones verificadas.
 
-## 5 fallos o limitaciones detectados en el código actual
+### Fase 02 — Corregir los enlaces de los resultados
+**Estado:** 🟡 En propuesta de cambio (PR #15; aún no integrado en `main`).  
+**Trabajo:** cuando haya título y precio válido, pero no un enlace HTTPS útil, generar una búsqueda de Google Shopping España codificada con el título; identificar visualmente ese destino como búsqueda, no como tienda.  
+**Cierre:** probar enlaces directos, enlaces Google y resultados sin enlace utilizable; no atribuir una búsqueda de Google a una tienda como si fuera la ficha del producto.
 
-1. **Conector listo, proveedor sin configurar.** El catálogo precargado sigue siendo de demostración; las consultas manuales de Google Shopping y Amazon.es solo funcionan tras guardar la clave de SerpApi en el dispositivo.
-2. **[RESUELTO] Dos fuentes de verdad para productos.** El flujo principal ahora lee los productos desde Room; el catálogo estático solo sirve para añadir fichas que faltan.
-3. **[PARCIALMENTE RESUELTO] Historial persistente con procedencia.** Ya existe una tabla/DAO con URL, fecha y verificación; sigue sin datos reales hasta conectar un proveedor autorizado.
-4. **[RESUELTO] Riesgo de pérdida por migración destructiva.** La migración destructiva se retiró y el camino 2→3→4 ha superado pruebas de preservación.
-5. **El seguimiento no monitoriza.** Los objetivos se guardan localmente, pero no hay comprobaciones automáticas ni alertas reales; la simulación de caída modifica objetos de demostración.
+### Fase 03 — Explicar por qué una búsqueda no devuelve resultados
+**Estado:** ⬜ Pendiente.  
+**Trabajo:** separar claramente cero resultados del proveedor, productos irrelevantes, precios/monedas inválidos y enlaces ausentes. Mostrar nombres de campos recibidos cuando todos los resultados fallen por enlaces.  
+**Cierre:** pruebas para cada causa y mensajes en español útiles para corregir la consulta.
 
-## 3 correcciones prioritarias
+### Fase 04 — Mejorar la normalización de las consultas
+**Estado:** ⬜ Pendiente.  
+**Trabajo:** normalizar espacios, guiones, acentos, marca y modelo sin borrar identificadores importantes como XM5, capacidad, tamaño o generación.  
+**Cierre:** batería de búsquedas equivalentes para casos como Sony WH-1000XM5 y sus variantes, sin aceptar productos distintos solo por compartir marca.
 
-- [x] **C01 — Preservar datos del usuario.** Migraciones explícitas 2→3→4; se ha retirado la migración destructiva y las pruebas confirman que los seguimientos/productos se conservan.
-- [~] **C02 — Persistir observaciones verificables (base completada).** La entidad, el DAO y el historial filtrado por verificación existen; falta conectar un proveedor real y registrar consultas auténticas.
-- [~] **C03 — Bloquear falsas ofertas (parcial).** El modelo requiere un registro verificado para presentar precios e historial como reales. Las alertas auténticas esperan a que se conecte la monitorización.
+### Fase 05 — Endurecer la lectura de precios y metadatos
+**Estado:** ⬜ Pendiente.  
+**Trabajo:** interpretar de forma consistente los campos del proveedor, separar precio mostrado y precio numérico, rechazar monedas extranjeras explícitas y validar URL, título e imagen.  
+**Cierre:** pruebas para formatos españoles, importes malformados, monedas no EUR, enlaces HTTP y respuestas incompletas.
 
-## Registro de progreso
+### Fase 06 — Validar el primer recorrido real de extremo a extremo
+**Estado:** 🟡 Código preparado; prueba real pendiente.  
+**Trabajo:** configurar SerpApi desde Ajustes y ejecutar en el móvil una búsqueda controlada; comprobar consulta, resultado, precio, origen, apertura del enlace y persistencia. No guardar claves en el repositorio ni en el APK.  
+**Cierre:** evidencia de una búsqueda real con producto identificable y revisión manual del precio final en el vendedor.
 
-| Hito | Estado |
-|---|---|
-| APK Android instalable y rama principal privada | Completado |
-| Catálogo y directorio de comercios ampliados | Completado como datos de descubrimiento; catálogo ahora sale de Room, pero no son precios en directo |
-| Ajustes y perfil local | Completado; sin autenticación online |
-| C01: migración no destructiva | Completado y probado |
-| C02: esquema y DAO de observaciones | Completado; falta el proveedor real |
-| Conectores manuales Google Shopping y Amazon.es mediante SerpApi | Código integrado en la rama del buscador; falta configurar la clave y probar precios reales en el móvil |
-| Monitorización y alertas | Pendiente |
+### Fase 07 — Hacer inequívoca la identificación del destino
+**Estado:** ⬜ Pendiente.  
+**Trabajo:** distinguir ficha directa de comercio, página de producto de Google Shopping y búsqueda genérica. No llamar “oferta en tienda” a un enlace que solo conduce a Google.  
+**Cierre:** etiqueta y acción del botón coinciden con el tipo de URL en todos los casos probados.
 
-## Criterio de finalización
+### Fase 08 — Afianzar las búsquedas de Google Shopping y Amazon.es
+**Estado:** 🟡 Funciones disponibles; precisión global pendiente de validar.  
+**Trabajo:** probar ambas fuentes por separado, mantener sus resultados y estados aislados, y explicar que Amazon no conoce cupones personalizados ni precios de una sesión Prime.  
+**Cierre:** búsquedas de control en ambas fuentes con resultados etiquetados correctamente y errores que no mezclen un proveedor con otro.
 
-Cada mejora debe compilar, pasar sus pruebas pertinentes y mantener explícita la diferencia entre datos de demostración y precios reales. Ninguna clave de proveedor se incluirá en el APK ni en el repositorio.
+### Fase 09 — Identificar correctamente cada producto y variante
+**Estado:** ⬜ Pendiente.  
+**Trabajo:** priorizar EAN/GTIN y MPN/SKU cuando existan; diferenciar color, memoria, tamaño, generación, vendedor y nuevo/reacondicionado.  
+**Cierre:** pruebas que eviten comparar variantes distintas y detecten duplicados de la misma oferta.
+
+### Fase 10 — Controlar caché, duplicados, límites y reintentos
+**Estado:** 🟡 Parcial.  
+**Trabajo:** consolidar caché, deduplicación, reintentos acotados, gestión de errores, cuotas reales del proveedor y cancelación de consultas. Evitar gastar créditos innecesariamente.  
+**Cierre:** pruebas con límite agotado, timeout, repetición de búsqueda, respuesta parcial y varias consultas seguidas sin duplicar precios.
+
+### Fase 11 — Formalizar proveedores autorizados
+**Estado:** ⬜ Pendiente.  
+**Trabajo:** documentar para cada fuente los términos, coste, límites y campos disponibles; integrar únicamente APIs o feeds con permiso adecuado. Un directorio de tiendas no cuenta como conector.  
+**Cierre:** ficha de proveedor con autorización, política de uso, gestión de errores y pruebas verificables antes de declararlo activo.
+
+### Fase 12 — Completar la persistencia y procedencia de observaciones
+**Estado:** 🟡 Esquema/DAO disponibles; alimentación real pendiente.  
+**Trabajo:** guardar cada observación auténtica con producto, tienda, URL, precio, moneda, fecha, fuente y estado de verificación. Mantener migraciones no destructivas.  
+**Cierre:** pruebas que reinicien la app, conserven seguimientos y distingan observaciones verificadas de no verificadas.
+
+### Fase 13 — Completar filtros y ordenaciones fiables
+**Estado:** 🟡 Parcial.  
+**Trabajo:** ordenar y filtrar por precio verificado, nombre, categoría, comercio y fecha de observación; no colocar precios desconocidos por delante de precios verificados en ordenaciones de precio.  
+**Cierre:** pruebas con productos verificados, sin precio y con observaciones de distinta antigüedad.
+
+### Fase 14 — Comparar el coste real de compra
+**Estado:** ⬜ Pendiente.  
+**Trabajo:** mostrar, cuando la fuente lo permita, envío, disponibilidad, vendedor real, IVA, condición y fecha/hora de consulta; no inventar los campos ausentes.  
+**Cierre:** una comparación distingue precio del artículo de coste total y marca con claridad los datos que el proveedor no facilita.
+
+### Fase 15 — Crear historial y mínimos históricos reales
+**Estado:** ⬜ Pendiente.  
+**Trabajo:** calcular historial, mínimo, máximo y descuentos exclusivamente desde observaciones verificables, con fechas y procedencia. Excluir simulaciones y datos de catálogo de demostración.  
+**Cierre:** pruebas con observaciones mezcladas —reales, no verificadas y simuladas— que demuestren que solo las válidas afectan a las métricas.
+
+### Fase 16 — Escalar el catálogo y la experiencia de búsqueda
+**Estado:** 🟡 Parcial; Room ya es la fuente de verdad.  
+**Trabajo:** añadir paginación, consultas eficientes, filtros que escalen y estados vacíos/carga/error coherentes en catálogos grandes.  
+**Cierre:** pruebas con catálogo ampliado, sin sobrescribir productos ni seguimientos existentes y sin bloquear la interfaz.
+
+### Fase 17 — Programar actualizaciones en segundo plano
+**Estado:** ⬜ Pendiente.  
+**Trabajo:** implementar tareas periódicas con restricciones de batería y conectividad, límites del proveedor, política de reintentos y cancelación. No convertir la búsqueda manual en monitorización implícita.  
+**Cierre:** pruebas de planificación, recuperación tras reinicio, falta de red, límites de consulta y ausencia de ejecuciones duplicadas.
+
+### Fase 18 — Activar alertas de precio auténticas
+**Estado:** ⬜ Pendiente.  
+**Trabajo:** evaluar objetivos del usuario contra observaciones reales recientes y enviar notificaciones solo cuando el dato cumpla las reglas; respetar permisos y preferencias.  
+**Cierre:** pruebas que generen una alerta al cumplirse el objetivo, eviten duplicados y nunca alerten por una simulación o precio no verificado.
+
+### Fase 19 — Crear una arquitectura backend segura para varios dispositivos
+**Estado:** ⬜ Pendiente.  
+**Trabajo:** sacar las credenciales del proveedor del cliente para una versión multiusuario; añadir proxy/backend, control de cuotas central, registros minimizados y protección contra abuso.  
+**Cierre:** revisión de seguridad y pruebas que confirmen que los secretos no aparecen en APK, código cliente, logs ni repositorio.
+
+### Fase 20 — Cuentas, sincronización y publicación de producción
+**Estado:** ⬜ Pendiente.  
+**Trabajo:** añadir autenticación real, sincronización y recuperación de datos; gestión de privacidad y borrado de cuenta/datos; observabilidad, copias y flujo reproducible de CI, firma y publicación.  
+**Cierre:** pruebas de registro, inicio/cierre de sesión, sincronización, recuperación, borrado, privacidad, instalación/actualización y compilación limpia de producción.
+
+## Fallos y limitaciones detectados
+
+1. **Precios reales incompletos:** el catálogo de demostración no equivale a un catálogo de ofertas en directo; SerpApi requiere configuración y prueba real.
+2. **Enlaces de producto poco fiables:** algunos resultados devuelven destinos de Google o enlaces no válidos; la solución de fallback está en revisión en el PR #15.
+3. **Coincidencias irrelevantes o escasas:** la precisión depende de normalizar la consulta, validar el resultado y probar distintos formatos devueltos por el proveedor.
+4. **Historial de observaciones sin alimentación completa:** existe la estructura persistente, pero debe llenarse con consultas auténticas y mantener la procedencia.
+5. **Seguimiento sin monitorización:** los objetivos locales no garantizan comprobaciones automáticas ni alertas reales.
+
+## Reglas de ejecución
+
+- Abordar las fases en orden, salvo que una dependencia técnica justifique explícitamente lo contrario.
+- No marcar una fase como completada solo porque se haya escrito código.
+- Cada cierre requiere compilación correcta, pruebas pertinentes y revisión del comportamiento real cuando dependa de un proveedor externo.
+- No publicar precios inventados ni presentar datos de demostración como verificados.
+- No subir claves, tokens, contraseñas ni credenciales al repositorio o al APK.
+- Actualizar el estado y la evidencia de cierre al terminar cada fase.
+
+## Correcciones prioritarias existentes
+
+- **C01 — Migraciones no destructivas:** completada y probada.
+- **C02 — Observaciones de precio con procedencia:** base de datos implementada; falta un flujo real completo y validado.
+- **C03 — Evitar falsas ofertas e historiales:** protección parcial; la monitorización y las alertas auténticas siguen pendientes.
+
+## Progreso
+
+El porcentaje global no debe estimarse por líneas de código ni por número de tareas escritas. Se actualizará según las fases cerradas con criterios verificables. La primera referencia práctica es completar una búsqueda real en el móvil, validar el destino y persistir la observación correctamente.

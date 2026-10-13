@@ -66,11 +66,12 @@ fun ProductDetailSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     val scrollState = rememberScrollState()
-    val currentSourceLabel = product.priceHistory
-        .maxByOrNull { it.timestamp }
+    val latestPricePoint = product.priceHistory.maxByOrNull { it.timestamp }
+    val currentSourceLabel = latestPricePoint
         ?.eventLabel
         ?.takeIf { it.isNotBlank() }
         ?: "Fuente no disponible"
+    val currentLinkType = latestPricePoint?.linkType ?: "directo"
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,

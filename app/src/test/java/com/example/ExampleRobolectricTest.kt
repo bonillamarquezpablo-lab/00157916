@@ -133,6 +133,42 @@ class ExampleRobolectricTest {
                 )
             )
 
+            // Simulate the exact legacy failure visible in the screenshots: a verified flag
+            // attached to a used marketplace listing for a laptop at an implausibly low price.
+            database.productDao().insert(
+                ProductEntity(
+                    id = "legacy_wallapop_macbook",
+                    title = "Apple MacBook Air 13 M3 16GB 256GB SSD",
+                    brand = "Apple",
+                    category = "COMPUTING",
+                    currentPrice = 67.50,
+                    athMinPrice = 67.50,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "Wallapop",
+                    athMaxPrice = 67.50,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "online_store_wallapop",
+                    storeUrl = "https://www.wallapop.com/item/macbook",
+                    ean = "",
+                    isPriceVerified = true
+                )
+            )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "legacy_wallapop_macbook",
+                    storeId = "online_store_wallapop",
+                    price = 67.50,
+                    observedAt = now,
+                    sourceUrl = "https://www.wallapop.com/item/macbook",
+                    sourceName = "SerpApi · Google Shopping España",
+                    isVerified = true,
+                    productTitle = "Apple MacBook Air 13 M3 16GB 256GB SSD",
+                    storeName = "Wallapop",
+                    sourceType = "Google Shopping"
+                )
+            )
+
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
             val repository = ProductRepository(
                 storeDao = database.storeDao(),
@@ -155,10 +191,15 @@ class ExampleRobolectricTest {
                     database.productDao().getProductCount() != 1 ||
                     database.storeDao().getStoreCount() != 0 ||
                     database.priceObservationDao().getObservationCount("demo_iphone_17_pro_max") != 0 ||
+                    database.priceObservationDao().getObservationCount("legacy_wallapop_macbook") != 0 ||
                     database.trackedProductDao().getAllTracked().first().isNotEmpty()
                 ) kotlinx.coroutines.delay(10)
             }
             assertEquals(0, database.priceObservationDao().getObservationCount("demo_iphone_17_pro_max"))
+            assertEquals("Legacy Wallapop prices must not survive because an old flag said verified", 0,
+                database.priceObservationDao().getObservationCount("legacy_wallap_macbook"))
+            assertEquals("The product supported only by the Wallapop listing must be removed", null,
+                database.productDao().getProductById("legacy_wallapop_macbook"))
             assertEquals(1, database.priceObservationDao().getObservationCount("online_product_redmi17"))
             assertTrue("Legacy mock tracking must be purged", database.trackedProductDao().getAllTracked().first().isEmpty())
             assertEquals("Room's static store rows must also be empty", 0, database.storeDao().getStoreCount())

@@ -32,7 +32,34 @@ interface PriceObservationDao {
     )
     suspend fun getLatestVerified(productId: String): PriceObservationEntity?
 
-    @Query("SELECT * FROM price_observations WHERE isVerified = 1 ORDER BY observedAt ASC")
+    @Query(
+        "SELECT * FROM price_observations WHERE isVerified = 1 " +
+            "AND lower(storeName) NOT LIKE '%wallapop%' " +
+            "AND lower(storeName) NOT LIKE '%cash converters%' " +
+            "AND lower(storeName) NOT LIKE '%vinted%' " +
+            "AND lower(storeName) NOT LIKE '%cex%' " +
+            "AND lower(storeName) NOT LIKE '%rentik%' " +
+            "AND lower(sourceUrl) NOT LIKE '%wallapop.%' " +
+            "AND lower(sourceUrl) NOT LIKE '%cashconverters.%' " +
+            "AND lower(sourceUrl) NOT LIKE '%vinted.%' " +
+            "AND lower(sourceUrl) NOT LIKE '%webuy.com%' " +
+            "AND lower(sourceUrl) NOT LIKE '%cex.%' " +
+            "AND lower(productTitle) NOT LIKE '%segunda mano%' " +
+            "AND lower(productTitle) NOT LIKE '%reacondicionad%' " +
+            "AND lower(productTitle) NOT LIKE '%refurbished%' " +
+            "AND lower(productTitle) NOT LIKE '%impreso con su logotipo%' " +
+            "AND lower(productTitle) NOT LIKE '%impreso con el logotipo%' " +
+            "AND lower(productTitle) NOT LIKE '%regalo promocional%' " +
+            "AND lower(productTitle) NOT LIKE '%articulo publicitario%' " +
+            "AND lower(productTitle) NOT LIKE '%merchandising personalizado%' " +
+            "AND NOT ((lower(productTitle) LIKE '%macbook%' OR lower(productTitle) LIKE '%laptop%' OR " +
+                "lower(productTitle) LIKE '%chromebook%' OR lower(productTitle) LIKE '%portatil%') AND price < 100) " +
+            "AND NOT ((lower(productTitle) LIKE '%iphone%' OR lower(productTitle) LIKE '%smartphone%' OR " +
+                "lower(productTitle) LIKE '%redmi%' OR lower(productTitle) LIKE '%pixel%' OR lower(productTitle) LIKE '%galaxy s%') AND price < 45) " +
+            "AND NOT ((lower(productTitle) LIKE '%playstation 5%' OR lower(productTitle) LIKE '%ps5%' OR " +
+                "lower(productTitle) LIKE '%xbox series%' OR lower(productTitle) LIKE '%nintendo switch%') AND price < 70) " +
+            "ORDER BY observedAt ASC"
+    )
     fun observeAllVerified(): Flow<List<PriceObservationEntity>>
 
     @Query("SELECT COUNT(*) FROM price_observations WHERE isVerified = 1")

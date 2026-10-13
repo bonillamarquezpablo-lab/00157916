@@ -110,8 +110,8 @@ class ProductRepository(
     }
 
     /**
-     * Store only provider-backed, EUR offers with HTTPS destination URLs. A product is marked
-     * verified only if at least one validated offer was stored for that product.
+     * Store only provider-backed, valid EUR offers. Direct merchant URLs and Google Shopping
+     * destinations are both allowed; link type is recorded separately for the UI.
      */
     suspend fun recordSerpApiQuotes(quotes: List<SerpApiQuote>): Int {
         // Resolve titles from persisted products only. The bundled demonstration catalogue is not

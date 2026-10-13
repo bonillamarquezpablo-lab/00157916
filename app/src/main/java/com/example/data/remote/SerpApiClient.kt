@@ -109,8 +109,9 @@ class SerpApiException(
  * Queries Google Shopping results through SerpApi for Spain.
  *
  * Each successful non-cached query consumes one search credit; the app reuses recent searches and
- * checks the actual account balance/rate window before catalog batches. Nothing runs
- * automatically in the background. Results represent a Google Shopping snapshot, not a direct
+ * checks the actual account balance/rate window before catalog batches. Price alerts can run
+ * a capped daily background check for up to three products with a target price. Results represent
+ * a Google Shopping snapshot, not a direct
  * retailer API guarantee; prices and availability must be rechecked at the seller before purchase.
  *
  * The user's API key is supplied at runtime and stored encrypted with Android Keystore. This is

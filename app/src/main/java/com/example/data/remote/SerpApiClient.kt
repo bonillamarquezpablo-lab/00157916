@@ -224,6 +224,7 @@ class SerpApiClient(
         return items.mapNotNull { item ->
             val title = item.optString("title").trim()
                 .takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
+            if (isClearlyNonNewListing(item, title)) return@mapNotNull null
             // SerpApi's Amazon engine can expose the active offer as price/extracted_price,
             // or as primary_price/extracted_primary_price depending on the product layout.
             val priceText = sequenceOf(
@@ -326,6 +327,10 @@ class SerpApiClient(
                     rejectedOther++
                     return@mapNotNull null
                 }
+            if (isClearlyNonNewListing(item, title)) {
+                rejectedOther++
+                return@mapNotNull null
+            }
             if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
                 rejectedAsIrrelevant++
                 return@mapNotNull null
@@ -351,23 +356,18 @@ class SerpApiClient(
                 return@mapNotNull null
             }
 
-            // Prefer a real retailer URL whenever SerpApi supplies one. Standard Google Shopping
-            // product_link values often point to Google itself, so retain those only as a clearly
-            // labelled fallback rather than pretending they're direct seller links.
+            // Only accept a direct HTTPS merchant destination. A Google Shopping/product/search
+            // URL is not a retailer product link and must not become a saved price observation.
             val candidateUrls = sequenceOf(
-                item.optString("link"),
                 item.optString("link_clean"),
+                item.optString("link"),
                 item.optString("product_link")
             ).filter(::isHttpsUrl).toList()
             val url = candidateUrls.firstOrNull { !isGoogleDomainUrl(it) }
-                ?: candidateUrls.firstOrNull { isGoogleDomainUrl(it) }
-                ?: "https://www.google.com/search".toHttpUrl().newBuilder()
-                    .addQueryParameter("tbm", "shop")
-                    .addQueryParameter("hl", "es")
-                    .addQueryParameter("gl", "es")
-                    .addQueryParameter("q", title)
-                    .build()
-                    .toString()
+            if (url == null) {
+                rejectedForLink++
+                return@mapNotNull null
+            }
             val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()
             if (host.isBlank()) {
@@ -511,6 +511,7 @@ class SerpApiClient(
 
         return results.mapNotNull { item ->
             val title = item.optString("title").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            if (isClearlyNonNewListing(item, title)) return@mapNotNull null
             if (!isPlausibleProductMatch(requested.queryTerm, title)) return@mapNotNull null
 
             val priceText = item.optString("price")
@@ -536,7 +537,6 @@ class SerpApiClient(
                 item.optString("product_link")
             ).filter(::isHttpsUrl).toList()
             val url = candidateUrls.firstOrNull { !isGoogleDomainUrl(it) }
-                ?: candidateUrls.firstOrNull()
                 ?: return@mapNotNull null
             val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()
@@ -651,6 +651,31 @@ class SerpApiClient(
         val host = URI(value).host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
         host.startsWith("google.") || host.endsWith(".google.com") || host.endsWith(".google.es")
     }.getOrDefault(false)
+
+    private fun isClearlyNonNewListing(item: JSONObject, title: String): Boolean {
+        val excludedTerms = Regex(
+            """(?i)\b(segunda[\s_-]+mano|second[\s_-]*hand|pre[\s_-]*owned|used|usad[oa]s?|seminuev[oa]s?|reacondicionad[oa]s?|refurbished|renewed|open[\s_-]*box|alquiler|renting|leasing)\b"""
+        )
+        if (excludedTerms.containsMatchIn(title)) return true
+
+        // SerpApi may expose the condition outside the title. Check the commonly returned fields
+        // without treating an explicitly "new" condition as used.
+        val conditionText = listOf(
+            "second_hand_condition",
+            "condition",
+            "item_condition",
+            "product_condition",
+            "condition_description"
+        ).mapNotNull { key ->
+            val value = item.opt(key)
+            when (value) {
+                null, JSONObject.NULL -> null
+                is JSONObject, is JSONArray -> value.toString()
+                else -> value.toString().takeUnless { it.isBlank() || it == "null" }
+            }
+        }.joinToString(" ")
+        return excludedTerms.containsMatchIn(conditionText)
+    }
 
     private fun isHttpsUrl(value: String): Boolean = runCatching {
         val uri = URI(value)

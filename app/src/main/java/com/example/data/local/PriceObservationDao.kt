@@ -45,8 +45,16 @@ interface PriceObservationDao {
             "AND lower(sourceUrl) NOT LIKE '%webuy.com%' " +
             "AND lower(sourceUrl) NOT LIKE '%cex.%' " +
             "AND lower(productTitle) NOT LIKE '%segunda mano%' " +
+            "AND lower(productTitle) NOT LIKE '%usado%' " +
             "AND lower(productTitle) NOT LIKE '%reacondicionad%' " +
             "AND lower(productTitle) NOT LIKE '%refurbished%' " +
+            "AND lower(productTitle) NOT LIKE '%renewed%' " +
+            "AND lower(productTitle) NOT LIKE '%alquiler%' " +
+            "AND lower(productTitle) NOT LIKE '%renting%' " +
+            "AND lower(productTitle) NOT LIKE '%cuota mensual%' " +
+            "AND lower(productTitle) NOT LIKE '%suscripcion%' " +
+            "AND lower(productTitle) NOT LIKE '%subscription%' " +
+            "AND lower(productTitle) NOT LIKE '%por mes%' " +
             "AND lower(productTitle) NOT LIKE '%impreso con su logotipo%' " +
             "AND lower(productTitle) NOT LIKE '%impreso con el logotipo%' " +
             "AND lower(productTitle) NOT LIKE '%regalo promocional%' " +

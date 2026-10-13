@@ -63,10 +63,8 @@ class ProductRepository(
             val missingStores = configuredStores.filter { it.id !in existingStoreIds }
             if (missingStores.isNotEmpty()) storeDao.insertAll(missingStores)
 
-            // Do not populate Mercado with the old 75-row demonstration catalogue. Clean old
-            // untracked seed rows on upgrade, but preserve rows with tracking or verified history.
-            val legacyDemoIds = SpanishMarketData.getInitialProducts().map { it.id }
-            productDao.deleteUntrackedUnobservedDemoProducts(legacyDemoIds)
+            // Product rows are no longer seeded from the demo catalogue. Existing Room rows
+            // remain untouched for safety; Mercado hides unverified, untracked sample products.
         }
     }
 
@@ -278,7 +276,6 @@ class ProductRepository(
             "Amazon.es", "Google Shopping" -> sourceType
             else -> return 0
         }
-        val catalog = _latestProducts.value
         val eligible = filterOnlineSearchResults(results, searchQuery)
         if (eligible.isEmpty()) return 0
 

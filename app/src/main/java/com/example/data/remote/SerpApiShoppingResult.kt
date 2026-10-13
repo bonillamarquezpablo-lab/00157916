@@ -70,8 +70,30 @@ data class OnlineProductGroup(
  * descriptions; capacity, color and copy differences do not create duplicate cards.
  */
 fun onlineProductIdentityKey(title: String): String {
+    // Convert both "4GB/256GB" and "4+256GB" to the same RAM/storage spelling first.
+    val standardizedTitle = Regex(
+        """(?i)\b(\d{1,2})\s*(?:gb)?\s*[+/]\s*(\d{2,4})\s*gb\b"""
+    ).replace(title.lowercase(Locale.ROOT)) { match ->
+        match.groupValues[1] + "gb " + match.groupValues[2] + "gb"
+    }
+
+    val looksLikeFootwear = Regex(
+        """\b(nike|adidas|puma|asics|new balance|reebok|converse|vans|air force|air max|jordan|dunk|samba|gazelle|pegasus|zapatillas|zapatilla|calzado|sneakers|shoes|botas)\b"""
+    ).containsMatchIn(standardizedTitle)
+    val looksLikeClothing = Regex(
+        """\b(camiseta|camisetas|sudadera|sudaderas|pantalon|pantalones|vaqueros|vestido|vestidos|chaqueta|chaquetas|abrigo|abrigos|ropa|camisa|camisas)\b"""
+    ).containsMatchIn(standardizedTitle)
+    val sizeNeutralTitle = when {
+        looksLikeFootwear -> Regex(
+            """(?i)(?:\s*[-/|]\s*|\s+)(?:talla\s*|size\s*)?(?:3[5-9]|4[0-9]|5[0-2])(?:[.,]\d)?\s*$"""
+        ).replace(standardizedTitle, " ")
+        looksLikeClothing -> Regex(
+            """(?i)(?:\s*[-/|]\s*|\s+)(?:talla\s*|size\s*)?(?:3[0-9]|[4-5][0-9]|60)(?:[.,]\d)?\s*$"""
+        ).replace(standardizedTitle, " ")
+        else -> standardizedTitle
+    }
     val rawNormalized = java.text.Normalizer.normalize(
-        title.lowercase(Locale.ROOT),
+        sizeNeutralTitle,
         java.text.Normalizer.Form.NFD
     ).replace(Regex("\\p{Mn}+"), "")
         .replace(Regex("""[^a-z0-9]+"""), " ")
@@ -84,7 +106,6 @@ fun onlineProductIdentityKey(title: String): String {
         .findAll(productNameNormalized)
         .map { it.value.replace(" ", "") }
         .distinct()
-        .sorted()
         .joinToString("+")
     val variants = setOf("pro", "max", "plus", "ultra", "fe", "lite", "mini", "fold", "flip", "classic", "edge")
         .filter { Regex("""\b""" + it + """\b""").containsMatchIn(productNameNormalized) }
@@ -105,7 +126,7 @@ fun onlineProductIdentityKey(title: String): String {
         .replace(Regex("""\b(?:4g|5g|wifi|wi-fi|bluetooth|nfc)\b"""), " ")
         .replace(
             Regex(
-                """\b(smartphone|telefono|telefonos|movil|moviles|mobile|phone|nuevo|new|original|oficial|libre|negro|negra|negros|black|azul|blue|blanco|blanca|white|verde|green|rojo|roja|red|gris|gray|grey|rosa|pink|morado|purple|plateado|silver)\b"""
+                """\b(smartphone|telefono|telefonos|movil|moviles|mobile|phone|nuevo|new|original|oficial|libre|zapatilla|zapatillas|calzado|shoes|sneakers|hombre|mujer|men|man|woman|women|unisex|negro|negra|negros|black|azul|blue|blanco|blanca|white|verde|green|rojo|roja|red|gris|gray|grey|rosa|pink|morado|purple|plateado|silver)\b"""
             ),
             " "
         )

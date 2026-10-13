@@ -190,7 +190,7 @@ class ProductRepository(
                 // A device-specific query should never show cases, filters, mop kits or other
                 // accessories as if they were the requested device. Brand-only accessory searches
                 // remain unrestricted, preserving UGREEN cable/hub deals.
-                !(deviceSearch && isAccessoryListing(result.title))
+                !(deviceSearch && !isAccessorySearchQuery(searchQuery) && isAccessoryListing(result.title))
         }
 
         // Retain the 25% accessory outlier guard for queries that ask about an entire device but
@@ -460,8 +460,13 @@ class ProductRepository(
         if (queryMarkers.isEmpty()) return false
         val resultMarkers = explicitModelMarkers(resultTitle)
         // Only enforce a model marker if the provider title provides any model evidence.
-        return resultMarkers.isNotEmpty() && queryMarkers.intersect(resultMarkers).isEmpty()
+        return resultMarkers.isEmpty() || queryMarkers.intersect(resultMarkers).isEmpty()
     }
+
+    private fun isAccessorySearchQuery(query: String): Boolean =
+        Regex(
+            """\b(funda|fundas|carcasa|carcasas|cristal templado|protector|cable|cables|cargador|adaptador|hub|mop kit|recambio|recambios|filtro|filtros|repuesto|repuestos|replacement|case|cover)\b"""
+        ).containsMatchIn(normalizedProductTitle(query))
 
     private fun isDeviceSearchQuery(query: String): Boolean {
         val normalized = normalizedProductTitle(query)

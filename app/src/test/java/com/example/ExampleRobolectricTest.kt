@@ -605,4 +605,77 @@ class ExampleRobolectricTest {
         assertTrue(result.isGoogleShoppingProductLink)
     }
 
+
+    @Test
+    fun `online search stores real offers once per store and day and rejects used listings and low outliers`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = scope
+            )
+            withTimeout<List<Product>>(10_000) {
+                repository.allProductsStream.first { rows -> rows.any { it.id == "sony_wh1000xm5" } && rows.size >= 60 }
+            }
+
+            val now = System.currentTimeMillis()
+            val results = listOf(
+                com.example.data.remote.SerpApiShoppingResult(
+                    title = "Sony WH-1000XM5 Wireless Headphones",
+                    price = 249.99,
+                    storeName = "PcComponentes",
+                    sourceUrl = "https://www.pccomponentes.com/sony-wh-1000xm5",
+                    observedAt = now
+                ),
+                com.example.data.remote.SerpApiShoppingResult(
+                    title = "Sony WH-1000XM5 Wireless Headphones",
+                    price = 239.99,
+                    storeName = "Amazon.es",
+                    sourceUrl = "https://www.amazon.es/dp/B0SONYTEST",
+                    observedAt = now
+                ),
+                com.example.data.remote.SerpApiShoppingResult(
+                    title = "Sony WH-1000XM5 Wireless Headphones",
+                    price = 12.00,
+                    storeName = "Fnac España",
+                    sourceUrl = "https://www.fnac.es/sony-wh-1000xm5",
+                    observedAt = now
+                ),
+                com.example.data.remote.SerpApiShoppingResult(
+                    title = "Sony WH-1000XM5 segunda mano",
+                    price = 119.99,
+                    storeName = "MediaMarkt España",
+                    sourceUrl = "https://www.mediamarkt.es/sony-wh-1000xm5",
+                    observedAt = now
+                )
+            )
+
+            val inserted = repository.recordOnlineSearchResults(results, "GOOGLE_SHOPPING")
+            assertEquals("Only the two plausible new offers should be stored", 2, inserted)
+            val stored = withTimeout<List<PriceObservationEntity>>(10_000) {
+                database.priceObservationDao().observeAllVerified().first { it.size >= 2 }
+            }
+            assertEquals(2, stored.size)
+            assertTrue(stored.all { it.productId == "sony_wh1000xm5" })
+            assertTrue(stored.all { it.productTitle == "Sony WH-1000XM5 Wireless Headphones" })
+            assertTrue(stored.all { it.currency == "EUR" && it.sourceType == "Google Shopping" })
+            assertTrue(stored.any { it.storeName == "PcComponentes" && it.sourceUrl.contains("pccomponentes.com") })
+            assertTrue(stored.any { it.storeName == "Amazon.es" && it.sourceUrl.contains("amazon.es") })
+
+            val duplicate = results.first().copy(price = 245.00, observedAt = now + 60_000L)
+            assertEquals(0, repository.recordOnlineSearchResults(listOf(duplicate), "GOOGLE_SHOPPING"))
+            assertEquals(2, database.priceObservationDao().getVerifiedObservationCount())
+        } finally {
+            database.close()
+        }
+    }
+
 }

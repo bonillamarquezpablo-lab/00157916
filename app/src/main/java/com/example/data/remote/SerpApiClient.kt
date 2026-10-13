@@ -263,7 +263,7 @@ class SerpApiClient(
     }
 
     private fun offerIdentity(result: SerpApiShoppingResult): String =
-        "\${result.storeName.trim().lowercase(Locale.ROOT)}|\${result.price}|\${result.sourceUrl.trim().lowercase(Locale.ROOT)}"
+        "${result.storeName.trim().lowercase(Locale.ROOT)}|${result.price}|${result.sourceUrl.trim().lowercase(Locale.ROOT)}"
 
     /**
      * Search Amazon.es itself, rather than Google Shopping. This still returns a public search

@@ -146,7 +146,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `SerpApi parser accepts matching euro HTTPS offers and rejects unsafe results`() {
+    fun `SerpApi quotes accept direct and Google links while rejecting invalid price currency and model`() {
         val requested = SerpApiRequestProduct(
             id = "demo_galaxy_s26_ultra",
             title = "Samsung Galaxy S26 Ultra 512 GB",
@@ -199,13 +199,16 @@ class ExampleRobolectricTest {
 
         val quotes = SerpApiClient().parseQuotes(payload, requested, observedAt = 123L)
 
-        assertEquals("Only matching EUR offers with direct HTTPS retailer links should survive", 1, quotes.size)
-        assertEquals(1249.50, quotes.single().price, 0.001)
-        assertEquals("EUR", quotes.single().currency)
-        assertEquals(123L, quotes.single().observedAt)
+        assertEquals("A matching Google Shopping URL and an HTTP merchant URL are not rejected by link type", 3, quotes.size)
+        assertEquals(899.99, quotes[0].price, 0.001)
+        assertEquals("directo", com.example.data.remote.linkTypeForUrl(quotes[0].sourceUrl))
+        assertEquals(1249.50, quotes[1].price, 0.001)
+        assertEquals("Amazon España", quotes[1].storeName)
+        assertEquals(1299.99, quotes[2].price, 0.001)
+        assertTrue(quotes[2].sourceUrl.contains("google.com/shopping/product"))
+        assertEquals("Google Shopping", com.example.data.remote.linkTypeForUrl(quotes[2].sourceUrl))
+        assertTrue(quotes.all { it.currency == "EUR" && it.observedAt == 123L })
         assertTrue(quotes.all { it.productId == "demo_galaxy_s26_ultra" })
-        assertTrue(quotes.single().sourceUrl.startsWith("https://www.amazon.es/"))
-        assertEquals("Amazon España", quotes.single().storeName)
     }
 
     @Test
@@ -541,13 +544,20 @@ class ExampleRobolectricTest {
 
         val results = client.parseShoppingResults(payload, observedAt = 123L)
 
-        assertEquals("Only direct HTTPS retailer URLs are eligible", 1, results.size)
-        assertEquals("Amazon.es", results.single().storeName)
-        assertEquals(89.99, results.single().price, 0.001)
-        assertFalse(results.single().isGoogleShoppingProductLink)
-        assertTrue(results.single().isAmazonOffer)
-        assertEquals(123L, results.single().observedAt)
-        assertEquals("https://images.example.test/sony.jpg", results.single().thumbnailUrl)
+        assertEquals("Eligible offers survive whether the URL is direct, HTTP, or Google Shopping", 3, results.size)
+        assertEquals("Unsafe HTTP", results[0].storeName)
+        assertEquals(49.99, results[0].price, 0.001)
+        assertEquals("directo", results[0].linkType)
+        assertEquals("PcComponentes", results[1].storeName)
+        assertEquals(79.99, results[1].price, 0.001)
+        assertTrue(results[1].isGoogleShoppingProductLink)
+        assertEquals("Google Shopping", results[1].linkType)
+        assertEquals("Amazon.es", results[2].storeName)
+        assertEquals(89.99, results[2].price, 0.001)
+        assertFalse(results[2].isGoogleShoppingProductLink)
+        assertTrue(results[2].isAmazonOffer)
+        assertEquals(123L, results[2].observedAt)
+        assertEquals("https://images.example.test/sony.jpg", results[2].thumbnailUrl)
     }
 
     @Test
@@ -574,6 +584,13 @@ class ExampleRobolectricTest {
                 },
                 {
                   "title": "Sony WH-1000XM5 headphones",
+                  "price": "239,99 €",
+                  "extracted_price": 239.99,
+                  "product_link": "https://www.google.com/shopping/product/SONY123",
+                  "source": "Fnac"
+                },
+                {
+                  "title": "Sony WH-1000XM5 headphones",
                   "price": "$239.00",
                   "extracted_price": 239.00,
                   "link": "https://shop.example.test/sony",
@@ -597,16 +614,25 @@ class ExampleRobolectricTest {
             observedAt = 123L
         )
 
-        assertEquals(4, report.rawResultCount)
-        assertEquals("Only the direct Amazon listing survives", 1, report.results.size)
+        assertEquals(5, report.rawResultCount)
+        assertEquals("Matching Google Shopping and HTTP offers remain available", 3, report.results.size)
         val amazonResult = report.results.single { it.storeName == "Amazon.es" }
         assertEquals("Sony WH1000XM5 Wireless Noise Canceling Headphones", amazonResult.title)
         assertEquals(249.99, amazonResult.price, 0.001)
-        assertFalse(amazonResult.isGoogleShoppingProductLink)
+        assertEquals("directo", amazonResult.linkType)
+
+        val googleResult = report.results.single { it.storeName == "Fnac" }
+        assertEquals(239.99, googleResult.price, 0.001)
+        assertTrue(googleResult.isGoogleShoppingProductLink)
+        assertEquals("Google Shopping", googleResult.linkType)
+
+        val httpResult = report.results.single { it.storeName == "Unsafe HTTP" }
+        assertEquals(229.99, httpResult.price, 0.001)
+        assertEquals("directo", httpResult.linkType)
 
         assertEquals(1, report.rejectedAsIrrelevant)
         assertEquals(1, report.rejectedForPriceOrCurrency)
-        assertEquals(1, report.rejectedForLink)
+        assertEquals(0, report.rejectedForLink)
         assertTrue(report.emptyResultMessage("Sony WH-1000XM5").isNotBlank())
     }
 
@@ -684,6 +710,7 @@ class ExampleRobolectricTest {
             observedAt = 123L
         )
         assertTrue(result.isGoogleShoppingProductLink)
+        assertEquals("Google Shopping", result.linkType)
     }
 
 

@@ -54,7 +54,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import com.example.data.model.Product
-import com.example.ui.components.HeroPriceBadge
 import com.example.data.model.Store
 
 @Composable

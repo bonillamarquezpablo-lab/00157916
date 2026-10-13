@@ -439,6 +439,20 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(onlineSearchAmazonOnly = onlyAmazon)
     }
 
+    /** Open the Room-backed detail sheet for a grouped online product card. */
+    fun onOnlineProductSelected(identityKey: String) {
+        if (identityKey.isBlank()) return
+        viewModelScope.launch {
+            runCatching {
+                withTimeout(10_000L) { repository.awaitProductForOnlineIdentity(identityKey) }
+            }.onSuccess { product ->
+                _uiState.value = _uiState.value.copy(selectedProduct = product)
+            }.onFailure {
+                showSnackbar("No se ha podido abrir la ficha guardada. Repite la búsqueda para sincronizar el producto.")
+            }
+        }
+    }
+
     fun searchOnlineShopping() = startOnlineSearch(OnlineSearchProvider.GOOGLE_SHOPPING)
 
     fun searchAmazonShopping() = startOnlineSearch(OnlineSearchProvider.AMAZON)

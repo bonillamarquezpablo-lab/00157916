@@ -16,6 +16,19 @@ import org.junit.Test
 
 class ExampleUnitTest {
     @Test
+    fun additionalShoppingQueriesExpandLogitechModelSearchWithoutChangingProductIdentity() {
+        val method = SerpApiClient::class.java.getDeclaredMethod("additionalShoppingQueries", String::class.java)
+        method.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val queries = method.invoke(SerpApiClient(), "Logitech G203") as List<String>
+
+        assertTrue("Should provide at least four useful alternate phrasings", queries.size >= 4)
+        assertTrue(queries.any { it.contains("Lightsync", ignoreCase = true) })
+        assertTrue(queries.any { it.contains("raton gaming", ignoreCase = true) })
+        assertTrue(queries.all { it.contains("G203", ignoreCase = true) })
+    }
+
+    @Test
     fun preciseModelSearchRejectsBundlesButKeepsStandaloneItemsAndExplicitPackQueries() {
         val keyboardAndMousePack =
             "Teclados Logitech Pack G213 Prodigy Teclado Gaming + Logitech G203 Lightsync Ratón Gaming"

@@ -17,6 +17,7 @@ import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.onlineProductIdentityKey
+import com.example.data.remote.linkTypeForUrl
 import com.example.data.model.Store
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -125,7 +126,6 @@ class ProductRepository(
                 quote.price.isFinite() && quote.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
                 quote.currency == "EUR" &&
                 quote.observedAt >= HISTORY_START_TIMESTAMP &&
-                isDirectMerchantHttpsUrl(quote.sourceUrl) &&
                 isEligibleHistoryTitle(title) &&
                 isEligibleSeller(quote.storeName) &&
                 isPlausibleHistoryPrice(title, quote.price)
@@ -148,7 +148,8 @@ class ProductRepository(
                 verificationNote = "Precio observado por SerpApi; confirmar precio final y disponibilidad en la tienda.",
                 productTitle = productTitle,
                 storeName = quote.storeName,
-                sourceType = "Google Shopping"
+                sourceType = "Google Shopping",
+                linkType = linkTypeForUrl(quote.sourceUrl)
             )
             if (saveDailyObservation(observation)) inserted++
             productDao.updatePriceVerification(quote.productId, true)
@@ -174,7 +175,6 @@ class ProductRepository(
                 result.price.isFinite() &&
                 result.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
                 result.observedAt >= HISTORY_START_TIMESTAMP &&
-                isDirectMerchantHttpsUrl(result.sourceUrl) &&
                 isEligibleHistoryTitle(result.title) &&
                 isEligibleSeller(result.storeName) &&
                 isPlausibleHistoryPrice(result.title, result.price) &&
@@ -362,7 +362,8 @@ class ProductRepository(
                     verificationNote = "Resultado online válido en euros; precio y disponibilidad pendientes de confirmación en la tienda.",
                     productTitle = result.title,
                     storeName = result.storeName,
-                    sourceType = normalizedSource
+                    sourceType = normalizedSource,
+                    linkType = result.linkType
                 )
                 if (saveDailyObservation(observation)) inserted++
             }
@@ -783,12 +784,11 @@ class ProductRepository(
         stores: List<Store>,
         verifiedObservations: List<PriceObservationEntity>
     ): Product {
-        // Ignore legacy/imported timestamps before the policy start. Only real observations from
-        // 13 October 2026 onward, in EUR and on a direct retailer URL, can support visible history.
+        // Ignore legacy/imported timestamps before the policy start. Observations from either a
+        // direct retailer URL or a Google Shopping page can support visible history.
         val sortedHistory = verifiedObservations.filter { observation ->
             observation.observedAt >= HISTORY_START_TIMESTAMP &&
                 observation.currency == "EUR" &&
-                isDirectMerchantHttpsUrl(observation.sourceUrl) &&
                 isEligibleHistoryTitle(observation.productTitle) &&
                 isEligibleSeller(observation.storeName) &&
                 isPlausibleHistoryPrice(observation.productTitle, observation.price)
@@ -838,7 +838,8 @@ class ProductRepository(
                     price = observation.price,
                     inStock = false,
                     shippingInfo = "Consultar envío en la tienda",
-                    url = observation.sourceUrl
+                    url = observation.sourceUrl,
+                    linkType = observation.linkType
                 )
             }.sortedBy { it.price }
         } else {
@@ -852,7 +853,8 @@ class ProductRepository(
                 dateLabel = dateFormatter.format(Date(observation.observedAt)),
                 price = observation.price,
                 storeName = observation.storeName.ifBlank { observationStore(observation, stores).name },
-                eventLabel = observation.sourceType.ifBlank { observation.sourceName }
+                eventLabel = observation.sourceType.ifBlank { observation.sourceName },
+                linkType = observation.linkType
             )
         } else {
             emptyList()
@@ -914,16 +916,6 @@ class ProductRepository(
             physicalStores = false,
             hasLivePriceIntegration = false
         )
-    }
-
-    private fun isDirectMerchantHttpsUrl(value: String): Boolean {
-        val uri = parseHttpUri(value) ?: return false
-        if (!uri.scheme.equals("https", ignoreCase = true)) return false
-        val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
-        return host.isNotBlank() &&
-            !host.startsWith("google.") &&
-            !host.endsWith(".google.com") &&
-            !host.endsWith(".google.es")
     }
 
     private fun parseHttpUri(value: String): URI? {

@@ -2,7 +2,6 @@ package com.example.data.repository
 
 import com.example.data.local.ProductEntity
 import com.example.data.local.StoreEntity
-import com.example.data.model.PricePoint
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.Store
@@ -266,14 +265,7 @@ object SpanishMarketData {
             ean = "4548736132573",
             imageResName = "prod_sony_headphones",
             imageUrl = "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=600",
-            priceHistory = generateHistory(
-                basePrice = 345.0,
-                minPrice = 279.0,
-                maxPrice = 419.0,
-                currentPrice = 279.0,
-                eventDate = "Black Friday",
-                eventMin = 289.0
-            ),
+            priceHistory = emptyList(),
             offers = listOf(
                 StoreOffer(Store.PC_COMPONENTES, 279.00, true, "Envío 24h gratis"),
                 StoreOffer(Store.AMAZON_ES, 285.00, true, "Envío Prime gratis"),
@@ -303,14 +295,7 @@ object SpanishMarketData {
             ean = "0711719577232",
             imageResName = "prod_ps5_slim",
             imageUrl = "https://images.unsplash.com/photo-1606813907291-d86efa9b94db?w=600",
-            priceHistory = generateHistory(
-                basePrice = 440.0,
-                minPrice = 379.0,
-                maxPrice = 449.99,
-                currentPrice = 379.0,
-                eventDate = "Días Gaming",
-                eventMin = 399.0
-            ),
+            priceHistory = emptyList(),
             offers = listOf(
                 StoreOffer(Store.CARREFOUR, 379.00, true, "Envío gratis península"),
                 StoreOffer(Store.GAME, 384.99, true, "Puntos GAME y garantía"),
@@ -340,14 +325,7 @@ object SpanishMarketData {
             ean = "0195949738124",
             imageResName = "prod_iphone_16",
             imageUrl = "https://images.unsplash.com/photo-1592750475338-74b7b21085ab?w=600",
-            priceHistory = generateHistory(
-                basePrice = 1180.0,
-                minPrice = 1099.0,
-                maxPrice = 1219.0,
-                currentPrice = 1129.0,
-                eventDate = "Black Friday",
-                eventMin = 1099.0
-            ),
+            priceHistory = emptyList(),
             offers = listOf(
                 StoreOffer(Store.AMAZON_ES, 1129.00, true, "Envío Prime gratis"),
                 StoreOffer(Store.MEDIA_MARKT, 1129.00, true, "Envío gratis"),
@@ -377,14 +355,7 @@ object SpanishMarketData {
             ean = "8806091873214",
             imageResName = "prod_smart_tv",
             imageUrl = "https://images.unsplash.com/photo-1593359677879-a4bb92f829d1?w=600",
-            priceHistory = generateHistory(
-                basePrice = 1290.0,
-                minPrice = 999.0,
-                maxPrice = 1699.0,
-                currentPrice = 1049.0,
-                eventDate = "Día sin IVA",
-                eventMin = 999.0
-            ),
+            priceHistory = emptyList(),
             offers = listOf(
                 StoreOffer(Store.MEDIA_MARKT, 1049.00, true, "Instalación disponible"),
                 StoreOffer(Store.EL_CORTE_INGLES, 1099.00, true, "Financiación 0%"),
@@ -413,14 +384,7 @@ object SpanishMarketData {
             ean = "8004399324687",
             imageResName = "prod_coffee_machine",
             imageUrl = "https://images.unsplash.com/photo-1517668808822-9ebb02f2a0e6?w=600",
-            priceHistory = generateHistory(
-                basePrice = 325.0,
-                minPrice = 269.0,
-                maxPrice = 399.0,
-                currentPrice = 269.0,
-                eventDate = "Semana del Café",
-                eventMin = 279.0
-            ),
+            priceHistory = emptyList(),
             offers = listOf(
                 StoreOffer(Store.AMAZON_ES, 269.00, true, "Envío Prime gratis"),
                 StoreOffer(Store.MEDIA_MARKT, 279.00, true, "Recogida gratis"),
@@ -448,14 +412,7 @@ object SpanishMarketData {
             storeUrl = "https://www.amazon.es/dp/B0CKZJXXXX",
             ean = "0810043378912",
             imageUrl = "https://images.unsplash.com/photo-1586208958839-06c17cacdf08?w=600",
-            priceHistory = generateHistory(
-                basePrice = 145.0,
-                minPrice = 109.99,
-                maxPrice = 169.99,
-                currentPrice = 109.99,
-                eventDate = "Oferta Flash",
-                eventMin = 119.0
-            ),
+            priceHistory = emptyList(),
             offers = listOf(
                 StoreOffer(Store.AMAZON_ES, 109.99, true, "Envío Prime gratis"),
                 StoreOffer(Store.MEDIA_MARKT, 129.00, true, "Envío 2.99€"),
@@ -484,12 +441,7 @@ object SpanishMarketData {
             wasRecentlyInflated = true,
             fakePriorPrice = 649.00,
             imageUrl = "https://images.unsplash.com/photo-1556911220-e15b29be8c8f?w=600",
-            priceHistory = generateInflatedHistory(
-                baseline = 369.0,
-                inflated = 649.0,
-                current = 429.0,
-                ath = 329.0
-            ),
+            priceHistory = emptyList(),
             offers = listOf(
                 StoreOffer(Store.MEDIA_MARKT, 429.00, true, "Rebajas 'supuestas'"),
                 StoreOffer(Store.AMAZON_ES, 399.00, true, "Envío Prime"),
@@ -516,14 +468,7 @@ object SpanishMarketData {
             storeUrl = "https://www.decathlon.es/reloj-garmin-fenix-7-pro",
             ean = "0753759317585",
             imageUrl = "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600",
-            priceHistory = generateHistory(
-                basePrice = 679.0,
-                minPrice = 549.0,
-                maxPrice = 799.99,
-                currentPrice = 549.0,
-                eventDate = "Días del Deporte",
-                eventMin = 599.0
-            ),
+            priceHistory = emptyList(),
             offers = listOf(
                 StoreOffer(Store.DECATHLON, 549.00, true, "Puntos Decathlon x2"),
                 StoreOffer(Store.SPRINTER, 559.00, true, "Garantía deportiva"),
@@ -551,14 +496,7 @@ object SpanishMarketData {
             storeUrl = "https://www.amazon.es/dp/B0CX23M3XX",
             ean = "0195949129482",
             imageUrl = "https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=600",
-            priceHistory = generateHistory(
-                basePrice = 1190.0,
-                minPrice = 1079.0,
-                maxPrice = 1299.0,
-                currentPrice = 1079.0,
-                eventDate = "Ofertas Primavera",
-                eventMin = 1089.0
-            ),
+            priceHistory = emptyList(),
             offers = listOf(
                 StoreOffer(Store.AMAZON_ES, 1079.00, true, "Envío Prime gratis"),
                 StoreOffer(Store.MEDIA_MARKT, 1089.00, true, "Recogida express"),
@@ -586,14 +524,7 @@ object SpanishMarketData {
             storeUrl = "https://www.pccomponentes.com/asus-dual-geforce-rtx-4070-super-12gb",
             ean = "4711387498124",
             imageUrl = "https://images.unsplash.com/photo-1587202372775-e229f172b9d7?w=600",
-            priceHistory = generateHistory(
-                basePrice = 635.0,
-                minPrice = 579.0,
-                maxPrice = 689.0,
-                currentPrice = 589.90,
-                eventDate = "Rebajas Enero",
-                eventMin = 579.0
-            ),
+            priceHistory = emptyList(),
             offers = listOf(
                 StoreOffer(Store.PC_COMPONENTES, 589.90, true, "Envío 24h gratis"),
                 StoreOffer(Store.AMAZON_ES, 599.00, true, "Envío gratis"),
@@ -620,14 +551,7 @@ object SpanishMarketData {
             storeUrl = "https://www.amazon.es/dp/B0C8VXXXXX",
             ean = "6970995786312",
             imageUrl = "https://images.unsplash.com/photo-1518770660439-4636190af475?w=600",
-            priceHistory = generateHistory(
-                basePrice = 699.0,
-                minPrice = 599.0,
-                maxPrice = 849.0,
-                currentPrice = 599.0,
-                eventDate = "Prime Day",
-                eventMin = 619.0
-            ),
+            priceHistory = emptyList(),
             offers = listOf(
                 StoreOffer(Store.AMAZON_ES, 599.00, true, "Envío Prime"),
                 StoreOffer(Store.MEDIA_MARKT, 649.00, true, "Envío 24h"),
@@ -655,14 +579,7 @@ object SpanishMarketData {
             storeUrl = "https://www.carrefour.es/nintendo-switch-oled-blanca",
             ean = "0045496453435",
             imageUrl = "https://images.unsplash.com/photo-1578303512597-8be9abb9471f?w=600",
-            priceHistory = generateHistory(
-                basePrice = 329.0,
-                minPrice = 289.0,
-                maxPrice = 349.99,
-                currentPrice = 309.0,
-                eventDate = "Black Friday",
-                eventMin = 289.0
-            ),
+            priceHistory = emptyList(),
             offers = listOf(
                 StoreOffer(Store.CARREFOUR, 309.00, true, "Envío gratuito"),
                 StoreOffer(Store.GAME, 312.99, true, "Con puntos de socio"),
@@ -762,48 +679,4 @@ object SpanishMarketData {
         )
     }
 
-    private fun generateHistory(
-        basePrice: Double,
-        minPrice: Double,
-        maxPrice: Double,
-        currentPrice: Double,
-        eventDate: String,
-        eventMin: Double
-    ): List<PricePoint> {
-        val now = System.currentTimeMillis()
-        val dayMillis = 86400000L
-
-        return listOf(
-            PricePoint(now - (300 * dayMillis), "Hace 10 meses", maxPrice, "Amazon España", "Lanzamiento oficial"),
-            PricePoint(now - (240 * dayMillis), "Hace 8 meses", basePrice + 30.0, "El Corte Inglés", null),
-            PricePoint(now - (180 * dayMillis), "Hace 6 meses", basePrice + 15.0, "MediaMarkt España", null),
-            PricePoint(now - (130 * dayMillis), "Hace 4 meses", eventMin, "PcComponentes", eventDate),
-            PricePoint(now - (90 * dayMillis), "Hace 3 meses", basePrice, "Amazon España", null),
-            PricePoint(now - (60 * dayMillis), "Hace 2 meses", basePrice - 10.0, "Carrefour España", null),
-            PricePoint(now - (30 * dayMillis), "Hace 1 mes", basePrice + 5.0, "PcComponentes", null),
-            PricePoint(now - (14 * dayMillis), "Hace 2 sem.", basePrice - 15.0, "MediaMarkt España", null),
-            PricePoint(now - (5 * dayMillis), "Hace 5 días", minPrice, "Amazon España", "Mínimo Registrado"),
-            PricePoint(now, "Hoy", currentPrice, "Mercado Español", if (currentPrice <= minPrice) "MÍNIMO HISTÓRICO" else null)
-        )
-    }
-
-    private fun generateInflatedHistory(
-        baseline: Double,
-        inflated: Double,
-        current: Double,
-        ath: Double
-    ): List<PricePoint> {
-        val now = System.currentTimeMillis()
-        val dayMillis = 86400000L
-
-        return listOf(
-            PricePoint(now - (120 * dayMillis), "Hace 4 meses", baseline, "MediaMarkt España", null),
-            PricePoint(now - (90 * dayMillis), "Hace 3 meses", ath, "PcComponentes", "Mínimo real"),
-            PricePoint(now - (60 * dayMillis), "Hace 2 meses", baseline + 10.0, "Amazon España", null),
-            PricePoint(now - (25 * dayMillis), "Hace 25 días", baseline, "MediaMarkt España", "Precio habitual"),
-            PricePoint(now - (14 * dayMillis), "Hace 14 días", inflated, "MediaMarkt España", "¡Subida artificial pre-campaña!"),
-            PricePoint(now - (7 * dayMillis), "Hace 7 días", inflated, "MediaMarkt España", "Inflado mantenido"),
-            PricePoint(now, "Hoy", current, "MediaMarkt España", "Falsa rebaja anunciada (Ojo)")
-        )
-    }
 }

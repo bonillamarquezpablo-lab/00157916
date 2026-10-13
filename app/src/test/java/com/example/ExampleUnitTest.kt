@@ -119,6 +119,10 @@ class ExampleUnitTest {
             )
         )
         assertTrue("History requires coverage across 90 days plus recent samples", enoughHistory.hasSufficientHistory)
+        assertTrue("A price observed just now should be fresh", oneSnapshot.isPriceFresh)
+        val stale = oneSnapshot.copy(priceObservedAt = now - 2L * day)
+        assertFalse("A two-day-old observation must not be described as fresh", stale.isPriceFresh)
+        assertTrue("Stale snapshot should display an explicit age", stale.priceFreshnessLabel.contains("2 días"))
     }
 
     @Test

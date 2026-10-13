@@ -73,6 +73,47 @@ class SerpApiAmazonSearchTest {
     }
 
     @Test
+    fun amazonSearchUsesQueryAndRejectsPromotionalMerchandising() {
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "organic_results": [
+                {
+                  "title": "Xiaomi Power Bank 20000mAh 35W",
+                  "price": "39,99 €",
+                  "extracted_price": 39.99,
+                  "link": "https://www.amazon.es/dp/XIAOMI-POWERBANK"
+                },
+                {
+                  "title": "3x Batería portátil de 20.000 mAh y 35W - Pueyo impreso con su logotipo",
+                  "price": "297,91 €",
+                  "extracted_price": 297.91,
+                  "link": "https://www.amazon.es/dp/PROMO-BATTERY"
+                },
+                {
+                  "title": "Apple MacBook Air 13 M3 16GB 256GB SSD",
+                  "price": "67,50 €",
+                  "extracted_price": 67.50,
+                  "link": "https://www.amazon.es/dp/UNRELATED-MACBOOK"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val results = SerpApiClient().parseAmazonResults(
+            payload,
+            query = "Xiaomi Power Bank 20000mAh 35W",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals("Only the matching consumer product should be retained", 1, results.size)
+        assertEquals("Xiaomi Power Bank 20000mAh 35W", results.single().title)
+        assertEquals(39.99, results.single().price, 0.001)
+    }
+
+    @Test
     fun acceptsStructuredShoppingPricesWithoutEuroLabelAndRejectsForeignCurrency() {
         val payload = JSONObject(
             """

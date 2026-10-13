@@ -77,20 +77,26 @@ fun onlineProductIdentityKey(title: String): String {
         match.groupValues[1] + "gb " + match.groupValues[2] + "gb"
     }
 
+    // Remove target-gender and generic apparel words before trimming a trailing size,
+    // so titles such as "Nike Air Force 1 Gris - 40.5 Hombre" normalize correctly.
+    val titleForSize = standardizedTitle.replace(
+        Regex("""(?i)\b(zapatillas|zapatilla|sneakers|shoes|calzado|hombre|mujer|men|man|women|woman|unisex)\b"""),
+        " "
+    )
     val looksLikeFootwear = Regex(
         """\b(nike|adidas|puma|asics|new balance|reebok|converse|vans|air force|air max|jordan|dunk|samba|gazelle|pegasus|zapatillas|zapatilla|calzado|sneakers|shoes|botas)\b"""
-    ).containsMatchIn(standardizedTitle)
+    ).containsMatchIn(titleForSize)
     val looksLikeClothing = Regex(
         """\b(camiseta|camisetas|sudadera|sudaderas|pantalon|pantalones|vaqueros|vestido|vestidos|chaqueta|chaquetas|abrigo|abrigos|ropa|camisa|camisas)\b"""
-    ).containsMatchIn(standardizedTitle)
+    ).containsMatchIn(titleForSize)
     val sizeNeutralTitle = when {
         looksLikeFootwear -> Regex(
             """(?i)(?:\s*[-/|]\s*|\s+)(?:talla\s*|size\s*)?(?:3[5-9]|4[0-9]|5[0-2])(?:[.,]\d)?\s*$"""
-        ).replace(standardizedTitle, " ")
+        ).replace(titleForSize, " ")
         looksLikeClothing -> Regex(
             """(?i)(?:\s*[-/|]\s*|\s+)(?:talla\s*|size\s*)?(?:3[0-9]|[4-5][0-9]|60)(?:[.,]\d)?\s*$"""
-        ).replace(standardizedTitle, " ")
-        else -> standardizedTitle
+        ).replace(titleForSize, " ")
+        else -> titleForSize
     }
     val rawNormalized = java.text.Normalizer.normalize(
         sizeNeutralTitle,

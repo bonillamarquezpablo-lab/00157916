@@ -12,6 +12,7 @@ import com.example.data.repository.SpanishMarketData
 import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiQuote
 import com.example.data.remote.SerpApiRequestProduct
+import com.example.data.remote.groupOnlineShoppingResults
 import org.json.JSONObject
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -39,7 +40,7 @@ import org.robolectric.annotation.Config
 class ExampleRobolectricTest {
 
     @Test
-    fun `catalogue streams from Room and seeds missing products without replacing old rows`() = runBlocking<Unit> {
+    fun `catalogue streams only persisted products without seeding demo entries`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,
@@ -75,15 +76,15 @@ class ExampleRobolectricTest {
             )
 
             val products: List<Product> = withTimeout<List<Product>>(10_000) {
-                repository.allProductsStream.first { productRows -> productRows.size >= 60 }
+                repository.allProductsStream.first { productRows -> productRows.any { it.id == "sony_wh1000xm5" } }
             }
-            assertTrue("Catalog should load from Room and include 60+ entries", products.size >= 60)
+            assertEquals("A new database must not be populated with 75 demo products", 1, products.size)
             assertEquals("Product IDs must stay unique", products.size, products.map { it.id }.toSet().size)
             val preserved = products.first { it.id == "sony_wh1000xm5" }
-            assertEquals("Existing row should not be overwritten by seed data", "Producto Sony preservado por el usuario", preserved.title)
-            assertFalse("Existing sample should stay unverified", preserved.isPriceVerified)
-            assertTrue("Unverified product should not display sample history", preserved.priceHistory.isEmpty())
-            assertTrue("New catalogue IDs should be seeded", products.any { it.id == "demo_galaxy_s26_ultra" })
+            assertEquals("Existing user row must not be overwritten", "Producto Sony preservado por el usuario", preserved.title)
+            assertFalse("Unobserved product should stay unverified", preserved.isPriceVerified)
+            assertTrue("Unverified product should not display fake history", preserved.priceHistory.isEmpty())
+            assertFalse("New catalogue should not seed static demo rows", products.any { it.id == "demo_galaxy_s26_ultra" })
 
             database.priceObservationDao().insert(
                 PriceObservationEntity(
@@ -622,10 +623,6 @@ class ExampleRobolectricTest {
                 priceObservationDao = database.priceObservationDao(),
                 externalScope = scope
             )
-            withTimeout<List<Product>>(10_000) {
-                repository.allProductsStream.first { rows -> rows.any { it.id == "sony_wh1000xm5" } && rows.size >= 60 }
-            }
-
             val now = System.currentTimeMillis()
             val results = listOf(
                 com.example.data.remote.SerpApiShoppingResult(
@@ -748,7 +745,7 @@ class ExampleRobolectricTest {
                 "Xiaomi Vacuum Cleaner G10"
             )
             assertFalse(
-                "An accessory below 25% of the full device reference price is not a full vacuum offer",
+                "An accessory must not appear as a whole device for a model-specific search",
                 filteredVacuumListings.any { it.title.contains("Mop Kit", ignoreCase = true) }
             )
             assertEquals(
@@ -762,14 +759,42 @@ class ExampleRobolectricTest {
                     .any { it.title.contains("UGREEN USB 2.0 Hub") }
             )
 
+            val deviceSearchListings = listOf(
+                normalNewPhone.copy(price = 189.99, storeName = "Amazon.es", sourceUrl = "https://www.amazon.es/redmi-17"),
+                normalNewPhone.copy(price = 179.99, storeName = "PcComponentes", sourceUrl = "https://www.pccomponentes.com/redmi-17"),
+                normalNewPhone.copy(
+                    title = "Xiaomi Redmi A5 Smartphone 4GB 128GB",
+                    price = 99.99,
+                    storeName = "MediaMarkt",
+                    sourceUrl = "https://www.mediamarkt.es/redmi-a5"
+                ),
+                normalNewPhone.copy(
+                    title = "Funda Xiaomi Redmi 17 con tapa",
+                    price = 7.99,
+                    storeName = "Apokin",
+                    sourceUrl = "https://www.example.com/redmi-17-case"
+                )
+            )
+            val strictMatches = repository.filterOnlineSearchResults(deviceSearchListings, "Xiaomi Redmi 17")
+            assertEquals("A model-specific query must exclude other models and cases", 2, strictMatches.size)
+            assertTrue(strictMatches.all { it.title.contains("Redmi 17", ignoreCase = true) })
+            val grouped = groupOnlineShoppingResults(strictMatches)
+            assertEquals("Repeated seller listings of one model make one product card", 1, grouped.size)
+            assertEquals(2, grouped.single().offers.size)
+            assertEquals(179.99, grouped.single().minPrice, 0.001)
+
             val inserted = repository.recordOnlineSearchResults(results, "GOOGLE_SHOPPING")
             assertEquals("Only the two plausible new offers should be stored", 2, inserted)
             val stored = withTimeout<List<PriceObservationEntity>>(10_000) {
                 database.priceObservationDao().observeAllVerified().first { it.size >= 2 }
             }
             assertEquals(2, stored.size)
-            assertTrue(stored.all { it.productId == "sony_wh1000xm5" })
+            val sonyProductId = stored.first().productId
+            assertTrue("Both retailer offers must attach to one saved product", stored.all { it.productId == sonyProductId })
             assertTrue(stored.all { it.productTitle == "Sony WH-1000XM5 Wireless Headphones" })
+            val persistedProduct = database.productDao().getProductById(sonyProductId)
+            assertNotNull("Online searches must add a real product row to Room", persistedProduct)
+            assertTrue("Searched products must be marked as source-verified", persistedProduct?.isPriceVerified == true)
             assertTrue(stored.all { it.currency == "EUR" && it.sourceType == "Google Shopping" })
             assertTrue(stored.any { it.storeName == "PcComponentes" && it.sourceUrl.contains("pccomponentes.com") })
             assertTrue(stored.any { it.storeName == "Amazon.es" && it.sourceUrl.contains("amazon.es") })
@@ -787,9 +812,9 @@ class ExampleRobolectricTest {
             assertEquals(2, repository.recordOnlineSearchResults(tomorrowResults, "GOOGLE_SHOPPING"))
             val productWithDailyHistory = withTimeout<List<Product>>(10_000) {
                 repository.allProductsStream.first { rows ->
-                    rows.firstOrNull { it.id == "sony_wh1000xm5" }?.priceHistory?.size == 2
+                    rows.firstOrNull { it.id == sonyProductId }?.priceHistory?.size == 2
                 }
-            }.first { it.id == "sony_wh1000xm5" }
+            }.first { it.id == sonyProductId }
             assertEquals("The graph has one real point per day, not one per retailer", 2, productWithDailyHistory.priceHistory.size)
             val firstHistoryDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT)
                 .format(java.util.Date(productWithDailyHistory.priceHistory[0].timestamp))

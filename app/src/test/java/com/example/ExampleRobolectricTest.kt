@@ -594,6 +594,28 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `model matching rejects unrelated codes and non-comparable offers`() {
+        val client = SerpApiClient()
+        val root = JSONObject(
+            """
+            {"shopping_results":[
+              {"title":"Sony WH-1000XM5 headphones","price":"1,00 €","extracted_price":1.0,"link":"https://example.test/a","source":"Example"},
+              {"title":"Sony WH-1000XM5 headphones en alquiler","price":"11,49 €","extracted_price":11.49,"link":"https://example.test/rent","source":"Grover"},
+              {"title":"Sony WH-1000XM4 headphones","price":"89,00 €","extracted_price":89.0,"link":"https://example.test/xm4","source":"Example"},
+              {"title":"Sony WH-1000XM5 headphones","price":"80,00 €","extracted_price":80.0,"link":"https://example.test/80","source":"Example"},
+              {"title":"Sony WH-1000XM5 headphones","price":"90,00 €","extracted_price":90.0,"link":"https://example.test/90","source":"Example"},
+              {"title":"Sony WH-1000XM5 headphones","price":"100,00 €","extracted_price":100.0,"link":"https://example.test/100","source":"Example"}
+            ]}
+            """.trimIndent()
+        )
+        val report = client.parseShoppingResultsDetailed(root, "Sony WH-1000XM5", 123L)
+        assertEquals(listOf(80.0, 90.0, 100.0), report.results.map { it.price })
+        assertEquals(2, report.rejectedAsIrrelevant)
+        assertEquals(1, report.rejectedAsSuspiciousPrice)
+        assertEquals(1, report.rejectedNonComparable)
+    }
+
+    @Test
     fun `Google search URL is labelled as an indirect Shopping link`() {
         val result = com.example.data.remote.SerpApiShoppingResult(
             title = "Cargador Anker",

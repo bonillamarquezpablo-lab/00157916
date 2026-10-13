@@ -73,32 +73,32 @@ fun onlineProductIdentityKey(title: String): String {
     val normalized = java.text.Normalizer.normalize(
         title.lowercase(Locale.ROOT),
         java.text.Normalizer.Form.NFD
-    ).replace(Regex("\\p{Mn}+"), "")
+    ).replace(Regex("\p{Mn}+"), "")
         .replace(Regex("""compatible (con|para) .*"""), " ")
-        .replace(Regex("""\\b\\d+(?:[.,]\\d+)?\\s*(?:gb|tb|mah|mp|hz|w|mm|cm|inch|pulgadas|pulgada)\\b"""), " ")
-        .replace(Regex("""\\b(?:4g|5g|wifi|wi-fi|bluetooth|nfc)\\b"""), " ")
+        .replace(Regex("""\b\d+(?:[.,]\d+)?\s*(?:gb|tb|mah|mp|hz|w|mm|cm|inch|pulgadas|pulgada)\b"""), " ")
+        .replace(Regex("""\b(?:4g|5g|wifi|wi-fi|bluetooth|nfc)\b"""), " ")
         .replace(
             Regex(
-                """\\b(smartphone|telefono|telefonos|movil|moviles|mobile|phone|nuevo|new|original|oficial|libre|negro|negra|negros|black|azul|blue|blanco|blanca|white|verde|green|rojo|roja|red|gris|gray|grey|rosa|pink|morado|purple|plateado|silver)\\b"""
+                """\b(smartphone|telefono|telefonos|movil|moviles|mobile|phone|nuevo|new|original|oficial|libre|negro|negra|negros|black|azul|blue|blanco|blanca|white|verde|green|rojo|roja|red|gris|gray|grey|rosa|pink|morado|purple|plateado|silver)\b"""
             ),
             " "
         )
         .replace(Regex("""[^a-z0-9]+"""), " ")
         .trim()
-        .replace(Regex("""\\s+"""), " ")
+        .replace(Regex("""\s+"""), " ")
 
     val brand = listOf(
         "xiaomi", "samsung", "apple", "sony", "ugreen", "anker", "baseus", "google",
         "huawei", "honor", "motorola", "oppo", "oneplus", "dyson", "roborock", "jbl",
         "logitech", "nintendo", "microsoft", "lenovo", "hp", "asus", "acer", "dell",
         "philips", "rowenta", "cecotec", "ecovacs", "bosch", "lg", "tcl"
-    ).firstOrNull { Regex("""\\b${Regex.escape(it)}\\b""").containsMatchIn(normalized) }.orEmpty()
+    ).firstOrNull { Regex("""\b${Regex.escape(it)}\b""").containsMatchIn(normalized) }.orEmpty()
 
     val model = Regex(
-        """\\b(redmi|poco|iphone|pixel|galaxy|wh|dyson|roborock)\\s*([a-z]{0,3}\\d+[a-z0-9]*)\\b"""
+        """\b(redmi|poco|iphone|pixel|galaxy|wh|dyson|roborock)\s*([a-z]{0,3}\d+[a-z0-9]*)\b"""
     ).find(normalized)?.let { match ->
         (match.groupValues[1] + match.groupValues[2]).replace(" ", "")
-    } ?: Regex("""\\b[a-z]{1,8}\\d[a-z0-9]{1,12}\\b""")
+    } ?: Regex("""\b[a-z]{1,8}\d[a-z0-9]{1,12}\b""")
         .findAll(normalized)
         .map { it.value }
         .firstOrNull { it !in setOf("usb20", "usb30", "usb32", "wifi6", "wifi7", "typec", "4gb", "8gb", "16gb", "32gb", "64gb", "128gb", "256gb", "512gb", "1tb") }

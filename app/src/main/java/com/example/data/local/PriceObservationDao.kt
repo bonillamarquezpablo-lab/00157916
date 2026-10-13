@@ -54,6 +54,46 @@ interface PriceObservationDao {
     @Query("SELECT COUNT(*) FROM price_observations WHERE productId = :productId")
     suspend fun getObservationCount(productId: String): Int
 
+    /**
+     * Purge legacy rows known to be incompatible with the app's "new in store" price history.
+     * This is intentionally conservative: these sellers/conditions were never eligible for
+     * the consumer-price history, and some old builds persisted them before today's filters.
+     */
+    @Query(
+        "DELETE FROM price_observations WHERE " +
+            "lower(storeName) LIKE '%wallapop%' OR " +
+            "lower(storeName) LIKE '%cash converters%' OR " +
+            "lower(storeName) LIKE '%vinted%' OR " +
+            "lower(storeName) LIKE '%cex%' OR " +
+            "lower(storeName) LIKE '%rentik%' OR " +
+            "lower(sourceUrl) LIKE '%wallapop.%' OR " +
+            "lower(sourceUrl) LIKE '%cashconverters.%' OR " +
+            "lower(sourceUrl) LIKE '%vinted.%' OR " +
+            "lower(sourceUrl) LIKE '%webuy.com%' OR " +
+            "lower(sourceUrl) LIKE '%cex.%' OR " +
+            "lower(productTitle) LIKE '%segunda mano%' OR " +
+            "lower(productTitle) LIKE '%reacondicionad%' OR " +
+            "lower(productTitle) LIKE '%refurbished%' OR " +
+            "lower(productTitle) LIKE '%renewed%' OR " +
+            "lower(productTitle) LIKE '%usado%' OR " +
+            "lower(productTitle) LIKE '%renting%' OR " +
+            "lower(productTitle) LIKE '%alquiler%' OR " +
+            "lower(productTitle) LIKE '%cuota mensual%' OR " +
+            "lower(productTitle) LIKE '%suscripción%' OR " +
+            "lower(productTitle) LIKE '%subscription%' OR " +
+            "lower(productTitle) LIKE '%impreso con su logotipo%' OR " +
+            "lower(productTitle) LIKE '%impreso con el logotipo%' OR " +
+            "lower(productTitle) LIKE '%regalo promocional%' OR " +
+            "lower(productTitle) LIKE '%artículo publicitario%' OR " +
+            "lower(productTitle) LIKE '%articulo publicitario%' OR " +
+            "lower(productTitle) LIKE '%merchandising personalizado%' OR " +
+            "((lower(productTitle) LIKE '%macbook%' OR lower(productTitle) LIKE '%laptop%' OR " +
+            "lower(productTitle) LIKE '%chromebook%' OR lower(productTitle) LIKE '%portátil%' OR lower(productTitle) LIKE '%portatil%') AND price < 100) OR " +
+            "((lower(productTitle) LIKE '%iphone%' OR lower(productTitle) LIKE '%smartphone%' OR lower(productTitle) LIKE '%redmi%' OR lower(productTitle) LIKE '%pixel%' OR lower(productTitle) LIKE '%galaxy s%') AND price < 45) OR " +
+            "((lower(productTitle) LIKE '%playstation 5%' OR lower(productTitle) LIKE '%ps5%' OR lower(productTitle) LIKE '%xbox series%' OR lower(productTitle) LIKE '%nintendo switch%') AND price < 70)"
+    )
+    suspend fun deleteIneligibleLegacyObservations(): Int
+
     /** Demo/unverified points are never valid history in this app. */
     @Query("DELETE FROM price_observations WHERE isVerified = 0")
     suspend fun deleteUnverifiedObservations(): Int

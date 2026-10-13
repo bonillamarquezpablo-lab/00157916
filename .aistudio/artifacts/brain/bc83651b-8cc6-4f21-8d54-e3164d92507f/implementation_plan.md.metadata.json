@@ -1,6 +1,0 @@
-{
-  "summary": "Plan integral para asegurar la copia de seguridad del proyecto actual, auditar la conexión con el repositorio privado de GitHub bonillamarquezpablo-lab/00157916 y reparar el formateo de consultas y parseo de respuestas de SerpApi para Google Shopping España sin perder las características nativas ni los cambios existentes de Google AI Studio.",
-  "updatedAt": "2026-10-13T01:53:01.649870268Z",
-  "requestFeedback": true,
-  "userFacing": true
-}

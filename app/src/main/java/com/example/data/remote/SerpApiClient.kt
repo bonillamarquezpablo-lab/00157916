@@ -206,9 +206,15 @@ class SerpApiClient(
             // it is a EUR amount even if the formatted label is omitted by a result layout.
             val price = extractedPrice ?: parsePrice(priceText)
             if (price == null || !price.isFinite() || price <= 0.0) return@mapNotNull null
-            if (extractedPrice == null &&
-                !priceText.contains("€") && !priceText.contains("EUR", ignoreCase = true)
-            ) return@mapNotNull null
+            val isEuroPrice = priceText.contains("€") ||
+                priceText.contains("EUR", ignoreCase = true)
+            // A structured numeric price is useful even when SerpApi omits the formatted label,
+            // but never reinterpret an explicitly labelled foreign currency as euros.
+            val explicitlyForeignCurrency = Regex(
+                "(?i)(\\\\$|£|¥|₹|\\\\b(USD|GBP|CAD|AUD|NZD|JPY|INR|CHF)\\\\b)"
+            ).containsMatchIn(priceText)
+            if (explicitlyForeignCurrency && !isEuroPrice) return@mapNotNull null
+            if (extractedPrice == null && !isEuroPrice) return@mapNotNull null
 
             val url = sequenceOf(item.optString("link_clean"), item.optString("link"))
                 .firstOrNull { isAmazonSpainUrl(it) } ?: return@mapNotNull null

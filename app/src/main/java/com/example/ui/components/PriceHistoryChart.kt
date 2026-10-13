@@ -4,6 +4,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -127,14 +129,14 @@ fun PriceHistoryChart(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = firstObservationLabel ?: "Sin datos todavía",
+                    text = firstObservationLabel ?: "Solo observaciones reales",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
             // Never show summary statistics based on demo/default product values.
-            if (priceHistory.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
+            if (filteredPoints.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
@@ -169,7 +171,9 @@ fun PriceHistoryChart(
 
         // Time Range Filter Chips
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             ChartRange.values().forEach { range ->

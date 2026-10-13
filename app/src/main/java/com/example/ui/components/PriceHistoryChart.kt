@@ -107,7 +107,7 @@ fun PriceHistoryChart(
         ) {
             Column {
                 Text(
-                    text = "Evolución Real del Precio",
+                    text = "Historial de precios observados",
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurface

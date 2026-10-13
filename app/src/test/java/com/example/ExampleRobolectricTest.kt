@@ -12,6 +12,7 @@ import com.example.data.repository.SpanishMarketData
 import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiQuote
 import com.example.data.remote.SerpApiRequestProduct
+import com.example.data.remote.SerpApiShoppingResult
 import org.json.JSONObject
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -613,6 +614,125 @@ class ExampleRobolectricTest {
         assertEquals(1, report.rejectedAsIrrelevant)
         assertEquals(1, report.rejectedAsSuspiciousPrice)
         assertEquals(1, report.rejectedNonComparable)
+    }
+
+    @Test
+    fun `immersive product lookup returns the direct URL for the requested merchant`() = runBlocking<Unit> {
+        var requestEngine: String? = null
+        var requestToken: String? = null
+        val http = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val request = chain.request()
+                requestEngine = request.url.queryParameter("engine")
+                requestToken = request.url.queryParameter("api_key")
+                val body = """
+                    {
+                      "product_results": {
+                        "stores": [
+                          {
+                            "name": "Fnac",
+                            "link": "https://www.fnac.es/sony-wh-1000xm5",
+                            "price": "249,99 €",
+                            "extracted_price": 249.99
+                          },
+                          {
+                            "name": "Amazon.es",
+                            "link": "https://www.amazon.es/dp/SONYXM5",
+                            "price": "259,00 €",
+                            "extracted_price": 259.00
+                          }
+                        ]
+                      }
+                    }
+                """.trimIndent()
+                Response.Builder()
+                    .request(request)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(body.toResponseBody("application/json".toMediaType()))
+                    .build()
+            }
+            .build()
+
+        val result = SerpApiShoppingResult(
+            title = "Sony WH-1000XM5",
+            price = 249.99,
+            storeName = "Fnac",
+            sourceUrl = "https://www.google.com/shopping/product/123?gl=es",
+            observedAt = 123L,
+            immersiveProductApiUrl = "https://serpapi.com/search.json?engine=google_immersive_product&page_token=test-token"
+        )
+
+        val directUrl = SerpApiClient(http).resolveRetailerUrl("test-api-key", result)
+
+        assertEquals("https://www.fnac.es/sony-wh-1000xm5", directUrl)
+        assertEquals("google_immersive_product", requestEngine)
+        assertEquals("test-api-key", requestToken)
+    }
+
+    @Test
+    fun `online model searches save a real snapshot but exclude broad queries and marketplaces`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+
+        try {
+            database.storeDao().insertAll(SpanishMarketData.getInitialStoreEntities())
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val observedAt = System.currentTimeMillis()
+            val results = listOf(
+                SerpApiShoppingResult(
+                    title = "Sony WH-1000XM5 Wireless Headphones",
+                    price = 249.99,
+                    storeName = "Fnac",
+                    sourceUrl = "https://www.fnac.es/sony-wh-1000xm5",
+                    observedAt = observedAt
+                ),
+                SerpApiShoppingResult(
+                    title = "Sony WH-1000XM5 usado",
+                    price = 80.0,
+                    storeName = "Wallapop",
+                    sourceUrl = "https://es.wallapop.com/item/sony",
+                    observedAt = observedAt
+                ),
+                SerpApiShoppingResult(
+                    title = "Sony WH-1000XM5 alquiler mensual",
+                    price = 11.49,
+                    storeName = "Grover",
+                    sourceUrl = "https://www.grover.com/es/sony",
+                    observedAt = observedAt
+                )
+            )
+
+            assertEquals(1, repository.recordOnlineSearchSnapshot("Sony WH-1000XM5", results))
+            assertEquals(0, repository.recordOnlineSearchSnapshot("Samsung", results))
+
+            val historyProduct = database.productDao().getAllProductsSnapshot()
+                .single { it.id.startsWith("online_") }
+            assertTrue(historyProduct.isPriceVerified)
+            assertEquals(1, database.priceObservationDao().getObservationCount(historyProduct.id))
+
+            val domainProducts = withTimeout<List<Product>>(10_000) {
+                repository.allProductsStream.first { rows ->
+                    rows.any { it.id == historyProduct.id && it.isPriceVerified }
+                }
+            }
+            val history = domainProducts.single { it.id == historyProduct.id }
+            assertEquals(249.99, history.currentPrice, 0.001)
+            assertEquals(1, history.priceHistory.size)
+            assertFalse("A single snapshot cannot be advertised as a 90-day historical low", history.hasSufficientHistory)
+        } finally {
+            database.close()
+        }
     }
 
     @Test

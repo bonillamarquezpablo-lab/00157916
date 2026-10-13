@@ -257,7 +257,10 @@ private fun ShoppingResultCard(result: SerpApiShoppingResult, onOpen: () -> Unit
                 Text(result.delivery, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             OutlinedButton(onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
-                Text("Ver oferta en ${result.storeName}")
+                Text(
+                    if (result.isGoogleShoppingProductLink) "Ver oferta en Google Shopping"
+                    else "Ver oferta en ${result.storeName}"
+                )
                 Spacer(Modifier.width(8.dp))
                 Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
             }

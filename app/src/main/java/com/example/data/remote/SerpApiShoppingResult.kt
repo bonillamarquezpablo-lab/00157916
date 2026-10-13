@@ -153,11 +153,22 @@ fun onlineProductIdentityKey(title: String): String {
         ).firstOrNull { Regex("""\b""" + Regex.escape(it) + """\b""").containsMatchIn(normalized) }.orEmpty()
     }
 
+    val sonyHeadphoneModel = if (
+        Regex("""\b(sony|headphones|auriculares|wh)\b""").containsMatchIn(productNameNormalized)
+    ) {
+        Regex("""(?i)(?:wh[\s-]*)?(\d{3,5}xm\d[a-z0-9]*)""")
+            .find(title)
+            ?.groupValues
+            ?.get(1)
+            ?.let { "wh" + it.lowercase(Locale.ROOT) }
+    } else null
+
     val model = Regex(
         """\b(redmi|poco|iphone|pixel|galaxy|wh|dyson|roborock)\s*([a-z]{0,3}\d+[a-z0-9]*)\b"""
     ).find(normalized)?.let { match ->
         (match.groupValues[1] + match.groupValues[2]).replace(" ", "")
-    } ?: Regex("""\b[a-z]{1,8}\d[a-z0-9]{1,12}\b""")
+    } ?: sonyHeadphoneModel
+      ?: Regex("""\b[a-z]{1,8}\d[a-z0-9]{1,12}\b""")
         .findAll(normalized)
         .map { it.value }
         .firstOrNull { it !in setOf("usb20", "usb30", "usb32", "wifi6", "wifi7", "typec", "4gb", "8gb", "16gb", "32gb", "64gb", "128gb", "256gb", "512gb", "1tb") }

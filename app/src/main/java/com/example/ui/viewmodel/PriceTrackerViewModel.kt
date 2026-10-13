@@ -604,9 +604,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     }
 
     private companion object {
-        const val LOW_RESULT_CACHE_BYPASS_AGE_MS = 15L * 60L * 1000L
-        const val LOW_RESULT_EXPANSION_THRESHOLD = 12
-        const val MAX_EXTRA_MANUAL_SEARCHES = 2
+        const val LOW_RESULT_CACHE_BYPASS_AGE_MS = 5L * 60L * 1000L
+        const val LOW_RESULT_EXPANSION_THRESHOLD = 20
+        const val MAX_EXTRA_MANUAL_SEARCHES = 4
     }
 
     private fun onlineFilterNotice(rawCount: Int, acceptedCount: Int): String =

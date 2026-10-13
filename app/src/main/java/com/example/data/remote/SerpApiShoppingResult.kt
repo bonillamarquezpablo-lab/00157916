@@ -18,7 +18,11 @@ data class SerpApiShoppingResult(
     val reviewCount: Int? = null,
     val observedAt: Long,
     /** Whether Amazon reports Prime delivery eligibility; not a personalized account price. */
-    val primeEligible: Boolean = false
+    val primeEligible: Boolean = false,
+    /** SerpApi's product-detail endpoint can expose direct merchant URLs on demand. */
+    val immersiveProductApiUrl: String? = null,
+    /** Google Shopping may identify an item's condition separately from its title. */
+    val condition: String = ""
 ) {
     /**
      * True when the accepted URL stays on a Google domain rather than opening the seller directly.

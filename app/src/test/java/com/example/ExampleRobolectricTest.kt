@@ -323,6 +323,20 @@ class ExampleRobolectricTest {
                   "source": "Wrong memory variant"
                 },
                 {
+                  "title": "Samsung Galaxy S26 Ultra",
+                  "price": "1.199,00 €",
+                  "extracted_price": 1199.00,
+                  "link": "https://shop.example.com/galaxy-unknown-memory",
+                  "source": "Unknown memory variant"
+                },
+                {
+                  "title": "Samsung Galaxy S26 512GB",
+                  "price": "1.199,00 €",
+                  "extracted_price": 1199.00,
+                  "link": "https://shop.example.com/galaxy-no-ultra",
+                  "source": "Missing Ultra variant"
+                },
+                {
                   "title": "Samsung Galaxy S26 Ultra 512GB",
                   "price": "899,99 €",
                   "extracted_price": 899.99,

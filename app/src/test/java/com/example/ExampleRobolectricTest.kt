@@ -190,6 +190,40 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `Google Shopping requests 100 results and keeps more than 30 returned offers`() = runBlocking<Unit> {
+        var requestedNum: String? = null
+        val payload = JSONObject()
+            .put("search_metadata", JSONObject().put("status", "Success"))
+            .put("shopping_results", JSONArray().apply {
+                for (index in 1..45) {
+                    put(
+                        JSONObject()
+                            .put("title", "Milwaukee M18 battery offer $index")
+                            .put("price", "199,99 €")
+                            .put("extracted_price", 199.99)
+                            .put("link", "https://shop$index.example.test/milwaukee")
+                            .put("source", "Tienda $index")
+                    )
+                }
+            })
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            requestedNum = chain.request().url.queryParameter("num")
+            Response.Builder()
+                .request(chain.request())
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .body(payload.toString().toResponseBody("application/json".toMediaType()))
+                .build()
+        }.build()
+
+        val report = SerpApiClient(http).searchOnlineWithDiagnostics("test-api-key", "Milwaukee")
+
+        assertEquals("The Google Shopping request should ask for the widest result set", "100", requestedNum)
+        assertEquals("The app must not truncate the provider response at 30 offers", 45, report.results.size)
+    }
+
+    @Test
     fun `SerpApi parser accepts matching euro HTTPS offers and rejects unsafe results`() {
         val requested = SerpApiRequestProduct(
             id = "demo_galaxy_s26_ultra",

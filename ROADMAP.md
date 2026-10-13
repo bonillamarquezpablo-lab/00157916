@@ -4,6 +4,15 @@
 
 **Progreso global provisional: 1%** se mantiene hasta completar el primer flujo de precio real de extremo a extremo en el móvil. El código del conector está integrado, pero falta la clave del proveedor y validar una búsqueda real; el porcentaje se actualiza por resultados funcionales, no por líneas de código.
 
+## Política estricta de historial (2026-10-13)
+
+- El gráfico solo admite observaciones reales y fechadas de búsquedas válidas guardadas en Room.
+- No se generan puntos retrospectivos, series 2022–2026 ni precios interpolados almacenados.
+- El primer punto del historial define la etiqueta «Historial desde [fecha]»; un rango sin puntos muestra «Sin datos todavía».
+- El catálogo precargado se marca como EJEMPLO y nunca alimenta el historial de precios.
+- Se retiró la acción de simular una caída de precio, incluido el punto temporal de historial que añadía en memoria.
+- En la rama revisada no existen funciones llamadas `generateHistory` o `generateInflatedHistory`; los tests ahora exigen que los productos de ejemplo tengan `priceHistory` vacío.
+
 ## 16 mejoras planificadas
 
 - [x] **M01 — Base de integridad y procedencia.** Existe una tabla persistente de observaciones con producto, comercio, precio, moneda, fecha/hora, URL y estado de verificación; queda pendiente alimentarla con un proveedor real.
@@ -19,7 +28,7 @@
 - [~] **M11 — Catálogo escalable (parcial).** Room es la fuente de verdad y las instalaciones existentes añaden solo los IDs que faltan sin sobrescribir filas. Quedan pendientes paginación y filtros escalables.
 - [~] **M12 — Ordenación comprobable (parcial).** Ya hay orden por nombre/categoría y por precio verificado; falta ampliar por comercio y frescura del dato.
 - [ ] **M13 — Seguimiento y objetivos.** Favoritos, objetivos de precio, exportación e historial por usuario.
-- [ ] **M14 — Interfaz moderna y accesible.** Cargas, errores, estados vacíos, diseño adaptable y accesibilidad.
+- [~] **M14 — Interfaz moderna y accesible.** Cargas, errores, estados vacíos, diseño adaptable y accesibilidad. El gráfico conserva 30D, 90D, 6M, 1A, 2A, 3A, 4A y Todo, con etiquetas basadas exclusivamente en observaciones reales.
 - [ ] **M15 — Calidad y publicación.** Pruebas de integración, privacidad, seguridad, observabilidad, copias y flujo de publicación.
 - [x] **M16 — Buscador online manual.** Búsqueda libre en Google Shopping España y búsqueda directa de Amazon.es a través de SerpApi; ambas muestran resultados con precio en euros dentro de Mínimo. Los resultados de Amazon.es incluyen, cuando se informa, la elegibilidad de entrega Prime. No leen precios/cupones personalizados de la sesión personal y requieren SerpApi; no hay monitorización automática.
 
@@ -29,7 +38,7 @@
 2. **[RESUELTO] Dos fuentes de verdad para productos.** El flujo principal ahora lee los productos desde Room; el catálogo estático solo sirve para añadir fichas que faltan.
 3. **[PARCIALMENTE RESUELTO] Historial persistente con procedencia.** Ya existe una tabla/DAO con URL, fecha y verificación; sigue sin datos reales hasta conectar un proveedor autorizado.
 4. **[RESUELTO] Riesgo de pérdida por migración destructiva.** La migración destructiva se retiró y el camino 2→3→4 ha superado pruebas de preservación.
-5. **El seguimiento no monitoriza.** Los objetivos se guardan localmente, pero no hay comprobaciones automáticas ni alertas reales; la simulación de caída modifica objetos de demostración.
+5. **El seguimiento no monitoriza.** Los objetivos se guardan localmente, pero no hay comprobaciones automáticas ni alertas reales; la acción de simular caídas se ha retirado para evitar historial sintético.
 
 ## 3 correcciones prioritarias
 

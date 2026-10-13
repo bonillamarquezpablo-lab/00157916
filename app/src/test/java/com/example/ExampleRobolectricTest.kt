@@ -308,6 +308,20 @@ class ExampleRobolectricTest {
                   "source": "Example USD"
                 },
                 {
+                  "title": "Samsung Galaxy S26 FE 512GB",
+                  "price": "999,00 €",
+                  "extracted_price": 999.00,
+                  "link": "https://shop.example.com/galaxy-fe",
+                  "source": "Wrong FE variant"
+                },
+                {
+                  "title": "Samsung Galaxy S26 Ultra 256GB",
+                  "price": "1.099,00 €",
+                  "extracted_price": 1099.00,
+                  "link": "https://shop.example.com/galaxy-256",
+                  "source": "Wrong memory variant"
+                },
+                {
                   "title": "Samsung Galaxy S26 Ultra 512GB",
                   "price": "899,99 €",
                   "extracted_price": 899.99,

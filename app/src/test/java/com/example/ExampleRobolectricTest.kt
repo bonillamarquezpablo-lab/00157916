@@ -734,9 +734,9 @@ class ExampleRobolectricTest {
             val results = listOf(
                 com.example.data.remote.SerpApiShoppingResult(
                     title = "Sony WH-1000XM5 Wireless Headphones",
-                    price = 249.99,
+                    price = 229.99,
                     storeName = "PcComponentes",
-                    sourceUrl = "https://www.pccomponentes.com/sony-wh-1000xm5",
+                    sourceUrl = "https://www.google.com/shopping/product/SONYWH1000XM5",
                     observedAt = now
                 ),
                 com.example.data.remote.SerpApiShoppingResult(
@@ -940,8 +940,20 @@ class ExampleRobolectricTest {
             assertNotNull("Online searches must add a real product row to Room", persistedProduct)
             assertTrue("Searched products must be marked as source-verified", persistedProduct?.isPriceVerified == true)
             assertTrue(stored.all { it.currency == "EUR" && it.sourceType == "Google Shopping" })
-            assertTrue(stored.any { it.storeName == "PcComponentes" && it.sourceUrl.contains("pccomponentes.com") })
-            assertTrue(stored.any { it.storeName == "Amazon.es" && it.sourceUrl.contains("amazon.es") })
+            val savedGoogleOffer = stored.single { it.storeName == "PcComponentes" }
+            assertTrue(savedGoogleOffer.sourceUrl.contains("google.com/shopping/product"))
+            assertEquals("Google Shopping", savedGoogleOffer.linkType)
+            assertEquals("directo", stored.single { it.storeName == "Amazon.es" }.linkType)
+
+            val productAfterGoogleObservation = withTimeout<List<Product>>(10_000) {
+                repository.allProductsStream.first { rows ->
+                    rows.firstOrNull { it.id == sonyProductId }?.priceHistory?.size == 1
+                }
+            }.first { it.id == sonyProductId }
+            assertEquals("Google Shopping", productAfterGoogleObservation.priceHistory.single().linkType)
+            assertTrue(productAfterGoogleObservation.offers.any {
+                it.store.name == "PcComponentes" && it.linkType == "Google Shopping"
+            })
 
             val duplicate = results.first().copy(price = 245.00, observedAt = now + 60_000L)
             assertEquals("A changed same-day quote updates the existing row, not a second row",

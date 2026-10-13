@@ -226,7 +226,13 @@ private fun ShoppingResultCard(
 ) {
     val cheapest = group.cheapestOffer
     val displayedStoreOffers = group.offers
-        .distinctBy { it.storeName.trim().lowercase(Locale.ROOT) }
+        .groupBy { it.storeName.trim().lowercase(Locale.ROOT) }
+        .values
+        .map { storeOffers ->
+            storeOffers.filterNot { it.isGoogleShoppingProductLink }.minByOrNull { it.price }
+                ?: storeOffers.minBy { it.price }
+        }
+        .sortedBy { it.price }
         .take(MAX_VISIBLE_STORE_OFFERS)
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenProduct),

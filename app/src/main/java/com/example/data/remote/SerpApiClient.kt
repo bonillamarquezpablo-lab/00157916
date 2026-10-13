@@ -206,12 +206,13 @@ class SerpApiClient(
             require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
             val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
             require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
-            parseAmazonResults(executeAmazonSearch(apiKey, normalizedQuery))
+            parseAmazonResults(executeAmazonSearch(apiKey, normalizedQuery), query = normalizedQuery)
         }
 
     internal fun parseAmazonResults(
         root: JSONObject,
-        observedAt: Long = System.currentTimeMillis()
+        observedAt: Long = System.currentTimeMillis(),
+        query: String = ""
     ): List<SerpApiShoppingResult> {
         val error = root.optString("error").takeIf { it.isNotBlank() && it != "null" }
         if (error != null) throw SerpApiException(error)
@@ -224,6 +225,7 @@ class SerpApiClient(
         return items.mapNotNull { item ->
             val title = item.optString("title").trim()
                 .takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
+            if (query.isNotBlank() && hasUnsafeListingMismatch(query, title, item)) return@mapNotNull null
             // SerpApi's Amazon engine can expose the active offer as price/extracted_price,
             // or as primary_price/extracted_primary_price depending on the product layout.
             val priceText = sequenceOf(
@@ -326,7 +328,9 @@ class SerpApiClient(
                     rejectedOther++
                     return@mapNotNull null
                 }
-            if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
+            if (!query.isNullOrBlank() &&
+                (!isPlausibleProductMatch(query, title) || hasUnsafeListingMismatch(query, title, item))
+            ) {
                 rejectedAsIrrelevant++
                 return@mapNotNull null
             }
@@ -511,7 +515,9 @@ class SerpApiClient(
 
         return results.mapNotNull { item ->
             val title = item.optString("title").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            if (!isPlausibleProductMatch(requested.queryTerm, title)) return@mapNotNull null
+            if (!isPlausibleProductMatch(requested.queryTerm, title) ||
+                hasUnsafeListingMismatch(requested.queryTerm, title, item)
+            ) return@mapNotNull null
 
             val priceText = item.optString("price")
             val extractedPrice = item.opt("extracted_price")
@@ -666,6 +672,58 @@ class SerpApiClient(
         uri.scheme.equals("https", ignoreCase = true) &&
             (host == "amazon.es" || host.endsWith(".amazon.es"))
     }.getOrDefault(false)
+
+    /**
+     * Prevents the most damaging comparison errors: used/refurbished listings mixed with new
+     * stock, mismatched storage/RAM variants, unrelated multipacks and promotional merchandise.
+     * Google Shopping is a discovery source, so we prefer fewer comparable offers over misleading
+     * prices that cannot be compared on equal terms.
+     */
+    private fun hasUnsafeListingMismatch(
+        requested: String,
+        returned: String,
+        item: JSONObject
+    ): Boolean {
+        val conditionText = buildString {
+            append(item.optString("second_hand_condition"))
+            append(' ')
+            append(item.optString("condition"))
+            append(' ')
+            append(item.optString("condition_label"))
+            val extensions = item.optJSONArray("extensions")
+            if (extensions != null) {
+                for (index in 0 until extensions.length()) append(' ').append(extensions.optString(index))
+            }
+        }.lowercase(Locale.ROOT)
+
+        val nonNewCondition = Regex(
+            """\b(used|second\s+hand|pre[- ]?owned|refurbished|renewed|reacondicionado|reacondicionada|seminuevo|seminueva|segunda\s+mano|usado|usada|open\s+box)\b"""
+        )
+        if (nonNewCondition.containsMatchIn(conditionText)) return true
+
+        val queryNorm = normalize(requested)
+        val titleNorm = normalize(returned)
+        val promotionalListing = Regex(
+            """\b(personalizado|personalizada|personalizados|personalizadas|publicitario|publicitaria|merchandising|regalo promocional|impreso con (?:su )?logotipo|con su logotipo|logo impreso)\b"""
+        )
+        if (promotionalListing.containsMatchIn(titleNorm)) return true
+
+        val bundleMarker = Regex("""\b(?:\d+\s?[x×]|pack|multipack|lote|set de|conjunto de)\b""")
+        if (bundleMarker.containsMatchIn(titleNorm) && !bundleMarker.containsMatchIn(queryNorm)) return true
+
+        val variantWords = setOf("pro", "max", "plus", "ultra", "fe", "lite", "mini", "fold", "flip", "classic", "edge")
+        val requestedVariants = queryNorm.split(' ').filter { it in variantWords }.toSet()
+        val resultVariants = titleNorm.split(' ').filter { it in variantWords }.toSet()
+        if (!resultVariants.containsAll(requestedVariants)) return true
+
+        // Do not compare a requested 16 GB / 256 GB configuration against a different variant.
+        val memoryPattern = Regex("""\b\d+\s?(?:gb|tb)\b""")
+        val requestedMemory = memoryPattern.findAll(queryNorm).map { it.value.replace(" ", "") }.toSet()
+        val resultMemory = memoryPattern.findAll(titleNorm).map { it.value.replace(" ", "") }.toSet()
+        if (requestedMemory.isNotEmpty() && !resultMemory.containsAll(requestedMemory)) return true
+
+        return false
+    }
 
     private fun isPlausibleProductMatch(requested: String, returned: String): Boolean {
         val wanted = tokens(requested)

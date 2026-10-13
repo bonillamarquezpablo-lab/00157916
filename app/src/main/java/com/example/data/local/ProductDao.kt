@@ -14,17 +14,6 @@ interface ProductDao {
     @Query("SELECT COUNT(*) FROM products")
     suspend fun getProductCount(): Int
 
-    /**
-     * Purges unobserved seed/demo rows from previous versions without deleting tracked items
-     * or products that already have verified real market observations.
-     */
-    @Query(
-        "DELETE FROM products WHERE id IN (:demoProductIds) " +
-            "AND id NOT IN (SELECT productId FROM tracked_products) " +
-            "AND id NOT IN (SELECT productId FROM price_observations WHERE isVerified = 1)"
-    )
-    suspend fun deleteUntrackedUnobservedDemoProducts(demoProductIds: List<String>): Int
-
     @Query("SELECT * FROM products ORDER BY title ASC")
     suspend fun getAllProductsSnapshot(): List<ProductEntity>
 

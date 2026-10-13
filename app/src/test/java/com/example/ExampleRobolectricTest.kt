@@ -191,6 +191,37 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun brandSearchesTolerateAMinorMilwaukeeTypo() {
+        val client = SerpApiClient()
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {
+                  "title": "Milwaukee M18 FUEL taladro percutor brushless",
+                  "price": "299,99 €",
+                  "extracted_price": 299.99,
+                  "link": "https://www.milwaukeetool.eu/product",
+                  "source": "Milwaukee Tool"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val report = client.parseShoppingResultsDetailed(
+            root = payload,
+            query = "Milwauke",
+            observedAt = 123L
+        )
+
+        assertEquals("A one-character misspelling must not discard a relevant brand result", 1, report.results.size)
+        assertEquals("Milwaukee Tool", report.results.single().storeName)
+        assertEquals(299.99, report.results.single().price, 0.001)
+    }
+
+    @Test
     fun `batch keeps valid offers when one product lookup fails`() = runBlocking<Unit> {
         val http = OkHttpClient.Builder()
             .addInterceptor { chain ->

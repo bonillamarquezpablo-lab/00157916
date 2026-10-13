@@ -56,7 +56,8 @@ data class SerpApiShoppingSearchReport(
     val rejectedForLink: Int,
     val rejectedOther: Int,
     val firstResultFields: String = "",
-    val queriesExecuted: Int = 1
+    val queriesExecuted: Int = 1,
+    val failedAdditionalQueries: Int = 0
 ) {
     fun emptyResultMessage(query: String): String {
         if (rawResultCount == 0) {
@@ -218,11 +219,23 @@ class SerpApiClient(
         if (followUps.isEmpty()) return initial
 
         val reports = mutableListOf(initial)
+        var attemptedQueries = 1
+        var failedAdditionalQueries = 0
         for (alternateQuery in followUps) {
             // Keep the original query as the relevance anchor so alternate wording does not
             // cause otherwise valid product titles to be rejected.
             delay(EXPANDED_QUERY_DELAY_MS)
-            reports += searchOnlineWithDiagnostics(token, alternateQuery, relevanceQuery = normalizedQuery)
+            attemptedQueries++
+            try {
+                reports += searchOnlineWithDiagnostics(token, alternateQuery, relevanceQuery = normalizedQuery)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // An optional expansion request must never discard valid results from the
+                // original query or from an earlier alternate query.
+                failedAdditionalQueries++
+                continue
+            }
             val uniqueCount = reports.flatMap { it.results }
                 .distinctBy { offerIdentity(it) }.size
             if (uniqueCount >= TARGET_EXPANDED_RESULT_COUNT) break
@@ -240,7 +253,8 @@ class SerpApiClient(
             rejectedForLink = reports.sumOf { it.rejectedForLink },
             rejectedOther = reports.sumOf { it.rejectedOther },
             firstResultFields = initial.firstResultFields,
-            queriesExecuted = reports.size
+            queriesExecuted = attemptedQueries,
+            failedAdditionalQueries = failedAdditionalQueries
         )
     }
 

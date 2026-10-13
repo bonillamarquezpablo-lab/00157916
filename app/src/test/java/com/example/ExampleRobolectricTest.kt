@@ -841,6 +841,21 @@ class ExampleRobolectricTest {
             val strictMatches = repository.filterOnlineSearchResults(deviceSearchListings, "Xiaomi Redmi 17")
             assertEquals("A model-specific query must exclude other models and cases", 2, strictMatches.size)
             assertTrue(strictMatches.all { it.title.contains("Redmi 17", ignoreCase = true) })
+
+            val sonyFormattingVariant = results.first().copy(
+                title = "Sony 1000XM5 Wireless Headphones",
+                price = 229.99,
+                storeName = "Worten",
+                sourceUrl = "https://www.worten.es/sony-1000xm5"
+            )
+            assertTrue(
+                "Equivalent retailer formatting of the WH-1000XM5 model should remain eligible",
+                repository.filterOnlineSearchResults(
+                    listOf(sonyFormattingVariant),
+                    "Sony WH-1000XM5"
+                ).isNotEmpty()
+            )
+
             val grouped = groupOnlineShoppingResults(strictMatches)
             assertEquals("Repeated seller listings of one model make one product card", 1, grouped.size)
             assertEquals(2, grouped.single().offers.size)

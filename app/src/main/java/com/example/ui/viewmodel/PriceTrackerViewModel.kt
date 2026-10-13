@@ -330,11 +330,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
             } catch (e: SerpApiException) {
                 if (testOneProduct) priceRefreshPreferences.edit().remove("single_product_test_fingerprint").apply()
+                refreshAccountStatusAfterFailure(token)
                 val message = e.message ?: "No se pudo consultar SerpApi."
                 _uiState.value = _uiState.value.copy(priceRefreshStatus = message)
                 showSnackbar(message)
             } catch (e: Exception) {
                 if (testOneProduct) priceRefreshPreferences.edit().remove("single_product_test_fingerprint").apply()
+                refreshAccountStatusAfterFailure(token)
                 val message = when (e) {
                     is java.net.SocketTimeoutException -> "Se agotó el tiempo de espera de SerpApi. No se ha guardado ningún precio."
                     is java.net.UnknownHostException -> "No se pudo localizar SerpApi. Comprueba la conexión a Internet y vuelve a probar."
@@ -350,6 +352,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 )
             }
         }
+    }
+
+    private suspend fun refreshAccountStatusAfterFailure(token: String) {
+        // The account endpoint is free. Refresh displayed quota even when product queries fail,
+        // so the UI never leaves a stale pre-batch balance after an unsuccessful batch.
+        val info = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull() ?: return
+        _uiState.value = _uiState.value.copy(serpApiAccountStatus = quotaMessage(info))
     }
 
     private fun tokenFingerprint(token: String): String {

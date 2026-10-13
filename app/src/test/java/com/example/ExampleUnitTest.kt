@@ -6,12 +6,45 @@ import com.example.data.model.Product
 import com.example.data.model.Store
 import com.example.data.model.VerdictLevel
 import com.example.data.repository.SpanishMarketData
+import com.example.data.remote.SerpApiShoppingResult
+import com.example.data.remote.groupOnlineShoppingResults
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ExampleUnitTest {
+    @Test
+    fun groupedOnlineSearchCombinesRetailersButKeepsModelsVariantsAndAccessoriesSeparate() {
+        fun result(title: String, price: Double, store: String) = SerpApiShoppingResult(
+            title = title,
+            price = price,
+            storeName = store,
+            sourceUrl = "https://${store.lowercase().replace(" ", "")}.example/product",
+            observedAt = 1_800_000_000_000L
+        )
+
+        val groups = groupOnlineShoppingResults(
+            listOf(
+                result("Xiaomi Redmi 17 4GB/128GB Negro", 189.99, "Amazon.es"),
+                result("Smartphone Xiaomi Redmi 17 4GB 128GB Azul", 179.99, "PcComponentes"),
+                result("Xiaomi Redmi A5 4GB/128GB", 99.99, "Tienda A"),
+                result("Funda Xiaomi Redmi 17 4GB/128GB con tapa", 7.99, "Tienda B"),
+                result("Samsung Galaxy S26 FE 256GB", 699.99, "Tienda C"),
+                result("Samsung Galaxy S26 Ultra 256GB", 1199.99, "Tienda D")
+            )
+        )
+
+        assertEquals("Models, variants and accessory kits must not be merged together", 5, groups.size)
+        val redmi17 = groups.single { it.identityKey == "xiaomi|redmi17|memory:128gb+4gb" }
+        assertEquals(2, redmi17.offers.size)
+        assertEquals(179.99, redmi17.minPrice, 0.001)
+        assertTrue(groups.any { it.identityKey.contains("redmia5") })
+        assertTrue(groups.any { it.identityKey.contains("accessory:funda") })
+        assertTrue(groups.any { it.identityKey.contains("variant:fe") })
+        assertTrue(groups.any { it.identityKey.contains("variant:ultra") })
+    }
+
     @Test
     fun addition_isCorrect() {
         assertEquals(4, 2 + 2)

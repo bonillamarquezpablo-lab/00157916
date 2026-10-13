@@ -57,4 +57,8 @@ interface PriceObservationDao {
     /** Demo/unverified points are never valid history in this app. */
     @Query("DELETE FROM price_observations WHERE isVerified = 0")
     suspend fun deleteUnverifiedObservations(): Int
+
+    /** Remove points attached to legacy mock products before deleting those products. */
+    @Query("DELETE FROM price_observations WHERE productId IN (SELECT id FROM products WHERE id LIKE 'demo_%' OR lower(athMinDate) LIKE '%demostración%' OR lower(athMinStore) LIKE '%demostración%')")
+    suspend fun deleteExplicitDemoObservations(): Int
 }

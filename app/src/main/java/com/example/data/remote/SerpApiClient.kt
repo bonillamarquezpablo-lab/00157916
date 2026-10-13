@@ -55,7 +55,8 @@ data class SerpApiShoppingSearchReport(
     val rejectedForPriceOrCurrency: Int,
     val rejectedForLink: Int,
     val rejectedOther: Int,
-    val firstResultFields: String = ""
+    val firstResultFields: String = "",
+    val rejectedAsSuspiciousPrice: Int = 0
 ) {
     fun emptyResultMessage(query: String): String {
         if (rawResultCount == 0) {
@@ -66,6 +67,7 @@ data class SerpApiShoppingSearchReport(
         if (rejectedForPriceOrCurrency > 0) reasons += "$rejectedForPriceOrCurrency no tenían un precio en euros verificable"
         if (rejectedForLink > 0) reasons += "$rejectedForLink no tenían un enlace HTTPS válido"
         if (rejectedOther > 0) reasons += "$rejectedOther estaban incompletos"
+        if (rejectedAsSuspiciousPrice > 0) reasons += "$rejectedAsSuspiciousPrice tenían un precio anormalmente bajo respecto al resto de resultados"
         val detail = reasons.joinToString("; ").ifBlank { "ninguno pasó los filtros de seguridad" }
         val fieldDiagnostic = if (
             results.isEmpty() &&
@@ -319,7 +321,7 @@ class SerpApiClient(
         var rejectedForPriceOrCurrency = 0
         var rejectedForLink = 0
         var rejectedOther = 0
-        val parsed = items.mapNotNull { item ->
+        val parsedCandidates = items.mapNotNull { item ->
             val title = item.optString("title").trim()
                 .takeIf { it.isNotBlank() && it != "null" }
                 ?: run {
@@ -328,6 +330,10 @@ class SerpApiClient(
                 }
             if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
                 rejectedAsIrrelevant++
+                return@mapNotNull null
+            }
+            if (isRentalOrFinancingListing(title, query.orEmpty())) {
+                rejectedOther++
                 return@mapNotNull null
             }
 
@@ -398,6 +404,19 @@ class SerpApiClient(
                 observedAt = observedAt
             )
         }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
+
+        // Flag extreme low-price outliers only when there are enough comparable offers to establish
+        // a useful baseline. This avoids treating a single cheap product as suspicious by itself.
+        val sortedPrices = parsedCandidates.map { it.price }.sorted()
+        val medianPrice = when {
+            sortedPrices.isEmpty() -> 0.0
+            sortedPrices.size % 2 == 1 -> sortedPrices[sortedPrices.size / 2]
+            else -> (sortedPrices[sortedPrices.size / 2 - 1] + sortedPrices[sortedPrices.size / 2]) / 2.0
+        }
+        val suspiciousPriceFloor = if (sortedPrices.size >= 3 && medianPrice >= 20.0) medianPrice * 0.10 else 0.0
+        val rejectedAsSuspiciousPrice = parsedCandidates.count { it.price < suspiciousPriceFloor }
+        val parsed = parsedCandidates
+            .filter { it.price >= suspiciousPriceFloor }
             .sortedBy { it.price }
             .take(30)
 
@@ -412,7 +431,8 @@ class SerpApiClient(
                 ?.keys()
                 ?.asSequence()
                 ?.joinToString(", ")
-                .orEmpty()
+                .orEmpty(),
+            rejectedAsSuspiciousPrice = rejectedAsSuspiciousPrice
         )
     }
 
@@ -676,6 +696,12 @@ class SerpApiClient(
             }
         }
 
+        val modelCodeTokens = wanted.filter {
+            it.length >= 4 && it.any(Char::isDigit) && it.any(Char::isLetter)
+        }
+        // A product title must match the requested model code; matching only the brand is not enough.
+        if (modelCodeTokens.any { code -> !tokenMatches(code) }) return false
+
         val overlap = wanted.count(::tokenMatches)
         val required = if (wanted.size <= 2) wanted.size else maxOf(2, ceil(wanted.size * 0.45).toInt())
         if (overlap >= required) return true
@@ -685,6 +711,18 @@ class SerpApiClient(
         val compactTitle = normalize(returned).replace(" ", "")
         return compactQuery.length >= 8 && compactTitle.length >= 8 &&
             (compactTitle.contains(compactQuery) || compactQuery.contains(compactTitle))
+    }
+
+    private fun isRentalOrFinancingListing(title: String, query: String): Boolean {
+        val markers = listOf(
+            "alquiler", "alquilar", "renting", "rental", "leasing",
+            "por dia", "por mes", "al mes", "mensual", "cuota", "cuotas",
+            "financiacion", "financiado", "contrato", "permanencia"
+        )
+        val normalizedQuery = normalize(query)
+        if (markers.any { normalizedQuery.contains(it) }) return false
+        val normalizedTitle = normalize(title)
+        return markers.any { normalizedTitle.contains(it) }
     }
 
     private fun tokens(value: String): Set<String> =

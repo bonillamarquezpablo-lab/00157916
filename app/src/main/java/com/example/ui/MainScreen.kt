@@ -152,7 +152,7 @@ fun MainScreen(
                             color = MaterialTheme.colorScheme.secondaryContainer
                         ) {
                             Text(
-                                text = "2 fuentes online",
+                                text = "2 buscadores online",
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,

@@ -109,7 +109,7 @@ class SerpApiAmazonSearchTest {
         )
 
         assertEquals("Only the matching consumer product should be retained", 1, results.size)
-        assertEquals("Xiaomi Power Bank 20000mAh 35W", results.single().title)
+        assertEquals("Batería portátil Xiaomi 20000mAh 35W", results.single().title)
         assertEquals(39.99, results.single().price, 0.001)
     }
 

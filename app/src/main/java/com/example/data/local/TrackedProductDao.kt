@@ -22,4 +22,8 @@ interface TrackedProductDao {
 
     @Query("UPDATE tracked_products SET targetAlertPrice = :targetPrice WHERE productId = :productId")
     suspend fun updateTargetPrice(productId: String, targetPrice: Double?)
+
+    /** Remove watchlist rows left behind by legacy static/demo products. */
+    @Query("DELETE FROM tracked_products WHERE productId NOT IN (SELECT id FROM products)")
+    suspend fun deleteTrackingForMissingProducts(): Int
 }

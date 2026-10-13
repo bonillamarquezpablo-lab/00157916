@@ -527,10 +527,17 @@ class SerpApiClient(
                 priceText.contains("EUR", ignoreCase = true)
             if (extractedPrice == null && !isEuroPrice) return@mapNotNull null
 
-            // Google Shopping API usually documents product_link (a Google product page);
-            // some layouts also expose a direct seller link. Prefer the direct link when present.
-            val url = sequenceOf(item.optString("link"), item.optString("product_link"))
-                .firstOrNull { isHttpsUrl(it) } ?: return@mapNotNull null
+            // SerpApi can expose a direct merchant URL as link/link_clean and a Google
+            // product page as product_link. Prefer a non-Google HTTPS destination whenever one
+            // exists; use the Google product page only as an explicitly labelled fallback.
+            val candidateUrls = sequenceOf(
+                item.optString("link_clean"),
+                item.optString("link"),
+                item.optString("product_link")
+            ).filter(::isHttpsUrl).toList()
+            val url = candidateUrls.firstOrNull { !isGoogleDomainUrl(it) }
+                ?: candidateUrls.firstOrNull()
+                ?: return@mapNotNull null
             val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()
             if (host.isBlank()) return@mapNotNull null

@@ -473,7 +473,7 @@ class SerpApiClient(
         var queriesWithoutMatches = 0
         var firstFailure: Exception? = null
         requested.forEachIndexed { index, product ->
-            onStage("Consultando Google Shopping España: ${index + 1}/${requested.size}…")
+            onStage("Consultando Google Shopping España: ${index + 1}/${requested.size} · ${product.queryTerm}…")
             try {
                 val json = executeSearch(apiKey, product.queryTerm)
                 val productQuotes = parseQuotes(json, product)
@@ -787,10 +787,16 @@ class SerpApiClient(
         }
 
         val modelCodeTokens = wanted.filter {
-            it.length >= 4 && it.any(Char::isDigit) && it.any(Char::isLetter)
+            it.length >= 3 && it.any(Char::isDigit) && it.any(Char::isLetter)
         }
         // Matching the brand alone is insufficient when the user specified a model code.
         if (modelCodeTokens.any { code -> !tokenMatches(code) }) return false
+
+        // Respect explicitly requested model variants instead of mixing FE/Ultra/Pro/etc.
+        val modelVariants = setOf(
+            "ultra", "fe", "plus", "pro", "max", "mini", "lite", "fold", "flip", "edge"
+        )
+        if (wanted.any { it in modelVariants && it !in found }) return false
 
         val overlap = wanted.count(::tokenMatches)
         val required = if (wanted.size <= 2) wanted.size else maxOf(2, ceil(wanted.size * 0.45).toInt())

@@ -13,6 +13,9 @@ import com.example.data.remote.SerpApiTokenStore
 import com.example.data.repository.ProductRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Quota-capped daily monitor: checks at most three products with target prices per run.
@@ -41,6 +44,15 @@ class PriceAlertWorker(
 
         val productsById = database.productDao().getAllProductsSnapshot().associateBy { it.id }
         val now = System.currentTimeMillis()
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date(now))
+        val usedToday = if (preferences.getString(QUOTA_DAY_KEY, null) == today) {
+            preferences.getInt(QUERIES_USED_TODAY_KEY, 0).coerceAtLeast(0)
+        } else {
+            0
+        }
+        val remainingDailyQuota = (MAX_PRODUCTS_PER_DAY - usedToday).coerceAtLeast(0)
+        if (remainingDailyQuota == 0) return Result.success()
+
         val due = tracked.mapNotNull { watch ->
             val product = productsById[watch.productId] ?: return@mapNotNull null
             if (now - preferences.getLong(checkedKey(watch.productId), 0L) < MIN_RECHECK_INTERVAL_MS) {
@@ -48,7 +60,7 @@ class PriceAlertWorker(
             }
             Candidate(watch, product)
         }.sortedBy { preferences.getLong(checkedKey(it.watch.productId), 0L) }
-            .take(MAX_PRODUCTS_PER_RUN)
+            .take(remainingDailyQuota)
         if (due.isEmpty()) return Result.success()
 
         val client = SerpApiClient()
@@ -64,9 +76,16 @@ class PriceAlertWorker(
         ) return Result.success()
 
         val availableThisHour = account.remainingThisHour ?: MAX_PRODUCTS_PER_RUN
-        val queryCount = minOf(MAX_PRODUCTS_PER_RUN, due.size, account.searchesRemaining, availableThisHour)
+        val queryCount = minOf(remainingDailyQuota, due.size, account.searchesRemaining, availableThisHour)
         if (queryCount <= 0) return Result.success()
         val selected = due.take(queryCount)
+        // Reserve quota and mark attempted items before the request: retries or repeated button
+        // presses must not silently turn this into more than three paid searches per local day.
+        preferences.edit().apply {
+            putString(QUOTA_DAY_KEY, today)
+            putInt(QUERIES_USED_TODAY_KEY, usedToday + selected.size)
+            selected.forEach { putLong(checkedKey(it.watch.productId), now) }
+        }.commit()
         val requests = selected.map { candidate ->
             SerpApiRequestProduct(
                 id = candidate.product.id,
@@ -94,11 +113,6 @@ class PriceAlertWorker(
             priceObservationDao = database.priceObservationDao()
         )
         repository.recordSerpApiQuotes(batch.quotes)
-
-        val checkedAt = System.currentTimeMillis()
-        preferences.edit().apply {
-            selected.forEach { putLong(checkedKey(it.watch.productId), checkedAt) }
-        }.apply()
 
         for (candidate in selected) {
             val productId = candidate.watch.productId
@@ -145,7 +159,9 @@ class PriceAlertWorker(
 
     private companion object {
         const val PREFS_NAME = "minimo_price_alert_monitor"
-        const val MAX_PRODUCTS_PER_RUN = 3
+        const val MAX_PRODUCTS_PER_DAY = 3
+        const val QUOTA_DAY_KEY = "quota_day"
+        const val QUERIES_USED_TODAY_KEY = "queries_used_today"
         const val MIN_RECHECK_INTERVAL_MS = 20L * 60L * 60L * 1000L
     }
 }

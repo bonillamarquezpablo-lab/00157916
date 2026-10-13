@@ -470,7 +470,37 @@ class ProductRepository(
             "wallapop.com", "vinted.es", "vinted.com", "cashconverters.es",
             "cashconverters.co.uk", "webuy.com", "cex.es", "cex.co.uk", "rentik.com"
         )
-        return excludedHosts.none { domain -> host == domain || host.endsWith(".$domain") }
+        if (excludedHosts.any { domain -> host == domain || host.endsWith(".$domain") }) return false
+        return isMerchantDestinationConsistent(storeName, sourceUrl)
+    }
+
+    /**
+     * If the URL belongs to a known listed retailer, reject a contradictory provider label.
+     * Google Shopping redirects are accepted but always shown as indirect links; unknown domains
+     * are retained because legitimate Spanish sellers may not be in the local directory yet.
+     */
+    private fun isMerchantDestinationConsistent(storeName: String, sourceUrl: String): Boolean {
+        val host = parseHttpUri(sourceUrl)?.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+        if (host.isBlank()) return false
+        if (host.startsWith("google.") || host.endsWith(".google.com") || host.endsWith(".google.es")) {
+            return true
+        }
+
+        val knownStore = Store.ALL_STORES.firstOrNull { store ->
+            val domain = store.domain.substringBefore('/').removePrefix("www.").lowercase(Locale.ROOT)
+            domain.isNotBlank() && (host == domain || host.endsWith(".$domain"))
+        } ?: return true
+
+        val stop = setOf("espana", "españa", "online", "tienda", "store", "shop", "seller", "es", "de", "el", "la")
+        val expectedTokens = normalizedProductTitle(knownStore.name).split(' ')
+            .filter { it.length > 2 && it !in stop }
+        val actualTokens = normalizedProductTitle(storeName).split(' ')
+            .filter { it.length > 2 && it !in stop }
+        val expectedCompact = normalizedProductTitle(knownStore.name).replace(" ", "")
+        val actualCompact = normalizedProductTitle(storeName).replace(" ", "")
+        return expectedTokens.any { it in actualTokens } ||
+            (actualCompact.length >= 4 && expectedCompact.contains(actualCompact)) ||
+            (expectedCompact.length >= 4 && actualCompact.contains(expectedCompact))
     }
 
     private fun isAccessoryListing(title: String): Boolean =

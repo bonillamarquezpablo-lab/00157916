@@ -18,6 +18,12 @@ interface PriceObservationDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertAll(observations: List<PriceObservationEntity>)
 
+    @Query("SELECT * FROM price_observations ORDER BY observedAt ASC")
+    suspend fun getAllObservationsSnapshot(): List<PriceObservationEntity>
+
+    @Query("DELETE FROM price_observations WHERE id IN (:observationIds)")
+    suspend fun deleteByIds(observationIds: List<Long>): Int
+
     @Query(
         "SELECT * FROM price_observations " +
             "WHERE productId = :productId AND isVerified = 1 " +

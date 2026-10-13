@@ -97,6 +97,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState
     ) { allProducts, state ->
         allProducts
+            // Hide legacy static demo rows from Mercado. Actual searches create verified Room
+            // observations and tracking remains visible even before it has live price history.
+            .filter { product -> product.isPriceVerified || product.isTracked }
             .filter { product ->
                 // Category filter
                 (state.selectedCategory == ProductCategory.ALL || product.category == state.selectedCategory)
@@ -439,6 +442,23 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(onlineSearchAmazonOnly = onlyAmazon)
     }
 
+    /** Open the Room-backed detail sheet for a grouped online product card. */
+    fun onOnlineProductSelected(identityKey: String) {
+        if (identityKey.isBlank()) return
+        viewModelScope.launch {
+            try {
+                val product = withTimeout(10_000L) {
+                    repository.awaitProductForOnlineIdentity(identityKey)
+                }
+                _uiState.value = _uiState.value.copy(selectedProduct = product)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                showSnackbar("No se ha podido abrir la ficha guardada. Repite la búsqueda para sincronizar el producto.")
+            }
+        }
+    }
+
     fun searchOnlineShopping() = startOnlineSearch(OnlineSearchProvider.GOOGLE_SHOPPING)
 
     fun searchAmazonShopping() = startOnlineSearch(OnlineSearchProvider.AMAZON)
@@ -572,9 +592,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     private fun onlineHistoryNotice(saved: Int, resultCount: Int): String =
         if (saved > 0) {
-            "Historial real: $saved nuevas observaciones guardadas en Room."
+            "Historial real: $saved nuevas observaciones guardadas en Room; los productos se han incorporado a Mercado."
         } else {
-            "Sin puntos nuevos en el historial: ya estaban registrados hoy o no pasaron los filtros de producto nuevo/precio seguro ($resultCount resultados revisados)."
+            "Los productos válidos siguen guardados en Mercado; no se añadieron puntos nuevos al historial porque ya estaban registrados hoy o no pasaron los filtros ($resultCount resultados revisados)."
         }
 
     private fun onlineSearchResultMessage(

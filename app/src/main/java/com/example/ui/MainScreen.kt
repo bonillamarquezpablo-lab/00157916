@@ -276,7 +276,8 @@ fun MainScreen(
                     onOpenSettings = {
                         showOnlineSearch = false
                         showSettings = true
-                    }
+                    },
+                    onOpenProduct = viewModel::onOnlineProductSelected
                 )
             } else when (currentTab) {
                 MainTab.MARKET -> {

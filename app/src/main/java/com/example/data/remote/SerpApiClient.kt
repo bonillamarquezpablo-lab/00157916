@@ -670,9 +670,32 @@ class SerpApiClient(
         if (wanted.isEmpty() || found.isEmpty()) return false
 
         val containsModelCode = wanted.any { token -> token.length >= 4 && token.any(Char::isDigit) && token.any(Char::isLetter) }
+
+        // Permit a small number of spelling mistakes in longer brand/product tokens, without
+        // relaxing model-code checks or allowing short generic words to match unrelated items.
+        fun editDistance(left: String, right: String): Int {
+            var previous = IntArray(right.length + 1) { it }
+            for (i in left.indices) {
+                val current = IntArray(right.length + 1)
+                current[0] = i + 1
+                for (j in right.indices) {
+                    val substitution = if (left[i] == right[j]) 0 else 1
+                    current[j + 1] = minOf(
+                        current[j] + 1,
+                        previous[j + 1] + 1,
+                        previous[j] + substitution
+                    )
+                }
+                previous = current
+            }
+            return previous[right.length]
+        }
+
         fun tokenMatches(token: String): Boolean = found.any { candidate ->
             when {
                 token == candidate -> true
+                token.length >= 7 && candidate.length >= 7 &&
+                    editDistance(token, candidate) <= minOf(2, token.length / 4) -> true
                 containsModelCode && token.length in 2..3 &&
                     candidate.length >= token.length + 3 && candidate.startsWith(token) -> true
                 token.length >= 4 && candidate.length >= 4 &&

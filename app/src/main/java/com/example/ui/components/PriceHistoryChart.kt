@@ -204,7 +204,9 @@ fun PriceHistoryChart(
                 val usableHeight = height - paddingBottom - paddingTop
 
                 val priceRange = (maxPriceInView - minPriceInView).coerceAtLeast(1.0)
-                val pointSpacing = if (filteredPoints.size > 1) width / (filteredPoints.size - 1) else width
+                // A single real observation is plotted in the center until later days
+                // extend it into a time series.
+                val pointSpacing = if (filteredPoints.size > 1) width / (filteredPoints.size - 1) else width / 2f
 
                 // Calculate point coordinates
                 val coords = filteredPoints.mapIndexed { index, pt ->

@@ -274,13 +274,17 @@ fun ProductDetailSheet(
                                 )
                             } else {
                                 Text(
-                                    text = "Historial en construcción",
+                                    text = if (product.priceHistory.isNotEmpty()) "Primer registro guardado" else "Historial en curso",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = "3 consultas · cobertura de 90 días",
+                                    text = when {
+                                        product.priceHistory.size == 1 -> "1 observación real · la gráfica ya está disponible"
+                                        product.priceHistory.size > 1 -> "${product.priceHistory.size} fechas registradas · evolución en curso"
+                                        else -> "Se necesitan observaciones reales para mostrar la evolución"
+                                    },
                                     fontSize = 10.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -354,7 +358,7 @@ fun ProductDetailSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            if (product.isPriceVerified && product.priceHistory.size >= 2) {
+            if (product.isPriceVerified && product.priceHistory.isNotEmpty()) {
                 PriceHistoryChart(
                     priceHistory = product.priceHistory,
                     athMinPrice = product.athMinPrice,

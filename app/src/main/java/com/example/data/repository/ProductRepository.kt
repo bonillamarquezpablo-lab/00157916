@@ -130,7 +130,7 @@ class ProductRepository(
                 quote.currency == "EUR" &&
                 parseHttpUri(quote.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
                 isEligibleHistoryTitle(title) &&
-                isEligibleHistoryTitle(quote.storeName) &&
+                isEligibleSeller(quote.storeName) &&
                 isPlausibleHistoryPrice(title, quote.price)
         }
         if (validQuotes.isEmpty()) return 0
@@ -173,7 +173,10 @@ class ProductRepository(
      * Applies the same conservative quality rules to visible results and Room history.
      * This keeps a suspicious price out of both the UI and the permanent price log.
      */
-    fun filterOnlineSearchResults(results: List<SerpApiShoppingResult>): List<SerpApiShoppingResult> {
+    fun filterOnlineSearchResults(
+        results: List<SerpApiShoppingResult>,
+        searchQuery: String = ""
+    ): List<SerpApiShoppingResult> {
         val eligible = results.filter { result ->
             result.title.isNotBlank() &&
                 result.storeName.isNotBlank() &&
@@ -181,12 +184,29 @@ class ProductRepository(
                 result.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
                 parseHttpUri(result.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
                 isEligibleHistoryTitle(result.title) &&
-                isEligibleHistoryTitle(result.storeName) &&
+                isEligibleSeller(result.storeName) &&
                 isPlausibleHistoryPrice(result.title, result.price)
         }
+
+        // Compare suspect accessories against complete-product offers only. Median is more
+        // robust than the arithmetic mean when one provider result has an extreme price.
+        val deviceSearch = isDeviceSearchQuery(searchQuery)
+        val fullProductPrices = if (deviceSearch) {
+            eligible.filterNot { isAccessoryListing(it.title) }.map { it.price }.sorted()
+        } else emptyList()
+        val referenceProductPrice = fullProductPrices.takeIf { it.isNotEmpty() }?.let { prices ->
+            if (prices.size % 2 == 1) prices[prices.size / 2]
+            else (prices[prices.size / 2 - 1] + prices[prices.size / 2]) / 2.0
+        }
+
         val coded = eligible.map { result -> result to modelCode(result.title) }
         return coded.filter { (candidate, code) ->
-            if (code == null) {
+            if (deviceSearch && isAccessoryListing(candidate.title) &&
+                referenceProductPrice != null &&
+                candidate.price < referenceProductPrice * ACCESSORY_PRICE_RATIO
+            ) {
+                false
+            } else if (code == null) {
                 true
             } else {
                 val comparablePrices = coded
@@ -243,7 +263,8 @@ class ProductRepository(
      */
     suspend fun recordOnlineSearchResults(
         results: List<SerpApiShoppingResult>,
-        sourceType: String
+        sourceType: String,
+        searchQuery: String = ""
     ): Int {
         val normalizedSource = when (sourceType) {
             "AMAZON" -> "Amazon.es"
@@ -252,7 +273,7 @@ class ProductRepository(
             else -> return 0
         }
         val catalog = _latestProducts.value.ifEmpty { SpanishMarketData.getInitialProducts() }
-        val eligible = filterOnlineSearchResults(results)
+        val eligible = filterOnlineSearchResults(results, searchQuery)
         if (eligible.isEmpty()) return 0
 
         var inserted = 0
@@ -295,10 +316,31 @@ class ProductRepository(
 
     private fun isEligibleHistoryTitle(title: String): Boolean {
         if (title.isBlank()) return false
+        val normalized = normalizedProductTitle(title)
         val excludedListing = Regex(
-            """(?i)\b(segunda\s+mano|usad[oa]s?|used|reacondicionad[oa]s?|refurbished|renewed|pre-owned|seminuev[oa]s?|alquiler|rentik|rental|renting|rent|leasing|lease|hire|financiaci[oó]n|financiar|cuota\s+mensual|pago\s+mensual|pago\s+a\s+plazos|monthly|por\s+mes|\d+\s*€/mes)\b"""
+            """\b(segunda\s+mano|usad[oa]s?|used|reacondicionad[oa]s?|refurbished|renewed|pre owned|seminuev[oa]s?|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|cuota|mensual|suscripcion|subscription|pago\s+a\s+plazos|monthly|por\s+mes|per\s+month|mes\s+a\s+mes)\b"""
         )
-        return !excludedListing.containsMatchIn(title)
+        return !excludedListing.containsMatchIn(normalized) &&
+            !Regex("""(?i)/\s*mes\b""").containsMatchIn(title)
+    }
+
+    private fun isEligibleSeller(storeName: String): Boolean {
+        if (storeName.isBlank() || !isEligibleHistoryTitle(storeName)) return false
+        val normalized = " " + normalizedProductTitle(storeName) + " "
+        val excludedSellers = listOf("rentik", "wallapop", "cash converters", "vinted", "cex")
+        return excludedSellers.none { seller -> (" " + seller + " ") in normalized }
+    }
+
+    private fun isAccessoryListing(title: String): Boolean =
+        Regex(
+            """(?i)\b(funda|fundas|carcasa|carcasas|cristal\s+templado|mop\s+kit|recambio|recambios|filtro|filtros|protector|adaptador|soporte|repuesto|repuestos|replacement|screen\s+protector|tempered\s+glass|cover|case)\b"""
+        ).containsMatchIn(normalizedProductTitle(title))
+
+    private fun isDeviceSearchQuery(query: String): Boolean {
+        val normalized = normalizedProductTitle(query)
+        return Regex(
+            """\b(movil|telefono|smartphone|iphone|redmi|poco|pixel|galaxy\s+(s|a|z|m)\s?\d{1,2}|aspiradora|vacuum|dyson|roomba|robot\s+aspirador|consola|playstation|ps5|xbox|nintendo\s+switch|oled|qled|televisor|television|smart\s+tv|laptop|portatil|macbook|chromebook|tablet|ipad|auriculares|headphones|headset)\b"""
+        ).containsMatchIn(normalized)
     }
 
     private fun isSafeCatalogTitleMatch(resultTitle: String, catalogTitle: String): Boolean {
@@ -395,6 +437,7 @@ class ProductRepository(
         const val MIN_HISTORY_PRICE_EUR = 5.0
         const val MAX_HISTORY_PRICE_EUR = 10000.0
         const val MIN_OUTLIER_PRICE_RATIO = 0.20
+        const val ACCESSORY_PRICE_RATIO = 0.25
         val TITLE_STOP_WORDS = setOf(
             "the", "and", "for", "with", "de", "del", "la", "las", "el", "los", "un", "una",
             "nuevo", "new", "of", "en", "para", "by", "from", "original", "oficial"

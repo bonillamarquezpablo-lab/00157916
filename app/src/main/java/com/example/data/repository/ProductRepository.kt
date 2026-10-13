@@ -60,6 +60,7 @@ class ProductRepository(
         externalScope.launch {
             priceObservationDao.deleteUnverifiedObservations()
             productDao.deleteProductsWithoutVerifiedObservations()
+            productDao.markProductsWithVerifiedObservations()
             trackedDao.deleteTrackingForMissingProducts()
             storeDao.deleteAll()
         }
@@ -768,8 +769,8 @@ class ProductRepository(
         val latestObservation = latestBatch.minByOrNull { it.price }
         val minObservation = snapshotHistory.minByOrNull { it.price }
         val maxObservation = snapshotHistory.maxByOrNull { it.price }
-        // Require both the explicit product flag and a provider-backed observation.
-        val priceIsVerified = isPriceVerified && latestObservation != null
+        // The verified Room observation is authoritative; repair stale pre-v5 product flags.
+        val priceIsVerified = latestObservation != null
         val effectiveHistory = if (priceIsVerified) snapshotHistory else emptyList()
         val effectiveStore = if (priceIsVerified) {
             observationStore(latestObservation!!, stores)

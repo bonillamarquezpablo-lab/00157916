@@ -594,6 +594,110 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `shopping search rejects rentals and extreme low price outliers`() {
+        val client = SerpApiClient()
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {
+                  "title": "Sony WH-1000XM5 Auriculares",
+                  "price": "1,00 €",
+                  "extracted_price": 1.0,
+                  "link": "https://www.movistar.es/sony",
+                  "source": "Movistar"
+                },
+                {
+                  "title": "Sony WH-1000XM5 auriculares en alquiler",
+                  "price": "11,49 €",
+                  "extracted_price": 11.49,
+                  "link": "https://www.grover.com/es/sony",
+                  "source": "Grover"
+                },
+                {
+                  "title": "Sony WH-1000XM5 auriculares negros",
+                  "price": "80,00 €",
+                  "extracted_price": 80.0,
+                  "link": "https://es.wallapop.com/item/sony",
+                  "source": "Wallapop"
+                },
+                {
+                  "title": "Sony WH-1000XM5 Wireless Headphones",
+                  "price": "90,00 €",
+                  "extracted_price": 90.0,
+                  "link": "https://www.pccomponentes.com/sony",
+                  "source": "PcComponentes"
+                },
+                {
+                  "title": "Sony WH-1000XM5 Noise Cancelling Headphones",
+                  "price": "100,00 €",
+                  "extracted_price": 100.0,
+                  "link": "https://www.amazon.es/dp/SONYTEST",
+                  "source": "Amazon.es"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val report = client.parseShoppingResultsDetailed(
+            root = payload,
+            query = "Sony WH-1000XM5",
+            observedAt = 123L
+        )
+
+        assertEquals(listOf(80.0, 90.0, 100.0), report.results.map { it.price })
+        assertEquals(1, report.rejectedAsSuspiciousPrice)
+        assertEquals(1, report.rejectedNonComparable)
+    }
+
+    @Test
+    fun `shopping search requires requested model code to match`() {
+        val client = SerpApiClient()
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {
+                  "title": "Sony auriculares inalámbricos",
+                  "price": "99,00 €",
+                  "extracted_price": 99.0,
+                  "link": "https://www.example.test/sony",
+                  "source": "Example"
+                },
+                {
+                  "title": "Sony WH-1000XM4 auriculares",
+                  "price": "89,00 €",
+                  "extracted_price": 89.0,
+                  "link": "https://www.example.test/xm4",
+                  "source": "Example"
+                },
+                {
+                  "title": "Sony WH-1000XM5 auriculares",
+                  "price": "249,00 €",
+                  "extracted_price": 249.0,
+                  "link": "https://www.example.test/xm5",
+                  "source": "Example"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val report = client.parseShoppingResultsDetailed(
+            root = payload,
+            query = "Sony WH-1000XM5",
+            observedAt = 123L
+        )
+
+        assertEquals(1, report.results.size)
+        assertEquals("Sony WH-1000XM5 auriculares", report.results.single().title)
+        assertEquals(2, report.rejectedAsIrrelevant)
+    }
+
+    @Test
     fun `Google search URL is labelled as an indirect Shopping link`() {
         val result = com.example.data.remote.SerpApiShoppingResult(
             title = "Cargador Anker",

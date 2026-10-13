@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.PricePoint
+import com.example.ui.theme.FloatingSurfaceShape
 
 enum class ChartRange(val label: String, val days: Int?) {
     DAYS_30("30 Días", 30),
@@ -92,9 +93,9 @@ fun PriceHistoryChart(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(16.dp))
+            .clip(FloatingSurfaceShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f))
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.55f), FloatingSurfaceShape)
             .padding(14.dp)
             .testTag("price_history_chart_container")
     ) {
@@ -122,9 +123,9 @@ fun PriceHistoryChart(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFF10B981).copy(alpha = 0.15f))
-                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF10B981).copy(alpha = 0.16f))
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
                     Text(
                         text = "Mín. observado: ${String.format("%.0f", athMinPrice)}€",
@@ -136,9 +137,9 @@ fun PriceHistoryChart(
                 Spacer(modifier = Modifier.width(6.dp))
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
-                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
                     Text(
                         text = "Media 90 d: ${if (avg90dPrice > 0.0) String.format("%.0f", avg90dPrice) + "€" else "—"}",

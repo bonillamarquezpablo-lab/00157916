@@ -342,7 +342,7 @@ class ProductRepository(
                     athMaxPrice = maxOf(existingProduct.athMaxPrice, highestToday),
                     currentStoreId = storeId,
                     storeUrl = bestOffer.sourceUrl,
-                    imageUrl = bestOffer.thumbnailUrl.takeIf { it.isNotBlank() } ?: existingProduct.imageUrl,
+                    imageUrl = group.representativeImageUrl.takeIf { it.isNotBlank() } ?: existingProduct.imageUrl,
                     isPriceVerified = true
                 )
             } else {
@@ -361,7 +361,7 @@ class ProductRepository(
                     currentStoreId = storeId,
                     storeUrl = bestOffer.sourceUrl,
                     ean = "",
-                    imageUrl = bestOffer.thumbnailUrl.takeIf { it.isNotBlank() },
+                    imageUrl = group.representativeImageUrl.takeIf { it.isNotBlank() },
                     rating = 0.0,
                     reviewCount = 0,
                     isPriceVerified = true

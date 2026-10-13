@@ -25,13 +25,11 @@ data class SerpApiShoppingResult(
      * SerpApi can return /search?prds=... links as well as /shopping/product/... links.
      */
     val isGoogleShoppingProductLink: Boolean
-        get() {
-            val uri = runCatching { URI(sourceUrl) }.getOrNull() ?: return false
-            val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
-            return host.startsWith("google.") ||
-                host.endsWith(".google.com") ||
-                host.endsWith(".google.es")
-        }
+        get() = isGoogleShoppingUrl(sourceUrl)
+
+    /** Stored label describing where tapping this offer opens. */
+    val linkType: String
+        get() = linkTypeForUrl(sourceUrl)
 
     val isAmazonOffer: Boolean
         get() {
@@ -44,6 +42,18 @@ data class SerpApiShoppingResult(
                 host.contains(".amazon.")
         }
 }
+
+/** Identifies the link destination without requiring a direct retailer URL or HTTPS. */
+fun isGoogleShoppingUrl(sourceUrl: String): Boolean {
+    val uri = runCatching { URI(sourceUrl) }.getOrNull() ?: return false
+    val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+    return host.startsWith("google.") ||
+        host.endsWith(".google.com") ||
+        host.endsWith(".google.es")
+}
+
+fun linkTypeForUrl(sourceUrl: String): String =
+    if (isGoogleShoppingUrl(sourceUrl)) "Google Shopping" else "directo"
 
 /**
  * One exact product/model grouping in the online results. Individual retailer listings remain

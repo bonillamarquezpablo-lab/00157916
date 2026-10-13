@@ -186,7 +186,7 @@ fun MainScreen(
                     .clip(FloatingSurfaceShape)
                     .border(
                         width = 1.dp,
-                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
                         shape = FloatingSurfaceShape
                     )
                     .testTag("main_bottom_nav"),

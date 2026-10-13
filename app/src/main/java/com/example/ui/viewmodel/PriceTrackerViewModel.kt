@@ -79,6 +79,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     private val serpApiTokenStore = SerpApiTokenStore(application)
     private val serpApiClient = SerpApiClient()
     private val onlineSearchCache = OnlineSearchCache(application)
+    private val resolvedSellerUrls = mutableMapOf<String, String>()
     private val priceRefreshPreferences = application.getSharedPreferences(
         "minimo_serpapi_refresh_state",
         Context.MODE_PRIVATE
@@ -236,17 +237,23 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             _uiState.value = _uiState.value.copy(
                 isRefreshingPrices = true,
                 isTestingSingleProduct = testOneProduct,
-                priceRefreshStatus = if (testOneProduct) "Preparando una prueba de 1 producto…" else "Preparando la actualización del catálogo…"
+                priceRefreshStatus = if (testOneProduct) "Preparando una prueba de producto conocido…" else "Preparando la actualización del catálogo…"
             )
             try {
                 val allProducts = withTimeout(20_000L) {
                     repository.allProductsStream.first { products -> products.isNotEmpty() }
                 }
                 val targets = if (testOneProduct) {
-                    // Prefer a real catalog product with a barcode so the one-search test uses
-                    // the strongest available identity instead of a hard-coded demo item.
-                    listOf(allProducts.firstOrNull { product -> !product.ean.isNullOrBlank() }
-                        ?: allProducts.first())
+                    // Use a recognizable, stable model for the probe. The first catalogue item
+                    // with an EAN may be obscure or poorly represented in Shopping results.
+                    listOf(
+                        allProducts.firstOrNull { it.id == "demo_galaxy_s26_ultra" }
+                            ?: allProducts.firstOrNull {
+                                it.brand.equals("Samsung", ignoreCase = true) &&
+                                    it.title.contains("S26 Ultra", ignoreCase = true)
+                            }
+                            ?: allProducts.first()
+                    )
                 } else {
                     // Spread catalog lookups over multiple manual batches, prioritizing products
                     // never queried or queried longest ago. This keeps one tap within 40 searches
@@ -309,7 +316,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
                 if (quotes.isEmpty()) {
                     val message = if (testOneProduct) {
-                        "La prueba respondió, pero no encontró una oferta que coincidiera de forma segura con ese producto. No se ha cambiado ningún precio y el lote de 40 sigue bloqueado para proteger tu cuota."
+                        "SerpApi respondió, pero Google Shopping no devolvió una oferta utilizable para «${targets.first().title}». No se ha cambiado ningún precio; el lote de 40 sigue bloqueado para proteger tu cuota."
                     } else {
                         "SerpApi respondió, pero ${batchResult.queriesWithoutMatches} de ${batchResult.requestedQueries - batchResult.failedQueries} consultas no produjeron ofertas con coincidencia segura. No se han cambiado los precios."
                     }
@@ -427,6 +434,32 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(onlineSearchAmazonOnly = onlyAmazon)
     }
 
+    /**
+     * Resolve a Google Shopping card to its retailer's direct offer when the detail API exposes
+     * that merchant. The lookup runs only after the user opens a card, not for every search result.
+     */
+    suspend fun resolveRetailerUrl(result: SerpApiShoppingResult): String? {
+        if (!result.isGoogleShoppingProductLink) return result.sourceUrl
+        val productApiUrl = result.immersiveProductApiUrl ?: return null
+        val cacheKey = "${result.sourceUrl}|${result.storeName.lowercase()}"
+        resolvedSellerUrls[cacheKey]?.let { return it }
+
+        val token = serpApiTokenStore.read()?.takeIf { it.isNotBlank() } ?: return null
+        val info = readAccountInfo(token) ?: return null
+        if (accountStatusBlockMessage(info) != null || accountCapacity(info) <= 0) return null
+
+        return try {
+            serpApiClient.resolveRetailerUrl(token, result)?.also { directUrl ->
+                resolvedSellerUrls[cacheKey] = directUrl
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // The caller will open a seller-targeted search when the provider has no direct URL.
+            null
+        }
+    }
+
     fun searchOnlineShopping() = startOnlineSearch(OnlineSearchProvider.GOOGLE_SHOPPING)
 
     fun searchAmazonShopping() = startOnlineSearch(OnlineSearchProvider.AMAZON)
@@ -455,8 +488,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             onlineSearchProvider = provider,
             onlineSearchAmazonOnly = provider == OnlineSearchProvider.AMAZON
         )
-        // Invalidate cached results made before the stricter quality filters.
-        val cacheNamespace = "${provider.name}_quality_v2"
+        // Invalidate cached results created before direct-link metadata and history persistence.
+        val cacheNamespace = "${provider.name}_quality_v3"
         viewModelScope.launch {
             try {
                 // Cache lookup comes first: saved results remain usable even if the quota is empty
@@ -509,6 +542,19 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
                 val results = googleReport?.results
                     ?: serpApiClient.searchAmazonOnline(token, query)
+                // Persist real result observations for specific model searches. A broad brand
+                // query is not a single product and must not combine unrelated prices into one history.
+                val historyNotice = if (results.isNotEmpty()) {
+                    runCatching { repository.recordOnlineSearchSnapshot(query, results) }
+                        .fold(
+                            onSuccess = { saved ->
+                                if (saved > 0) " Historial local: se guardaron $saved observaciones del modelo." else ""
+                            },
+                            onFailure = { " Los resultados aparecieron, pero no se pudo guardar su historial local." }
+                        )
+                } else {
+                    ""
+                }
                 // Empty responses are not useful cache entries: allow a later retry to query
                 // SerpApi again instead of replaying a stale "no results" response for 55 minutes.
                 if (results.isNotEmpty()) onlineSearchCache.write(cacheNamespace, query, results)
@@ -535,7 +581,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 // The account endpoint is free; refresh the displayed balance after a live request.
                 val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
                 val quotaNote = quotaAfter?.let { " ${it.quotaSummary()}" }.orEmpty()
-                val message = base + qualityNotice + quotaNote
+                val message = base + qualityNotice + historyNotice + quotaNote
                 _uiState.value = _uiState.value.copy(
                     onlineSearchResults = results,
                     onlineSearchStatus = message

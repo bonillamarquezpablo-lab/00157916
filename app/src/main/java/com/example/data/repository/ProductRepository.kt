@@ -64,6 +64,12 @@ class ProductRepository(
             productDao.deleteExplicitDemoProducts()
             priceObservationDao.deleteIneligibleLegacyObservations()
             priceObservationDao.deleteUnverifiedObservations()
+            val invalidObservationIds = priceObservationDao.getAllObservationsSnapshot()
+                .filterNot(::isEligibleObservationForHistory)
+                .map { it.id }
+            if (invalidObservationIds.isNotEmpty()) {
+                priceObservationDao.deleteByIds(invalidObservationIds)
+            }
             productDao.deleteProductsWithoutVerifiedObservations()
             productDao.markProductsWithVerifiedObservations()
             trackedDao.deleteTrackingForMissingProducts()
@@ -87,7 +93,11 @@ class ProductRepository(
     ) { productEntities, storeEntities, trackedEntities, observations, simulations ->
         val stores = storeEntities.map { it.toDomainStore() }.ifEmpty { Store.ALL_STORES }
         val trackingMap = trackedEntities.associateBy { it.productId }
-        val observationsByProduct = observations.groupBy { it.productId }
+        // Apply the same trust policy while streaming so legacy rows cannot flash before
+        // asynchronous startup cleanup has completed.
+        val observationsByProduct = observations
+            .filter(::isEligibleObservationForHistory)
+            .groupBy { it.productId }
 
         // Never render a Room product without at least one verified source-backed observation.
         // This also prevents legacy/mock rows from flashing on screen while startup cleanup runs.
@@ -239,6 +249,17 @@ class ProductRepository(
             }
         }.map { (result, _) -> result }
     }
+
+    private fun isEligibleObservationForHistory(observation: PriceObservationEntity): Boolean =
+        observation.isVerified &&
+            observation.productId.isNotBlank() &&
+            observation.currency == "EUR" &&
+            observation.price.isFinite() &&
+            observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
+            parseHttpUri(observation.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
+            isEligibleHistoryTitle(observation.productTitle) &&
+            isEligibleSeller(observation.storeName, observation.sourceUrl) &&
+            isPlausibleHistoryPrice(observation.productTitle, observation.price)
 
     private fun isPlausibleHistoryPrice(title: String, price: Double): Boolean {
         if (!price.isFinite() || price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR) return false

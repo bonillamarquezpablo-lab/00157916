@@ -281,7 +281,7 @@ fun ProductDetailSheet(
                                 )
                                 Text(
                                     text = when {
-                                        product.priceHistory.size == 1 -> "1 observación real · la gráfica ya está disponible"
+                                        product.priceHistory.size == 1 -> "1 observación real · aún sin evolución temporal"
                                         product.priceHistory.size > 1 -> "${product.priceHistory.size} fechas registradas · evolución en curso"
                                         else -> "Se necesitan observaciones reales para mostrar la evolución"
                                     },
@@ -358,19 +358,34 @@ fun ProductDetailSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            if (product.isPriceVerified && product.priceHistory.isNotEmpty()) {
+            if (product.isPriceVerified && product.priceHistory.size >= 2) {
                 PriceHistoryChart(
                     priceHistory = product.priceHistory,
                     athMinPrice = product.athMinPrice,
-                    avg90dPrice = product.avg90dPrice
+                    avg90dPrice = product.avg90dPrice,
+                    hasSufficientHistory = product.hasSufficientHistory
                 )
             } else if (product.isPriceVerified) {
-                Text(
-                    text = "El historial queda guardado en este dispositivo. La evolución aparecerá cuando haya observaciones de días distintos; no se inventan precios anteriores.",
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Historial en construcción",
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Hay ${product.priceHistory.size} observación real. El gráfico aparecerá cuando Mínimo registre precios en al menos dos fechas distintas; todavía no se puede calcular una tendencia.",
+                            modifier = Modifier.padding(top = 4.dp),
+                            fontSize = 12.sp,
+                            lineHeight = 18.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
 
             // Only show offers that came back from the latest provider query.

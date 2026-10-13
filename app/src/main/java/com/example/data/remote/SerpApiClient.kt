@@ -815,7 +815,7 @@ class SerpApiClient(
         val standardized = Regex(
             """(?i)\b(\d{1,2})\s*(?:gb)?\s*[+/]\s*(\d{2,4})\s*gb\b"""
         ).replace(value) { match ->
-            "\${match.groupValues[1]}GB \${match.groupValues[2]}GB"
+            "${match.groupValues[1]}GB ${match.groupValues[2]}GB"
         }
         return Regex("""\b(\d{1,4})\s?(gb|tb)\b""")
             .findAll(normalize(standardized))

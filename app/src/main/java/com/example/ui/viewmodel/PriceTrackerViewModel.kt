@@ -592,9 +592,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     private fun onlineHistoryNotice(saved: Int, resultCount: Int): String =
         if (saved > 0) {
-            "Historial real: $saved nuevas observaciones guardadas en Room."
+            "Historial real: $saved nuevas observaciones guardadas en Room; los productos se han incorporado a Mercado."
         } else {
-            "Sin puntos nuevos en el historial: ya estaban registrados hoy o no pasaron los filtros de producto nuevo/precio seguro ($resultCount resultados revisados)."
+            "Los productos válidos siguen guardados en Mercado; no se añadieron puntos nuevos al historial porque ya estaban registrados hoy o no pasaron los filtros ($resultCount resultados revisados)."
         }
 
     private fun onlineSearchResultMessage(

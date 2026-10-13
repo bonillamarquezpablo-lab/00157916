@@ -712,7 +712,6 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    @Test
     fun `Google search URL is labelled as an indirect Shopping link`() {
         val result = com.example.data.remote.SerpApiShoppingResult(
             title = "Cargador Anker",

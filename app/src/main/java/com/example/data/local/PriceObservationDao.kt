@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -17,6 +18,9 @@ interface PriceObservationDao {
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertAll(observations: List<PriceObservationEntity>)
+
+    @Update
+    suspend fun update(observation: PriceObservationEntity)
 
     @Query(
         "SELECT * FROM price_observations " +
@@ -40,7 +44,7 @@ interface PriceObservationDao {
 
     @Query(
         "SELECT * FROM price_observations " +
-            "WHERE productId = :productId AND storeId = :storeId " +
+            "WHERE productId = :productId AND storeId = :storeId AND isVerified = 1 " +
             "AND observedAt >= :dayStart AND observedAt < :dayEnd " +
             "LIMIT 1"
     )

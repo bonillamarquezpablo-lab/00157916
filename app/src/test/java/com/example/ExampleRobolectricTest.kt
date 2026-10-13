@@ -337,7 +337,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `migration 2 to 4 preserves watchlist and old products and stores verified price observations`() {
+    fun `migration 2 to 5 preserves watchlist and old products and stores verified price observations`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val databaseName = "minimo_migration_preservation_test.db"
         context.deleteDatabase(databaseName)
@@ -390,7 +390,7 @@ class ExampleRobolectricTest {
             AppDatabase::class.java,
             databaseName
         )
-            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
             .allowMainThreadQueries()
             .build()
 

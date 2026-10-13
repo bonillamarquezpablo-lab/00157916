@@ -913,6 +913,7 @@ class ExampleRobolectricTest {
                 normalNewPhone.copy(storeName = "Vinted", sourceUrl = "https://www.vinted.es/xiaomi"),
                 normalNewPhone.copy(storeName = "CeX España", sourceUrl = "https://www.webuy.com/xiaomi"),
                 normalNewPhone.copy(storeName = "Tienda oficial", sourceUrl = "https://www.wallapop.com/item/xiaomi"),
+                normalNewPhone.copy(storeName = "Amazon.es - Seller", sourceUrl = "https://www.pccomponentes.com/xiaomi-redmi-17"),
                 normalNewPhone.copy(
                     title = "Xiaomi Redmi 17 5G cuota 9,90 €/mes",
                     storeName = "Tienda oficial",

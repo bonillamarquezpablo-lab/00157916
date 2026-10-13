@@ -14,12 +14,16 @@ import com.example.data.model.ProductCategory
 import com.example.data.model.StoreOffer
 import com.example.data.remote.SerpApiQuote
 import com.example.data.remote.SerpApiShoppingResult
+import com.example.data.remote.OnlineProductGroup
+import com.example.data.remote.groupOnlineShoppingResults
+import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.model.Store
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
@@ -59,12 +63,10 @@ class ProductRepository(
             val missingStores = configuredStores.filter { it.id !in existingStoreIds }
             if (missingStores.isNotEmpty()) storeDao.insertAll(missingStores)
 
-            val configuredProducts = SpanishMarketData.getInitialProducts()
-            val existingProductIds = productDao.getAllProductsSnapshot().map { it.id }.toSet()
-            val missingProducts = configuredProducts.filter { it.id !in existingProductIds }
-            if (missingProducts.isNotEmpty()) {
-                productDao.insertAll(missingProducts.map { it.toEntity() })
-            }
+            // Do not populate Mercado with the old 75-row demonstration catalogue. Clean old
+            // untracked seed rows on upgrade, but preserve rows with tracking or verified history.
+            val legacyDemoIds = SpanishMarketData.getInitialProducts().map { it.id }
+            productDao.deleteUntrackedUnobservedDemoProducts(legacyDemoIds)
         }
     }
 
@@ -115,13 +117,11 @@ class ProductRepository(
      * verified only if at least one validated offer was stored for that product.
      */
     suspend fun recordSerpApiQuotes(quotes: List<SerpApiQuote>): Int {
-        val catalog = _latestProducts.value.ifEmpty { SpanishMarketData.getInitialProducts() }
-        // The currently refreshed item can exist in Room before the catalogue flow has emitted it.
-        // Resolve its real stored title as well as the bundled seed data.
+        // Resolve titles from persisted products only. The bundled demonstration catalogue is not
+        // a valid source for a real market observation.
         val storedProducts = productDao.getAllProductsSnapshot()
-        val titleById = buildMap {
-            catalog.forEach { put(it.id, it.title) }
-            storedProducts.forEach { put(it.id, it.title) }
+        val titleById = storedProducts.associate { it.id to it.title }.toMutableMap().apply {
+            _latestProducts.value.forEach { product -> put(product.id, product.title) }
         }
         val validQuotes = quotes.filter { quote ->
             val title = titleById[quote.productId].orEmpty()
@@ -272,46 +272,135 @@ class ProductRepository(
             "Amazon.es", "Google Shopping" -> sourceType
             else -> return 0
         }
-        val catalog = _latestProducts.value.ifEmpty { SpanishMarketData.getInitialProducts() }
+        val catalog = _latestProducts.value
         val eligible = filterOnlineSearchResults(results, searchQuery)
         if (eligible.isEmpty()) return 0
 
         var inserted = 0
-        for (result in eligible) {
-            val matchedProduct = catalog.firstOrNull { product ->
-                isSafeCatalogTitleMatch(result.title, product.title)
+        val currentEntities = productDao.getAllProductsSnapshot().toMutableList()
+        val groups = groupOnlineShoppingResults(eligible)
+        for (group in groups) {
+            val bestOffer = group.cheapestOffer
+            val storeId = canonicalStoreId(bestOffer.storeName, bestOffer.sourceUrl)
+            val existingProduct = currentEntities.firstOrNull {
+                onlineProductIdentityKey(it.title) == group.identityKey
             }
-            val productId = matchedProduct?.id
-                ?: stableOnlineId("online_product_", normalizedProductTitle(result.title))
-            val storeId = canonicalStoreId(result.storeName, result.sourceUrl)
-            val (dayStart, dayEnd) = localDayBounds(result.observedAt)
-            if (priceObservationDao.getObservationForStoreProductDay(
-                    productId, storeId, dayStart, dayEnd
-                ) != null
-            ) continue
-
-            priceObservationDao.insert(
-                PriceObservationEntity(
-                    productId = productId,
-                    storeId = storeId,
-                    price = result.price,
-                    currency = "EUR",
-                    observedAt = result.observedAt,
-                    sourceUrl = result.sourceUrl,
-                    sourceName = normalizedSource,
-                    isVerified = true,
-                    verificationNote = "Resultado online válido en euros; precio y disponibilidad pendientes de confirmación en la tienda.",
-                    productTitle = result.title,
-                    storeName = result.storeName,
-                    sourceType = normalizedSource
+            val productId = existingProduct?.id
+                ?: stableOnlineId("online_product_", group.identityKey)
+            val displayTitle = existingProduct?.title?.takeIf { it.isNotBlank() } ?: group.title
+            val currentMinimum = group.minPrice
+            val highestToday = group.offers.maxOfOrNull { it.price } ?: currentMinimum
+            val productEntity = if (existingProduct != null) {
+                existingProduct.copy(
+                    title = displayTitle,
+                    brand = existingProduct.brand.takeIf { it.isNotBlank() }
+                        ?: inferProductBrand(displayTitle),
+                    category = if (existingProduct.category == ProductCategory.ALL.name) {
+                        inferProductCategory(displayTitle, searchQuery).name
+                    } else existingProduct.category,
+                    currentPrice = currentMinimum,
+                    athMinPrice = if (existingProduct.athMinPrice > 0.0) existingProduct.athMinPrice else currentMinimum,
+                    athMinDate = existingProduct.athMinDate.ifBlank { "Historial en construcción" },
+                    athMinStore = bestOffer.storeName,
+                    athMaxPrice = maxOf(existingProduct.athMaxPrice, highestToday),
+                    currentStoreId = storeId,
+                    storeUrl = bestOffer.sourceUrl,
+                    imageUrl = bestOffer.thumbnailUrl.takeIf { it.isNotBlank() } ?: existingProduct.imageUrl,
+                    isPriceVerified = true
                 )
-            )
-            if (matchedProduct != null) {
-                productDao.updatePriceVerification(matchedProduct.id, true)
+            } else {
+                ProductEntity(
+                    id = productId,
+                    title = displayTitle,
+                    brand = inferProductBrand(displayTitle),
+                    category = inferProductCategory(displayTitle, searchQuery).name,
+                    currentPrice = currentMinimum,
+                    athMinPrice = currentMinimum,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = bestOffer.storeName,
+                    athMaxPrice = highestToday,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = storeId,
+                    storeUrl = bestOffer.sourceUrl,
+                    ean = "",
+                    imageUrl = bestOffer.thumbnailUrl.takeIf { it.isNotBlank() },
+                    rating = 0.0,
+                    reviewCount = 0,
+                    isPriceVerified = true
+                )
             }
-            inserted++
+            productDao.insert(productEntity)
+            if (existingProduct == null) currentEntities += productEntity
+
+            // Keep every distinct merchant observation in Room. The product chart later condenses
+            // these offers into one minimum-price point per local calendar day.
+            for (result in group.offers) {
+                val offerStoreId = canonicalStoreId(result.storeName, result.sourceUrl)
+                val (dayStart, dayEnd) = localDayBounds(result.observedAt)
+                if (priceObservationDao.getObservationForStoreProductDay(
+                        productId, offerStoreId, dayStart, dayEnd
+                    ) != null
+                ) continue
+
+                priceObservationDao.insert(
+                    PriceObservationEntity(
+                        productId = productId,
+                        storeId = offerStoreId,
+                        price = result.price,
+                        currency = "EUR",
+                        observedAt = result.observedAt,
+                        sourceUrl = result.sourceUrl,
+                        sourceName = normalizedSource,
+                        isVerified = true,
+                        verificationNote = "Resultado online válido en euros; precio y disponibilidad pendientes de confirmación en la tienda.",
+                        productTitle = result.title,
+                        storeName = result.storeName,
+                        sourceType = normalizedSource
+                    )
+                )
+                inserted++
+            }
         }
         return inserted
+    }
+
+    /** Resolve a persisted online product when a grouped result card is tapped. */
+    suspend fun awaitProductForOnlineIdentity(identityKey: String): Product {
+        return allProductsStream.first { products ->
+            products.any { onlineProductIdentityKey(it.title) == identityKey }
+        }.first { onlineProductIdentityKey(it.title) == identityKey }
+    }
+
+    private fun inferProductBrand(title: String): String {
+        val brands = listOf(
+            "Apple", "Samsung", "Xiaomi", "Redmi", "POCO", "Google", "Sony", "UGREEN",
+            "Anker", "Baseus", "Huawei", "Honor", "Motorola", "OPPO", "OnePlus", "Dyson",
+            "Roborock", "JBL", "Logitech", "Nintendo", "Microsoft", "Lenovo", "HP", "ASUS",
+            "Acer", "Dell", "Philips", "Rowenta", "Cecotec", "Bosch", "LG", "TCL"
+        )
+        return brands.firstOrNull { title.contains(it, ignoreCase = true) } ?: "Sin marca"
+    }
+
+    private fun inferProductCategory(title: String, query: String): ProductCategory {
+        val text = "${title.lowercase(Locale.ROOT)} ${query.lowercase(Locale.ROOT)}"
+        return when {
+            Regex("""\\b(iphone|redmi|poco|smartphone|movil|telefono|galaxy s|pixel)\\b""").containsMatchIn(text) ->
+                ProductCategory.SMARTPHONES
+            Regex("""\\b(laptop|portatil|macbook|chromebook|pc|ram|ssd|procesador|gpu|usb|hub|ethernet|router|cable|cargador)\\b""").containsMatchIn(text) ->
+                ProductCategory.COMPUTING
+            Regex("""\\b(playstation|ps5|xbox|nintendo|switch|consola|mando)\\b""").containsMatchIn(text) ->
+                ProductCategory.GAMING
+            Regex("""\\b(oled|qled|televisor|television|tv|auriculares|headphones|altavoz|speaker)\\b""").containsMatchIn(text) ->
+                ProductCategory.TV_AUDIO
+            Regex("""\\b(aspiradora|vacuum|robot aspirador|cafetera|frigorifico|microondas|lavadora|mop kit)\\b""").containsMatchIn(text) ->
+                ProductCategory.HOME_APPLIANCES
+            Regex("""\\b(afeitadora|depiladora|secador|cepillo electrico)\\b""").containsMatchIn(text) ->
+                ProductCategory.PERSONAL_CARE
+            Regex("""\\b(bicicleta|bicicletas|casco|running|deporte)\\b""").containsMatchIn(text) ->
+                ProductCategory.SPORTS
+            else -> ProductCategory.ALL
+        }
     }
 
     private fun isEligibleHistoryTitle(title: String): Boolean {
@@ -535,7 +624,7 @@ class ProductRepository(
                 detectedTitle = directMatch.title,
                 matchedProduct = directMatch,
                 isKnownRetailerDomain = detectedStore != null,
-                adviceMessage = "Coincidencia con una ficha del catálogo de demostración. Sus precios e historial son datos de ejemplo; no se ha consultado la tienda ni verificado el precio actual."
+                adviceMessage = "Coincidencia con un producto guardado en tu Mercado y sus observaciones reales de precio."
             )
         }
 
@@ -553,7 +642,7 @@ class ProductRepository(
             submittedUri != null ->
                 "No se reconoce este dominio como una de las tiendas configuradas y la app todavía no puede extraer el precio de la página. No se ha inventado ningún precio ni historial."
             else ->
-                "No hay coincidencia con el catálogo de demostración. Escribe el modelo exacto o pega un enlace de producto. Esta versión aún no dispone de una fuente de precios en directo."
+                "No hay coincidencia con los productos que has guardado. Busca el modelo desde la lupa para consultar precios actuales y añadirlo a Mercado."
         }
 
         // Never manufacture a product with placeholder prices, a fake EAN or synthetic history.

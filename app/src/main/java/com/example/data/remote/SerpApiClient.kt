@@ -685,6 +685,7 @@ class SerpApiClient(
     }.getOrDefault(false)
 
     private fun isPlausibleProductMatch(requested: String, returned: String): Boolean {
+        if (isIrrelevantMultiProductBundle(requested, returned)) return false
         val wanted = tokens(requested)
         val found = tokens(returned)
         if (wanted.isEmpty() || found.isEmpty()) return false

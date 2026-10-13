@@ -72,6 +72,29 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun groupedProductPrefersDirectRetailerLinkForItsPurchaseAction() {
+        val indirectLowest = SerpApiShoppingResult(
+            title = "Logitech G203 Lightsync Gaming Mouse",
+            price = 11.95,
+            storeName = "Todo Consolas",
+            sourceUrl = "https://www.google.com/shopping/product/123",
+            observedAt = 1_800_000_000_000L
+        )
+        val directRetailer = indirectLowest.copy(
+            price = 24.99,
+            storeName = "Tienda oficial",
+            sourceUrl = "https://shop.example.com/logitech-g203"
+        )
+
+        val group = groupOnlineShoppingResults(listOf(indirectLowest, directRetailer)).single()
+
+        assertEquals("The raw observed minimum remains available for history", 11.95, group.minPrice, 0.001)
+        assertEquals("The purchase action should use the cheapest direct merchant link",
+            24.99, group.bestPurchaseOffer.price, 0.001)
+        assertFalse(group.bestPurchaseOffer.isGoogleShoppingProductLink)
+    }
+
+    @Test
     fun groupedProductUsesThumbnailThatMatchesRepresentativeTitle() {
         val cheapest = SerpApiShoppingResult(
             title = "Smartphone Sony WH-1000XM5 Wireless Headphones",

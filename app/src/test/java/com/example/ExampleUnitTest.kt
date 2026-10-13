@@ -9,6 +9,7 @@ import com.example.data.repository.SpanishMarketData
 import com.example.ui.components.ChartRange
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
+import com.example.data.remote.onlineProductIdentityKey
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -76,6 +77,16 @@ class ExampleUnitTest {
         assertEquals(54.99, twentyK65W.minPrice, 0.001)
         assertTrue(groups.any { it.identityKey.contains("100w") })
         assertTrue(groups.any { it.identityKey.contains("10000mah") })
+    }
+
+    @Test
+    fun sonyHeadphoneModelFormattingDoesNotCreateDuplicateCards() {
+        val formatted = onlineProductIdentityKey("Sony WH-1000XM5 Wireless Headphones")
+        val compact = onlineProductIdentityKey("Sony WH1000XM5 Wireless Noise Canceling Headphones")
+        val withoutPrefix = onlineProductIdentityKey("Sony 1000XM5 Wireless Headphones")
+
+        assertEquals(formatted, compact)
+        assertEquals(formatted, withoutPrefix)
     }
 
     @Test

@@ -13,6 +13,7 @@ import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.StoreOffer
 import com.example.data.remote.SerpApiQuote
+import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.model.Store
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,6 +26,7 @@ import kotlinx.coroutines.launch
 import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Calendar
 import java.util.Locale
 
 data class UrlAnalysisResult(
@@ -113,32 +115,228 @@ class ProductRepository(
      * verified only if at least one validated offer was stored for that product.
      */
     suspend fun recordSerpApiQuotes(quotes: List<SerpApiQuote>): Int {
-        val validQuotes = quotes.filter {
-            it.productId.isNotBlank() &&
-                it.price.isFinite() && it.price > 0.0 &&
-                it.currency == "EUR" &&
-                parseHttpUri(it.sourceUrl)?.scheme.equals("https", ignoreCase = true)
+        val catalog = _latestProducts.value.ifEmpty { SpanishMarketData.getInitialProducts() }
+        val validQuotes = quotes.filter { quote ->
+            val title = catalog.firstOrNull { it.id == quote.productId }?.title.orEmpty()
+            quote.productId.isNotBlank() &&
+                quote.price.isFinite() && quote.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
+                quote.currency == "EUR" &&
+                parseHttpUri(quote.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
+                isEligibleHistoryTitle(title)
         }
         if (validQuotes.isEmpty()) return 0
 
-        val observations = validQuotes.map { quote ->
-            PriceObservationEntity(
-                productId = quote.productId,
-                storeId = quote.storeId,
-                price = quote.price,
-                currency = quote.currency,
-                observedAt = quote.observedAt,
-                sourceUrl = quote.sourceUrl,
-                sourceName = "${quote.storeName} · ${quote.sourceName}",
-                isVerified = true,
-                verificationNote = "Consulta manual de Google Shopping España mediante SerpApi; validar precio y disponibilidad en la tienda antes de comprar."
+        var inserted = 0
+        for (quote in validQuotes) {
+            val product = catalog.firstOrNull { it.id == quote.productId } ?: continue
+            val storeId = canonicalStoreId(quote.storeName, quote.sourceUrl)
+            val (dayStart, dayEnd) = localDayBounds(quote.observedAt)
+            if (priceObservationDao.getObservationForStoreProductDay(
+                    quote.productId, storeId, dayStart, dayEnd
+                ) != null
+            ) continue
+
+            priceObservationDao.insert(
+                PriceObservationEntity(
+                    productId = quote.productId,
+                    storeId = storeId,
+                    price = quote.price,
+                    currency = "EUR",
+                    observedAt = quote.observedAt,
+                    sourceUrl = quote.sourceUrl,
+                    sourceName = "Google Shopping",
+                    isVerified = true,
+                    verificationNote = "Precio observado por SerpApi; confirmar precio final y disponibilidad en la tienda.",
+                    productTitle = product.title,
+                    storeName = quote.storeName,
+                    sourceType = "Google Shopping"
+                )
             )
+            productDao.updatePriceVerification(quote.productId, true)
+            inserted++
         }
-        priceObservationDao.insertAll(observations)
-        observations.map { it.productId }.distinct().forEach { productId ->
-            productDao.updatePriceVerification(productId, true)
+        // Preserve the previous test contract: a validated provider quote is a successful
+        // configuration test even when today's copy was already recorded and deduplicated.
+        return validQuotes.map { it.productId }.distinct().size
+    }
+
+    /**
+     * Persist each valid "new in store" result returned by a manual online search.
+     * Results are observations, not synthetic historical points. A known catalogue product
+     * reuses its product ID; an unmatched result still gets a stable Room identity and title.
+     */
+    suspend fun recordOnlineSearchResults(
+        results: List<SerpApiShoppingResult>,
+        sourceType: String
+    ): Int {
+        val normalizedSource = when (sourceType) {
+            "AMAZON" -> "Amazon.es"
+            "GOOGLE_SHOPPING" -> "Google Shopping"
+            "Amazon.es", "Google Shopping" -> sourceType
+            else -> return 0
         }
-        return observations.map { it.productId }.distinct().size
+        val catalog = _latestProducts.value.ifEmpty { SpanishMarketData.getInitialProducts() }
+        val eligible = results.filter { result ->
+            result.title.isNotBlank() &&
+                result.storeName.isNotBlank() &&
+                result.price.isFinite() && result.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
+                parseHttpUri(result.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
+                isEligibleHistoryTitle(result.title)
+        }
+        if (eligible.isEmpty()) return 0
+
+        val eligibleModels = eligible.map { it to modelCode(result.title) }
+        var inserted = 0
+        for ((result, code) in eligibleModels) {
+            // Very low price outliers are rejected only against at least three listings carrying
+            // the same identifiable model code. Broad searches such as "Samsung" remain usable.
+            if (code != null) {
+                val comparablePrices = eligibleModels
+                    .filter { (other, otherCode) ->
+                        otherCode == code && isEligibleHistoryTitle(other.title)
+                    }
+                    .map { (other, _) -> other.price }
+                    .sorted()
+                if (comparablePrices.size >= 3) {
+                    val median = comparablePrices[comparablePrices.size / 2]
+                    if (result.price < median * MIN_OUTLIER_PRICE_RATIO) continue
+                }
+            }
+
+            val matchedProduct = catalog.firstOrNull { product ->
+                isSafeCatalogTitleMatch(result.title, product.title)
+            }
+            val productId = matchedProduct?.id
+                ?: stableOnlineId("online_product_", normalizedProductTitle(result.title))
+            val storeId = canonicalStoreId(result.storeName, result.sourceUrl)
+            val (dayStart, dayEnd) = localDayBounds(result.observedAt)
+            if (priceObservationDao.getObservationForStoreProductDay(
+                    productId, storeId, dayStart, dayEnd
+                ) != null
+            ) continue
+
+            priceObservationDao.insert(
+                PriceObservationEntity(
+                    productId = productId,
+                    storeId = storeId,
+                    price = result.price,
+                    currency = "EUR",
+                    observedAt = result.observedAt,
+                    sourceUrl = result.sourceUrl,
+                    sourceName = normalizedSource,
+                    isVerified = true,
+                    verificationNote = "Resultado online válido en euros; precio y disponibilidad pendientes de confirmación en la tienda.",
+                    productTitle = result.title,
+                    storeName = result.storeName,
+                    sourceType = normalizedSource
+                )
+            )
+            if (matchedProduct != null) {
+                productDao.updatePriceVerification(matchedProduct.id, true)
+            }
+            inserted++
+        }
+        return inserted
+    }
+
+    private fun isEligibleHistoryTitle(title: String): Boolean {
+        if (title.isBlank()) return false
+        val excludedListing = Regex(
+            """(?i)\\b(segunda\\s+mano|usad[oa]s?|reacondicionad[oa]s?|refurbished|renewed|pre-owned|seminuev[oa]s?|alquiler|renting|rent|financiaci[oó]n|financiar|cuota\\s+mensual|pago\\s+mensual|por\\s+mes|\\d+\\s*€/mes)\\b"""
+        )
+        return !excludedListing.containsMatchIn(title)
+    }
+
+    private fun isSafeCatalogTitleMatch(resultTitle: String, catalogTitle: String): Boolean {
+        val resultCodes = modelCodes(resultTitle)
+        val catalogCodes = modelCodes(catalogTitle)
+        // If both titles identify a model, require the exact model code before attaching history.
+        if (resultCodes.isNotEmpty() && catalogCodes.isNotEmpty()) {
+            return resultCodes.any { it in catalogCodes }
+        }
+        val resultTokens = normalizedProductTitle(resultTitle)
+            .split(' ').filter { it.length > 2 && it !in TITLE_STOP_WORDS }.toSet()
+        val catalogTokens = normalizedProductTitle(catalogTitle)
+            .split(' ').filter { it.length > 2 && it !in TITLE_STOP_WORDS }.toSet()
+        if (resultTokens.isEmpty() || catalogTokens.isEmpty()) return false
+        val overlap = resultTokens.intersect(catalogTokens).size
+        val smallerSize = minOf(resultTokens.size, catalogTokens.size)
+        return overlap >= 2 && overlap.toDouble() / smallerSize >= 0.6
+    }
+
+    private fun modelCode(title: String): String? = modelCodes(title).firstOrNull()
+
+    private fun modelCodes(title: String): Set<String> =
+        Regex("""(?i)\\b[a-z0-9-]{4,}\\b""")
+            .findAll(title)
+            .map { it.value.lowercase(Locale.ROOT).replace("-", "") }
+            .filter { value -> value.any(Char::isLetter) && value.any(Char::isDigit) }
+            .toSet()
+
+    private fun normalizedProductTitle(title: String): String =
+        java.text.Normalizer.normalize(title.lowercase(Locale.ROOT), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+            .replace(Regex("[^a-z0-9]+"), " ")
+            .trim()
+            .replace(Regex("\\s+"), " ")
+
+    private fun canonicalStoreId(storeName: String, sourceUrl: String): String {
+        val host = parseHttpUri(sourceUrl)?.host?.let(::normalizeHost).orEmpty()
+        val googleHost = host.startsWith("google.") || host.endsWith(".google.com") || host.endsWith(".google.es")
+        if (host.isNotBlank() && !googleHost) {
+            Store.ALL_STORES.firstOrNull { store ->
+                val knownHost = normalizeHost(store.domain.substringBefore('/'))
+                knownHost.isNotBlank() && (host == knownHost || host.endsWith(".$knownHost"))
+            }?.let { return it.id }
+        }
+
+        val normalizedName = normalizedProductTitle(storeName)
+        Store.ALL_STORES.firstOrNull { store ->
+            val candidate = normalizedProductTitle(store.name)
+            candidate.isNotBlank() &&
+                (candidate == normalizedName || normalizedName.contains(candidate) || candidate.contains(normalizedName))
+        }?.let { return it.id }
+
+        return when {
+            "amazon" in normalizedName -> "amazon_es"
+            "pccomponentes" in normalizedName -> "pccomponentes"
+            "mediamarkt" in normalizedName -> "mediamarkt"
+            "carrefour" in normalizedName -> "carrefour"
+            "fnac" in normalizedName -> "fnac"
+            "worten" in normalizedName -> "worten"
+            "el corte ingles" in normalizedName -> "elcorteingles"
+            else -> stableOnlineId("online_store_", normalizedName)
+        }
+    }
+
+    private fun stableOnlineId(prefix: String, value: String): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray(Charsets.UTF_8))
+        val hash = digest.take(10).joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        return prefix + hash
+    }
+
+    private fun localDayBounds(timestamp: Long): Pair<Long, Long> {
+        val start = Calendar.getInstance().apply {
+            timeInMillis = timestamp
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val dayStart = start.timeInMillis
+        val dayEnd = (start.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, 1) }.timeInMillis
+        return dayStart to dayEnd
+    }
+
+    private companion object {
+        const val MIN_HISTORY_PRICE_EUR = 5.0
+        const val MAX_HISTORY_PRICE_EUR = 10000.0
+        const val MIN_OUTLIER_PRICE_RATIO = 0.20
+        val TITLE_STOP_WORDS = setOf(
+            "the", "and", "for", "with", "de", "del", "la", "las", "el", "los", "un", "una",
+            "nuevo", "new", "of", "en", "para", "by", "from", "original", "oficial"
+        )
     }
 
     suspend fun toggleTracking(productId: String, targetAlertPrice: Double? = null) {
@@ -342,14 +540,18 @@ class ProductRepository(
             emptyList()
         }
         val dateFormatter = SimpleDateFormat("dd MMM yyyy", Locale("es", "ES"))
-        val historyPoints = effectiveHistory.map { observation ->
+        // The chart shows every source-backed store observation, including separate stores
+        // seen at the same search time. Summary calculations continue to use de-duplicated batches.
+        val historyPoints = if (priceIsVerified) sortedHistory.map { observation ->
             PricePoint(
                 timestamp = observation.observedAt,
                 dateLabel = dateFormatter.format(Date(observation.observedAt)),
                 price = observation.price,
-                storeName = observationStore(observation, stores).name,
-                eventLabel = observation.sourceName
+                storeName = observation.storeName.ifBlank { observationStore(observation, stores).name },
+                eventLabel = observation.sourceType.ifBlank { observation.sourceName }
             )
+        } else {
+            emptyList()
         }
         return Product(
             id = id,
@@ -394,8 +596,10 @@ class ProductRepository(
                 storeHost.isNotBlank() && (host == storeHost || host.endsWith(".$storeHost"))
             }?.let { return it }
         }
-        val merchantName = observation.sourceName.substringBefore(" · SerpApi")
+        val merchantName = observation.storeName
             .takeIf { it.isNotBlank() }
+            ?: observation.sourceName.substringBefore(" · SerpApi")
+                .takeIf { it.isNotBlank() }
             ?: host.ifBlank { "Comercio consultado" }
         return Store(
             id = observation.storeId,

@@ -295,12 +295,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     _uiState.value = _uiState.value.copy(priceRefreshStatus = stage)
                 }
                 val quotes = batchResult.quotes
-                if (testOneProduct) {
-                    priceRefreshPreferences.edit().apply {
-                        if (quotes.isNotEmpty()) putString("single_product_test_fingerprint", currentTokenFingerprint)
-                        else remove("single_product_test_fingerprint")
-                    }.apply()
-                }
                 val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
                 if (quotaAfter != null) {
                     _uiState.value = _uiState.value.copy(serpApiAccountStatus = quotaMessage(quotaAfter))
@@ -323,6 +317,15 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     showSnackbar(message)
                 } else {
                     val updatedProducts = repository.recordSerpApiQuotes(quotes)
+                    if (testOneProduct) {
+                        priceRefreshPreferences.edit().apply {
+                            if (updatedProducts > 0) {
+                                putString("single_product_test_fingerprint", currentTokenFingerprint)
+                            } else {
+                                remove("single_product_test_fingerprint")
+                            }
+                        }.apply()
+                    }
                     val partialNotice = if (batchResult.failedQueries > 0) {
                         " Consulta parcial: fallaron ${batchResult.failedQueries} de ${batchResult.requestedQueries} consultas; se han conservado y guardado las ofertas válidas."
                     } else {

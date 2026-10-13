@@ -437,7 +437,7 @@ class ExampleRobolectricTest {
                         storeName = "Amazon España"
                     ),
                     SerpApiQuote(
-                        productId = "live-test-product",
+                        productId = "online_product_live_test",
                         price = 230.00,
                         currency = "EUR",
                         observedAt = observedAt,

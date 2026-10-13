@@ -32,6 +32,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Calendar
 import java.util.Locale
+import java.util.TimeZone
 
 data class UrlAnalysisResult(
     val queryOrUrl: String,
@@ -123,7 +124,8 @@ class ProductRepository(
             quote.productId.isNotBlank() &&
                 quote.price.isFinite() && quote.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
                 quote.currency == "EUR" &&
-                parseHttpUri(quote.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
+                quote.observedAt >= HISTORY_START_TIMESTAMP &&
+                isDirectMerchantHttpsUrl(quote.sourceUrl) &&
                 isEligibleHistoryTitle(title) &&
                 isEligibleSeller(quote.storeName) &&
                 isPlausibleHistoryPrice(title, quote.price)
@@ -134,30 +136,22 @@ class ProductRepository(
         for (quote in validQuotes) {
             val productTitle = titleById[quote.productId] ?: continue
             val storeId = canonicalStoreId(quote.storeName, quote.sourceUrl)
-            val (dayStart, dayEnd) = localDayBounds(quote.observedAt)
-            if (priceObservationDao.getObservationForStoreProductDay(
-                    quote.productId, storeId, dayStart, dayEnd
-                ) != null
-            ) continue
-
-            priceObservationDao.insert(
-                PriceObservationEntity(
-                    productId = quote.productId,
-                    storeId = storeId,
-                    price = quote.price,
-                    currency = "EUR",
-                    observedAt = quote.observedAt,
-                    sourceUrl = quote.sourceUrl,
-                    sourceName = "Google Shopping",
-                    isVerified = true,
-                    verificationNote = "Precio observado por SerpApi; confirmar precio final y disponibilidad en la tienda.",
-                    productTitle = productTitle,
-                    storeName = quote.storeName,
-                    sourceType = "Google Shopping"
-                )
+            val observation = PriceObservationEntity(
+                productId = quote.productId,
+                storeId = storeId,
+                price = quote.price,
+                currency = "EUR",
+                observedAt = quote.observedAt,
+                sourceUrl = quote.sourceUrl,
+                sourceName = "Google Shopping",
+                isVerified = true,
+                verificationNote = "Precio observado por SerpApi; confirmar precio final y disponibilidad en la tienda.",
+                productTitle = productTitle,
+                storeName = quote.storeName,
+                sourceType = "Google Shopping"
             )
+            if (saveDailyObservation(observation)) inserted++
             productDao.updatePriceVerification(quote.productId, true)
-            inserted++
         }
         // Preserve the previous test contract: a validated provider quote is a successful
         // configuration test even when today's copy was already recorded and deduplicated.
@@ -179,7 +173,8 @@ class ProductRepository(
                 result.storeName.isNotBlank() &&
                 result.price.isFinite() &&
                 result.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
-                parseHttpUri(result.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
+                result.observedAt >= HISTORY_START_TIMESTAMP &&
+                isDirectMerchantHttpsUrl(result.sourceUrl) &&
                 isEligibleHistoryTitle(result.title) &&
                 isEligibleSeller(result.storeName) &&
                 isPlausibleHistoryPrice(result.title, result.price) &&
@@ -229,7 +224,7 @@ class ProductRepository(
         val normalized = normalizedProductTitle(title)
         // Low prices are normal for accessories; do not apply device floors to them.
         val accessory = Regex(
-            """\b(funda|case|carcasa|protector|cristal|cable|cargador|adaptador|repuesto|replacement|cover|bumper|pantalla|bateria|solo caja|dummy)\b"""
+            """\b(funda|case|carcasa|protector|cristal|cable|cargador|adaptador|repuesto|replacement|cover|bumper|pantalla|bateria|solo caja|dummy|hub|usb|conector|enchufe)\b"""
         ).containsMatchIn(normalized)
         if (accessory) return true
 
@@ -333,33 +328,29 @@ class ProductRepository(
             productDao.insert(productEntity)
             if (existingProduct == null) currentEntities += productEntity
 
-            // Keep every distinct merchant observation in Room. The product chart later condenses
-            // these offers into one minimum-price point per local calendar day.
-            for (result in group.offers) {
+            // Keep one best offer per merchant and day. A later search updates that day's row
+            // rather than losing the refreshed price or creating a duplicate.
+            val bestOfferPerStore = group.offers
+                .groupBy { offer -> canonicalStoreId(offer.storeName, offer.sourceUrl) }
+                .values
+                .mapNotNull { offers -> offers.minByOrNull { it.price } }
+            for (result in bestOfferPerStore) {
                 val offerStoreId = canonicalStoreId(result.storeName, result.sourceUrl)
-                val (dayStart, dayEnd) = localDayBounds(result.observedAt)
-                if (priceObservationDao.getObservationForStoreProductDay(
-                        productId, offerStoreId, dayStart, dayEnd
-                    ) != null
-                ) continue
-
-                priceObservationDao.insert(
-                    PriceObservationEntity(
-                        productId = productId,
-                        storeId = offerStoreId,
-                        price = result.price,
-                        currency = "EUR",
-                        observedAt = result.observedAt,
-                        sourceUrl = result.sourceUrl,
-                        sourceName = normalizedSource,
-                        isVerified = true,
-                        verificationNote = "Resultado online válido en euros; precio y disponibilidad pendientes de confirmación en la tienda.",
-                        productTitle = result.title,
-                        storeName = result.storeName,
-                        sourceType = normalizedSource
-                    )
+                val observation = PriceObservationEntity(
+                    productId = productId,
+                    storeId = offerStoreId,
+                    price = result.price,
+                    currency = "EUR",
+                    observedAt = result.observedAt,
+                    sourceUrl = result.sourceUrl,
+                    sourceName = normalizedSource,
+                    isVerified = true,
+                    verificationNote = "Resultado online válido en euros; precio y disponibilidad pendientes de confirmación en la tienda.",
+                    productTitle = result.title,
+                    storeName = result.storeName,
+                    sourceType = normalizedSource
                 )
-                inserted++
+                if (saveDailyObservation(observation)) inserted++
             }
         }
         return inserted
@@ -383,7 +374,30 @@ class ProductRepository(
         }
     }
 
-    private fun inferProductBrand(title: String): String {
+    /**
+     * Save one verified row per product/merchant/local day. Only replace an existing row when
+     * the new search is newer, or has a lower price at the exact same timestamp.
+     */
+    private suspend fun saveDailyObservation(observation: PriceObservationEntity): Boolean {
+        val (dayStart, dayEnd) = localDayBounds(observation.observedAt)
+        val existing = priceObservationDao.getObservationForStoreProductDay(
+            observation.productId, observation.storeId, dayStart, dayEnd
+        )
+        if (existing == null) {
+            priceObservationDao.insert(observation)
+            return true
+        }
+
+        val isNewer = observation.observedAt > existing.observedAt
+        val sameTimeAndBetterPrice =
+            observation.observedAt == existing.observedAt && observation.price < existing.price
+        if (!isNewer && !sameTimeAndBetterPrice) return false
+
+        priceObservationDao.update(observation.copy(id = existing.id))
+        return true
+    }
+
+    private fun inferProductBrand(title: String) {
         val brands = listOf(
             "Apple", "Samsung", "Xiaomi", "Redmi", "POCO", "Google", "Sony", "UGREEN",
             "Anker", "Baseus", "Huawei", "Honor", "Motorola", "OPPO", "OnePlus", "Dyson",
@@ -589,7 +603,12 @@ class ProductRepository(
     }
 
     private companion object {
-        const val MIN_HISTORY_PRICE_EUR = 5.0
+        // Fixed policy boundary: no stored row before this local Spain date contributes to history.
+        val HISTORY_START_TIMESTAMP: Long = Calendar.getInstance(TimeZone.getTimeZone("Europe/Madrid")).apply {
+            clear()
+            set(2026, Calendar.OCTOBER, 13, 0, 0, 0)
+        }.timeInMillis
+        const val MIN_HISTORY_PRICE_EUR = 0.50
         const val MAX_HISTORY_PRICE_EUR = 10000.0
         const val MIN_OUTLIER_PRICE_RATIO = 0.20
         const val ACCESSORY_PRICE_RATIO = 0.25
@@ -728,7 +747,16 @@ class ProductRepository(
         stores: List<Store>,
         verifiedObservations: List<PriceObservationEntity>
     ): Product {
-        val sortedHistory = verifiedObservations.sortedBy { it.observedAt }
+        // Ignore legacy/imported timestamps before the policy start. Only real observations from
+        // 13 October 2026 onward, in EUR and on a direct retailer URL, can support visible history.
+        val sortedHistory = verifiedObservations.filter { observation ->
+            observation.observedAt >= HISTORY_START_TIMESTAMP &&
+                observation.currency == "EUR" &&
+                isDirectMerchantHttpsUrl(observation.sourceUrl) &&
+                isEligibleHistoryTitle(observation.productTitle) &&
+                isEligibleSeller(observation.storeName) &&
+                isPlausibleHistoryPrice(observation.productTitle, observation.price)
+        }.sortedBy { it.observedAt }
         // Room keeps each store observation, but the chart must be a daily time series, not a
         // sequence of sellers from the same search. Plot the cheapest valid offer for each day.
         val latestDayStart = sortedHistory.lastOrNull()?.let { localDayBounds(it.observedAt).first }
@@ -850,6 +878,16 @@ class ProductRepository(
             physicalStores = false,
             hasLivePriceIntegration = false
         )
+    }
+
+    private fun isDirectMerchantHttpsUrl(value: String): Boolean {
+        val uri = parseHttpUri(value) ?: return false
+        if (!uri.scheme.equals("https", ignoreCase = true)) return false
+        val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+        return host.isNotBlank() &&
+            !host.startsWith("google.") &&
+            !host.endsWith(".google.com") &&
+            !host.endsWith(".google.es")
     }
 
     private fun parseHttpUri(value: String): URI? {

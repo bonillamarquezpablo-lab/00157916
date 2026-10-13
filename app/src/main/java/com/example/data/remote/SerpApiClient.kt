@@ -44,7 +44,8 @@ data class SerpApiQuote(
 data class SerpApiBatchResult(
     val quotes: List<SerpApiQuote>,
     val requestedQueries: Int,
-    val failedQueries: Int
+    val failedQueries: Int,
+    val queriesWithoutMatches: Int = 0
 )
 
 data class SerpApiAccountInfo(
@@ -346,12 +347,18 @@ class SerpApiClient(
 
         val quotes = mutableListOf<SerpApiQuote>()
         var failedQueries = 0
+        var queriesWithoutMatches = 0
         var firstFailure: Exception? = null
         requested.forEachIndexed { index, product ->
             onStage("Consultando Google Shopping España: ${index + 1}/${requested.size}…")
             try {
                 val json = executeSearch(apiKey, product.queryTerm)
-                quotes += parseQuotes(json, product)
+                val productQuotes = parseQuotes(json, product)
+                if (productQuotes.isEmpty()) {
+                    queriesWithoutMatches++
+                } else {
+                    quotes += productQuotes
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -365,10 +372,16 @@ class SerpApiClient(
         }
 
         if (quotes.isEmpty() && failedQueries > 0) {
-            val providerFailure = firstFailure as? SerpApiException
-            if (providerFailure != null) throw providerFailure
+            val failureDetail = when (val failure = firstFailure) {
+                is SerpApiException -> failure.message ?: "Error devuelto por SerpApi."
+                is java.net.SocketTimeoutException -> "Se agotó el tiempo de espera al conectar con SerpApi."
+                is java.net.UnknownHostException -> "No se pudo localizar el servidor de SerpApi; comprueba la conexión."
+                is java.io.IOException -> "Fallo de red (${failure.javaClass.simpleName})."
+                else -> "Error técnico (${firstFailure?.javaClass?.simpleName ?: "desconocido"})."
+            }
             throw SerpApiException(
-                "No se pudo consultar ningún producto (${failedQueries} de ${requested.size} consultas fallidas)."
+                "No se pudo consultar ningún producto (${failedQueries} de ${requested.size} consultas fallidas). Motivo del primer fallo: $failureDetail",
+                (firstFailure as? SerpApiException)?.httpCode
             )
         }
 
@@ -377,7 +390,8 @@ class SerpApiClient(
                 .distinctBy { "${it.productId}|${it.storeId}|${it.price}|${it.sourceUrl}" }
                 .sortedWith(compareBy<SerpApiQuote> { it.productId }.thenBy { it.price }),
             requestedQueries = requested.size,
-            failedQueries = failedQueries
+            failedQueries = failedQueries,
+            queriesWithoutMatches = queriesWithoutMatches
         )
     }
 

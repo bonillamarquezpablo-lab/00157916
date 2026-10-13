@@ -665,6 +665,15 @@ class ExampleRobolectricTest {
                 sourceUrl = "https://www.rentik.com/xiaomi-redmi-17",
                 observedAt = now
             )
+            val rentalPhoneWithNormalPrice = suspiciousRedmi.copy(
+                price = 199.99,
+                sourceUrl = "https://www.rentik.com/xiaomi-redmi-17"
+            )
+            val normalNewPhone = suspiciousRedmi.copy(
+                price = 199.99,
+                storeName = "Amazon.es",
+                sourceUrl = "https://www.amazon.es/dp/REDFEATURETEST"
+            )
             val cheapLegitimateAccessory = com.example.data.remote.SerpApiShoppingResult(
                 title = "UGREEN USB 2.0 Hub 4 Puertos",
                 price = 5.82,
@@ -673,11 +682,19 @@ class ExampleRobolectricTest {
                 observedAt = now
             )
             val filteredResults = repository.filterOnlineSearchResults(
-                listOf(suspiciousRedmi, cheapLegitimateAccessory)
+                listOf(suspiciousRedmi, rentalPhoneWithNormalPrice, normalNewPhone, cheapLegitimateAccessory)
             )
             assertFalse(
                 "A €9.90 Redmi phone listing is implausible for a new-in-store offer",
-                filteredResults.any { it.title.contains("Redmi 17", ignoreCase = true) }
+                filteredResults.any { it.title.contains("Redmi 17", ignoreCase = true) && it.price < 45.0 }
+            )
+            assertFalse(
+                "Offers from the Rentik renting provider must not be stored as new-in-store offers",
+                filteredResults.any { it.storeName.equals("Rentik", ignoreCase = true) }
+            )
+            assertTrue(
+                "A plausibly priced new phone from an ordinary retailer remains eligible",
+                filteredResults.any { it.storeName == "Amazon.es" && it.title.contains("Redmi 17", ignoreCase = true) }
             )
             assertTrue(
                 "Low-priced real accessories should remain eligible",

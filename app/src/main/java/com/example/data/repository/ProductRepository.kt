@@ -130,6 +130,7 @@ class ProductRepository(
                 quote.currency == "EUR" &&
                 parseHttpUri(quote.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
                 isEligibleHistoryTitle(title) &&
+                isEligibleHistoryTitle(quote.storeName) &&
                 isPlausibleHistoryPrice(title, quote.price)
         }
         if (validQuotes.isEmpty()) return 0
@@ -180,6 +181,7 @@ class ProductRepository(
                 result.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
                 parseHttpUri(result.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
                 isEligibleHistoryTitle(result.title) &&
+                isEligibleHistoryTitle(result.storeName) &&
                 isPlausibleHistoryPrice(result.title, result.price)
         }
         val coded = eligible.map { result -> result to modelCode(result.title) }
@@ -294,7 +296,7 @@ class ProductRepository(
     private fun isEligibleHistoryTitle(title: String): Boolean {
         if (title.isBlank()) return false
         val excludedListing = Regex(
-            """(?i)\b(segunda\s+mano|usad[oa]s?|used|reacondicionad[oa]s?|refurbished|renewed|pre-owned|seminuev[oa]s?|alquiler|renting|rent|leasing|lease|hire|financiaci[oó]n|financiar|cuota\s+mensual|pago\s+mensual|pago\s+a\s+plazos|monthly|por\s+mes|\d+\s*€/mes)\b"""
+            """(?i)\b(segunda\s+mano|usad[oa]s?|used|reacondicionad[oa]s?|refurbished|renewed|pre-owned|seminuev[oa]s?|alquiler|rentik|rental|renting|rent|leasing|lease|hire|financiaci[oó]n|financiar|cuota\s+mensual|pago\s+mensual|pago\s+a\s+plazos|monthly|por\s+mes|\d+\s*€/mes)\b"""
         )
         return !excludedListing.containsMatchIn(title)
     }

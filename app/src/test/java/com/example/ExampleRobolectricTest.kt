@@ -369,6 +369,49 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun sparseGoogleShoppingQueriesExpandAndMergeUniqueStoreOffersWithinQuota() = runBlocking<Unit> {
+        val requestedQueries = mutableListOf<String>()
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val query = chain.request().url.queryParameter("q").orEmpty()
+            requestedQueries += query
+            val index = requestedQueries.size
+            val merchant = "Tienda $index"
+            val host = "shop$index.example.test"
+            val payload = JSONObject()
+                .put("search_metadata", JSONObject().put("status", "Success"))
+                .put("shopping_results", JSONArray().put(
+                    JSONObject()
+                        .put("title", "Logitech G203 Lightsync Gaming Mouse")
+                        .put("price", "\${20 + index},99 €")
+                        .put("extracted_price", 20.0 + index)
+                        .put("link", "https://$host/logitech-g203")
+                        .put("source", merchant)
+                ))
+            Response.Builder()
+                .request(chain.request())
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .body(payload.toString().toResponseBody("application/json".toMediaType()))
+                .build()
+        }.build()
+
+        val report = SerpApiClient(http).searchOnlineWithExpandedDiagnostics(
+            token = "test-api-key",
+            query = "Logitech G203",
+            maxAdditionalQueries = 2
+        )
+
+        assertEquals("The original query plus no more than two follow-ups are allowed", 3, requestedQueries.size)
+        assertEquals(3, report.queriesExecuted)
+        assertEquals(3, report.results.size)
+        assertEquals(3, report.results.map { it.storeName }.distinct().size)
+        assertTrue(requestedQueries.any { it == "Logitech G203" })
+        assertTrue(requestedQueries.any { it.contains("Lightsync", ignoreCase = true) })
+        assertTrue(requestedQueries.any { it.contains("gaming mouse", ignoreCase = true) })
+    }
+
+    @Test
     fun `Google Shopping rejects keyboard mouse bundle for a single mouse query`() {
         val payload = JSONObject(
             """

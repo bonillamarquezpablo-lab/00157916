@@ -446,11 +446,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     fun onOnlineProductSelected(identityKey: String) {
         if (identityKey.isBlank()) return
         viewModelScope.launch {
-            runCatching {
-                withTimeout(10_000L) { repository.awaitProductForOnlineIdentity(identityKey) }
-            }.onSuccess { product ->
+            try {
+                val product = withTimeout(10_000L) {
+                    repository.awaitProductForOnlineIdentity(identityKey)
+                }
                 _uiState.value = _uiState.value.copy(selectedProduct = product)
-            }.onFailure {
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
                 showSnackbar("No se ha podido abrir la ficha guardada. Repite la búsqueda para sincronizar el producto.")
             }
         }

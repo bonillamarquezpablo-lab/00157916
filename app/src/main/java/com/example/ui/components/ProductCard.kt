@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
@@ -41,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -56,6 +58,7 @@ import java.util.Locale
 import com.example.data.model.Product
 import com.example.data.model.Store
 import com.example.ui.theme.ProductCardShape
+import com.example.ui.theme.ProductImageShape
 
 @Composable
 fun ProductCard(
@@ -79,7 +82,12 @@ fun ProductCard(
             .clickable(onClick = onClick)
             .testTag("product_card_${product.id}"),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            // A barely-visible 5% store-brand tint gives verified cards a quiet ambient hue.
+            containerColor = if (product.isPriceVerified) {
+                lerp(MaterialTheme.colorScheme.surface, product.currentStore.brandColor, 0.05f)
+            } else {
+                MaterialTheme.colorScheme.surface
+            }
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
@@ -94,7 +102,7 @@ fun ProductCard(
                     product = product,
                     modifier = Modifier
                         .size(88.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(ProductImageShape)
                         .testTag("product_photo_${product.id}"),
                     showAthRibbon = product.isPriceVerified && product.isAtAth
                 )
@@ -111,9 +119,9 @@ fun ProductCard(
                         // Store pill
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(if (product.isPriceVerified) product.currentStore.brandColor.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant)
-                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                                .clip(CircleShape)
+                                .background(if (product.isPriceVerified) product.currentStore.brandColor.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant)
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
                         ) {
                             Text(
                                 text = if (product.isPriceVerified) product.currentStore.name else "Ficha de demostración",
@@ -144,9 +152,10 @@ fun ProductCard(
                     // Title
                     Text(
                         text = product.title,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.SemiBold,
                         fontSize = 14.sp,
-                        lineHeight = 18.sp,
+                        lineHeight = 19.sp,
+                        letterSpacing = (-0.15).sp,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurface
@@ -207,8 +216,9 @@ fun ProductCard(
                         Text(
                             text = if (product.isPriceVerified) "${String.format("%.2f", product.currentPrice)} €" else "Precio no disponible",
                             fontWeight = FontWeight.Black,
-                            fontSize = if (product.isPriceVerified) 22.sp else 15.sp,
-                            color = if (product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
+                            fontSize = if (product.isPriceVerified) 24.sp else 15.sp,
+                            letterSpacing = if (product.isPriceVerified) (-0.65).sp else 0.sp,
+                            color = if (product.isAtAth) Color(0xFF34D399) else MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
                         if (product.isPriceVerified && product.officialPvp > product.currentPrice) {
@@ -253,7 +263,7 @@ fun ProductCard(
             OutlinedButton(
                 onClick = { showStoreComparison = true },
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp)
+                shape = RoundedCornerShape(18.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.OpenInNew,
@@ -273,12 +283,12 @@ fun ProductCard(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(18.dp))
                     .background(
                         if (product.isAtAth) Color(0xFF10B981).copy(alpha = 0.12f)
-                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
                     )
-                    .padding(horizontal = 10.dp, vertical = 7.dp)
+                    .padding(horizontal = 12.dp, vertical = 9.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),

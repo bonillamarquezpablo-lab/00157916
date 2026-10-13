@@ -24,6 +24,10 @@ interface ProductDao {
     @Query("DELETE FROM products WHERE id NOT IN (SELECT DISTINCT productId FROM price_observations WHERE isVerified = 1)")
     suspend fun deleteProductsWithoutVerifiedObservations(): Int
 
+    /** Remove legacy mock rows by explicit demo markers, even if old code marked their history verified. */
+    @Query("DELETE FROM products WHERE id LIKE 'demo_%' OR lower(athMinDate) LIKE '%demostración%' OR lower(athMinStore) LIKE '%demostración%'")
+    suspend fun deleteExplicitDemoProducts(): Int
+
     /** Reconcile legacy flags from the authoritative verified-observation table. */
     @Query("UPDATE products SET isPriceVerified = 1 WHERE id IN (SELECT DISTINCT productId FROM price_observations WHERE isVerified = 1)")
     suspend fun markProductsWithVerifiedObservations(): Int

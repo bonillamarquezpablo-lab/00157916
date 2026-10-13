@@ -8,10 +8,20 @@
 
 - El gráfico solo admite observaciones reales y fechadas de búsquedas válidas guardadas en Room.
 - No se generan puntos retrospectivos, series 2022–2026 ni precios interpolados almacenados.
-- El primer punto del historial define la etiqueta «Historial desde [fecha]»; un rango sin puntos muestra «Sin datos todavía».
+- El primer punto del historial define la etiqueta «Historial desde [fecha]»; si no hay observaciones globales muestra «Sin datos todavía» y si el rango elegido está vacío muestra «Sin datos en este rango».
 - El catálogo precargado se marca como EJEMPLO y nunca alimenta el historial de precios.
 - Se retiró la acción de simular una caída de precio, incluido el punto temporal de historial que añadía en memoria.
 - En la rama revisada no existen funciones llamadas `generateHistory` o `generateInflatedHistory`; los tests ahora exigen que los productos de ejemplo tengan `priceHistory` vacío.
+
+## Correcciones técnicas recientes en `fix/real-price-history-only`
+
+- Las observaciones anteriores al 13 de octubre de 2026 quedan fuera de cualquier precio actual verificado o del gráfico, incluso si sobreviven en instalaciones antiguas.
+- Los resultados solo se guardan con URL HTTPS directa al comercio; las URL de Google Shopping/búsqueda genérica ya no se tratan como enlaces de producto válidos.
+- La ingesta descarta segunda mano, reacondicionados, alquileres y financiación cuando aparecen en el título o en los campos de condición del proveedor.
+- La misma tienda y el mismo producto conservan una sola observación por día: las búsquedas posteriores actualizan esa fila en vez de duplicar datos o mostrar un precio obsoleto.
+- Se corrigió la identidad para conservar capacidad mAh y potencia W de baterías/cargadores, y para normalizar formatos equivalentes del modelo Sony WH-1000XM5.
+- La ficha utiliza la fuente real del último dato y el gráfico une puntos reales con segmentos rectos, sin curvas que sugieran precios no observados.
+- Se añadieron y actualizaron pruebas de regresión para fecha de corte, estado del artículo, enlaces directos, variantes de producto y actualización diaria. La compilación y las pruebas todavía necesitan ejecución en un entorno Android; no se consideran aprobadas solo por estar escritas.
 
 ## 16 mejoras planificadas
 

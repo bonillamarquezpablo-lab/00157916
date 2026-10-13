@@ -237,7 +237,7 @@ fun ProductDetailSheet(
                                 )
                             }
                             Text(
-                                text = "Google Shopping · confirma precio final y stock en la tienda.",
+                                text = "${product.priceSource.ifBlank { "Fuente online" }} · confirma precio final y stock en la tienda.",
                                 fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

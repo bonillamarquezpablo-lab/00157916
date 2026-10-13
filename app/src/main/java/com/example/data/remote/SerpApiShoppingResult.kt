@@ -70,10 +70,33 @@ data class OnlineProductGroup(
  * descriptions; capacity, color and copy differences do not create duplicate cards.
  */
 fun onlineProductIdentityKey(title: String): String {
-    val normalized = java.text.Normalizer.normalize(
+    val rawNormalized = java.text.Normalizer.normalize(
         title.lowercase(Locale.ROOT),
         java.text.Normalizer.Form.NFD
     ).replace(Regex("\\p{Mn}+"), "")
+        .replace(Regex("""[^a-z0-9]+"""), " ")
+        .trim()
+        .replace(Regex("""\s+"""), " ")
+    val memorySpecs = Regex("""\b\d+\s?(?:gb|tb)\b""")
+        .findAll(rawNormalized)
+        .map { it.value.replace(" ", "") }
+        .distinct()
+        .sorted()
+        .joinToString("+")
+    val variants = setOf("pro", "max", "plus", "ultra", "fe", "lite", "mini", "fold", "flip", "classic", "edge")
+        .filter { Regex("""\b""" + it + """\b""").containsMatchIn(rawNormalized) }
+        .distinct()
+        .sorted()
+        .joinToString("+")
+    val accessoryType = listOf(
+        "cristal templado", "screen protector", "mop kit", "funda",
+        "carcasa", "case", "cover", "protector", "cable", "cargador", "adaptador", "hub",
+        "filtro", "recambio", "repuesto", "soporte"
+    ).firstOrNull { type ->
+        Regex("""\b""" + Regex.escape(type) + """\b""").containsMatchIn(rawNormalized)
+    }.orEmpty()
+
+    val normalized = rawNormalized
         .replace(Regex("""compatible (con|para) .*"""), " ")
         .replace(Regex("""\b\d+(?:[.,]\d+)?\s*(?:gb|tb|mah|mp|hz|w|mm|cm|inch|pulgadas|pulgada)\b"""), " ")
         .replace(Regex("""\b(?:4g|5g|wifi|wi-fi|bluetooth|nfc)\b"""), " ")
@@ -92,7 +115,7 @@ fun onlineProductIdentityKey(title: String): String {
         "huawei", "honor", "motorola", "oppo", "oneplus", "dyson", "roborock", "jbl",
         "logitech", "nintendo", "microsoft", "lenovo", "hp", "asus", "acer", "dell",
         "philips", "rowenta", "cecotec", "ecovacs", "bosch", "lg", "tcl"
-    ).firstOrNull { Regex("""\b${Regex.escape(it)}\b""").containsMatchIn(normalized) }.orEmpty()
+    ).firstOrNull { Regex("""\b""" + Regex.escape(it) + """\b""").containsMatchIn(normalized) }.orEmpty()
 
     val model = Regex(
         """\b(redmi|poco|iphone|pixel|galaxy|wh|dyson|roborock)\s*([a-z]{0,3}\d+[a-z0-9]*)\b"""
@@ -103,14 +126,21 @@ fun onlineProductIdentityKey(title: String): String {
         .map { it.value }
         .firstOrNull { it !in setOf("usb20", "usb30", "usb32", "wifi6", "wifi7", "typec", "4gb", "8gb", "16gb", "32gb", "64gb", "128gb", "256gb", "512gb", "1tb") }
 
-    if (model != null) return listOf(brand, model).filter { it.isNotBlank() }.joinToString("|")
+    val suffix = listOf(
+        accessoryType.takeIf { it.isNotBlank() }?.let { "accessory:$it" },
+        variants.takeIf { it.isNotBlank() }?.let { "variant:$it" },
+        memorySpecs.takeIf { it.isNotBlank() }?.let { "memory:$it" }
+    ).filterNotNull().joinToString("|")
+
+    if (model != null) return (listOf(brand, model).filter { it.isNotBlank() } + suffix)
+        .joinToString("|")
 
     val ignored = setOf("the", "and", "for", "with", "de", "del", "la", "las", "el", "los", "un", "una", "con", "para", "by", "from")
     val coreTokens = normalized.split(' ')
         .filter { it.isNotBlank() && it !in ignored }
         .distinct()
         .sorted()
-    return (if (brand.isNotBlank()) listOf(brand) + coreTokens.filterNot { it == brand } else coreTokens)
+    return ((if (brand.isNotBlank()) listOf(brand) + coreTokens.filterNot { it == brand } else coreTokens) + suffix)
         .joinToString(" ")
         .ifBlank { normalized }
 }

@@ -235,6 +235,15 @@ fun ProductDetailSheet(
                                     fontSize = 10.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                if (!product.isPriceFresh) {
+                                    Text(
+                                        text = "Este precio tiene más de 24 horas. Vuelve a consultar antes de comprar.",
+                                        fontSize = 12.sp,
+                                        lineHeight = 16.sp,
+                                        color = MaterialTheme.colorScheme.tertiary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
                             }
                             Text(
                                 text = "${product.priceSource.ifBlank { "Fuente online" }} · confirma precio final y stock en la tienda.",

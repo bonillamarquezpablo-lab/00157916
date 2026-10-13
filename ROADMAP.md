@@ -2,7 +2,7 @@
 
 **Orden:** de menor a mayor dificultad. Cada fase debe cerrarse con pruebas y evidencia; que una función exista parcialmente no equivale a que esté terminada en producción.
 
-**Situación actual conocida:** el catálogo usa Room y existe almacenamiento de observaciones verificables. El buscador manual de Google Shopping España y Amazon.es mediante SerpApi está implementado en el código, pero requiere clave configurada y una prueba real en el móvil. El arreglo de enlaces alternativos está propuesto en el PR #15 y todavía no debe considerarse integrado en `main`. Las actualizaciones de fondo, las alertas automáticas y las cuentas sincronizadas no están completas.
+**Situación actual conocida:** el catálogo usa Room y existe almacenamiento de observaciones verificables. El buscador manual de Google Shopping España y Amazon.es mediante SerpApi está implementado, y el fallback a búsqueda de Google Shopping cuando falta un enlace útil ya está en `main` (PR #15). La mejora adicional de relevancia, anuncios no comparables y precios anormalmente bajos se propone en el PR #17. Aún falta validar la búsqueda real en el móvil; las actualizaciones de fondo, las alertas automáticas y las cuentas sincronizadas no están completas.
 
 ## Las 20 fases, de fácil a difícil
 
@@ -12,7 +12,7 @@
 **Cierre:** pruebas que demuestren que los datos de muestra no se guardan ni se muestran como observaciones verificadas.
 
 ### Fase 02 — Corregir los enlaces de los resultados
-**Estado:** 🟡 En propuesta de cambio (PR #15; aún no integrado en `main`).  
+**Estado:** ✅ Fallback de búsqueda integrado en `main` (PR #15); la precisión del resultado sigue en mejora (PR #17).  
 **Trabajo:** cuando haya título y precio válido, pero no un enlace HTTPS útil, generar una búsqueda de Google Shopping España codificada con el título; identificar visualmente ese destino como búsqueda, no como tienda.  
 **Cierre:** probar enlaces directos, enlaces Google y resultados sin enlace utilizable; no atribuir una búsqueda de Google a una tienda como si fuera la ficha del producto.
 

@@ -227,7 +227,8 @@ class SerpApiClient(
                 .takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
             // Amazon's engine must obey the same query relevance rules as Google Shopping.
             if ((!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) ||
-                isNonRetailPromotionalListing(title)
+                isNonRetailPromotionalListing(title) ||
+                isDisallowedListingCondition(item, title)
             ) return@mapNotNull null
             // SerpApi's Amazon engine can expose the active offer as price/extracted_price,
             // or as primary_price/extracted_primary_price depending on the product layout.
@@ -333,6 +334,10 @@ class SerpApiClient(
                 }
             if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
                 rejectedAsIrrelevant++
+                return@mapNotNull null
+            }
+            if (isDisallowedListingCondition(item, title)) {
+                rejectedOther++
                 return@mapNotNull null
             }
             if (isNonRetailPromotionalListing(title)) {
@@ -521,7 +526,8 @@ class SerpApiClient(
         return results.mapNotNull { item ->
             val title = item.optString("title").takeIf { it.isNotBlank() } ?: return@mapNotNull null
             if (!isPlausibleProductMatch(requested.queryTerm, title) ||
-                isNonRetailPromotionalListing(title)
+                isNonRetailPromotionalListing(title) ||
+                isDisallowedListingCondition(item, title)
             ) return@mapNotNull null
 
             val priceText = item.optString("price")
@@ -729,6 +735,21 @@ class SerpApiClient(
         val compactTitle = normalize(returned).replace(" ", "")
         return compactQuery.length >= 8 && compactTitle.length >= 8 &&
             (compactTitle.contains(compactQuery) || compactQuery.contains(compactTitle))
+    }
+
+    /** Reject condition metadata that identifies a non-new item even when the title omits it. */
+    private fun isDisallowedListingCondition(item: JSONObject, title: String): Boolean {
+        val conditionFields = listOf(
+            "condition", "item_condition", "product_condition", "condition_label",
+            "condition_description", "conditionDescription"
+        ).mapNotNull { key ->
+            item.opt(key)?.takeIf { it !is JSONObject && it !is JSONArray }
+                ?.toString()?.takeIf { it.isNotBlank() && it != "null" }
+        }.joinToString(" ")
+        val evidence = normalize("$title $conditionFields")
+        return Regex(
+            """\b(segunda mano|usado|usada|usados|usadas|used|reacondicionad|refurbished|renewed|pre owned|seminuevo|seminueva|open box|caja abierta|alquiler|renting|lease|leasing|cuota mensual|pago mensual|subscription)\b"""
+        ).containsMatchIn(evidence)
     }
 
     /**

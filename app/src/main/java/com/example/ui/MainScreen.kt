@@ -276,7 +276,8 @@ fun MainScreen(
                     onOpenSettings = {
                         showOnlineSearch = false
                         showSettings = true
-                    }
+                    },
+                    onResolveRetailerUrl = viewModel::resolveRetailerUrl
                 )
             } else when (currentTab) {
                 MainTab.MARKET -> {

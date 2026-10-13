@@ -116,8 +116,15 @@ class ProductRepository(
      */
     suspend fun recordSerpApiQuotes(quotes: List<SerpApiQuote>): Int {
         val catalog = _latestProducts.value.ifEmpty { SpanishMarketData.getInitialProducts() }
+        // The currently refreshed item can exist in Room before the catalogue flow has emitted it.
+        // Resolve its real stored title as well as the bundled seed data.
+        val storedProducts = productDao.getAllProductsSnapshot()
+        val titleById = buildMap {
+            catalog.forEach { put(it.id, it.title) }
+            storedProducts.forEach { put(it.id, it.title) }
+        }
         val validQuotes = quotes.filter { quote ->
-            val title = catalog.firstOrNull { it.id == quote.productId }?.title.orEmpty()
+            val title = titleById[quote.productId].orEmpty()
             quote.productId.isNotBlank() &&
                 quote.price.isFinite() && quote.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
                 quote.currency == "EUR" &&
@@ -128,7 +135,7 @@ class ProductRepository(
 
         var inserted = 0
         for (quote in validQuotes) {
-            val product = catalog.firstOrNull { it.id == quote.productId } ?: continue
+            val productTitle = titleById[quote.productId] ?: continue
             val storeId = canonicalStoreId(quote.storeName, quote.sourceUrl)
             val (dayStart, dayEnd) = localDayBounds(quote.observedAt)
             if (priceObservationDao.getObservationForStoreProductDay(
@@ -147,7 +154,7 @@ class ProductRepository(
                     sourceName = "Google Shopping",
                     isVerified = true,
                     verificationNote = "Precio observado por SerpApi; confirmar precio final y disponibilidad en la tienda.",
-                    productTitle = product.title,
+                    productTitle = productTitle,
                     storeName = quote.storeName,
                     sourceType = "Google Shopping"
                 )

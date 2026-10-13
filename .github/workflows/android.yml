@@ -47,10 +47,6 @@ jobs:
       - name: Instalar componentes Android
         run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
 
-      - name: Ejecutar pruebas unitarias
-        timeout-minutes: 15
-        run: gradle :app:testDebugUnitTest --stacktrace --info
-
       - name: Restaurar clave de firma estable
         env:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
@@ -65,6 +61,7 @@ jobs:
           echo "Clave estable encontrada y validada."
 
       - name: Compilar APK
+        timeout-minutes: 20
         env:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
         run: |
@@ -80,3 +77,8 @@ jobs:
           name: minimo-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Ejecutar pruebas unitarias
+        timeout-minutes: 15
+        run: gradle :app:testDebugUnitTest --stacktrace --info
+

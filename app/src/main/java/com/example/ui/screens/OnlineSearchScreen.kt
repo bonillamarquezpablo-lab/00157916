@@ -93,7 +93,7 @@ fun OnlineSearchScreen(
                         Spacer(Modifier.width(9.dp))
                         Text("Encuentra productos y ofertas", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
                     }
-                    Text("Busca cualquier producto aunque no exista en el catálogo. Consulta Google Shopping o Amazon.es y muestra los precios aquí mismo.")
+                    Text("Busca cualquier producto. Las ofertas válidas se guardan en Mercado; toca una tarjeta para comparar tiendas y consultar el historial real.")
                     OutlinedTextField(
                         value = state.onlineSearchQuery,
                         onValueChange = onQueryChange,

@@ -185,7 +185,7 @@ class ProductRepository(
         }
         if (eligible.isEmpty()) return 0
 
-        val eligibleModels = eligible.map { it to modelCode(result.title) }
+        val eligibleModels = eligible.map { result -> result to modelCode(result.title) }
         var inserted = 0
         for ((result, code) in eligibleModels) {
             // Very low price outliers are rejected only against at least three listings carrying

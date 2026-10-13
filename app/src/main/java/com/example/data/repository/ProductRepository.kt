@@ -58,6 +58,10 @@ class ProductRepository(
         // that do not have real verified online observations and their orphaned watchlist/history.
         // The static Store.ALL_STORES directory is read-only metadata and does not need Room rows.
         externalScope.launch {
+            // Purge demo-linked history and watchlist rows before removing the products themselves.
+            priceObservationDao.deleteExplicitDemoObservations()
+            trackedDao.deleteTrackingForDemoProducts()
+            productDao.deleteExplicitDemoProducts()
             priceObservationDao.deleteUnverifiedObservations()
             productDao.deleteProductsWithoutVerifiedObservations()
             productDao.markProductsWithVerifiedObservations()
@@ -87,7 +91,13 @@ class ProductRepository(
         // Never render a Room product without at least one verified source-backed observation.
         // This also prevents legacy/mock rows from flashing on screen while startup cleanup runs.
         productEntities
-            .filter { entity -> observationsByProduct[entity.id].orEmpty().isNotEmpty() }
+            .filter { entity ->
+                // Explicitly exclude legacy demo markers immediately, before async Room cleanup.
+                !entity.id.startsWith("demo_", ignoreCase = true) &&
+                    !entity.athMinDate.contains("demostración", ignoreCase = true) &&
+                    !entity.athMinStore.contains("demostración", ignoreCase = true) &&
+                    observationsByProduct[entity.id].orEmpty().isNotEmpty()
+            }
             .map { entity ->
                 val product = entity.toDomainProduct(
                     stores = stores,

@@ -52,6 +52,33 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun powerBankCapacityAndChargerWattageStayDistinctWhileColourVariantsMerge() {
+        fun result(title: String, price: Double, store: String) = SerpApiShoppingResult(
+            title = title,
+            price = price,
+            storeName = store,
+            sourceUrl = "https://${store.lowercase().replace(" ", "")}.example/product",
+            observedAt = 1_800_000_000_000L
+        )
+
+        val groups = groupOnlineShoppingResults(
+            listOf(
+                result("Anker Power Bank 20000mAh 65W Black", 59.99, "Tienda A"),
+                result("Anker Power Bank 20.000 mAh 65 W Negro", 54.99, "Tienda B"),
+                result("Anker Power Bank 20000mAh 100W", 79.99, "Tienda C"),
+                result("Anker Power Bank 10000mAh 65W", 39.99, "Tienda D")
+            )
+        )
+
+        assertEquals("Capacity and wattage change the product variant, colour does not", 3, groups.size)
+        val twentyK65W = groups.single { it.identityKey.contains("20000mah") && it.identityKey.contains("65w") }
+        assertEquals(2, twentyK65W.offers.size)
+        assertEquals(54.99, twentyK65W.minPrice, 0.001)
+        assertTrue(groups.any { it.identityKey.contains("100w") })
+        assertTrue(groups.any { it.identityKey.contains("10000mah") })
+    }
+
+    @Test
     fun chartRangesCoverThirtyDaysThroughFourYearsAndAllTime() {
         assertEquals(
             listOf("30D", "90D", "6M", "1A", "2A", "3A", "4A", "Todo"),

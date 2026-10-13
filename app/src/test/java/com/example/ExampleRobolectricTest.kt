@@ -889,15 +889,17 @@ class ExampleRobolectricTest {
                 sourceUrl = "https://www.amazon.es/dp/B0SONY-CONCURRENT-B"
             )
 
-            val outcomes = listOf(first, second).map { result ->
-                async(Dispatchers.Default) {
-                    repository.recordOnlineSearchResults(
-                        results = listOf(result),
-                        sourceType = "GOOGLE_SHOPPING",
-                        searchQuery = "Sony WH-1000XM5"
-                    )
-                }
-            }.map { it.await() }
+            val outcomes = withTimeout(15_000L) {
+                listOf(first, second).map { result ->
+                    async(Dispatchers.Default) {
+                        repository.recordOnlineSearchResults(
+                            results = listOf(result),
+                            sourceType = "GOOGLE_SHOPPING",
+                            searchQuery = "Sony WH-1000XM5"
+                        )
+                    }
+                }.map { it.await() }
+            }
 
             assertEquals("Only one concurrent search may insert for this product/store/day", 1, outcomes.sum())
             assertEquals("Room should contain a single observation for this daily key", 1, database.priceObservationDao().getVerifiedObservationCount())

@@ -56,7 +56,8 @@ data class SerpApiShoppingSearchReport(
     val rejectedForLink: Int,
     val rejectedOther: Int,
     val firstResultFields: String = "",
-    val rejectedAsSuspiciousPrice: Int = 0
+    val rejectedAsSuspiciousPrice: Int = 0,
+    val rejectedNonComparable: Int = 0
 ) {
     fun emptyResultMessage(query: String): String {
         if (rawResultCount == 0) {
@@ -68,6 +69,7 @@ data class SerpApiShoppingSearchReport(
         if (rejectedForLink > 0) reasons += "$rejectedForLink no tenían un enlace HTTPS válido"
         if (rejectedOther > 0) reasons += "$rejectedOther estaban incompletos"
         if (rejectedAsSuspiciousPrice > 0) reasons += "$rejectedAsSuspiciousPrice tenían un precio anormalmente bajo respecto al resto de resultados"
+        if (rejectedNonComparable > 0) reasons += "$rejectedNonComparable eran anuncios de alquiler o financiación no comparables"
         val detail = reasons.joinToString("; ").ifBlank { "ninguno pasó los filtros de seguridad" }
         val fieldDiagnostic = if (
             results.isEmpty() &&
@@ -321,6 +323,7 @@ class SerpApiClient(
         var rejectedForPriceOrCurrency = 0
         var rejectedForLink = 0
         var rejectedOther = 0
+        var rejectedNonComparable = 0
         val parsedCandidates = items.mapNotNull { item ->
             val title = item.optString("title").trim()
                 .takeIf { it.isNotBlank() && it != "null" }
@@ -333,7 +336,7 @@ class SerpApiClient(
                 return@mapNotNull null
             }
             if (isRentalOrFinancingListing(title, query.orEmpty())) {
-                rejectedOther++
+                rejectedNonComparable++
                 return@mapNotNull null
             }
 
@@ -432,7 +435,8 @@ class SerpApiClient(
                 ?.asSequence()
                 ?.joinToString(", ")
                 .orEmpty(),
-            rejectedAsSuspiciousPrice = rejectedAsSuspiciousPrice
+            rejectedAsSuspiciousPrice = rejectedAsSuspiciousPrice,
+            rejectedNonComparable = rejectedNonComparable
         )
     }
 

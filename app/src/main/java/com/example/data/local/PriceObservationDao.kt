@@ -35,6 +35,12 @@ interface PriceObservationDao {
     @Query("SELECT * FROM price_observations WHERE isVerified = 1 ORDER BY observedAt ASC")
     fun observeAllVerified(): Flow<List<PriceObservationEntity>>
 
+    @Query("SELECT * FROM price_observations WHERE isVerified = 1 ORDER BY observedAt ASC")
+    suspend fun getAllVerifiedSnapshot(): List<PriceObservationEntity>
+
+    @Query("DELETE FROM price_observations WHERE id IN (:observationIds)")
+    suspend fun deleteByIds(observationIds: List<Long>): Int
+
     @Query("SELECT COUNT(*) FROM price_observations WHERE isVerified = 1")
     suspend fun getVerifiedObservationCount(): Int
 

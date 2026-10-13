@@ -62,20 +62,14 @@ class ProductRepository(
             priceObservationDao.deleteExplicitDemoObservations()
             trackedDao.deleteTrackingForDemoProducts()
             productDao.deleteExplicitDemoProducts()
-            // Evaluate legacy rows in Kotlin through one shared policy. Keeping the SQL simple
-            // avoids Room/KSP spending excessive time parsing huge nested LIKE predicates.
+            priceObservationDao.deleteUnverifiedObservations()
+            // Evaluate the remaining legacy rows in Kotlin through one shared policy.
+            // Room's SQL stays simple, which keeps KSP's query validation fast and predictable.
             val invalidObservationIds = priceObservationDao.getAllObservationsSnapshot()
                 .filterNot(::isEligibleObservationForHistory)
                 .map { it.id }
             if (invalidObservationIds.isNotEmpty()) {
                 priceObservationDao.deleteByIds(invalidObservationIds)
-            }
-            priceObservationDao.deleteUnverifiedObservations()
-            val remainingInvalidObservationIds = priceObservationDao.getAllObservationsSnapshot()
-                .filterNot(::isEligibleObservationForHistory)
-                .map { it.id }
-            if (remainingInvalidObservationIds.isNotEmpty()) {
-                priceObservationDao.deleteByIds(remainingInvalidObservationIds)
             }
             productDao.deleteProductsWithoutVerifiedObservations()
             productDao.markProductsWithVerifiedObservations()

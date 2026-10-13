@@ -18,6 +18,7 @@ import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.model.Store
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -53,28 +54,37 @@ class ProductRepository(
     private val _latestProducts = MutableStateFlow<List<Product>>(emptyList())
     private val _simulationOverrides = MutableStateFlow<Map<String, Product>>(emptyMap())
 
+    // Do not let the first online query race the asynchronous cleanup of legacy Room rows.
+    private val startupCleanupCompleted = CompletableDeferred<Unit>()
+
     init {
         // The database must never seed a demonstration catalogue. On upgrade, discard old rows
         // that do not have real verified online observations and their orphaned watchlist/history.
         // The static Store.ALL_STORES directory is read-only metadata and does not need Room rows.
         externalScope.launch {
-            // Purge demo-linked history and watchlist rows before removing the products themselves.
-            priceObservationDao.deleteExplicitDemoObservations()
-            trackedDao.deleteTrackingForDemoProducts()
-            productDao.deleteExplicitDemoProducts()
-            priceObservationDao.deleteUnverifiedObservations()
-            // Evaluate the remaining legacy rows in Kotlin through one shared policy.
-            // Room's SQL stays simple, which keeps KSP's query validation fast and predictable.
-            val invalidObservationIds = priceObservationDao.getAllObservationsSnapshot()
-                .filterNot(::isEligibleObservationForHistory)
-                .map { it.id }
-            if (invalidObservationIds.isNotEmpty()) {
-                priceObservationDao.deleteByIds(invalidObservationIds)
+            try {
+                // Purge demo-linked history and watchlist rows before removing the products themselves.
+                priceObservationDao.deleteExplicitDemoObservations()
+                trackedDao.deleteTrackingForDemoProducts()
+                productDao.deleteExplicitDemoProducts()
+                priceObservationDao.deleteUnverifiedObservations()
+                // Evaluate the remaining legacy rows in Kotlin through one shared policy.
+                // Room's SQL stays simple, which keeps KSP's query validation fast and predictable.
+                val invalidObservationIds = priceObservationDao.getAllObservationsSnapshot()
+                    .filterNot(::isEligibleObservationForHistory)
+                    .map { it.id }
+                if (invalidObservationIds.isNotEmpty()) {
+                    priceObservationDao.deleteByIds(invalidObservationIds)
+                }
+                productDao.deleteProductsWithoutVerifiedObservations()
+                productDao.markProductsWithVerifiedObservations()
+                trackedDao.deleteTrackingForMissingProducts()
+                storeDao.deleteAll()
+                startupCleanupCompleted.complete(Unit)
+            } catch (failure: Throwable) {
+                startupCleanupCompleted.completeExceptionally(failure)
+                throw failure
             }
-            productDao.deleteProductsWithoutVerifiedObservations()
-            productDao.markProductsWithVerifiedObservations()
-            trackedDao.deleteTrackingForMissingProducts()
-            storeDao.deleteAll()
         }
     }
 
@@ -139,6 +149,7 @@ class ProductRepository(
      * verified only if at least one validated offer was stored for that product.
      */
     suspend fun recordSerpApiQuotes(quotes: List<SerpApiQuote>): Int {
+        startupCleanupCompleted.await()
         // Resolve titles from persisted, user-searched products only.
         val storedProducts = productDao.getAllProductsSnapshot()
         val titleById = storedProducts.associate { it.id to it.title }.toMutableMap().apply {
@@ -307,6 +318,7 @@ class ProductRepository(
         sourceType: String,
         searchQuery: String = ""
     ): Int {
+        startupCleanupCompleted.await()
         val normalizedSource = when (sourceType) {
             "AMAZON" -> "Amazon.es"
             "GOOGLE_SHOPPING" -> "Google Shopping"
@@ -703,6 +715,7 @@ class ProductRepository(
     }
 
     suspend fun toggleTracking(productId: String, targetAlertPrice: Double? = null) {
+        startupCleanupCompleted.await()
         val existing = trackedDao.getById(productId)
         if (existing != null) {
             trackedDao.delete(productId)
@@ -717,6 +730,7 @@ class ProductRepository(
     }
 
     suspend fun updateAlertTarget(productId: String, targetPrice: Double?) {
+        startupCleanupCompleted.await()
         val existing = trackedDao.getById(productId)
         if (existing != null) {
             trackedDao.updateTargetPrice(productId, targetPrice)

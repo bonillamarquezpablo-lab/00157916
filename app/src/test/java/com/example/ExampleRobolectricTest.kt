@@ -387,7 +387,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `migration 2 to 5 preserves watchlist and old products and stores verified price observations`() {
+    fun `migration 2 to 6 preserves watchlist and stores link destination types`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val databaseName = "minimo_migration_preservation_test.db"
         context.deleteDatabase(databaseName)
@@ -440,7 +440,7 @@ class ExampleRobolectricTest {
             AppDatabase::class.java,
             databaseName
         )
-            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
+            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6)
             .allowMainThreadQueries()
             .build()
 
@@ -464,9 +464,10 @@ class ExampleRobolectricTest {
                         storeId = "sample-store",
                         price = 42.50,
                         observedAt = 1000L,
-                        sourceUrl = "https://example.com/product",
+                        sourceUrl = "https://www.google.com/shopping/product/123456",
                         sourceName = "Unit-test source",
-                        isVerified = true
+                        isVerified = true,
+                        linkType = "Google Shopping"
                     )
                 )
                 migratedDatabase.priceObservationDao().insert(
@@ -485,6 +486,7 @@ class ExampleRobolectricTest {
                 val latestVerified = migratedDatabase.priceObservationDao().getLatestVerified("sample-product")
                 assertNotNull(latestVerified)
                 assertEquals(42.50, latestVerified?.price ?: 0.0, 0.001)
+                assertEquals("Google Shopping", latestVerified?.linkType)
             }
         } finally {
             migratedDatabase.close()

@@ -224,9 +224,18 @@ fun PriceHistoryChart(
                     .pointerInput(filteredPoints) {
                         detectTapGestures { offset ->
                             if (filteredPoints.isNotEmpty()) {
-                                val spacing = size.width / (filteredPoints.size - 1).coerceAtLeast(1)
-                                val index = ((offset.x + (spacing / 2)) / spacing).toInt()
-                                selectedPointIndex = index.coerceIn(0, filteredPoints.size - 1)
+                                val firstTimestamp = filteredPoints.first().timestamp
+                                val timestampSpan = (filteredPoints.last().timestamp - firstTimestamp)
+                                    .coerceAtLeast(1L).toDouble()
+                                selectedPointIndex = filteredPoints.indices.minByOrNull { index ->
+                                    val pointX = if (filteredPoints.size == 1) {
+                                        size.width / 2f
+                                    } else {
+                                        (((filteredPoints[index].timestamp - firstTimestamp).toDouble() /
+                                            timestampSpan) * size.width).toFloat()
+                                    }
+                                    kotlin.math.abs(pointX - offset.x)
+                                } ?: -1
                             }
                         }
                     }
@@ -244,9 +253,17 @@ fun PriceHistoryChart(
                 // extend it into a time series.
                 val pointSpacing = if (filteredPoints.size > 1) width / (filteredPoints.size - 1) else 0f
 
-                // A single observation is centered instead of being glued to the left edge.
+                // Horizontal distance represents elapsed time, not row number. This matters
+                // when a four-year series contains uneven gaps between real observations.
+                val firstTimestamp = filteredPoints.first().timestamp
+                val timestampSpan = (filteredPoints.last().timestamp - firstTimestamp)
+                    .coerceAtLeast(1L).toDouble()
                 val coords = filteredPoints.mapIndexed { index, pt ->
-                    val x = if (filteredPoints.size == 1) width / 2f else index * pointSpacing
+                    val x = if (filteredPoints.size == 1) {
+                        width / 2f
+                    } else {
+                        (((pt.timestamp - firstTimestamp).toDouble() / timestampSpan) * width).toFloat()
+                    }
                     val normalizedPrice = (pt.price - minPriceInView) / priceRange
                     val y = paddingTop + usableHeight - (normalizedPrice.toFloat() * usableHeight)
                     Offset(x, y)

@@ -32,7 +32,9 @@ data class SerpApiShoppingResult(
     /** True for offers far below the result-set median; visible but excluded from best-price/history calculations. */
     val isSuspiciousPrice: Boolean = false,
     /** Google Shopping catalog identity used to fetch the full list of retailer offers. */
-    val googleProductId: String? = null
+    val googleProductId: String? = null,
+    /** A wheel result whose title omits one or more requested fitment dimensions. */
+    val isFitmentUnverified: Boolean = false
 ) {
     /**
      * True when the accepted URL stays on a Google domain rather than opening the seller directly.

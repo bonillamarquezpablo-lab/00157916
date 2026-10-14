@@ -4,17 +4,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.platform.testTag
 import com.example.data.remote.RejectedOnlineOffer
 import com.example.ui.viewmodel.TrackerUiState
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -61,7 +62,7 @@ class OnlineSearchScreenTest {
         val searchList = composeRule.onNodeWithTag("online-search-list")
         searchList.performScrollToNode(hasText("Ver descartados (1)"))
         composeRule.onNodeWithText("Ver descartados (1)").assertIsDisplayed()
-        composeRule.onNodeWithText(rejectedOffer.title).assertDoesNotExist()
+        assertTrue(composeRule.onAllNodesWithText(rejectedOffer.title).fetchSemanticsNodes().isEmpty())
 
         composeRule.onNodeWithText("Ver descartados (1)").performClick()
         searchList.performScrollToNode(hasText(rejectedOffer.title))
@@ -72,7 +73,7 @@ class OnlineSearchScreenTest {
 
         searchList.performScrollToNode(hasText("Ocultar descartados"))
         composeRule.onNodeWithText("Ocultar descartados").performClick()
-        composeRule.onNodeWithText(rejectedOffer.title).assertDoesNotExist()
+        assertTrue(composeRule.onAllNodesWithText(rejectedOffer.title).fetchSemanticsNodes().isEmpty())
         composeRule.onNodeWithText("Ver descartados (1)").assertIsDisplayed()
     }
 
@@ -94,7 +95,7 @@ class OnlineSearchScreenTest {
             }
         }
 
-        composeRule.onNodeWithText("Ver descartados (0)").assertDoesNotExist()
-        composeRule.onNodeWithText("Ocultar descartados").assertDoesNotExist()
+        assertTrue(composeRule.onAllNodesWithText("Ver descartados (0)").fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithText("Ocultar descartados").fetchSemanticsNodes().isEmpty())
     }
 }

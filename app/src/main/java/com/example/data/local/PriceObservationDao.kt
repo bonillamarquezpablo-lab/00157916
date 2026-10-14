@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -17,6 +18,9 @@ interface PriceObservationDao {
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertAll(observations: List<PriceObservationEntity>)
+
+    @Update
+    suspend fun update(observation: PriceObservationEntity)
 
     @Query(
         "SELECT * FROM price_observations " +
@@ -35,12 +39,15 @@ interface PriceObservationDao {
     @Query("SELECT * FROM price_observations WHERE isVerified = 1 ORDER BY observedAt ASC")
     fun observeAllVerified(): Flow<List<PriceObservationEntity>>
 
+    @Query("SELECT * FROM price_observations WHERE productId = :productId AND isVerified = 1 AND observedAt >= :since ORDER BY price ASC")
+    suspend fun getVerifiedSince(productId: String, since: Long): List<PriceObservationEntity>
+
     @Query("SELECT COUNT(*) FROM price_observations WHERE isVerified = 1")
     suspend fun getVerifiedObservationCount(): Int
 
     @Query(
         "SELECT * FROM price_observations " +
-            "WHERE productId = :productId AND storeId = :storeId " +
+            "WHERE productId = :productId AND storeId = :storeId AND isVerified = 1 " +
             "AND observedAt >= :dayStart AND observedAt < :dayEnd " +
             "LIMIT 1"
     )
@@ -53,12 +60,12 @@ interface PriceObservationDao {
 
     @Query("SELECT COUNT(*) FROM price_observations WHERE productId = :productId")
     suspend fun getObservationCount(productId: String): Int
-
-    /** Demo/unverified points are never valid history in this app. */
+ 
+    /** Demo/unverified points are never valid price history. */
     @Query("DELETE FROM price_observations WHERE isVerified = 0")
     suspend fun deleteUnverifiedObservations(): Int
 
-    /** Remove points attached to legacy mock products before deleting those products. */
+    /** Remove legacy demo-linked history before deleting demo products. */
     @Query("DELETE FROM price_observations WHERE productId IN (SELECT id FROM products WHERE id LIKE 'demo_%' OR lower(athMinDate) LIKE '%demostración%' OR lower(athMinStore) LIKE '%demostración%')")
     suspend fun deleteExplicitDemoObservations(): Int
 }

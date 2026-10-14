@@ -342,9 +342,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         ean = product.ean
                     )
                 }
-                val batchResult = serpApiClient.searchProducts(token, requests) { stage ->
-                    _uiState.value = _uiState.value.copy(priceRefreshStatus = stage)
-                }
+                val batchResult = serpApiClient.searchProducts(
+                    token = token,
+                    products = requests,
+                    onStage = { stage ->
+                        _uiState.value = _uiState.value.copy(priceRefreshStatus = stage)
+                    }
+                )
                 val quotes = batchResult.quotes
                 val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
                 if (quotaAfter != null) {

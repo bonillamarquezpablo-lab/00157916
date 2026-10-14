@@ -36,6 +36,13 @@ data class SerpApiShoppingResult(
             """(?i)\b(segunda[\s_-]+mano|second[\s_-]*hand|pre[\s_-]*owned|used|usad[oa]s?|seminuev[oa]s?|reacondicionad[oa]s?|refurbished|renewed|open[\s_-]*box)\b"""
         ).containsMatchIn(title)
 
+    val isRentalOrMonthly: Boolean
+        get() = Regex(
+            """(?i)\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b"""
+        ).containsMatchIn(title) || Regex(
+            """(?i)\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b"""
+        ).containsMatchIn(condition)
+
     /** Stored label describing where tapping this offer opens. */
     val linkType: String
         get() = linkTypeForUrl(sourceUrl)

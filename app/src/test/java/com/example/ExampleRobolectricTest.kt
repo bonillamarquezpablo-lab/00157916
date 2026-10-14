@@ -506,7 +506,7 @@ class ExampleRobolectricTest {
             AppDatabase::class.java,
             databaseName
         )
-            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6)
+            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7)
             .allowMainThreadQueries()
             .build()
 
@@ -583,7 +583,7 @@ class ExampleRobolectricTest {
 
         val offers = client.parseGoogleProductOffers(
             root = payload,
-            expectedTitle = "Sony WH-1000XM5 Wireless Headphones",
+            expectedTitle = "Sony WH-1000XM5",
             productId = "987654321",
             observedAt = 1234L
         )

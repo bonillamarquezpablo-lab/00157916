@@ -18,8 +18,9 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Quota-capped daily monitor: checks at most three products with target prices per run.
- * Products are rotated by last-check time so the same watchlist items do not always win.
+ * Quota-capped daily history collector and optional price-alert monitor.
+ * It checks up to three tracked products per local day, rotating oldest-checks first.
+ * Collection is independent from notification permission and target-price alert settings.
  */
 class PriceAlertWorker(
     appContext: Context,
@@ -27,19 +28,14 @@ class PriceAlertWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        // Do not spend paid searches if Android cannot display the notifications the user requested.
-        if (!PriceAlertNotifications.hasPermission(applicationContext)) return Result.success()
-
         val token = SerpApiTokenStore(applicationContext).read()
         if (token.isNullOrBlank()) return Result.success()
 
         val database = AppDatabase.getInstance(applicationContext)
         val preferences = applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        // History collection applies to every product in the watchlist. Notification settings
+        // control alerts only; they must not silently disable historical price observations.
         val tracked = database.trackedProductDao().getAllTracked().first()
-            .filter {
-                it.isNotificationEnabled &&
-                    it.targetAlertPrice?.let { price -> price.isFinite() && price > 0.0 } == true
-            }
         if (tracked.isEmpty()) return Result.success()
 
         val productsById = database.productDao().getAllProductsSnapshot().associateBy { it.id }
@@ -53,14 +49,20 @@ class PriceAlertWorker(
         val remainingDailyQuota = (MAX_PRODUCTS_PER_DAY - usedToday).coerceAtLeast(0)
         if (remainingDailyQuota == 0) return Result.success()
 
-        val due = tracked.mapNotNull { watch ->
+        val lastCheckedAt = tracked.associate { watch ->
+            watch.productId to preferences.getLong(checkedKey(watch.productId), 0L)
+        }
+        val dueWatches = PriceHistoryCollectionPolicy.selectDueProducts(
+            tracked = tracked,
+            availableProductIds = productsById.keys,
+            lastCheckedAt = lastCheckedAt,
+            now = now,
+            maxProducts = remainingDailyQuota
+        )
+        val due = dueWatches.mapNotNull { watch ->
             val product = productsById[watch.productId] ?: return@mapNotNull null
-            if (now - preferences.getLong(checkedKey(watch.productId), 0L) < MIN_RECHECK_INTERVAL_MS) {
-                return@mapNotNull null
-            }
             Candidate(watch, product)
-        }.sortedBy { preferences.getLong(checkedKey(it.watch.productId), 0L) }
-            .take(remainingDailyQuota)
+        }
         if (due.isEmpty()) return Result.success()
 
         val client = SerpApiClient()
@@ -116,9 +118,18 @@ class PriceAlertWorker(
 
         for (candidate in selected) {
             val productId = candidate.watch.productId
-            val target = candidate.watch.targetAlertPrice ?: continue
             val latestQuotes = database.priceObservationDao().getVerifiedSince(productId, startedAt)
             val best = latestQuotes.minByOrNull { it.price } ?: continue
+
+            // Historical collection above is always retained, even if alerts are disabled or
+            // POST_NOTIFICATIONS permission is unavailable. Alert state is updated only when the
+            // user has enabled alerts and Android accepts any required notification.
+            val target = candidate.watch.targetAlertPrice
+                ?.takeIf { it.isFinite() && it > 0.0 }
+            if (!candidate.watch.isNotificationEnabled || target == null ||
+                !PriceAlertNotifications.hasPermission(applicationContext)
+            ) continue
+
             val previousPrice = preferences.getString(priceKey(productId), null)?.toDoubleOrNull()
             val previousTarget = preferences.getString(targetKey(productId), null)?.toDoubleOrNull()
             val shouldNotify = PriceAlertRules.shouldNotifyPriceDrop(
@@ -159,9 +170,7 @@ class PriceAlertWorker(
 
     private companion object {
         const val PREFS_NAME = "minimo_price_alert_monitor"
-        const val MAX_PRODUCTS_PER_DAY = 3
         const val QUOTA_DAY_KEY = "quota_day"
         const val QUERIES_USED_TODAY_KEY = "queries_used_today"
-        const val MIN_RECHECK_INTERVAL_MS = 20L * 60L * 60L * 1000L
     }
 }

@@ -60,6 +60,7 @@ data class TrackerUiState(
     val isOnlineSearching: Boolean = false,
     val onlineSearchStatus: String? = null,
     val onlineSearchAmazonOnly: Boolean = false,
+    val onlineSearchShowSecondHand: Boolean = false,
     val onlineSearchProvider: OnlineSearchProvider = OnlineSearchProvider.GOOGLE_SHOPPING,
     val isCheckingSerpApiAccount: Boolean = false,
     val serpApiAccountStatus: String? = null,
@@ -446,6 +447,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     fun onOnlineSearchAmazonOnlyChange(onlyAmazon: Boolean) {
         _uiState.value = _uiState.value.copy(onlineSearchAmazonOnly = onlyAmazon)
+    }
+
+    fun onOnlineSearchShowSecondHandChange(show: Boolean) {
+        _uiState.value = _uiState.value.copy(onlineSearchShowSecondHand = show)
     }
 
     /** Open the Room-backed detail sheet for a grouped online product card. */

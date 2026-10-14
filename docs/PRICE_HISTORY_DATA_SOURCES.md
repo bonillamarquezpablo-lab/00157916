@@ -14,7 +14,22 @@
 
 ## Fuentes complementarias
 
-### 2. Keepa API — historial de Amazon.es
+### 2. PricesAPI (pricesapi.io) — candidato multi-tienda para España
+
+- Documentación: https://pricesapi.io/docs
+- La documentación lista el mercado español (`es`) y una API `Price History` que recupera ofertas retenidas por producto, comercio y fecha.
+- La búsqueda de catálogo permite consultar por nombre/vendedor y devuelve un resumen de cobertura retenida (primera/última fecha y días con ofertas) **sin gastar créditos**. Es el primer paso recomendado para medir si merece la pena importar un producto.
+- La API admite ventanas de hasta 1.500 días (aproximadamente 4,1 años). El coste documentado del historial es de 1 crédito por día con ofertas; la solicitud puede requerir reservar saldo para toda la ventana, aunque reembolse los días sin ofertas.
+- **Límite importante:** la propia documentación dice que la profundidad varía por producto y mercado y que esta función está en beta pública. No garantiza cobertura de cuatro años para un artículo concreto. Antes de activarla hay que consultar la cobertura gratuita de catálogo, estimar el coste y obtener autorización para gastar créditos.
+- Es la candidata más interesante que he encontrado para un histórico agregado multi-tienda en España; debe compararse con resultados reales de Mínimo antes de decidir.
+
+### 3. PriceAPI / Idealo — alternativa comercial europea
+
+- Documentación: https://readme.priceapi.com/reference/idealo
+- El proveedor PriceAPI ofrece fuente Idealo para España (`es`) y documenta datos de ofertas, productos y precio histórico; la fuente se solicita al soporte y el uso se factura en créditos.
+- Tiene sentido evaluarlo si PricesAPI no conserva suficiente profundidad en modelos relevantes, pero hay que solicitar condiciones y confirmar cobertura/coste antes de integrarlo.
+
+### 4. Keepa API — historial especializado de Amazon.es
 
 - Documentación: https://keepa.com/api-docs/
 - Keepa entrega historial de precios de mercados Amazon, incluyendo datos por producto/ASIN. Su documentación describe una API con consumo de tokens y planes de pago: https://keepa.com/api-docs/plans-tokens.html
@@ -22,14 +37,14 @@
 - **Uso recomendado:** fuente especializada para Amazon.es y principal alternativa cuando Google no ofrezca un historial suficientemente profundo.
 - **Límites:** requiere una cuenta y clave de API con saldo; el precio, disponibilidad y profundidad deben validarse por ASIN. No cubre de forma general todas las tiendas españolas. Antes de integrar, revisar coste por volumen y condiciones de uso, y mantener la clave fuera del APK en una versión pública.
 
-### 3. Internet Archive / Wayback Machine — capturas de páginas
+### 5. Internet Archive / Wayback Machine — capturas de páginas
 
 - Documentación del índice CDX: https://github.com/internetarchive/wayback-cdx-server
 - Permite buscar capturas históricas de URL en intervalos de fechas, pero una captura no equivale a una base de precios estructurada.
 - **Uso recomendado:** fuente auxiliar para auditar un precio de una página concreta cuando exista una captura antigua y se pueda verificar claramente producto, moneda y condición.
 - **No usar como fuente primaria masiva:** las fichas de tiendas pueden depender de JavaScript, variar sus URL, no estar archivadas o mostrar precios personalizados/agotados. No debe inventarse un precio cuando la captura no lo expone con claridad.
 
-### 4. Feeds y acuerdos directos con tiendas
+### 6. Feeds y acuerdos directos con tiendas
 
 La opción de mayor calidad a largo plazo son feeds, APIs de afiliación o acuerdos de datos que permitan explícitamente registrar y conservar precios históricos. Deben evaluarse tienda por tienda; disponer de una URL pública no implica permiso para crear una base de datos histórica comercial.
 

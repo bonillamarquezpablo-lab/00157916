@@ -1107,7 +1107,7 @@ class ExampleRobolectricTest {
         assertTrue(
             report.discardedOffers.any {
                 it.title.contains("4x100") &&
-                    it.reason.contains("Anclaje incompatible", ignoreCase = true)
+                    it.reason.contains("Anclaje distinto", ignoreCase = true)
             }
         )
         assertFalse(

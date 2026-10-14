@@ -443,6 +443,15 @@ class SerpApiClient(
                     recordDiscard(item, title, "Otro modelo o título no coincidente")
                     return@mapNotNull null
                 }
+                // When the query only specifies generic fitment (no wheel model), do not
+                // accept obvious non-wheel accessories such as hubcaps as uncertain wheel results.
+                // A named/model-specific match may still lack category words and remains explicitly
+                // unverified, rather than being silently discarded.
+                if (modelQuery.isBlank() && !isWheelListing(title)) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "No parece una llanta o rueda")
+                    return@mapNotNull null
+                }
                 categoryUnverified = !isWheelListing(title)
                 val resultDiameter = wheelDiameterInches(title)
                 val resultPcd = wheelBoltPattern(title)

@@ -96,4 +96,28 @@ class OnlineSearchCacheTest {
         assertNotNull(cache.read("GOOGLE_SHOPPING", "usb c cable", now + 1_000L))
         assertNull(cache.read("GOOGLE_SHOPPING", "usb c cable", now + OnlineSearchCache.CACHE_TTL_MS))
     }
+    @Test
+    fun invalidateRemovesOnlyTheRequestedProviderAndQuery() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val cache = OnlineSearchCache(context)
+        val now = 1_800_300_000_000L
+        val googleResult = SerpApiShoppingResult(
+            title = "Anker Prime",
+            price = 99.0,
+            storeName = "Tienda",
+            sourceUrl = "https://shop.example/anker",
+            observedAt = now
+        )
+        val amazonResult = googleResult.copy(storeName = "Amazon.es")
+        cache.write("GOOGLE_SHOPPING", "anker prime", listOf(googleResult), now)
+        cache.write("AMAZON", "anker prime", listOf(amazonResult), now)
+        cache.write("GOOGLE_SHOPPING", "anker prime 27k", listOf(googleResult.copy(title = "Anker Prime 27K")), now)
+
+        cache.invalidate("GOOGLE_SHOPPING", "anker prime")
+
+        assertNull(cache.read("GOOGLE_SHOPPING", "anker prime", now + 1L))
+        assertNotNull(cache.read("AMAZON", "anker prime", now + 1L))
+        assertNotNull(cache.read("GOOGLE_SHOPPING", "anker prime 27k", now + 1L))
+    }
+
 }

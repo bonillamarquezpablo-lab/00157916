@@ -20,15 +20,15 @@ interface ProductDao {
     @Query("SELECT * FROM products WHERE id = :productId LIMIT 1")
     suspend fun getProductById(productId: String): ProductEntity?
 
-    /** Remove legacy catalogue rows which never acquired a real, source-backed observation. */
-    @Query("DELETE FROM products WHERE id NOT IN (SELECT DISTINCT productId FROM price_observations WHERE isVerified = 1)")
+    /** Remove unverified legacy catalogue rows, but preserve products explicitly followed by the user. */
+    @Query("DELETE FROM products WHERE id NOT IN (SELECT DISTINCT productId FROM price_observations WHERE isVerified = 1) AND id NOT IN (SELECT productId FROM tracked_products)")
     suspend fun deleteProductsWithoutVerifiedObservations(): Int
 
-    /** Remove legacy mock rows by explicit demo markers, even if old code marked their history verified. */
+    /** Remove only rows with explicit demo markers, even if old history was incorrectly verified. */
     @Query("DELETE FROM products WHERE id LIKE 'demo_%' OR lower(athMinDate) LIKE '%demostración%' OR lower(athMinStore) LIKE '%demostración%'")
     suspend fun deleteExplicitDemoProducts(): Int
 
-    /** Reconcile legacy flags from the authoritative verified-observation table. */
+    /** Reconcile the cached verification flag from the source-backed observation table. */
     @Query("UPDATE products SET isPriceVerified = 1 WHERE id IN (SELECT DISTINCT productId FROM price_observations WHERE isVerified = 1)")
     suspend fun markProductsWithVerifiedObservations(): Int
 

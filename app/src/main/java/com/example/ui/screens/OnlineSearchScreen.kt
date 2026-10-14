@@ -277,7 +277,7 @@ private fun ShoppingResultCard(
                     )
                     if (group.offers.any { it.isSuspiciousPrice }) {
                         Text(
-                            "Precio sospechoso · no cuenta como mejor precio",
+                            "Hay una oferta con precio sospechoso; se excluye del mejor precio",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.error,
                             fontWeight = FontWeight.Bold

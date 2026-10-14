@@ -832,7 +832,7 @@ class ProductRepository(
     }
 
     private companion object {
-        // Fixed policy boundary: no stored row before this local Spain date contributes to history.
+        // Live provider rows before this local Spain date remain excluded; verified archive rows bypass this boundary only through evidenceType=archive.
         val HISTORY_START_TIMESTAMP: Long = Calendar.getInstance(TimeZone.getTimeZone("Europe/Madrid")).apply {
             clear()
             set(2026, Calendar.OCTOBER, 13, 0, 0, 0)

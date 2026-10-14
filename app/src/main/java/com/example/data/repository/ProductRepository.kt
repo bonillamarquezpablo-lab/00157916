@@ -181,7 +181,8 @@ class ProductRepository(
 
         // Do not discard unusually low prices: surface them with an explicit warning. They are
         // excluded from best-price selection and Room history unless they reach 30% of the median.
-        val prices = eligible.map { it.price }.sorted()
+        val prices = eligible.filterNot { it.isSecondHand }.map { it.price }.sorted()
+            .ifEmpty { eligible.map { it.price }.sorted() }
         val median = if (prices.size % 2 == 1) prices[prices.size / 2]
             else (prices[prices.size / 2 - 1] + prices[prices.size / 2]) / 2.0
         return eligible.map { result ->

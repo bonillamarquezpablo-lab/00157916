@@ -11,6 +11,7 @@ import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiException
 import com.example.data.remote.SerpApiRequestProduct
 import com.example.data.remote.SerpApiShoppingResult
+import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.SerpApiTokenStore
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
@@ -57,6 +58,8 @@ data class TrackerUiState(
     val priceRefreshStatus: String? = null,
     val onlineSearchQuery: String = "",
     val onlineSearchResults: List<SerpApiShoppingResult> = emptyList(),
+    val onlineSearchDiscardedOffers: List<RejectedOnlineOffer> = emptyList(),
+    val showOnlineSearchDiscarded: Boolean = false,
     val isOnlineSearching: Boolean = false,
     val onlineSearchStatus: String? = null,
     val onlineSearchAmazonOnly: Boolean = false,
@@ -440,12 +443,20 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(
             onlineSearchQuery = query,
             onlineSearchResults = emptyList(),
+            onlineSearchDiscardedOffers = emptyList(),
+            showOnlineSearchDiscarded = false,
             onlineSearchStatus = null
         )
     }
 
     fun onOnlineSearchAmazonOnlyChange(onlyAmazon: Boolean) {
         _uiState.value = _uiState.value.copy(onlineSearchAmazonOnly = onlyAmazon)
+    }
+
+    fun onToggleOnlineSearchDiscarded() {
+        _uiState.value = _uiState.value.copy(
+            showOnlineSearchDiscarded = !_uiState.value.showOnlineSearchDiscarded
+        )
     }
 
     /** Open the Room-backed detail sheet for a grouped online product card. */
@@ -507,8 +518,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         val savedObservations = repository.recordOnlineSearchResults(safeCachedResults, provider.name, query)
                         val historyNotice = onlineHistoryNotice(savedObservations, safeCachedResults.size)
                         val filterNotice = onlineFilterNotice(cached.results.size, safeCachedResults.size)
+                        val cachedDiscarded = repository.diagnoseOnlineSearchRejections(cached.results, query)
                         _uiState.value = _uiState.value.copy(
                             onlineSearchResults = safeCachedResults,
+                            onlineSearchDiscardedOffers = cachedDiscarded,
+                            showOnlineSearchDiscarded = false,
                             onlineSearchStatus = "$base $cacheNotice$filterNotice $historyNotice"
                         )
                         return@launch
@@ -544,35 +558,39 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     return@launch
                 }
 
-                val googleReport = if (provider == OnlineSearchProvider.GOOGLE_SHOPPING) {
+                val providerReport = if (provider == OnlineSearchProvider.GOOGLE_SHOPPING) {
                     serpApiClient.searchOnlineWithDiagnostics(token, query)
                 } else {
-                    null
+                    serpApiClient.searchAmazonOnlineWithDiagnostics(token, query)
                 }
-                val rawResults = googleReport?.results
-                    ?: serpApiClient.searchAmazonOnline(token, query)
+                val rawResults = providerReport.results
+                val repositoryDiscarded = repository.diagnoseOnlineSearchRejections(rawResults, query)
                 // Use the same plausibility rules for visible cards, cache entries and Room history.
                 val results = repository.filterOnlineSearchResults(rawResults, query)
+                val discarded = (providerReport.discardedOffers + repositoryDiscarded)
+                    .distinctBy { "${it.provider}|${it.title}|${it.priceLabel}|${it.reason}" }
                 val savedObservations = if (results.isNotEmpty()) {
                     repository.recordOnlineSearchResults(results, provider.name, query)
                 } else 0
                 // Cache only filtered offers so a suspicious cached price cannot return later.
                 if (results.isNotEmpty()) onlineSearchCache.write(provider.name, query, results)
-                val base = if (results.isEmpty() && googleReport != null) {
-                    googleReport.emptyResultMessage(query)
+                val base = if (results.isEmpty() && providerReport.rawResultCount > 0) {
+                    providerReport.emptyResultMessage(query)
                 } else {
                     onlineSearchResultMessage(results, provider)
                 }
                 // The account endpoint is free; refresh the displayed balance after a live request.
                 val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
                 val quotaNote = quotaAfter?.let { " ${it.quotaSummary()}" }.orEmpty()
-                val filterNote = onlineFilterNotice(rawResults.size, results.size)
+                val filterNote = onlineFilterNotice(providerReport.rawResultCount, results.size)
                 val historyNote = if (results.isNotEmpty()) {
                     " " + onlineHistoryNotice(savedObservations, results.size)
                 } else ""
                 val message = base + quotaNote + filterNote + historyNote
                 _uiState.value = _uiState.value.copy(
                     onlineSearchResults = results,
+                    onlineSearchDiscardedOffers = discarded,
+                    showOnlineSearchDiscarded = false,
                     onlineSearchStatus = message
                 )
             } catch (cancelled: CancellationException) {

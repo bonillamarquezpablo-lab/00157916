@@ -56,11 +56,12 @@ data class SerpApiShoppingSearchReport(
     val rejectedForLink: Int,
     val rejectedOther: Int,
     val firstResultFields: String = "",
-    val discardedOffers: List<RejectedOnlineOffer> = emptyList()
+    val discardedOffers: List<RejectedOnlineOffer> = emptyList(),
+    val providerName: String = "Google Shopping"
 ) {
     fun emptyResultMessage(query: String): String {
         if (rawResultCount == 0) {
-            return "Google Shopping no devolvió productos para «$query». Prueba con el modelo exacto o inténtalo más tarde; no se ha guardado ningún precio."
+            return "$providerName no devolvió productos para «$query». Prueba con el modelo exacto o inténtalo más tarde; no se ha guardado ningún precio."
         }
         val reasons = mutableListOf<String>()
         if (rejectedAsIrrelevant > 0) reasons += "$rejectedAsIrrelevant no coincidían suficientemente con la búsqueda"
@@ -74,7 +75,7 @@ data class SerpApiShoppingSearchReport(
             rejectedForLink == rawResultCount &&
             firstResultFields.isNotBlank()
         ) " Campos recibidos: $firstResultFields." else ""
-        return "Google Shopping devolvió $rawResultCount resultados para «$query», pero ninguno era utilizable: $detail.$fieldDiagnostic No se ha guardado ningún precio."
+        return "$providerName devolvió $rawResultCount resultados para «$query», pero ninguno era utilizable: $detail.$fieldDiagnostic No se ha guardado ningún precio."
     }
 }
 
@@ -356,7 +357,8 @@ class SerpApiClient(
             rejectedForPriceOrCurrency = rejectedForPriceOrCurrency,
             rejectedForLink = rejectedForLink,
             rejectedOther = rejectedOther,
-            discardedOffers = discardedOffers
+            discardedOffers = discardedOffers,
+            providerName = "Amazon.es"
         )
     }
 

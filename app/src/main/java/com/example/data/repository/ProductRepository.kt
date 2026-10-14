@@ -1065,7 +1065,8 @@ class ProductRepository(
                 price = observation.price,
                 storeName = observation.storeName.ifBlank { observationStore(observation, stores).name },
                 eventLabel = observation.sourceType.ifBlank { observation.sourceName },
-                linkType = observation.linkType
+                linkType = observation.linkType,
+                sourceUrl = observation.sourceUrl
             )
         } else {
             emptyList()

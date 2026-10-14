@@ -46,7 +46,8 @@ data class Product(
     val hasSufficientHistory: Boolean
         get() {
             if (!isPriceVerified) return false
-            val timestamps = priceHistory.map { it.timestamp }.distinct().sorted()
+            val liveHistory = priceHistory.filterNot { it.eventLabel.equals("Internet Archive", ignoreCase = true) }
+            val timestamps = liveHistory.map { it.timestamp }.distinct().sorted()
             if (timestamps.size < MIN_HISTORY_POINTS) return false
             val now = System.currentTimeMillis()
             val ninetyDays = 90L * 24L * 60L * 60L * 1000L
@@ -62,7 +63,7 @@ data class Product(
      */
     val priceBadgeState: PriceBadgeState
         get() {
-            val orderedPoints = priceHistory.sortedBy { it.timestamp }
+            val orderedPoints = priceHistory.filterNot { it.eventLabel.equals("Internet Archive", ignoreCase = true) }.sortedBy { it.timestamp }
             val priorPrices = if (orderedPoints.size > 1) {
                 orderedPoints.dropLast(1).map { it.price }
             } else {

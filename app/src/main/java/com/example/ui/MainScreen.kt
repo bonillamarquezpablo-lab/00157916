@@ -273,6 +273,7 @@ fun MainScreen(
                     onSearch = viewModel::searchOnlineShopping,
                     onAmazonSearch = viewModel::searchAmazonShopping,
                     onAmazonOnlyChange = viewModel::onOnlineSearchAmazonOnlyChange,
+                    onShowSecondHandChange = viewModel::onOnlineSearchShowSecondHandChange,
                     onOpenSettings = {
                         showOnlineSearch = false
                         showSettings = true

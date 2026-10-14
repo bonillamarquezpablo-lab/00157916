@@ -501,6 +501,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             isOnlineSearching = true,
             onlineSearchStatus = searchingMessage,
             onlineSearchResults = emptyList(),
+            onlineSearchDiscardedOffers = emptyList(),
+            showOnlineSearchDiscarded = false,
             onlineSearchProvider = provider,
             onlineSearchAmazonOnly = provider == OnlineSearchProvider.AMAZON
         )

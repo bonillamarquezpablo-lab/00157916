@@ -1,5 +1,16 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import com.example.notifications.PriceAlertNotifications
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -21,7 +32,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddAlert
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -30,7 +40,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -50,10 +59,24 @@ fun AlertsScreen(
     onProductClick: (Product) -> Unit,
     onToggleTrack: (Product) -> Unit,
     onEditAlert: (Product) -> Unit,
-    onSimulatePriceDrop: (String) -> Unit,
     onNavigateToMarket: () -> Unit,
+    onCheckPricesNow: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    var notificationPermissionGranted by remember {
+        mutableStateOf(PriceAlertNotifications.hasPermission(context))
+    }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        notificationPermissionGranted = granted
+        if (granted) onCheckPricesNow()
+    }
+    val configuredTargetCount = trackedProducts.count { product ->
+        product.alertTargetPrice?.let { it.isFinite() && it > 0.0 } == true
+    }
+
     if (trackedProducts.isEmpty()) {
         Box(
             modifier = modifier
@@ -92,7 +115,7 @@ fun AlertsScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Guarda productos para tenerlos a mano. Las consultas automáticas de precios y las notificaciones todavía no están implementadas.",
+                    text = "Guarda un producto, fija el precio al que quieres comprarlo y permite las notificaciones. Mínimo podrá revisar su precio a diario y avisarte cuando baje hasta tu objetivo.",
                     fontSize = 13.sp,
                     lineHeight = 18.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -151,12 +174,40 @@ fun AlertsScreen(
                                     fontSize = 14.sp
                                 )
                                 Text(
-                                    text = "${trackedProducts.size} productos guardados · sin vigilancia automática",
+                                    text = "${trackedProducts.size} productos guardados · $configuredTargetCount con objetivo",
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
+                    }
+                }
+            }
+
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !notificationPermissionGranted) {
+                        Button(
+                            onClick = { notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Permitir avisos de precio")
+                        }
+                        Text(
+                            "Android necesita tu permiso para mostrar notificaciones. Mínimo no consumirá búsquedas automáticas mientras falte ese permiso.",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        Button(onClick = onCheckPricesNow, modifier = Modifier.fillMaxWidth()) {
+                            Text("Comprobar precios ahora")
+                        }
+                        Text(
+                            "Revisión automática diaria: hasta 3 productos con objetivo al día. Si sigues más, Mínimo rota los turnos. Cada consulta consume cuota de SerpApi.",
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
@@ -198,9 +249,9 @@ fun AlertsScreen(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = if (product.alertTargetPrice != null) {
-                                    "Objetivo guardado: ${String.format("%.2f", product.alertTargetPrice)} € (sin avisos automáticos)"
+                                    "Aviso al llegar a ${String.format("%.2f", product.alertTargetPrice)} € o menos"
                                 } else {
-                                    "Guardado para seguimiento manual (sin avisos automáticos)"
+                                    "Sin objetivo de precio · toca el lápiz para configurarlo"
                                 },
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
@@ -221,18 +272,6 @@ fun AlertsScreen(
                                 )
                             }
 
-                            // Simulation tool
-                            IconButton(
-                                onClick = { onSimulatePriceDrop(product.id) },
-                                modifier = Modifier.size(30.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.FlashOn,
-                                    contentDescription = "Simulación de demostración; no es un precio real",
-                                    tint = Color(0xFFD97706),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
                         }
                     }
                 }

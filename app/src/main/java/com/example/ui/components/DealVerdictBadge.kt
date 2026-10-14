@@ -50,12 +50,25 @@ fun DealVerdictBadge(
 ) {
     var expanded by remember { mutableStateOf(false) }
 
+    val isDemoData = verdict.title == "Datos de demostración"
+
     val icon = when (verdict.level) {
         VerdictLevel.ATH_RECORD -> Icons.Default.CheckCircle
         VerdictLevel.NEAR_ATH -> Icons.Default.TrendingDown
         VerdictLevel.FAIR_DISCOUNT -> Icons.Default.ArrowDownward
         VerdictLevel.INFLATED_FAKE_DEAL -> Icons.Default.Warning
         else -> Icons.Default.Info
+    }
+
+    val statusLabel = when {
+        isDemoData -> "Sin verificar"
+        verdict.level == VerdictLevel.UNVERIFIED -> "Historial insuficiente"
+        else -> "Verificado"
+    }
+    val statusDescription = when {
+        isDemoData -> "Datos de demostración · sin consulta en directo"
+        verdict.level == VerdictLevel.UNVERIFIED -> "Precio observado · historial aún insuficiente"
+        else -> "Resultado basado en datos verificados"
     }
 
     val containerColor = verdict.color.copy(alpha = 0.12f)
@@ -124,11 +137,7 @@ fun DealVerdictBadge(
                                 color = verdict.color
                             )
                             Text(
-                                text = if (verdict.level == VerdictLevel.UNVERIFIED) {
-                                    "Datos de demostración · sin consulta en directo"
-                                } else {
-                                    "Resultado basado en datos verificados"
-                                },
+                                text = statusDescription,
                                 fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -137,14 +146,14 @@ fun DealVerdictBadge(
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            imageVector = if (verdict.level == VerdictLevel.UNVERIFIED) Icons.Default.Info else Icons.Default.Shield,
-                            contentDescription = if (verdict.level == VerdictLevel.UNVERIFIED) "Sin verificar" else "Verificado",
+                            imageVector = if (isDemoData || verdict.level == VerdictLevel.UNVERIFIED) Icons.Default.Info else Icons.Default.Shield,
+                            contentDescription = statusLabel,
                             tint = verdict.color,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = if (verdict.level == VerdictLevel.UNVERIFIED) "Sin verificar" else "Verificado",
+                            text = statusLabel,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = verdict.color
@@ -169,7 +178,13 @@ fun DealVerdictBadge(
                             color = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            text = "El análisis solo puede confirmar una oferta cuando existen observaciones de precio con fuente y fecha. En esta versión, el catálogo inicial contiene datos de demostración y no se consultan automáticamente las tiendas.",
+                            text = if (isDemoData) {
+                                "Esta ficha pertenece al catálogo inicial. No hay una observación actual validada de una consulta online; por eso no se muestran sus precios como reales."
+                            } else if (verdict.level == VerdictLevel.UNVERIFIED) {
+                                "Hay al menos un precio observado con fuente y fecha, pero aún no existen suficientes consultas en fechas distintas para calcular un mínimo histórico, una media de 90 días o confirmar un descuento."
+                            } else {
+                                "El análisis se basa en observaciones guardadas con fuente y fecha. Comprueba siempre el precio final, el envío y el stock en la tienda."
+                            },
                             fontSize = 10.sp,
                             lineHeight = 14.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant

@@ -42,6 +42,13 @@ class SerpApiAmazonSearchTest {
                   "prime": false
                 },
                 {
+                  "title": "Anker Power Bank 20000mAh",
+                  "price": "29,99 €",
+                  "extracted_price": 29.99,
+                  "link": "https://www.amazon.es/dp/B0ANKERUSED/",
+                  "second_hand_condition": "used"
+                },
+                {
                   "title": "External unsafe result",
                   "price": "1,99 €",
                   "extracted_price": 1.99,

@@ -25,13 +25,11 @@ data class SerpApiShoppingResult(
      * SerpApi can return /search?prds=... links as well as /shopping/product/... links.
      */
     val isGoogleShoppingProductLink: Boolean
-        get() {
-            val uri = runCatching { URI(sourceUrl) }.getOrNull() ?: return false
-            val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
-            return host.startsWith("google.") ||
-                host.endsWith(".google.com") ||
-                host.endsWith(".google.es")
-        }
+        get() = isGoogleShoppingUrl(sourceUrl)
+
+    /** Stored label describing where tapping this offer opens. */
+    val linkType: String
+        get() = linkTypeForUrl(sourceUrl)
 
     val isAmazonOffer: Boolean
         get() {
@@ -44,6 +42,18 @@ data class SerpApiShoppingResult(
                 host.contains(".amazon.")
         }
 }
+
+/** Identifies the link destination without requiring a direct retailer URL or HTTPS. */
+fun isGoogleShoppingUrl(sourceUrl: String): Boolean {
+    val uri = runCatching { URI(sourceUrl) }.getOrNull() ?: return false
+    val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+    return host.startsWith("google.") ||
+        host.endsWith(".google.com") ||
+        host.endsWith(".google.es")
+}
+
+fun linkTypeForUrl(sourceUrl: String): String =
+    if (isGoogleShoppingUrl(sourceUrl)) "Google Shopping" else "directo"
 
 /**
  * One exact product/model grouping in the online results. Individual retailer listings remain
@@ -75,7 +85,7 @@ fun onlineProductIdentityKey(title: String): String {
         """(?i)\b(\d{1,2})\s*(?:gb)?\s*[+/]\s*(\d{2,4})\s*gb\b"""
     ).replace(title.lowercase(Locale.ROOT)) { match ->
         match.groupValues[1] + "gb " + match.groupValues[2] + "gb"
-    }
+    }.replace(Regex("""(?i)\b(\d{1,3})[.,](\d{3})\b"""), "$1$2")
 
     // Remove target-gender and generic apparel words before trimming a trailing size,
     // so titles such as "Nike Air Force 1 Gris - 40.5 Hombre" normalize correctly.
@@ -153,19 +163,51 @@ fun onlineProductIdentityKey(title: String): String {
         ).firstOrNull { Regex("""\b""" + Regex.escape(it) + """\b""").containsMatchIn(normalized) }.orEmpty()
     }
 
+    val sonyHeadphoneModel = if (
+        Regex("""\b(sony|headphones|auriculares|wh)\b""").containsMatchIn(productNameNormalized)
+    ) {
+        Regex("""(?i)(?:wh[\s-]*)?(\d{3,5}xm\d[a-z0-9]*)""")
+            .find(title)
+            ?.groupValues
+            ?.get(1)
+            ?.let { "wh" + it.lowercase(Locale.ROOT) }
+    } else null
+
     val model = Regex(
         """\b(redmi|poco|iphone|pixel|galaxy|wh|dyson|roborock)\s*([a-z]{0,3}\d+[a-z0-9]*)\b"""
     ).find(normalized)?.let { match ->
         (match.groupValues[1] + match.groupValues[2]).replace(" ", "")
-    } ?: Regex("""\b[a-z]{1,8}\d[a-z0-9]{1,12}\b""")
+    } ?: sonyHeadphoneModel
+      ?: Regex("""\b[a-z]{1,8}\d[a-z0-9]{1,12}\b""")
         .findAll(normalized)
         .map { it.value }
         .firstOrNull { it !in setOf("usb20", "usb30", "usb32", "wifi6", "wifi7", "typec", "4gb", "8gb", "16gb", "32gb", "64gb", "128gb", "256gb", "512gb", "1tb") }
 
+    // Capacity matters for power banks; wattage matters for chargers and power stations.
+    // Keep these specifications in the identity key so 20,000 mAh / 65 W and 100 W
+    // variants never collapse into one card just because the numeric token was normalized away.
+    val technicalSource = title.lowercase(Locale.ROOT)
+        .replace(Regex("""(?<=\d)[.,](?=\d{3}\b)"""), "")
+    val isPowerAccessory = Regex(
+        """\b(cargador|charger|charging|power\s*bank|bateria\s+externa|battery\s+pack|power\s+station|estacion\s+de\s+energia|fuente\s+de\s+alimentacion|adaptador\s+de\s+corriente)\b"""
+    ).containsMatchIn(productNameNormalized)
+    val technicalSpecs = Regex("""(?i)\b(\d+(?:[.,]\d+)?)\s*(mah|w)\b""")
+        .findAll(technicalSource)
+        .filter { match -> match.groupValues[2].equals("mah", ignoreCase = true) || isPowerAccessory }
+        .map { match ->
+            val number = match.groupValues[1].replace(",", ".")
+                .removeSuffix(".0")
+            number + match.groupValues[2].lowercase(Locale.ROOT)
+        }
+        .distinct()
+        .sorted()
+        .joinToString("+")
+    
     val suffix = listOf(
         accessoryType.takeIf { it.isNotBlank() }?.let { "accessory:$it" },
         variants.takeIf { it.isNotBlank() }?.let { "variant:$it" },
-        memorySpecs.takeIf { it.isNotBlank() }?.let { "memory:$it" }
+        memorySpecs.takeIf { it.isNotBlank() }?.let { "memory:$it" },
+        technicalSpecs.takeIf { it.isNotBlank() }?.let { "specs:$it" }
     ).filterNotNull().joinToString("|")
 
     if (model != null) return (listOf(brand, model).filter { it.isNotBlank() } + suffix)

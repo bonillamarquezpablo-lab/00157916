@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TrackedProductEntity::class,
         PriceObservationEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -100,6 +100,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Records whether an observation links directly to a merchant or via Google Shopping. */
+        val MIGRATION_5_6: Migration = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE `price_observations` ADD COLUMN `linkType` TEXT NOT NULL DEFAULT 'directo'"
+                )
+                database.execSQL(
+                    "UPDATE `price_observations` SET `linkType` = 'Google Shopping' " +
+                        "WHERE lower(`sourceUrl`) LIKE '%://google.%' " +
+                        "OR lower(`sourceUrl`) LIKE '%://%.google.%'"
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -110,7 +124,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "minimo_spanish_market.db"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .build()
                 INSTANCE = instance
                 instance

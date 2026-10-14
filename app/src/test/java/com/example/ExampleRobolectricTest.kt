@@ -758,6 +758,54 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun modelFirstWheelSearchValidatesFitmentWithoutRequiringTheWordLlantas() {
+        val client = SerpApiClient()
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {"title":"RIAL Milano llanta","price":"111,00 €","extracted_price":111.00,"link":"https://oponeo.example/rial-milano","source":"Oponeo.es","condition":"new"},
+                {"title":"RIAL Milano llanta 14 pulgadas 5x100","price":"142,80 €","extracted_price":142.80,"link":"https://tienda.example/rial-milano-5x100","source":"Tienda Rial","condition":"new"},
+                {"title":"RIAL Kodiak llanta","price":"94,99 €","extracted_price":94.99,"link":"https://tienda.example/rial-kodiak","source":"Tienda Rial","condition":"new"},
+                {"title":"RIAL U1","price":"133,78 €","extracted_price":133.78,"link":"https://tienda.example/rial-u1","source":"Tienda Rial","condition":"new"},
+                {"title":"VW UP! Llanta Merano 14 pulgadas 5.0Jx14 ET35 OEM","price":"149,99 €","extracted_price":149.99,"link":"https://tienda.example/vw-merano","source":"Tienda VW","condition":"new"},
+                {"title":"4x Llantas RIAL MILANO Titanio 5.5Jx14 ET35 4x100","price":"516,53 €","extracted_price":516.53,"link":"https://tienda.example/rial-set-4x100","source":"Tienda Rial","condition":"new"},
+                {"title":"RIAL Milano llanta 16 pulgadas 5x112","price":"154,60 €","extracted_price":154.60,"link":"https://tienda.example/rial-milano-5x112","source":"Tienda Rial","condition":"new"},
+                {"title":"RIAL Milano llanta usada 14 pulgadas 5x100","price":"65,00 €","extracted_price":65.00,"link":"https://es.wallapop.com/item/rial-milano","source":"Wallapop","second_hand_condition":"used"}
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val query = "RIAL Milano 14\\" 5x100"
+        val report = client.parseShoppingResultsDetailed(
+            root = payload,
+            query = query,
+            observedAt = System.currentTimeMillis()
+        )
+
+        val singleRimWithoutFitment = report.results.first { it.title == "RIAL Milano llanta" }
+        assertTrue(singleRimWithoutFitment.isFitmentUnverified)
+        assertTrue(report.results.any { it.title == "RIAL Milano llanta 14 pulgadas 5x100" && !it.isFitmentUnverified })
+        assertTrue(report.results.any { it.isSecondHand && it.storeName == "Wallapop" })
+        assertTrue(report.results.none { it.title.contains("RIAL Kodiak") || it.title == "RIAL U1" })
+        assertTrue(report.results.none { it.title.contains("VW UP!") })
+        assertTrue(report.results.none { it.title.contains("4x Llantas") })
+        assertTrue(report.results.none { it.title.contains("5x112") })
+        assertTrue(report.discardedOffers.any { it.title.contains("RIAL Kodiak") && it.reason.contains("modelo", ignoreCase = true) })
+        assertTrue(report.discardedOffers.any { it.title.contains("4x Llantas") && it.reason.contains("anclaje", ignoreCase = true) })
+
+        val escapedQuoteReport = client.parseShoppingResultsDetailed(
+            root = payload,
+            query = """RIAL Milano 14\\" 5x100""",
+            observedAt = System.currentTimeMillis()
+        )
+        assertTrue(escapedQuoteReport.results.any { it.title == "RIAL Milano llanta" && it.isFitmentUnverified })
+        assertTrue(escapedQuoteReport.results.none { it.title.contains("RIAL Kodiak") })
+    }
+
+    @Test
     fun fitmentUnconfirmedWheelCandidatesAreNotSavedToMercadoOrHistory() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(

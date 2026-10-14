@@ -34,7 +34,9 @@ data class Product(
     /** A product price lookup does not verify the demo rating or review count. */
     val isRatingVerified: Boolean = false,
     /** A product price lookup does not verify a bundled EAN. */
-    val isEanVerified: Boolean = false
+    val isEanVerified: Boolean = false,
+    /** Provider-backed Google Shopping catalog ID, when available. */
+    val googleProductId: String? = null
 ) {
     /**
      * Historical conclusions require at least three distinct snapshots spanning 90 days,

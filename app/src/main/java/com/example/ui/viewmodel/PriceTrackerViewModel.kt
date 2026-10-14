@@ -524,9 +524,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         val cacheNotice = "Resultados guardados hace $ageMinutes min; no se ha consumido otra búsqueda."
                         val savedObservations = repository.recordOnlineSearchResults(safeCachedResults, provider.name, query)
                         val historyNotice = onlineHistoryNotice(savedObservations, safeCachedResults.size)
-                        val filterNotice = onlineFilterNotice(cached.results.size, safeCachedResults.size)
                         val cachedDiscarded = onlineDiscardedCache[onlineSearchCacheKey(provider, query)]
                             ?: repository.diagnoseOnlineSearchRejections(cached.results, query)
+                        val filterNotice = onlineFilterNotice(cachedDiscarded)
                         _uiState.value = _uiState.value.copy(
                             onlineSearchResults = safeCachedResults,
                             onlineSearchDiscardedOffers = cachedDiscarded,
@@ -591,7 +591,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 // The account endpoint is free; refresh the displayed balance after a live request.
                 val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
                 val quotaNote = quotaAfter?.let { " ${it.quotaSummary()}" }.orEmpty()
-                val filterNote = onlineFilterNotice(providerReport.rawResultCount, results.size)
+                val filterNote = onlineFilterNotice(discarded)
                 val historyNote = if (results.isNotEmpty()) {
                     " " + onlineHistoryNotice(savedObservations, results.size)
                 } else ""
@@ -618,10 +618,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
-    private fun onlineFilterNotice(rawCount: Int, acceptedCount: Int): String =
-        (rawCount - acceptedCount).takeIf { it > 0 }?.let {
-            " Se han omitido $it resultados por precio sospechoso o condición no válida."
-        }.orEmpty()
+    private fun onlineFilterNotice(discarded: List<RejectedOnlineOffer>): String {
+        if (discarded.isEmpty()) return ""
+        val reasons = discarded.groupingBy { it.reason }.eachCount()
+            .entries.joinToString("; ") { "${it.value} por ${it.key.lowercase(Locale.ROOT)}" }
+        return " Se han descartado ${discarded.size} resultados: $reasons. Pulsa «Ver descartados» para revisar cada oferta."
+    }
 
     private fun onlineHistoryNotice(saved: Int, resultCount: Int): String =
         if (saved > 0) {

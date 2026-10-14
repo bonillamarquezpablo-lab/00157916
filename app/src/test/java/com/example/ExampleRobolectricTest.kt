@@ -1013,9 +1013,12 @@ class ExampleRobolectricTest {
             )
 
             val grouped = groupOnlineShoppingResults(strictMatches)
-            assertEquals("Repeated seller listings of one model make one product card", 1, grouped.size)
-            assertEquals(2, grouped.single().offers.size)
-            assertEquals(179.99, grouped.single().minPrice, 0.001)
+            assertEquals("The main product and its accessory form separate cards", 2, grouped.size)
+            val mainProductGroup = grouped.single { group -> group.offers.none { it.isAccessoryOffer } }
+            assertEquals(2, mainProductGroup.offers.size)
+            assertEquals(179.99, mainProductGroup.minPrice, 0.001)
+            assertTrue(grouped.single { group -> group.offers.all { it.isAccessoryOffer } }
+                .title.contains("Funda", ignoreCase = true))
 
             val inserted = repository.recordOnlineSearchResults(results, "GOOGLE_SHOPPING")
             assertEquals("Two normal offers and one suspicious unverified observation should be stored", 3, inserted)

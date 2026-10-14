@@ -212,6 +212,35 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `googleShopping accepts all valid offers when most links point to Google`() {
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {"title":"Samsung Galaxy S26 Ultra 512GB Negro","price":"1.299,99 €","extracted_price":1299.99,"product_link":"https://www.google.com/shopping/product/gs1","source":"Tienda Uno","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512GB Negro","price":"1.279,99 €","extracted_price":1279.99,"product_link":"https://www.google.com/shopping/product/gs2","source":"Tienda Dos","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512GB Negro","price":"1.249,99 €","extracted_price":1249.99,"link":"https://www.google.es/search?tbm=shop&q=gs3","source":"Tienda Tres","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512GB Negro","price":"1.219,99 €","extracted_price":1219.99,"product_link":"https://www.google.com/shopping/product/gs4","source":"Tienda Cuatro","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512GB Negro","price":"1.199,99 €","extracted_price":1199.99,"product_link":"https://www.google.com/shopping/product/gs5","source":"Tienda Cinco","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512GB usado","price":"899,99 €","extracted_price":899.99,"product_link":"https://www.google.com/shopping/product/gs-used","source":"Tienda Segunda Mano","second_hand_condition":"used"},
+                {"title":"Samsung Galaxy S26 Ultra 512GB alquiler mensual","price":"49,99 €","extracted_price":49.99,"product_link":"https://www.google.com/shopping/product/gs-rent","source":"Alquiler","second_hand_condition":"new"}
+              ]
+            }
+            """.trimIndent()
+        )
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = payload,
+            query = "Samsung Galaxy S26 Ultra 512 GB",
+            observedAt = 123L
+        )
+        assertEquals("All six valid new/used offers survive Google destination links", 6, report.results.size)
+        assertEquals(5, report.results.count { it.linkType == "Google Shopping" && !it.isSecondHand })
+        assertEquals(1, report.results.count { it.isSecondHand })
+        assertTrue(report.results.none { it.title.contains("alquiler", ignoreCase = true) })
+    }
+
+    @Test
     fun brandSearchesTolerateAMinorMilwaukeeTypo() {
         val client = SerpApiClient()
         val payload = JSONObject(

@@ -12,6 +12,7 @@ import com.example.data.repository.SpanishMarketData
 import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiQuote
 import com.example.data.remote.SerpApiRequestProduct
+import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
 import org.json.JSONObject
 import okhttp3.OkHttpClient
@@ -209,6 +210,67 @@ class ExampleRobolectricTest {
         assertEquals("Google Shopping", com.example.data.remote.linkTypeForUrl(quotes[2].sourceUrl))
         assertTrue(quotes.all { it.currency == "EUR" && it.observedAt == 123L })
         assertTrue(quotes.all { it.productId == "demo_galaxy_s26_ultra" })
+    }
+
+    @Test
+    fun `googleShopping accepts all valid offers when most links point to Google`() {
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {"title":"Samsung Galaxy S26 Ultra 512GB Negro","price":"1.299,99 €","extracted_price":1299.99,"product_link":"https://www.google.com/shopping/product/gs1","source":"Tienda Uno","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512GB Negro","price":"1.279,99 €","extracted_price":1279.99,"product_link":"https://www.google.com/shopping/product/gs2","source":"Tienda Dos","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512GB Negro","price":"1.249,99 €","extracted_price":1249.99,"link":"https://www.google.es/search?tbm=shop&q=gs3","source":"Tienda Tres","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512GB Negro","price":"1.219,99 €","extracted_price":1219.99,"product_link":"https://www.google.com/shopping/product/gs4","source":"Tienda Cuatro","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512GB Negro","price":"1.199,99 €","extracted_price":1199.99,"product_link":"https://www.google.com/shopping/product/gs5","source":"Tienda Cinco","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512GB usado","price":"899,99 €","extracted_price":899.99,"product_link":"https://www.google.com/shopping/product/gs-used","source":"Tienda Segunda Mano","second_hand_condition":"used"},
+                {"title":"Samsung Galaxy S26 Ultra 512GB alquiler mensual","price":"49,99 €","extracted_price":49.99,"product_link":"https://www.google.com/shopping/product/gs-rent","source":"Alquiler","second_hand_condition":"new"}
+              ]
+            }
+            """.trimIndent()
+        )
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = payload,
+            query = "Samsung Galaxy S26 Ultra 512 GB",
+            observedAt = 123L
+        )
+        assertEquals("All six valid new/used offers survive Google destination links", 6, report.results.size)
+        assertEquals(5, report.results.count { it.linkType == "Google Shopping" && !it.isSecondHand })
+        assertEquals(1, report.results.count { it.isSecondHand })
+        assertTrue(report.results.none { it.title.contains("alquiler", ignoreCase = true) })
+    }
+
+    @Test
+    fun `positive sub-five-euro offer is kept but flagged below thirty percent of median`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val timestamp = System.currentTimeMillis()
+            val results = listOf(
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 1.99, "Tienda barata", "https://www.google.com/shopping/product/cheap", observedAt = timestamp),
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 39.99, "Tienda 2", "https://www.google.com/shopping/product/p2", observedAt = timestamp),
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 42.99, "Tienda 3", "https://www.google.com/shopping/product/p3", observedAt = timestamp),
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 44.99, "Tienda 4", "https://www.google.com/shopping/product/p4", observedAt = timestamp),
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 49.99, "Tienda 5", "https://www.google.com/shopping/product/p5", observedAt = timestamp)
+            )
+            val filtered = repository.filterOnlineSearchResults(results, "Anker Power Bank 20000mAh")
+            assertEquals("Suspicious offers remain visible instead of being discarded", 5, filtered.size)
+            assertTrue(filtered.single { it.price == 1.99 }.isSuspiciousPrice)
+            assertTrue(filtered.filter { it.price > 1.99 }.none { it.isSuspiciousPrice })
+            assertEquals("The cheapest trusted offer is used for group best-price calculations", 39.99,
+                groupOnlineShoppingResults(filtered).single().cheapestOffer.price, 0.001)
+        } finally {
+            database.close()
+        }
     }
 
     @Test
@@ -637,7 +699,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `condition metadata blocks used and refurbished listings even if titles omit it`() {
+    fun `condition metadata marks used and refurbished offers for the opt-in filter`() {
         val report = SerpApiClient().parseShoppingResultsDetailed(
             root = JSONObject(
                 """
@@ -677,9 +739,10 @@ class ExampleRobolectricTest {
         )
 
         assertEquals(3, report.rawResultCount)
-        assertEquals(1, report.results.size)
-        assertEquals(249.99, report.results.single().price, 0.001)
-        assertEquals(2, report.rejectedOther)
+        assertEquals(3, report.results.size)
+        assertEquals(2, report.results.count { it.isSecondHand })
+        assertEquals(249.99, report.results.single { !it.isSecondHand }.price, 0.001)
+        assertEquals(0, report.rejectedOther)
     }
 
     @Test
@@ -726,7 +789,7 @@ class ExampleRobolectricTest {
 
 
     @Test
-    fun `online search stores real offers once per store and day and rejects used listings and low outliers`() = runBlocking<Unit> {
+    fun `online search stores valid offers once per store and day and marks low outliers`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,
@@ -817,12 +880,12 @@ class ExampleRobolectricTest {
                 "A result stamped before 13 October 2026 must not enter live history",
                 repository.filterOnlineSearchResults(listOf(prePolicySnapshot)).isNotEmpty()
             )
-            assertFalse(
-                "A €9.90 Redmi phone listing is implausible for a new-in-store offer",
-                filteredResults.any { it.title.contains("Redmi 17", ignoreCase = true) && it.price < 45.0 }
+            assertTrue(
+                "A positive-price listing is not discarded by a hard-coded device price floor",
+                filteredResults.any { it.title.contains("Redmi 17", ignoreCase = true) && it.price == 9.90 }
             )
-            assertFalse(
-                "Offers from the Rentik renting provider must not be stored as new-in-store offers",
+            assertTrue(
+                "A seller name alone is not proof of renting; explicit condition/title signals decide",
                 filteredResults.any { it.storeName.equals("Rentik", ignoreCase = true) }
             )
             assertTrue(
@@ -833,9 +896,9 @@ class ExampleRobolectricTest {
                 "Low-priced real accessories should remain eligible",
                 filteredResults.any { it.title.contains("UGREEN USB 2.0 Hub") }
             )
-            assertFalse(
-                "A sub-€5 20,000mAh power bank is suspicious and must not be saved",
-                filteredResults.any { it.title.contains("Power Bank", ignoreCase = true) && it.price < 5.0 }
+            assertTrue(
+                "A sub-€5 positive price is retained; the relative median rule decides suspicion",
+                filteredResults.any { it.title.contains("Power Bank", ignoreCase = true) && it.price == 2.99 }
             )
 
             val excludedSellerResults = listOf(
@@ -849,10 +912,11 @@ class ExampleRobolectricTest {
                     sourceUrl = "https://www.example.com/xiaomi-cuota"
                 )
             )
-            assertTrue(
-                "Second-hand marketplaces and subscription listings must be excluded",
-                repository.filterOnlineSearchResults(excludedSellerResults, "Xiaomi Redmi 17").isEmpty()
-            )
+            val filteredMarketplaceResults = repository.filterOnlineSearchResults(excludedSellerResults, "Xiaomi Redmi 17")
+            assertEquals("Listings are not discarded merely because of seller name", 4, filteredMarketplaceResults.size)
+            assertTrue("Monthly payment listings are still excluded", filteredMarketplaceResults.none {
+                it.title.contains("cuota", ignoreCase = true)
+            })
 
             val vacuumListings = listOf(
                 cheapLegitimateAccessory.copy(
@@ -939,11 +1003,11 @@ class ExampleRobolectricTest {
             assertEquals(179.99, grouped.single().minPrice, 0.001)
 
             val inserted = repository.recordOnlineSearchResults(results, "GOOGLE_SHOPPING")
-            assertEquals("Only the two plausible new offers should be stored", 2, inserted)
+            assertEquals("Two normal offers and one suspicious unverified observation should be stored", 3, inserted)
             val stored = withTimeout<List<PriceObservationEntity>>(10_000) {
                 database.priceObservationDao().observeAllVerified().first { it.size >= 2 }
             }
-            assertEquals(2, stored.size)
+            assertEquals("Only the two non-suspicious offers count as verified history", 2, stored.size)
             val sonyProductId = stored.first().productId
             assertTrue("Both retailer offers must attach to one saved product", stored.all { it.productId == sonyProductId })
             assertTrue(stored.all { it.productTitle == "Sony WH-1000XM5 Wireless Headphones" })
@@ -951,6 +1015,7 @@ class ExampleRobolectricTest {
             assertNotNull("Online searches must add a real product row to Room", persistedProduct)
             assertTrue("Searched products must be marked as source-verified", persistedProduct?.isPriceVerified == true)
             assertTrue(stored.all { it.currency == "EUR" && it.sourceType == "Google Shopping" })
+            assertEquals(3, database.priceObservationDao().getObservationCount(sonyProductId))
             val savedGoogleOffer = stored.single { it.storeName == "PcComponentes" }
             assertTrue(savedGoogleOffer.sourceUrl.contains("google.com/shopping/product"))
             assertEquals("Google Shopping", savedGoogleOffer.linkType)
@@ -999,4 +1064,167 @@ class ExampleRobolectricTest {
         }
     }
 
+
+
+    @Test
+    fun `Google Shopping fixture reports accepted offers and a reason for every rejected offer`() {
+        val client = SerpApiClient()
+        fun parse(query: String, item: JSONObject) = client.parseShoppingResultsDetailed(
+            JSONObject().put("search_metadata", JSONObject().put("status", "Success"))
+                .put("shopping_results", JSONArray().put(item)),
+            query = query,
+            observedAt = 123L
+        )
+        fun item(
+            title: String,
+            price: String = "1.299,99 €",
+            extractedPrice: Double? = 1299.99,
+            link: String = "https://www.google.com/shopping/product/123",
+            condition: String? = null
+        ): JSONObject = JSONObject().put("title", title).put("price", price)
+            .put("source", "Tienda de ejemplo").put("product_link", link).apply {
+                if (extractedPrice != null) put("extracted_price", extractedPrice)
+                if (condition != null) put("second_hand_condition", condition)
+            }
+
+        val mostlyGoogle = JSONObject().put("search_metadata", JSONObject().put("status", "Success"))
+            .put("shopping_results", JSONArray()
+                .put(item("Samsung Galaxy S26 Ultra 512 GB negro", link = "https://www.google.com/shopping/product/one"))
+                .put(item("Samsung Galaxy S26 Ultra 512 GB negro", price = "1.279,99 €", extractedPrice = 1279.99,
+                    link = "https://www.google.es/search?tbm=shop&q=galaxy"))
+                .put(item("Samsung Galaxy S26 Ultra 512 GB negro", price = "1.259,99 €", extractedPrice = 1259.99,
+                    link = "https://www.tienda.example/samsung-s26")))
+        val validReport = client.parseShoppingResultsDetailed(mostlyGoogle, "Samsung Galaxy S26 Ultra 512 GB", 123L)
+        assertEquals("Google product/search links are valid destinations alongside direct links", 3, validReport.results.size)
+        assertEquals(2, validReport.results.count { it.linkType == "Google Shopping" })
+        assertEquals(1, validReport.results.count { it.linkType == "directo" })
+
+        val used = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Samsung Galaxy S26 Ultra 512 GB", condition = "used"))
+        assertEquals("Used offers stay available to the opt-in second-hand filter", 1, used.results.size)
+        assertTrue(used.results.single().isSecondHand)
+        assertEquals("used", used.results.single().condition)
+
+        val refurbished = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Samsung Galaxy S26 Ultra 512 GB", condition = "refurbished"))
+        assertTrue(refurbished.results.single().isSecondHand)
+        assertEquals("refurbished", refurbished.results.single().condition)
+
+        val rental = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Samsung Galaxy S26 Ultra 512 GB alquiler"))
+        assertTrue(rental.discardedOffers.single().reason.contains("Alquiler o cuota"))
+
+        val monthly = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Samsung Galaxy S26 Ultra 512 GB 49,99 €/mes", price = "49,99 €/mes", extractedPrice = 49.99))
+        assertEquals("A monthly installment must never become a product offer", 0, monthly.results.size)
+        assertEquals("The excluded installment must be visible in diagnostics", 1, monthly.discardedOffers.size)
+        assertTrue(monthly.discardedOffers.single().reason.contains("Alquiler o cuota"))
+
+        val pack = parse("Detergente líquido 300 ml",
+            item("Detergente líquido 12x300 ml"))
+        assertTrue(pack.discardedOffers.single().reason.contains("pack distinto"))
+
+        val wrongVariant = parse("Anker Prime 20.000 mAh 200 W",
+            item("Anker Prime 10.000 mAh 100 W"))
+        assertTrue(wrongVariant.discardedOffers.single().reason.contains("variante"))
+
+        val noEuroSymbol = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Samsung Galaxy S26 Ultra 512 GB", price = "1299.99"))
+        assertEquals("Structured price from Spain's Google Shopping response is EUR even without the € glyph",
+            1, noEuroSymbol.results.size)
+
+        val noEuroEvidence = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Samsung Galaxy S26 Ultra 512 GB", price = "1299.99", extractedPrice = null))
+        assertTrue("Without the euro symbol or structured price, currency cannot be verified",
+            noEuroEvidence.discardedOffers.single().reason.contains("Sin precio válido"))
+
+        val dollars = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Samsung Galaxy S26 Ultra 512 GB", price = "$999.99", extractedPrice = 999.99))
+        assertTrue(dollars.discardedOffers.single().reason.contains("moneda extranjera"))
+
+        val missingPrice = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Samsung Galaxy S26 Ultra 512 GB", price = "", extractedPrice = null))
+        assertTrue(missingPrice.discardedOffers.single().reason.contains("Sin precio válido"))
+
+        val wrongTitle = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Tostadora de cocina", price = "19,99 €", extractedPrice = 19.99))
+        assertTrue(wrongTitle.discardedOffers.single().reason.contains("Otro modelo"))
+    }
+
+    @Test
+    fun `Amazon es fixture reports condition currency monthly and model rejection reasons`() {
+        val client = SerpApiClient()
+        fun parse(query: String, items: JSONArray) = client.parseAmazonResultsDetailed(
+            JSONObject().put("search_metadata", JSONObject().put("status", "Success"))
+                .put("organic_results", items),
+            query = query,
+            observedAt = 123L
+        )
+        fun item(
+            title: String,
+            price: String = "129,99 €",
+            extractedPrice: Double? = 129.99,
+            condition: String? = null
+        ): JSONObject = JSONObject().put("title", title).put("price", price)
+            .put("link", "https://www.amazon.es/dp/B0EXAMPLE").apply {
+                if (extractedPrice != null) put("extracted_price", extractedPrice)
+                if (condition != null) put("second_hand_condition", condition)
+            }
+
+        val query = "Anker Power Bank 20.000 mAh"
+        val report = parse(query, JSONArray()
+            .put(item("Anker Power Bank 20.000 mAh", price = "39.99", extractedPrice = 39.99))
+            .put(item("Anker Power Bank 20.000 mAh", condition = "used"))
+            .put(item("Anker Power Bank 20.000 mAh alquiler mensual"))
+            .put(item("Anker Power Bank 20.000 mAh cuota 4,99 €/mes", price = "4,99 €/mes", extractedPrice = 4.99))
+            .put(item("Anker Power Bank 10.000 mAh", price = "19,99 €", extractedPrice = 19.99))
+            .put(item("Tostadora de cocina", price = "12,99 €", extractedPrice = 12.99))
+            .put(item("Anker Power Bank 20.000 mAh", price = "$39.99", extractedPrice = 39.99))
+            .put(item("Anker Power Bank 20.000 mAh", price = "Consultar precio", extractedPrice = null))
+            .put(item("Anker Power Bank 20.000 mAh", price = "39.99", extractedPrice = null)))
+
+        assertEquals("Amazon.es numeric structured prices are accepted without the € glyph", 1, report.results.size)
+        assertEquals(8, report.discardedOffers.size)
+        assertTrue(report.discardedOffers.any { it.reason.contains("Segunda mano") })
+        assertTrue(report.discardedOffers.any { it.reason.contains("Alquiler o cuota") })
+        assertTrue(report.discardedOffers.any { it.reason.contains("variante") })
+        assertTrue(report.discardedOffers.any { it.reason.contains("Otro modelo") })
+        assertTrue(report.discardedOffers.any { it.reason.contains("moneda extranjera") })
+        assertTrue(report.discardedOffers.any { it.reason.contains("Sin precio válido") })
+    }
+
+    @Test
+    fun `repository explains unusually low prices relative to comparable offers without saving them`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val timestamp = System.currentTimeMillis()
+            val offers = listOf(999.99, 1049.99, 1099.99, 1149.99, 99.99).mapIndexed { index, price ->
+                com.example.data.remote.SerpApiShoppingResult(
+                    title = "Samsung Galaxy S26 Ultra 512 GB",
+                    price = price,
+                    storeName = "Tienda ${index + 1}",
+                    sourceUrl = "https://www.google.com/shopping/product/${index + 1}",
+                    observedAt = timestamp
+                )
+            }
+            val accepted = repository.filterOnlineSearchResults(offers, "Samsung Galaxy S26 Ultra 512 GB")
+            val discarded = repository.diagnoseOnlineSearchRejections(offers, "Samsung Galaxy S26 Ultra 512 GB")
+            assertEquals("Low outlier remains visible but is explicitly marked", 5, accepted.size)
+            assertTrue(accepted.single { it.price == 99.99 }.isSuspiciousPrice)
+            assertTrue(discarded.any { it.priceLabel.contains("99.99") && it.reason.contains("Precio sospechoso") })
+            assertEquals("Viewing diagnostics does not persist accepted or rejected prices", 0,
+                database.priceObservationDao().getVerifiedObservationCount())
+        } finally {
+            database.close()
+        }
+    }
 }

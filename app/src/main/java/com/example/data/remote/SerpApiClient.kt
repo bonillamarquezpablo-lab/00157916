@@ -267,43 +267,15 @@ class SerpApiClient(
                 recordDiscard(item, title, nonNewRejectionReason(item, title))
                 return@mapNotNull null
             }
-            var fitmentUnverified = false
-            val wheelFitmentQuery = query?.let(::parseWheelFitmentQuery)
-            if (wheelFitmentQuery != null) {
-                if (!isWheelListing(title)) {
-                    rejectedAsIrrelevant++
-                    recordDiscard(item, title, "No parece una llanta o rueda")
-                    return@mapNotNull null
-                }
-                val resultDiameter = wheelDiameterInches(title)
-                val resultPcd = wheelBoltPattern(title)
-                if (resultDiameter != null && resultDiameter != wheelFitmentQuery.diameterInches) {
-                    rejectedAsIrrelevant++
-                    recordDiscard(item, title, "Diámetro incompatible: se busca ${wheelFitmentQuery.diameterInches} pulgadas")
-                    return@mapNotNull null
-                }
-                if (resultPcd != null && resultPcd != wheelFitmentQuery.boltPattern) {
-                    rejectedAsIrrelevant++
-                    recordDiscard(item, title, "Anclaje incompatible: se busca ${wheelFitmentQuery.boltPattern}")
-                    return@mapNotNull null
-                }
-                // Some Shopping titles omit one or both fitment dimensions. Show those candidates,
-                // but label them clearly and never add their prices to Mercado/history until the
-                // exact size and bolt pattern can be confirmed from the listing.
-                fitmentUnverified =
-                    resultDiameter != wheelFitmentQuery.diameterInches ||
-                    resultPcd != wheelFitmentQuery.boltPattern
-            } else {
-                if (!query.isNullOrBlank() && hasVariantMismatch(query, title)) {
-                    rejectedAsIrrelevant++
-                    recordDiscard(item, title, "Otro modelo o variante (capacidad, potencia o pack distinto)")
-                    return@mapNotNull null
-                }
-                if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
-                    rejectedAsIrrelevant++
-                    recordDiscard(item, title, "Otro modelo o título no coincidente")
-                    return@mapNotNull null
-                }
+            if (!query.isNullOrBlank() && hasVariantMismatch(query, title)) {
+                rejectedAsIrrelevant++
+                recordDiscard(item, title, "Otro modelo o variante (capacidad, potencia o pack distinto)")
+                return@mapNotNull null
+            }
+            if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
+                rejectedAsIrrelevant++
+                recordDiscard(item, title, "Otro modelo o título no coincidente")
+                return@mapNotNull null
             }
             // SerpApi's Amazon engine can expose the active offer as price/extracted_price,
             // or as primary_price/extracted_primary_price depending on the product layout.
@@ -456,15 +428,43 @@ class SerpApiClient(
                 recordDiscard(item, title, "Alquiler o cuota mensual")
                 return@mapNotNull null
             }
-            if (!query.isNullOrBlank() && hasVariantMismatch(query, title)) {
-                rejectedAsIrrelevant++
-                recordDiscard(item, title, "Otro modelo o variante (capacidad, potencia o pack distinto)")
-                return@mapNotNull null
-            }
-            if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
-                rejectedAsIrrelevant++
-                recordDiscard(item, title, "Otro modelo o título no coincidente")
-                return@mapNotNull null
+            var fitmentUnverified = false
+            val wheelFitmentQuery = query?.let(::parseWheelFitmentQuery)
+            if (wheelFitmentQuery != null) {
+                if (!isWheelListing(title)) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "No parece una llanta o rueda")
+                    return@mapNotNull null
+                }
+                val resultDiameter = wheelDiameterInches(title)
+                val resultPcd = wheelBoltPattern(title)
+                if (resultDiameter != null && resultDiameter != wheelFitmentQuery.diameterInches) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "Diámetro incompatible: se busca ${wheelFitmentQuery.diameterInches} pulgadas")
+                    return@mapNotNull null
+                }
+                if (resultPcd != null && resultPcd != wheelFitmentQuery.boltPattern) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "Anclaje incompatible: se busca ${wheelFitmentQuery.boltPattern}")
+                    return@mapNotNull null
+                }
+                // Some Shopping titles omit one or both fitment dimensions. Show those candidates,
+                // but label them clearly and never add their prices to Mercado/history until the
+                // exact size and bolt pattern can be confirmed from the listing.
+                fitmentUnverified =
+                    resultDiameter != wheelFitmentQuery.diameterInches ||
+                    resultPcd != wheelFitmentQuery.boltPattern
+            } else {
+                if (!query.isNullOrBlank() && hasVariantMismatch(query, title)) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "Otro modelo o variante (capacidad, potencia o pack distinto)")
+                    return@mapNotNull null
+                }
+                if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "Otro modelo o título no coincidente")
+                    return@mapNotNull null
+                }
             }
 
             val priceText = item.optString("price")

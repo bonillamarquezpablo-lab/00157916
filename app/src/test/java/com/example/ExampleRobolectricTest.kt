@@ -778,7 +778,7 @@ class ExampleRobolectricTest {
             """.trimIndent()
         )
 
-        val query = "RIAL Milano 14\\" 5x100"
+        val query = "RIAL Milano 14\" 5x100"
         val report = client.parseShoppingResultsDetailed(
             root = payload,
             query = query,
@@ -798,7 +798,7 @@ class ExampleRobolectricTest {
 
         val escapedQuoteReport = client.parseShoppingResultsDetailed(
             root = payload,
-            query = """RIAL Milano 14\\" 5x100""",
+            query = """RIAL Milano 14\" 5x100""",
             observedAt = System.currentTimeMillis()
         )
         assertTrue(escapedQuoteReport.results.any { it.title == "RIAL Milano llanta" && it.isFitmentUnverified })

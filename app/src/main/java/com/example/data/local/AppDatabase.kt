@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TrackedProductEntity::class,
         PriceObservationEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -144,6 +144,26 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Repairs archive provenance for any rows saved by an earlier v8 build without deleting
+         * or rewriting their prices, timestamps, verification, product IDs or merchant URLs.
+         * Only unmistakable Internet Archive URLs/source names are reclassified; genuine live
+         * observations remain untouched.
+         */
+        val MIGRATION_8_9: Migration = object : Migration(8, 9) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "UPDATE price_observations SET evidenceType = 'archive' WHERE " +
+                        "lower(sourceUrl) LIKE 'https://web.archive.org/%' OR " +
+                        "lower(sourceUrl) LIKE 'http://web.archive.org/%' OR " +
+                        "lower(sourceType) LIKE '%internet archive%' OR " +
+                        "lower(sourceType) LIKE '%wayback%' OR " +
+                        "lower(sourceName) LIKE '%internet archive%' OR " +
+                        "lower(sourceName) LIKE '%wayback%'"
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -154,7 +174,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "minimo_spanish_market.db"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                     .build()
                 INSTANCE = instance
                 instance

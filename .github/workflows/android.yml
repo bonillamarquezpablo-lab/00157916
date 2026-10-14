@@ -75,6 +75,16 @@ jobs:
           keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey >/dev/null
           echo "Clave estable encontrada y validada."
 
+      - name: Ejecutar pruebas de interfaz Compose en emulador Android
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: gradle :app:connectedDebugAndroidTest --stacktrace
+
       - name: Compilar APK
         env:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
@@ -84,6 +94,14 @@ jobs:
           VERSION_NAME="1.5.${GITHUB_RUN_NUMBER}"
           echo "Building Mínimo ${VERSION_NAME} (versionCode ${VERSION_CODE})"
           gradle :app:assembleDebug --stacktrace -PVERSION_CODE="${VERSION_CODE}" -PVERSION_NAME="${VERSION_NAME}"
+
+      - name: Verificar firma y validez del APK
+        run: |
+          set -euo pipefail
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "${APK_PATH}"
+          "${ANDROID_HOME}/build-tools/36.0.0/apksigner" verify --verbose --print-certs "${APK_PATH}"
+          sha256sum "${APK_PATH}"
 
       - name: Guardar el APK
         uses: actions/upload-artifact@v4

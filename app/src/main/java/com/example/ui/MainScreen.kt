@@ -274,6 +274,7 @@ fun MainScreen(
                     onQueryChange = viewModel::onOnlineSearchQueryChange,
                     onSearch = viewModel::searchOnlineShopping,
                     onAmazonSearch = viewModel::searchAmazonShopping,
+                    onForceRefresh = viewModel::refreshOnlineSearch,
                     onAmazonOnlyChange = viewModel::onOnlineSearchAmazonOnlyChange,
                     onShowSecondHandChange = viewModel::onOnlineSearchShowSecondHandChange,
                     onToggleDiscarded = viewModel::onToggleOnlineSearchDiscarded,

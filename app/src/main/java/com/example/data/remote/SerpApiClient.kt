@@ -436,6 +436,12 @@ class SerpApiClient(
                     recordDiscard(item, title, "No parece una llanta o rueda")
                     return@mapNotNull null
                 }
+                val modelQuery = query?.let(::wheelModelQuery).orEmpty()
+                if (modelQuery.isNotBlank() && !isPlausibleProductMatch(modelQuery, title)) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "Otro modelo o título no coincidente")
+                    return@mapNotNull null
+                }
                 val resultDiameter = wheelDiameterInches(title)
                 val resultPcd = wheelBoltPattern(title)
                 if (resultDiameter != null && resultDiameter != wheelFitmentQuery.diameterInches) {
@@ -978,19 +984,25 @@ class SerpApiClient(
     )
 
     private fun parseWheelFitmentQuery(query: String): WheelFitmentQuery? {
-        // Search text can contain escaped or typographic inch marks from Android keyboards.
-        // Normalize them before fitment detection so generic titles such as "RIAL Milano llanta"
-        // remain candidates with unverified fitment instead of falling through to strict title match.
-        val normalizedQuery = query
-            .replace("\\\"", "\"")
-            .replace('″', '"')
-            .replace('”', '"')
-            .replace('“', '"')
-        if (!isWheelListing(normalizedQuery)) return null
-        val diameter = wheelDiameterInches(normalizedQuery) ?: return null
+        // An explicit diameter plus PCD identifies a wheel search even if the query begins with
+        // a model name ("RIAL Milano 14\" 5x100") instead of the word "llanta".
+        val normalizedQuery = normalizeWheelFitmentQuery(query)
+        if (!isWheelFitmentQuery(normalizedQuery)) return null
+        val diameter = wheelDiameterInches(normalizedQuery)
+            ?: Regex("""\b(1[0-9]|2[0-4])\b""").find(normalizedQuery)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?: return null
         val boltPattern = wheelBoltPattern(normalizedQuery) ?: return null
         return WheelFitmentQuery(diameter, boltPattern)
     }
+
+    private fun wheelModelQuery(query: String): String = normalizeWheelFitmentQuery(query)
+        .replace(Regex("""(?i)\b[3456]\s*[x×]\s*(?:100|108|110|112|114(?:[.,]3)?|115|120|127|130|139(?:[.,]7)?)(?=\b|(?:et)?[0-9]{2,3}\b)"""), " ")
+        .replace(Regex("""(?i)\b(?:R\s*)?(?:1[0-9]|2[0-4])\s*(?:["”″]|pulg(?:adas?)?|inch(?:es)?)?\b"""), " ")
+        .replace(Regex("""(?i)\b(?:ET)\s*\d{2,3}\b"""), " ")
+        .replace(Regex("""(?i)\b(llantas?|ruedas?|wheels?|rims?|felgen|PCD)\b"""), " ")
+        .replace(Regex("""[^a-zA-Z0-9]+"""), " ")
+        .trim()
+        .replace(Regex("""\s+"""), " ")
 
     private fun isWheelListing(value: String): Boolean =
         Regex("""(?i)\b(llantas?|ruedas?|wheels?|rims?)\b""").containsMatchIn(value)

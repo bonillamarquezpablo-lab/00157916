@@ -55,25 +55,31 @@ data class SerpApiShoppingSearchReport(
     val rejectedForPriceOrCurrency: Int,
     val rejectedForLink: Int,
     val rejectedOther: Int,
-    val firstResultFields: String = ""
+    val firstResultFields: String = "",
+    val discardedOffers: List<RejectedOnlineOffer> = emptyList(),
+    val providerName: String = "Google Shopping"
 ) {
     fun emptyResultMessage(query: String): String {
         if (rawResultCount == 0) {
-            return "Google Shopping no devolvió productos para «$query». Prueba con el modelo exacto o inténtalo más tarde; no se ha guardado ningún precio."
+            return "$providerName no devolvió productos para «$query». Prueba con el modelo exacto o inténtalo más tarde; no se ha guardado ningún precio."
         }
+        val detailedReasons = discardedOffers.groupingBy { it.reason }.eachCount()
+            .entries.joinToString("; ") { "${it.value} por ${it.key.lowercase(Locale.ROOT)}" }
         val reasons = mutableListOf<String>()
         if (rejectedAsIrrelevant > 0) reasons += "$rejectedAsIrrelevant no coincidían suficientemente con la búsqueda"
         if (rejectedForPriceOrCurrency > 0) reasons += "$rejectedForPriceOrCurrency no tenían un precio en euros verificable"
         if (rejectedForLink > 0) reasons += "$rejectedForLink no tenían un enlace utilizable"
-        if (rejectedOther > 0) reasons += "$rejectedOther estaban incompletos"
-        val detail = reasons.joinToString("; ").ifBlank { "ninguno pasó los filtros de seguridad" }
+        if (rejectedOther > 0) reasons += "$rejectedOther tenían condición no válida o datos incompletos"
+        val detail = detailedReasons.ifBlank {
+            reasons.joinToString("; ").ifBlank { "ninguno pasó los filtros de seguridad" }
+        }
         val fieldDiagnostic = if (
             results.isEmpty() &&
             rejectedForLink > 0 &&
             rejectedForLink == rawResultCount &&
             firstResultFields.isNotBlank()
         ) " Campos recibidos: $firstResultFields." else ""
-        return "Google Shopping devolvió $rawResultCount resultados para «$query», pero ninguno era utilizable: $detail.$fieldDiagnostic No se ha guardado ningún precio."
+        return "$providerName devolvió $rawResultCount resultados para «$query», pero ninguno era utilizable: $detail.$fieldDiagnostic No se ha guardado ningún precio."
     }
 }
 
@@ -202,18 +208,29 @@ class SerpApiClient(
      * snapshot through SerpApi; it cannot see the user's signed-in account or personalized coupons.
      */
     suspend fun searchAmazonOnline(token: String, query: String): List<SerpApiShoppingResult> =
-        withContext(Dispatchers.IO) {
-            val apiKey = token.trim()
-            require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
-            val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
-            require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
-            parseAmazonResults(executeAmazonSearch(apiKey, normalizedQuery))
-        }
+        searchAmazonOnlineWithDiagnostics(token, query).results
+
+    suspend fun searchAmazonOnlineWithDiagnostics(
+        token: String,
+        query: String
+    ): SerpApiShoppingSearchReport = withContext(Dispatchers.IO) {
+        val apiKey = token.trim()
+        require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
+        val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
+        require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
+        parseAmazonResultsDetailed(executeAmazonSearch(apiKey, normalizedQuery), normalizedQuery)
+    }
 
     internal fun parseAmazonResults(
         root: JSONObject,
         observedAt: Long = System.currentTimeMillis()
-    ): List<SerpApiShoppingResult> {
+    ): List<SerpApiShoppingResult> = parseAmazonResultsDetailed(root, null, observedAt).results
+
+    internal fun parseAmazonResultsDetailed(
+        root: JSONObject,
+        query: String?,
+        observedAt: Long = System.currentTimeMillis()
+    ): SerpApiShoppingSearchReport {
         val error = root.optString("error").takeIf { it.isNotBlank() && it != "null" }
         if (error != null) throw SerpApiException(error)
         val status = root.optJSONObject("search_metadata")?.optString("status")
@@ -222,10 +239,43 @@ class SerpApiClient(
         }
 
         val items = root.optJSONArray("organic_results")?.toObjects().orEmpty()
-        return items.mapNotNull { item ->
+        var rejectedAsIrrelevant = 0
+        var rejectedForPriceOrCurrency = 0
+        var rejectedForLink = 0
+        var rejectedOther = 0
+        val discardedOffers = mutableListOf<RejectedOnlineOffer>()
+        fun recordDiscard(item: JSONObject, title: String, reason: String) {
+            discardedOffers += RejectedOnlineOffer(
+                title = title.ifBlank { "Título no disponible" },
+                priceLabel = sequenceOf(item.optString("price"), item.optString("primary_price"),
+                    item.optString("extracted_price"), item.optString("extracted_primary_price"))
+                    .firstOrNull { it.isNotBlank() && it != "null" }.orEmpty(),
+                reason = reason,
+                provider = "Amazon.es"
+            )
+        }
+        val parsed = items.mapNotNull { item ->
             val title = item.optString("title").trim()
-                .takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
-            if (isClearlyNonNewListing(item, title)) return@mapNotNull null
+                .takeIf { it.isNotBlank() && it != "null" } ?: run {
+                    rejectedOther++
+                    recordDiscard(item, "", "Datos incompletos")
+                    return@mapNotNull null
+                }
+            if (isClearlyNonNewListing(item, title)) {
+                rejectedOther++
+                recordDiscard(item, title, nonNewRejectionReason(item, title))
+                return@mapNotNull null
+            }
+            if (!query.isNullOrBlank() && hasVariantMismatch(query, title)) {
+                rejectedAsIrrelevant++
+                recordDiscard(item, title, "Otro modelo o variante (capacidad, potencia o pack distinto)")
+                return@mapNotNull null
+            }
+            if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
+                rejectedAsIrrelevant++
+                recordDiscard(item, title, "Otro modelo o título no coincidente")
+                return@mapNotNull null
+            }
             // SerpApi's Amazon engine can expose the active offer as price/extracted_price,
             // or as primary_price/extracted_primary_price depending on the product layout.
             val priceText = sequenceOf(
@@ -243,7 +293,11 @@ class SerpApiClient(
             // Amazon.es is a Spanish storefront; when its structured numeric price is present,
             // it is a EUR amount even if the formatted label is omitted by a result layout.
             val price = extractedPrice ?: parsePrice(priceText)
-            if (price == null || !price.isFinite() || price <= 0.0) return@mapNotNull null
+            if (price == null || !price.isFinite() || price <= 0.0) {
+                rejectedForPriceOrCurrency++
+                recordDiscard(item, title, "Sin precio válido en euros")
+                return@mapNotNull null
+            }
             val isEuroPrice = priceText.contains("€") ||
                 priceText.contains("EUR", ignoreCase = true)
             // A structured numeric price is useful even when SerpApi omits the formatted label,
@@ -252,11 +306,23 @@ class SerpApiClient(
                 listOf('$', '£', '¥', '₹').any { priceText.contains(it) } ||
                     listOf("USD", "GBP", "CAD", "AUD", "NZD", "JPY", "INR", "CHF")
                         .any { currency -> priceText.contains(currency, ignoreCase = true) }
-            if (explicitlyForeignCurrency) return@mapNotNull null
-            if (extractedPrice == null && !isEuroPrice) return@mapNotNull null
+            if (explicitlyForeignCurrency) {
+                rejectedForPriceOrCurrency++
+                recordDiscard(item, title, "Sin precio válido: moneda extranjera")
+                return@mapNotNull null
+            }
+            if (extractedPrice == null && !isEuroPrice) {
+                rejectedForPriceOrCurrency++
+                recordDiscard(item, title, "Sin precio válido en euros")
+                return@mapNotNull null
+            }
 
             val url = sequenceOf(item.optString("link_clean"), item.optString("link"))
-                .firstOrNull { isAmazonSpainUrl(it) } ?: return@mapNotNull null
+                .firstOrNull { isAmazonSpainUrl(it) } ?: run {
+                    rejectedForLink++
+                    recordDiscard(item, title, "Datos incompletos: sin enlace válido de Amazon.es")
+                    return@mapNotNull null
+                }
             val thumbnail = item.optString("thumbnail").takeIf { isHttpsUrl(it) }.orEmpty()
             val delivery = when (val raw = item.opt("delivery")) {
                 is JSONArray -> (0 until raw.length())
@@ -287,6 +353,17 @@ class SerpApiClient(
         }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
             .sortedBy { it.price }
             .take(30)
+
+        return SerpApiShoppingSearchReport(
+            results = parsed,
+            rawResultCount = items.size,
+            rejectedAsIrrelevant = rejectedAsIrrelevant,
+            rejectedForPriceOrCurrency = rejectedForPriceOrCurrency,
+            rejectedForLink = rejectedForLink,
+            rejectedOther = rejectedOther,
+            discardedOffers = discardedOffers,
+            providerName = "Amazon.es"
+        )
     }
 
     internal fun parseShoppingResults(
@@ -321,19 +398,43 @@ class SerpApiClient(
         var rejectedForPriceOrCurrency = 0
         var rejectedForLink = 0
         var rejectedOther = 0
+        val discardedOffers = mutableListOf<RejectedOnlineOffer>()
+        fun recordDiscard(item: JSONObject, title: String, reason: String) {
+            discardedOffers += RejectedOnlineOffer(
+                title = title.ifBlank { "Título no disponible" },
+                priceLabel = item.optString("price").takeIf { it.isNotBlank() && it != "null" }
+                    ?: item.optString("extracted_price").takeIf { it.isNotBlank() && it != "null" }.orEmpty(),
+                reason = reason,
+                provider = "Google Shopping"
+            )
+        }
         val parsed = items.mapNotNull { item ->
             val title = item.optString("title").trim()
                 .takeIf { it.isNotBlank() && it != "null" }
                 ?: run {
                     rejectedOther++
+                    recordDiscard(item, "", "Datos incompletos")
                     return@mapNotNull null
                 }
-            if (isClearlyNonNewListing(item, title)) {
+            val condition = sequenceOf(
+                "second_hand_condition", "condition", "item_condition",
+                "product_condition", "condition_description"
+            ).mapNotNull { key ->
+                item.optString(key).takeIf { it.isNotBlank() && it != "null" }
+            }.firstOrNull().orEmpty()
+            if (isRentalOrMonthlyListing(item, title)) {
                 rejectedOther++
+                recordDiscard(item, title, "Alquiler o cuota mensual")
+                return@mapNotNull null
+            }
+            if (!query.isNullOrBlank() && hasVariantMismatch(query, title)) {
+                rejectedAsIrrelevant++
+                recordDiscard(item, title, "Otro modelo o variante (capacidad, potencia o pack distinto)")
                 return@mapNotNull null
             }
             if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
                 rejectedAsIrrelevant++
+                recordDiscard(item, title, "Otro modelo o título no coincidente")
                 return@mapNotNull null
             }
 
@@ -345,6 +446,7 @@ class SerpApiClient(
                 ?.takeIf { it.isFinite() && it > 0.0 }
             if (hasExplicitForeignCurrency(priceText)) {
                 rejectedForPriceOrCurrency++
+                recordDiscard(item, title, "Sin precio válido: moneda extranjera")
                 return@mapNotNull null
             }
             val price = extractedPrice ?: parsePrice(priceText)
@@ -354,6 +456,7 @@ class SerpApiClient(
                 (extractedPrice == null && !isEuroPrice)
             ) {
                 rejectedForPriceOrCurrency++
+                recordDiscard(item, title, "Sin precio válido en euros")
                 return@mapNotNull null
             }
 
@@ -390,7 +493,8 @@ class SerpApiClient(
                 delivery = delivery,
                 rating = rating,
                 reviewCount = reviewCount,
-                observedAt = observedAt
+                observedAt = observedAt,
+                condition = condition
             )
         }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
             .sortedBy { it.price }
@@ -403,6 +507,7 @@ class SerpApiClient(
             rejectedForPriceOrCurrency = rejectedForPriceOrCurrency,
             rejectedForLink = rejectedForLink,
             rejectedOther = rejectedOther,
+            discardedOffers = discardedOffers,
             firstResultFields = items.firstOrNull()
                 ?.keys()
                 ?.asSequence()
@@ -658,9 +763,23 @@ class SerpApiClient(
             uri.scheme.equals("https", ignoreCase = true)) && !uri.host.isNullOrBlank()
     }.getOrDefault(false)
 
+    private fun isRentalOrMonthlyListing(item: JSONObject, title: String): Boolean {
+        val excludedTerms = Regex(
+            """(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b|/\s*mes\b)"""
+        )
+        if (excludedTerms.containsMatchIn(title)) return true
+        val conditionText = listOf(
+            "second_hand_condition", "condition", "item_condition",
+            "product_condition", "condition_description"
+        ).mapNotNull { key ->
+            item.opt(key)?.toString()?.takeUnless { it.isBlank() || it == "null" }
+        }.joinToString(" ")
+        return excludedTerms.containsMatchIn(conditionText)
+    }
+
     private fun isClearlyNonNewListing(item: JSONObject, title: String): Boolean {
         val excludedTerms = Regex(
-            """(?i)\b(segunda[\s_-]+mano|second[\s_-]*hand|pre[\s_-]*owned|used|usad[oa]s?|seminuev[oa]s?|reacondicionad[oa]s?|refurbished|renewed|open[\s_-]*box|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b"""
+            """(?i)(?:\b(segunda[\s_-]+mano|second[\s_-]*hand|pre[\s_-]*owned|used|usad[oa]s?|seminuev[oa]s?|reacondicionad[oa]s?|refurbished|renewed|open[\s_-]*box|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b|/\s*mes\b)"""
         )
         if (excludedTerms.containsMatchIn(title)) return true
 

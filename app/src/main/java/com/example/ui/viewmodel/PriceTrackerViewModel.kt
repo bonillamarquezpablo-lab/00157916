@@ -1129,9 +1129,22 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 )
                 savedCount += newlySaved
                 if (newlySaved > 0) {
+                    val identityKey = onlineProductIdentityKey(candidate.title)
                     val refreshedProduct = runCatching {
                         withTimeout(10_000L) {
-                            repository.awaitProductForOnlineIdentity(onlineProductIdentityKey(candidate.title))
+                            repository.allProductsStream.first { products ->
+                                products.any { product ->
+                                    onlineProductIdentityKey(product.title) == identityKey &&
+                                        product.priceHistory.any {
+                                            it.eventLabel.equals("Internet Archive", ignoreCase = true)
+                                        }
+                                }
+                            }.first { product ->
+                                onlineProductIdentityKey(product.title) == identityKey &&
+                                    product.priceHistory.any {
+                                        it.eventLabel.equals("Internet Archive", ignoreCase = true)
+                                    }
+                            }
                         }
                     }.getOrNull()
                     if (refreshedProduct != null) {

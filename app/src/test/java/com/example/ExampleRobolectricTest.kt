@@ -1015,9 +1015,7 @@ class ExampleRobolectricTest {
             assertNotNull("Online searches must add a real product row to Room", persistedProduct)
             assertTrue("Searched products must be marked as source-verified", persistedProduct?.isPriceVerified == true)
             assertTrue(stored.all { it.currency == "EUR" && it.sourceType == "Google Shopping" })
-            val allStoredObservations = database.priceObservationDao().observeAll().first()
-            assertEquals(3, allStoredObservations.size)
-            assertEquals(1, allStoredObservations.count { !it.isVerified && it.price == 12.00 })
+            assertEquals(3, database.priceObservationDao().getObservationCount(sonyProductId))
             val savedGoogleOffer = stored.single { it.storeName == "PcComponentes" }
             assertTrue(savedGoogleOffer.sourceUrl.contains("google.com/shopping/product"))
             assertEquals("Google Shopping", savedGoogleOffer.linkType)

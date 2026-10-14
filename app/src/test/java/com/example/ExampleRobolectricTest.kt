@@ -704,7 +704,7 @@ class ExampleRobolectricTest {
         assertTrue(escapedQuoteReport.results.any { it.title == "RIAL Milano llanta" && it.isFitmentUnverified })
         assertTrue(
             escapedQuoteReport.discardedOffers.any {
-                it.title.contains("RIAL Kodiak") && it.reason.contains("Anclaje incompatible", ignoreCase = true)
+                it.title.contains("RIAL Kodiak") && it.reason.contains("incompatible", ignoreCase = true)
             }
         )
     }

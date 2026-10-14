@@ -13,6 +13,7 @@ import com.example.data.remote.SerpApiException
 import com.example.data.remote.SerpApiRequestProduct
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.SerpApiTokenStore
+import com.example.data.remote.extractGoogleShoppingProductId
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.Store
@@ -32,6 +33,17 @@ import kotlinx.coroutines.withTimeout
 import java.util.Locale
 
 enum class OnlineSearchProvider { GOOGLE_SHOPPING, AMAZON }
+
+enum class SerpApiActionType { UPDATE_TRACKED, COMPARE_STORES }
+
+data class SerpApiActionConfirmation(
+    val type: SerpApiActionType,
+    val title: String,
+    val searchesToSpend: Int,
+    val remainingSearches: Int,
+    val remainingThisHour: Int?,
+    val message: String
+)
 
 enum class SortOption(val label: String) {
     BEST_ATH_DISCOUNT("Mejores ofertas verificadas"),
@@ -68,10 +80,18 @@ data class TrackerUiState(
     val onlineSearchProvider: OnlineSearchProvider = OnlineSearchProvider.GOOGLE_SHOPPING,
     val isCheckingSerpApiAccount: Boolean = false,
     val serpApiAccountStatus: String? = null,
+    val isPreparingSerpApiAction: Boolean = false,
+    val isExecutingSerpApiAction: Boolean = false,
+    val serpApiActionConfirmation: SerpApiActionConfirmation? = null,
+    val serpApiActionStatus: String? = null,
     val snackbarMessage: String? = null
 )
 
 class PriceTrackerViewModel(application: Application) : AndroidViewModel(application) {
+    private companion object {
+        const val TRACKED_REFRESH_COOLDOWN_MS = 24L * 60L * 60L * 1000L
+        const val MAX_TRACKED_REFRESH_PER_TAP = 10
+    }
 
     private val database = AppDatabase.getInstance(application)
     private val repository = ProductRepository(
@@ -94,6 +114,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         Context.MODE_PRIVATE
     )
 
+    private var pendingTrackedRefreshProducts: List<Product> = emptyList()
+    private var pendingCompareStoresProduct: Product? = null
     private val _uiState = MutableStateFlow(TrackerUiState())
 
     val uiState: StateFlow<TrackerUiState> = _uiState.asStateFlow()

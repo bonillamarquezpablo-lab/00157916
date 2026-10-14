@@ -571,7 +571,17 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 // The account endpoint is free; refresh the displayed balance after a live request.
                 val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
                 val quotaNote = quotaAfter?.let { " ${it.quotaSummary()}" }.orEmpty()
-                val filterNote = onlineFilterNotice(rawResults.size, results.size)
+                val parserFilterNote = googleReport?.let { report ->
+                    val reasons = mutableListOf<String>()
+                    if (report.rejectedAsIrrelevant > 0) reasons += "${report.rejectedAsIrrelevant} por modelo no coincidente"
+                    if (report.rejectedForPriceOrCurrency > 0) reasons += "${report.rejectedForPriceOrCurrency} por precio o moneda no válidos"
+                    if (report.rejectedForLink > 0) reasons += "${report.rejectedForLink} por enlace no utilizable"
+                    if (report.rejectedOther > 0) reasons += "${report.rejectedOther} por condición no válida o datos incompletos"
+                    val totalRejected = report.rejectedAsIrrelevant + report.rejectedForPriceOrCurrency +
+                        report.rejectedForLink + report.rejectedOther
+                    if (totalRejected > 0) " Se descartaron $totalRejected resultados: ${reasons.joinToString("; ")}." else ""
+                }.orEmpty()
+                val filterNote = parserFilterNote + onlineFilterNotice(rawResults.size, results.size)
                 val historyNote = if (results.isNotEmpty()) {
                     " " + onlineHistoryNotice(savedObservations, results.size)
                 } else ""
@@ -598,7 +608,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     private fun onlineFilterNotice(rawCount: Int, acceptedCount: Int): String =
         (rawCount - acceptedCount).takeIf { it > 0 }?.let {
-            " Se han omitido $it resultados por precio sospechoso o condición no válida."
+            " Se han omitido $it resultados por precio no válido o modelo no coincidente."
         }.orEmpty()
 
     private fun onlineHistoryNotice(saved: Int, resultCount: Int): String =

@@ -1007,6 +1007,52 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun wheelSearchValidatesExplicitWidthAndEtAndLabelsMissingSpecs() {
+        val client = SerpApiClient()
+        val items = JSONArray()
+        val titles = listOf(
+            "Autec Zenit 5.5Jx14 ET35 5x100",
+            "Autec Zenit 6Jx14 ET35 5x100",
+            "Autec Zenit 5.5Jx14 ET38 5x100",
+            "Autec Zenit 5.5Jx14 5x100",
+            "Autec Zenit 5.5Jx15 ET35 5x100"
+        )
+        titles.forEachIndexed { index, title ->
+            items.put(
+                JSONObject()
+                    .put("title", title)
+                    .put("price", "140,00 €")
+                    .put("extracted_price", 140.0 + index)
+                    .put("link", "https://shop.example/wheel-fitment-$index")
+                    .put("source", "Tienda $index")
+                    .put("condition", "new")
+            )
+        }
+
+        val report = client.parseShoppingResultsDetailed(
+            root = JSONObject()
+                .put("search_metadata", JSONObject().put("status", "Success"))
+                .put("shopping_results", items),
+            query = "autec zenit 5.5x14 ET35 5x100",
+            observedAt = System.currentTimeMillis()
+        )
+
+        assertEquals(listOf(titles[0], titles[3]), report.results.map { it.title })
+        assertFalse(report.results.single { it.title == titles[0] }.isFitmentUnverified)
+        assertTrue("Missing ET must remain visible but unconfirmed", report.results.single { it.title == titles[3] }.isFitmentUnverified)
+
+        assertTrue(report.discardedOffers.any {
+            it.title == titles[1] && it.reason == "Ancho distinto: 6 pulgadas (buscaste 5.5 pulgadas)"
+        })
+        assertTrue(report.discardedOffers.any {
+            it.title == titles[2] && it.reason == "ET distinto: 38 (buscaste ET35)"
+        })
+        assertTrue(report.discardedOffers.any {
+            it.title == titles[4] && it.reason == "Diámetro distinto: 15 pulgadas (buscaste 14 pulgadas)"
+        })
+    }
+
+    @Test
     fun wheelSearchRecognizesMultilingualCategoryTermsAndSeparatesSetsFromSingleWheels() {
         val client = SerpApiClient()
         val terms = listOf("llanta", "rueda", "aro", "Felgen", "Stahlfelge", "felge", "felgi", "felga", "Aluräder", "Alu", "jante", "cerchi", "wheel", "rim", "alloy")

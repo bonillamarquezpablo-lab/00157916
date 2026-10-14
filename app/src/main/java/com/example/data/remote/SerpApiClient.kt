@@ -63,12 +63,16 @@ data class SerpApiShoppingSearchReport(
         if (rawResultCount == 0) {
             return "$providerName no devolvió productos para «$query». Prueba con el modelo exacto o inténtalo más tarde; no se ha guardado ningún precio."
         }
+        val detailedReasons = discardedOffers.groupingBy { it.reason }.eachCount()
+            .entries.joinToString("; ") { "${it.value} por ${it.key.lowercase(Locale.ROOT)}" }
         val reasons = mutableListOf<String>()
         if (rejectedAsIrrelevant > 0) reasons += "$rejectedAsIrrelevant no coincidían suficientemente con la búsqueda"
         if (rejectedForPriceOrCurrency > 0) reasons += "$rejectedForPriceOrCurrency no tenían un precio en euros verificable"
         if (rejectedForLink > 0) reasons += "$rejectedForLink no tenían un enlace utilizable"
-        if (rejectedOther > 0) reasons += "$rejectedOther estaban incompletos"
-        val detail = reasons.joinToString("; ").ifBlank { "ninguno pasó los filtros de seguridad" }
+        if (rejectedOther > 0) reasons += "$rejectedOther tenían condición no válida o datos incompletos"
+        val detail = detailedReasons.ifBlank {
+            reasons.joinToString("; ").ifBlank { "ninguno pasó los filtros de seguridad" }
+        }
         val fieldDiagnostic = if (
             results.isEmpty() &&
             rejectedForLink > 0 &&

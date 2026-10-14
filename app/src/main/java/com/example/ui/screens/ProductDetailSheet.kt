@@ -49,6 +49,8 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Product
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import com.example.ui.components.DealVerdictBadge
 import com.example.ui.components.HeroPriceBadge

@@ -7,6 +7,12 @@ import java.util.Locale
  * One result from a manual Google Shopping query.
  * Prices are point-in-time observations and must be rechecked at the seller.
  */
+data class DiscardedOnlineOffer(
+    val title: String,
+    val priceText: String,
+    val reason: String
+)
+
 data class SerpApiShoppingResult(
     val title: String,
     val price: Double,

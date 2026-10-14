@@ -675,7 +675,7 @@ class ExampleRobolectricTest {
 
         val report = client.parseShoppingResultsDetailed(
             root = payload,
-            query = "llantas 14\\" 5x100",
+            query = """llantas 14" 5x100""",
             observedAt = System.currentTimeMillis()
         )
 
@@ -737,7 +737,7 @@ class ExampleRobolectricTest {
             val saved = repository.recordOnlineSearchResults(
                 results = listOf(result),
                 sourceType = "GOOGLE_SHOPPING",
-                searchQuery = "llantas 14\\" 5x100"
+                searchQuery = """llantas 14" 5x100"""
             )
 
             assertEquals(0, saved)

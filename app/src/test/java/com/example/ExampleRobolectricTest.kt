@@ -699,7 +699,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `condition metadata blocks used and refurbished listings even if titles omit it`() {
+    fun `condition metadata marks used and refurbished offers for the opt-in filter`() {
         val report = SerpApiClient().parseShoppingResultsDetailed(
             root = JSONObject(
                 """
@@ -739,9 +739,10 @@ class ExampleRobolectricTest {
         )
 
         assertEquals(3, report.rawResultCount)
-        assertEquals(1, report.results.size)
-        assertEquals(249.99, report.results.single().price, 0.001)
-        assertEquals(2, report.rejectedOther)
+        assertEquals(3, report.results.size)
+        assertEquals(2, report.results.count { it.isSecondHand })
+        assertEquals(249.99, report.results.single { !it.isSecondHand }.price, 0.001)
+        assertEquals(0, report.rejectedOther)
     }
 
     @Test
@@ -788,7 +789,7 @@ class ExampleRobolectricTest {
 
 
     @Test
-    fun `online search stores real offers once per store and day and rejects used listings and low outliers`() = runBlocking<Unit> {
+    fun `online search stores valid offers once per store and day and marks low outliers` = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,
@@ -879,12 +880,12 @@ class ExampleRobolectricTest {
                 "A result stamped before 13 October 2026 must not enter live history",
                 repository.filterOnlineSearchResults(listOf(prePolicySnapshot)).isNotEmpty()
             )
-            assertFalse(
-                "A €9.90 Redmi phone listing is implausible for a new-in-store offer",
-                filteredResults.any { it.title.contains("Redmi 17", ignoreCase = true) && it.price < 45.0 }
+            assertTrue(
+                "A positive-price listing is not discarded by a hard-coded device price floor",
+                filteredResults.any { it.title.contains("Redmi 17", ignoreCase = true) && it.price == 9.90 }
             )
-            assertFalse(
-                "Offers from the Rentik renting provider must not be stored as new-in-store offers",
+            assertTrue(
+                "A seller name alone is not proof of renting; explicit condition/title signals decide",
                 filteredResults.any { it.storeName.equals("Rentik", ignoreCase = true) }
             )
             assertTrue(
@@ -895,9 +896,9 @@ class ExampleRobolectricTest {
                 "Low-priced real accessories should remain eligible",
                 filteredResults.any { it.title.contains("UGREEN USB 2.0 Hub") }
             )
-            assertFalse(
-                "A sub-€5 20,000mAh power bank is suspicious and must not be saved",
-                filteredResults.any { it.title.contains("Power Bank", ignoreCase = true) && it.price < 5.0 }
+            assertTrue(
+                "A sub-€5 positive price is retained; the relative median rule decides suspicion",
+                filteredResults.any { it.title.contains("Power Bank", ignoreCase = true) && it.price == 2.99 }
             )
 
             val excludedSellerResults = listOf(
@@ -911,10 +912,11 @@ class ExampleRobolectricTest {
                     sourceUrl = "https://www.example.com/xiaomi-cuota"
                 )
             )
-            assertTrue(
-                "Second-hand marketplaces and subscription listings must be excluded",
-                repository.filterOnlineSearchResults(excludedSellerResults, "Xiaomi Redmi 17").isEmpty()
-            )
+            val filteredMarketplaceResults = repository.filterOnlineSearchResults(excludedSellerResults, "Xiaomi Redmi 17")
+            assertEquals("Listings are not discarded merely because of seller name", 4, filteredMarketplaceResults.size)
+            assertTrue("Monthly payment listings are still excluded", filteredMarketplaceResults.none {
+                it.title.contains("cuota", ignoreCase = true)
+            })
 
             val vacuumListings = listOf(
                 cheapLegitimateAccessory.copy(
@@ -1001,11 +1003,11 @@ class ExampleRobolectricTest {
             assertEquals(179.99, grouped.single().minPrice, 0.001)
 
             val inserted = repository.recordOnlineSearchResults(results, "GOOGLE_SHOPPING")
-            assertEquals("Only the two plausible new offers should be stored", 2, inserted)
+            assertEquals("Two normal offers and one suspicious unverified observation should be stored", 3, inserted)
             val stored = withTimeout<List<PriceObservationEntity>>(10_000) {
                 database.priceObservationDao().observeAllVerified().first { it.size >= 2 }
             }
-            assertEquals(2, stored.size)
+            assertEquals("Only the two non-suspicious offers count as verified history", 2, stored.size)
             val sonyProductId = stored.first().productId
             assertTrue("Both retailer offers must attach to one saved product", stored.all { it.productId == sonyProductId })
             assertTrue(stored.all { it.productTitle == "Sony WH-1000XM5 Wireless Headphones" })
@@ -1013,6 +1015,9 @@ class ExampleRobolectricTest {
             assertNotNull("Online searches must add a real product row to Room", persistedProduct)
             assertTrue("Searched products must be marked as source-verified", persistedProduct?.isPriceVerified == true)
             assertTrue(stored.all { it.currency == "EUR" && it.sourceType == "Google Shopping" })
+            val allStoredObservations = database.priceObservationDao().observeAll().first()
+            assertEquals(3, allStoredObservations.size)
+            assertEquals(1, allStoredObservations.count { !it.isVerified && it.price == 12.00 })
             val savedGoogleOffer = stored.single { it.storeName == "PcComponentes" }
             assertTrue(savedGoogleOffer.sourceUrl.contains("google.com/shopping/product"))
             assertEquals("Google Shopping", savedGoogleOffer.linkType)

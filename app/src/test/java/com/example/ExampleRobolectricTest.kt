@@ -12,6 +12,7 @@ import com.example.data.model.Product
 import com.example.data.repository.ProductRepository
 import com.example.data.repository.SpanishMarketData
 import com.example.data.remote.SerpApiClient
+import com.example.data.remote.ArchivedPriceQuote
 import com.example.data.remote.SerpApiQuote
 import com.example.data.remote.SerpApiRequestProduct
 import com.example.data.remote.SerpApiShoppingResult
@@ -708,6 +709,9 @@ class ExampleRobolectricTest {
                 assertEquals(123.45, verifiedHistory.single().price, 0.001)
                 assertEquals("Amazon.es", verifiedHistory.single().sourceName)
                 assertEquals("directo", verifiedHistory.single().linkType)
+                assertEquals("live", verifiedHistory.single().evidenceType)
+                assertEquals(1_700_000_000_000L, verifiedHistory.single().collectedAt)
+                assertEquals("", verifiedHistory.single().sourcePageUrl)
             }
         } finally {
             migratedDatabase.close()
@@ -1227,6 +1231,71 @@ class ExampleRobolectricTest {
         // German "alloy wheels" (Aluräder) with a matching PCD are accepted as confirmed.
         val matching = report.results.first { it.title.contains("Aluräder") }
         assertFalse(matching.isFitmentUnverified)
+    }
+
+    @Test
+    fun archiveBackfillAddsOldHistoryWithoutReplacingCurrentPrice() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val now = System.currentTimeMillis()
+            val title = "Anker Prime 27K Power Bank"
+            val originalUrl = "https://shop.example/products/anker-prime-27k"
+            val liveOffer = SerpApiShoppingResult(
+                title = title,
+                price = 99.99,
+                storeName = "Tienda directa",
+                sourceUrl = originalUrl,
+                observedAt = now,
+                condition = "new"
+            )
+            assertTrue(repository.recordOnlineSearchResults(listOf(liveOffer), "GOOGLE_SHOPPING", title) > 0)
+
+            val archivedAt = now - 1_550L * 24L * 60L * 60L * 1000L
+            val archiveQuote = ArchivedPriceQuote(
+                observedAt = archivedAt,
+                price = 79.99,
+                currency = "EUR",
+                productTitle = title,
+                originalUrl = originalUrl,
+                snapshotUrl = "https://web.archive.org/web/20220501000000id_/" + originalUrl
+            )
+            assertEquals(1, repository.recordArchivedPriceHistory(
+                expectedTitle = title,
+                originalUrl = originalUrl,
+                storeName = "Tienda directa",
+                quotes = listOf(archiveQuote)
+            ))
+
+            val productId = database.productDao().getAllProductsSnapshot().single().id
+            val observations = database.priceObservationDao().observeVerifiedHistory(productId).first()
+            assertEquals(2, observations.size)
+            val archived = observations.first { it.evidenceType == "archive" }
+            assertEquals(archivedAt, archived.observedAt)
+            assertTrue(archived.collectedAt >= now)
+            assertEquals(originalUrl, archived.sourcePageUrl)
+            assertEquals("Internet Archive", archived.sourceType)
+
+            val product = withTimeout<com.example.data.model.Product>(10_000L) {
+                repository.allProductsStream.first { list ->
+                    list.any { it.id == productId && it.priceHistory.any { point -> point.eventLabel == "Internet Archive" } }
+                }.first { it.id == productId }
+            }
+            assertEquals("Historical archive data must never replace the current quote", 99.99, product.currentPrice, 0.001)
+            assertTrue(product.priceHistory.any { it.timestamp == archivedAt && it.price == 79.99 })
+        } finally {
+            database.close()
+        }
     }
 
     @Test

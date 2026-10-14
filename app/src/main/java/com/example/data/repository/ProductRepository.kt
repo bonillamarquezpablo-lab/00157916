@@ -485,7 +485,7 @@ class ProductRepository(
 
     private fun isAccessoryListing(title: String): Boolean =
         Regex(
-            """(?i)\b(p[oó]ster(?:es|s)?|poster(?:es|s)?|fundas?|carcasas?|cristal\s+templado|mop\s+kit|recambios?|filtros?|protectores?|cargadores?|chargers?|charging|cables?|adaptadores?|hubs?|soportes?|repuestos?|replacement|screen\s+protector|tempered\s+glass|covers?|cases?)\b"""
+            """(?i)\b(p[oó]ster(?:es|s)?|poster(?:es|s)?|fundas?|carcasas?|cristal\s+templado|mop\s+kit|recambios?|filtros?|protector(?:es)?|cargador(?:es)?|chargers?|charging|cables?|adaptador(?:es)?|hubs?|soportes?|repuestos?|replacement|screen\s+protector|tempered\s+glass|covers?|cases?)\b"""
         ).containsMatchIn(normalizedProductTitle(title))
 
     private fun explicitModelMarkers(text: String): Set<String> {

@@ -14,6 +14,7 @@ import com.example.data.model.ProductCategory
 import com.example.data.model.StoreOffer
 import com.example.data.remote.SerpApiQuote
 import com.example.data.remote.SerpApiShoppingResult
+import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.onlineProductIdentityKey
@@ -217,6 +218,46 @@ class ProductRepository(
                 }
             }
         }.map { (result, _) -> result }
+    }
+
+    /**
+     * Explains repository-level rejections without writing anything to Room. The exact same
+     * filter is used for cards and history, so this diagnostic cannot change accepted results.
+     */
+    fun diagnoseOnlineSearchRejections(
+        results: List<SerpApiShoppingResult>,
+        searchQuery: String = ""
+    ): List<RejectedOnlineOffer> {
+        val accepted = filterOnlineSearchResults(results, searchQuery).toSet()
+        val queryModelMarkers = explicitModelMarkers(searchQuery)
+        return results.filterNot { it in accepted }.map { result ->
+            val reason = when {
+                result.title.isBlank() || result.storeName.isBlank() ->
+                    "Datos incompletos"
+                !result.price.isFinite() || result.price <= 0.0 ||
+                    result.price > MAX_HISTORY_PRICE_EUR ->
+                    "Sin precio válido"
+                !isEligibleHistoryTitle(result.title) ->
+                    if (Regex("""(?i)\b(alquiler|rental|renting|mensual|cuota|/\s*mes)\b""")
+                            .containsMatchIn(result.title)) "Alquiler o cuota mensual"
+                    else "Segunda mano o reacondicionado"
+                !isEligibleSeller(result.storeName) ->
+                    "Otro modelo o vendedor no elegible"
+                hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title) ||
+                    (isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
+                        isAccessoryListing(result.title)) ->
+                    "Otro modelo o variante"
+                !isPlausibleHistoryPrice(result.title, result.price) ->
+                    "Precio sospechoso"
+                else -> "Precio sospechoso: demasiado bajo frente a ofertas comparables"
+            }
+            RejectedOnlineOffer(
+                title = result.title,
+                priceLabel = "€" + String.format(Locale.ROOT, "%.2f", result.price),
+                reason = reason,
+                provider = if (result.isAmazonOffer) "Amazon.es" else "Google Shopping"
+            )
+        }
     }
 
     private fun isPlausibleHistoryPrice(title: String, price: Double): Boolean {

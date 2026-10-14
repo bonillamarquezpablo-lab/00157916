@@ -328,8 +328,12 @@ class SerpApiClient(
                     rejectedOther++
                     return@mapNotNull null
                 }
-            val condition = item.optString("second_hand_condition")
-                .takeIf { it.isNotBlank() && it != "null" }.orEmpty()
+            val condition = sequenceOf(
+                "second_hand_condition", "condition", "item_condition",
+                "product_condition", "condition_description"
+            ).mapNotNull { key ->
+                item.optString(key).takeIf { it.isNotBlank() && it != "null" }
+            }.firstOrNull().orEmpty()
             if (isRentalOrMonthlyListing(item, title)) {
                 rejectedOther++
                 return@mapNotNull null

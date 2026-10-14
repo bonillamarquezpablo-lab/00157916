@@ -949,13 +949,13 @@ class ExampleRobolectricTest {
                 vacuumListings,
                 "Xiaomi Vacuum Cleaner G10"
             )
-            assertFalse(
-                "An accessory must not appear as a whole device for a model-specific search",
+            assertTrue(
+                "Accessories should remain visible in online results, marked and sorted by the UI",
                 filteredVacuumListings.any { it.title.contains("Mop Kit", ignoreCase = true) }
             )
             assertEquals(
-                "The three legitimate vacuum offers should remain",
-                3,
+                "The three main vacuum offers and the visible accessory should remain",
+                4,
                 filteredVacuumListings.size
             )
             assertTrue(
@@ -981,7 +981,7 @@ class ExampleRobolectricTest {
                 )
             )
             val strictMatches = repository.filterOnlineSearchResults(deviceSearchListings, "Xiaomi Redmi 17")
-            assertEquals("A model-specific query must exclude other models and cases", 2, strictMatches.size)
+            assertEquals("A model-specific query keeps matching accessories visible but rejects other models", 3, strictMatches.size)
             assertTrue(strictMatches.all { it.title.contains("Redmi 17", ignoreCase = true) })
 
             val sonyFormattingVariant = results.first().copy(

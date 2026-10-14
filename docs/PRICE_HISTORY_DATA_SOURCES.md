@@ -41,8 +41,9 @@
 
 - Documentación del índice CDX: https://github.com/internetarchive/wayback-cdx-server
 - Permite buscar capturas históricas de URL en intervalos de fechas, pero una captura no equivale a una base de precios estructurada.
-- **Uso recomendado:** fuente auxiliar para auditar un precio de una página concreta cuando exista una captura antigua y se pueda verificar claramente producto, moneda y condición.
-- **No usar como fuente primaria masiva:** las fichas de tiendas pueden depender de JavaScript, variar sus URL, no estar archivadas o mostrar precios personalizados/agotados. No debe inventarse un precio cuando la captura no lo expone con claridad.
+- **Implementación inicial en PR #31:** la app consulta gratuitamente hasta 1.600 días para enlaces directos HTTPS de tiendas, toma una muestra limitada de capturas y acepta solo precios con moneda EUR explícita, metadatos estructurados y título coincidente. La caché de intentos evita repetir búsquedas sobre la misma página durante 30 días.
+- La base de datos v8 distingue `observedAt` (fecha de la captura), `collectedAt` (fecha de importación), `evidenceType=archive`, la URL original y la URL de la captura. Los precios archivados no pueden reemplazar la oferta actual; los puntos quedan identificados en el historial.
+- **Límites:** no se garantiza ningún número mínimo de puntos ni cobertura de 1.500 días. La app solo puede obtener datos si la página tiene capturas y el precio aparece en metadata legible; la mayoría de los enlaces intermedios de Google Shopping no son aptos para este método. No se debe inventar un precio cuando la captura no lo expone con claridad.
 
 ### 6. Feeds y acuerdos directos con tiendas
 
@@ -50,13 +51,7 @@ La opción de mayor calidad a largo plazo son feeds, APIs de afiliación o acuer
 
 ## Arquitectura requerida antes de importar historia antigua
 
-La tabla `price_observations` ya guarda fecha de observación, comercio, moneda, origen, URL y estado de validación. Para un backfill fiable, la próxima migración debe separar explícitamente:
-
-- **Fecha del precio** (`observedAt`): fecha que afirma la fuente que tenía ese precio.
-- **Fecha de adquisición** (`collectedAt`): cuándo Mínimo recuperó/importó el dato.
-- **Tipo de evidencia:** observación propia en directo, historial de proveedor o captura de archivo.
-- **Identidad externa:** ASIN, ID de producto Google o identificador del feed, vinculada al producto exacto de Mínimo.
-- **Procedencia y validación:** proveedor, tienda, moneda, URL/referencia, tipo de artículo, coincidencia de modelo/variante y nota de validación.
+La tabla `price_observations` conserva fecha de observación, fecha de adquisición, tipo de evidencia, comercio, moneda, URL de captura, URL original y estado de validación. La migración a la versión 8 incorpora `collectedAt`, `evidenceType` y `sourcePageUrl`. Las futuras fuentes estructuradas (por ejemplo, una API histórica externa) aún tendrán que incorporar su identificador externo de producto y una validación de coincidencia estricta antes de importar datos.
 
 El filtro temporal actual impide que fechas anteriores al 13 de octubre de 2026 entren en el historial validado. No basta con quitar ese filtro global: hay que permitir fechas antiguas únicamente para importaciones identificadas y verificadas, y seguir excluyendo filas heredadas/sintéticas que no tengan procedencia fiable.
 

@@ -141,6 +141,7 @@ fun OnlineSearchScreen(
     onQueryChange: (String) -> Unit,
     onSearch: () -> Unit,
     onAmazonSearch: () -> Unit,
+    onForceRefresh: () -> Unit,
     onAmazonOnlyChange: (Boolean) -> Unit,
     onToggleDiscarded: () -> Unit,
     onShowSecondHandChange: (Boolean) -> Unit,
@@ -221,6 +222,18 @@ fun OnlineSearchScreen(
                             Icon(Icons.Default.ShoppingBag, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
                             Text("Buscar precios de Amazon.es en Mínimo")
+                        }
+                    }
+                    if (state.onlineSearchResults.isNotEmpty()) {
+                        OutlinedButton(
+                            onClick = onForceRefresh,
+                            enabled = !state.isOnlineSearching && !state.isRefreshingPrices &&
+                                state.onlineSearchQuery.trim().length >= 2,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Actualizar resultados ahora (puede consumir cuota)")
                         }
                     }
                     Text(

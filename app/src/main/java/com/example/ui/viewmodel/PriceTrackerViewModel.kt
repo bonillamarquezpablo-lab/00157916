@@ -6,6 +6,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
 import com.example.data.remote.OnlineSearchCache
+import com.example.data.remote.WaybackPriceHistoryClient
+import com.example.data.remote.isGoogleShoppingUrl
 import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.SerpApiAccountInfo
 import com.example.data.remote.SerpApiClient
@@ -31,6 +33,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeout
 import java.util.Locale
+import java.text.SimpleDateFormat
+import java.util.Date
 
 enum class OnlineSearchProvider { GOOGLE_SHOPPING, AMAZON }
 
@@ -106,6 +110,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     private val serpApiTokenStore = SerpApiTokenStore(application)
     private val serpApiClient = SerpApiClient()
     private val onlineSearchCache = OnlineSearchCache(application)
+    private val waybackPriceHistoryClient = WaybackPriceHistoryClient(application)
     private val onlineDiscardedCache = mutableMapOf<String, List<RejectedOnlineOffer>>()
 
     private fun onlineSearchCacheKey(provider: OnlineSearchProvider, query: String): String =
@@ -983,6 +988,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         showOnlineSearchDiscarded = false,
                         onlineSearchStatus = "$base $cacheNotice$filterNotice$historyNotice"
                     )
+                    startFreeArchiveBackfill(safeCachedResults, query, provider)
                     return@launch
                 }
 
@@ -1051,6 +1057,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     showOnlineSearchDiscarded = false,
                     onlineSearchStatus = message
                 )
+                startFreeArchiveBackfill(results, query, provider)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: SerpApiException) {
@@ -1065,6 +1072,103 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 _uiState.value = _uiState.value.copy(isOnlineSearching = false)
             }
         }
+    }
+
+    /**
+     * Fetch optional historical prices from the free Internet Archive only for direct retailer
+     * pages. This runs after current results are displayed, does not call SerpApi, and never
+     * uses archived prices to overwrite the current offer. Archive coverage is product-dependent.
+     */
+    private fun startFreeArchiveBackfill(
+        results: List<SerpApiShoppingResult>,
+        query: String,
+        provider: OnlineSearchProvider
+    ) {
+        val candidates = results
+            .filterNot { it.isSecondHand || it.isRentalOrMonthly || it.isFitmentUnverified || it.isCategoryUnverified }
+            .filter { waybackPriceHistoryClient.isEligibleDirectUrl(it.sourceUrl) && !isGoogleShoppingUrl(it.sourceUrl) }
+            .sortedBy { it.price }
+            .distinctBy { it.title.trim().lowercase(Locale.ROOT) + "|" + it.sourceUrl }
+            .take(MAX_ARCHIVE_PAGES_PER_SEARCH)
+
+        if (candidates.isEmpty()) {
+            appendArchiveNotice(
+                query,
+                provider,
+                "Historial antiguo gratuito: estos resultados no incluyen un enlace directo de tienda archivables; no se han inventado precios previos."
+            )
+            return
+        }
+
+        viewModelScope.launch {
+            var savedCount = 0
+            var checkedCount = 0
+            var foundCount = 0
+            var skippedCount = 0
+            val archiveDates = mutableListOf<Long>()
+            for (candidate in candidates) {
+                val archive = waybackPriceHistoryClient.fetchHistory(
+                    originalUrl = candidate.sourceUrl,
+                    expectedTitle = candidate.title
+                )
+                if (archive.skippedRecently) {
+                    skippedCount++
+                    continue
+                }
+                if (!archive.available) continue
+                checkedCount += archive.capturesChecked
+                foundCount += archive.quotes.size
+                archive.quotes.minOfOrNull { it.observedAt }?.let(archiveDates::add)
+                savedCount += repository.recordArchivedPriceHistory(
+                    expectedTitle = candidate.title,
+                    originalUrl = candidate.sourceUrl,
+                    storeName = candidate.storeName,
+                    quotes = archive.quotes
+                )
+            }
+
+            if (skippedCount == candidates.size) return@launch
+            val notice = when {
+                savedCount > 0 -> {
+                    val oldest = archiveDates.minOrNull()?.let { timestamp ->
+                        SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(timestamp))
+                    }
+                    " Histórico gratuito recuperado de Internet Archive: $savedCount precios antiguos guardados" +
+                        (oldest?.let { ", con capturas desde $it" } ?: "") +
+                        ". Son precios anunciados en páginas archivadas; puede haber huecos y no garantizan envío, stock ni precio final."
+                }
+                foundCount > 0 -> {
+                    " Se encontraron capturas con precios previos, pero no se añadieron porque no se pudo vincular la ficha a un producto verificado o ya existía el registro diario."
+                }
+                checkedCount > 0 -> {
+                    " Se consultaron $checkedCount capturas gratuitas, pero ninguna expuso un precio EUR verificable para el producto exacto. No se han rellenado datos ausentes."
+                }
+                else -> {
+                    " No se recuperó histórico gratuito de las páginas consultadas: puede que no estén archivadas o que su precio no aparezca en metadatos verificables."
+                }
+            }
+            appendArchiveNotice(query, provider, notice)
+        }
+    }
+
+    private fun appendArchiveNotice(
+        query: String,
+        provider: OnlineSearchProvider,
+        notice: String
+    ) {
+        val current = _uiState.value
+        if (current.onlineSearchQuery.trim().equals(query, ignoreCase = true) &&
+            current.onlineSearchProvider == provider &&
+            current.onlineSearchStatus?.contains("Histórico gratuito recuperado de Internet Archive") != true
+        ) {
+            _uiState.value = current.copy(
+                onlineSearchStatus = (current.onlineSearchStatus.orEmpty() + " " + notice).trim()
+            )
+        }
+    }
+
+    private companion object {
+        const val MAX_ARCHIVE_PAGES_PER_SEARCH = 2
     }
 
     private fun onlineFilterNotice(discarded: List<RejectedOnlineOffer>): String {

@@ -154,6 +154,12 @@ class ProductRepository(
             )
             if (saveDailyObservation(observation)) inserted++
             productDao.updatePriceVerification(quote.productId, true)
+            quote.googleProductId?.takeIf { it.isNotBlank() }?.let { googleId ->
+                val savedProduct = productDao.getProductById(quote.productId)
+                if (savedProduct != null && savedProduct.googleProductId != googleId) {
+                    productDao.insert(savedProduct.copy(googleProductId = googleId))
+                }
+            }
         }
         // Preserve the previous test contract: a validated provider quote is a successful
         // configuration test even when today's copy was already recorded and deduplicated.
@@ -324,7 +330,10 @@ class ProductRepository(
                     currentStoreId = storeId,
                     storeUrl = bestOffer.sourceUrl,
                     imageUrl = bestOffer.thumbnailUrl.takeIf { it.isNotBlank() } ?: existingProduct.imageUrl,
-                    isPriceVerified = hasTrustedOffer || existingProduct.isPriceVerified
+                    isPriceVerified = hasTrustedOffer || existingProduct.isPriceVerified,
+                    googleProductId = bestOffer.googleProductId
+                        ?: group.offers.firstNotNullOfOrNull { it.googleProductId }
+                        ?: existingProduct.googleProductId
                 )
             } else {
                 ProductEntity(
@@ -345,7 +354,9 @@ class ProductRepository(
                     imageUrl = bestOffer.thumbnailUrl.takeIf { it.isNotBlank() },
                     rating = 0.0,
                     reviewCount = 0,
-                    isPriceVerified = group.offers.any { !it.isSuspiciousPrice }
+                    isPriceVerified = group.offers.any { !it.isSuspiciousPrice },
+                    googleProductId = bestOffer.googleProductId
+                        ?: group.offers.firstNotNullOfOrNull { it.googleProductId }
                 )
             }
             productDao.insert(productEntity)
@@ -385,6 +396,65 @@ class ProductRepository(
             }
         }
         return inserted
+    }
+
+    /**
+     * Save a single Google Product API response against the already-identified product row.
+     * No new catalogue product is created and no observation is saved if the product was not
+     * safely identified by the API parser.
+     */
+    suspend fun recordProductComparisonOffers(
+        productId: String,
+        expectedTitle: String,
+        offers: List<SerpApiShoppingResult>
+    ): Int {
+        val product = productDao.getProductById(productId) ?: return 0
+        if (expectedTitle.isBlank() || onlineProductIdentityKey(product.title) != onlineProductIdentityKey(expectedTitle)) {
+            return 0
+        }
+        val valid = filterOnlineSearchResults(offers, expectedTitle)
+            .filterNot { it.isSecondHand || it.isRentalOrMonthly }
+            .filter { isEligibleSeller(it.storeName) && isEligibleHistoryTitle(it.title) }
+            .groupBy { canonicalStoreId(it.storeName, it.sourceUrl) }
+            .values
+            .mapNotNull { rows ->
+                rows.filterNot { it.isSuspiciousPrice }.minByOrNull { it.price }
+                    ?: rows.minByOrNull { it.price }
+            }
+        if (valid.isEmpty()) return 0
+
+        var savedCount = 0
+        for (offer in valid) {
+            val storeId = canonicalStoreId(offer.storeName, offer.sourceUrl)
+            val observation = PriceObservationEntity(
+                productId = productId,
+                storeId = storeId,
+                price = offer.price,
+                currency = "EUR",
+                observedAt = offer.observedAt,
+                sourceUrl = offer.sourceUrl,
+                sourceName = "SerpApi · Google Product API",
+                isVerified = !offer.isSuspiciousPrice,
+                verificationNote = if (offer.isSuspiciousPrice) {
+                    "Precio sospechoso según la mediana de ofertas; conservado sin verificar."
+                } else {
+                    "Oferta de tienda recuperada con Google Product API; confirma precio final y disponibilidad."
+                },
+                productTitle = product.title,
+                storeName = offer.storeName,
+                sourceType = "Google Shopping",
+                linkType = offer.linkType
+            )
+            if (saveDailyObservation(observation)) savedCount++
+        }
+        if (savedCount > 0) {
+            productDao.updatePriceVerification(productId, true)
+            val googleId = valid.firstNotNullOfOrNull { it.googleProductId }
+            if (!googleId.isNullOrBlank() && product.googleProductId != googleId) {
+                productDao.insert(product.copy(googleProductId = googleId))
+            }
+        }
+        return savedCount
     }
 
     /** Resolve a persisted online product when a grouped result card is tapped. */
@@ -911,7 +981,8 @@ class ProductRepository(
             imageResName = imageResName,
             imageUrl = imageUrl.orEmpty(),
             isPriceVerified = priceIsVerified,
-            priceObservedAt = latestObservation?.observedAt.takeIf { priceIsVerified }
+            priceObservedAt = latestObservation?.observedAt.takeIf { priceIsVerified },
+            googleProductId = googleProductId
         )
     }
 

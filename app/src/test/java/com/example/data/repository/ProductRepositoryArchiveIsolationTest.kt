@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import java.util.Calendar
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -32,6 +33,13 @@ class ProductRepositoryArchiveIsolationTest {
             .build()
         try {
             val now = System.currentTimeMillis()
+            val todayStart = Calendar.getInstance().apply {
+                timeInMillis = now
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
             val productId = "archive-isolation-test"
             val title = "Anker Prime 27K Power Bank"
             database.productDao().insert(
@@ -74,9 +82,9 @@ class ProductRepositoryArchiveIsolationTest {
             val archiveUrl1 = "https://web.archive.org/web/20251001000000id_/https://shop.example/product/anker-prime"
             val archiveUrl2 = "https://web.archive.org/web/20260201000000id_/https://shop.example/product/anker-prime"
             val observations = listOf(
-                live(220.0, now - 30L * 60L * 60L * 1000L, "old"),
-                live(190.0, now - 18L * 60L * 60L * 1000L, "middle"),
-                live(200.0, now - 6L * 60L * 60L * 1000L, "current"),
+                live(220.0, todayStart - 36L * 60L * 60L * 1000L, "old"),
+                live(190.0, todayStart - 12L * 60L * 60L * 1000L, "middle"),
+                live(200.0, now, "current"),
                 // Simulate a row saved by an older v8 build before its provenance marker was repaired.
                 PriceObservationEntity(
                     productId = productId,
@@ -136,9 +144,9 @@ class ProductRepositoryArchiveIsolationTest {
             val liveOnly = product.copy(priceHistory = product.priceHistory.filterNot { it.isArchiveEvidence })
             assertEquals("archive rows must not change the badge classification",
                 liveOnly.priceBadgeState, product.priceBadgeState)
-            assertEquals("archive rows must not change the live chart's oldest point",
-                liveOnly.priceHistory.minOf { it.timestamp }, product.priceHistory
-                    .filterNot { it.isArchiveEvidence }.minOf { it.timestamp })
+            assertEquals("archive rows must not change 'Historial desde'",
+                todayStart - 36L * 60L * 60L * 1000L,
+                product.priceHistory.filterNot { it.isArchiveEvidence }.minOf { it.timestamp })
             assertTrue(product.priceHistory.any { it.sourceUrl == archiveUrl1 })
         } finally {
             database.close()

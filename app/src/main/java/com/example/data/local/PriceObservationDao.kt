@@ -61,11 +61,4 @@ interface PriceObservationDao {
     @Query("SELECT COUNT(*) FROM price_observations WHERE productId = :productId")
     suspend fun getObservationCount(productId: String): Int
 
-    /** Demo/unverified points are never valid price history. */
-    @Query("DELETE FROM price_observations WHERE isVerified = 0")
-    suspend fun deleteUnverifiedObservations(): Int
-
-    /** Remove legacy demo-linked history before deleting demo products. */
-    @Query("DELETE FROM price_observations WHERE productId IN (SELECT id FROM products WHERE id LIKE 'demo_%' OR lower(athMinDate) LIKE '%demostración%' OR lower(athMinStore) LIKE '%demostración%')")
-    suspend fun deleteExplicitDemoObservations(): Int
 }

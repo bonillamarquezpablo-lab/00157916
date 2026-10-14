@@ -70,7 +70,7 @@ class ExampleRobolectricTest {
                     isPriceVerified = false
                 )
             )
-            // An unverified product survives startup cleanup only when it is on the user's watchlist.
+            // The startup cleanup must not discard a product just because it is awaiting a verified quote.
             database.trackedProductDao().insertOrUpdate(
                 TrackedProductEntity(productId = "sony_wh1000xm5")
             )
@@ -181,9 +181,8 @@ class ExampleRobolectricTest {
                     isPriceVerified = true
                 )
             )
-            // The startup cleanup correctly removes orphan products without a verified source
-            // observation. Give this fixture real source-backed state so it tests tracking rather
-            // than relying on a stale isPriceVerified flag.
+            // Give the tracking-flow fixture a source-backed observation instead of relying only on
+            // a potentially stale isPriceVerified flag.
             database.priceObservationDao().insert(
                 PriceObservationEntity(
                     productId = "sample-followed-product",
@@ -590,8 +589,133 @@ class ExampleRobolectricTest {
         assertEquals("Mínimo", appName)
     }
 
+
     @Test
-    fun `migration 2 to 6 preserves watchlist and stores link destination types`() {
+    fun `migration from version 6 to 7 preserves preexisting products observations and tracking`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val databaseName = "minimo_v6_preservation_test.db"
+        context.deleteDatabase(databaseName)
+
+        // Construct a real version-6 database, including history written before migration starts.
+        val oldDatabase = context.openOrCreateDatabase(databaseName, Context.MODE_PRIVATE, null)
+        oldDatabase.execSQL(
+            "CREATE TABLE `spanish_stores` (" +
+                "`id` TEXT NOT NULL, `name` TEXT NOT NULL, `domain` TEXT NOT NULL, " +
+                "`brandColorHex` TEXT NOT NULL, `category` TEXT NOT NULL, " +
+                "`physicalStoresInSpain` INTEGER NOT NULL, `storeCountApprox` INTEGER NOT NULL, " +
+                "`headquartersInSpain` TEXT NOT NULL, `description` TEXT NOT NULL, PRIMARY KEY(`id`))"
+        )
+        oldDatabase.execSQL(
+            "CREATE TABLE `products` (" +
+                "`id` TEXT NOT NULL, `title` TEXT NOT NULL, `brand` TEXT NOT NULL, " +
+                "`category` TEXT NOT NULL, `currentPrice` REAL NOT NULL, `athMinPrice` REAL NOT NULL, " +
+                "`athMinDate` TEXT NOT NULL, `athMinStore` TEXT NOT NULL, `athMaxPrice` REAL NOT NULL, " +
+                "`avg90dPrice` REAL NOT NULL, `officialPvp` REAL NOT NULL, `currentStoreId` TEXT NOT NULL, " +
+                "`storeUrl` TEXT NOT NULL, `ean` TEXT NOT NULL, `imageResName` TEXT, `imageUrl` TEXT, " +
+                "`rating` REAL NOT NULL, `reviewCount` INTEGER NOT NULL, " +
+                "`wasRecentlyInflated` INTEGER NOT NULL, `fakePriorPrice` REAL, " +
+                "`isPriceVerified` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`))"
+        )
+        oldDatabase.execSQL(
+            "CREATE TABLE `tracked_products` (" +
+                "`productId` TEXT NOT NULL, `targetAlertPrice` REAL, " +
+                "`isNotificationEnabled` INTEGER NOT NULL, `trackedAtTimestamp` INTEGER NOT NULL, " +
+                "`notes` TEXT NOT NULL, PRIMARY KEY(`productId`))"
+        )
+        oldDatabase.execSQL(
+            "CREATE TABLE `price_observations` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `productId` TEXT NOT NULL, " +
+                "`storeId` TEXT NOT NULL, `price` REAL NOT NULL, `currency` TEXT NOT NULL, " +
+                "`observedAt` INTEGER NOT NULL, `sourceUrl` TEXT NOT NULL, `sourceName` TEXT NOT NULL, " +
+                "`isVerified` INTEGER NOT NULL, `verificationNote` TEXT, " +
+                "`productTitle` TEXT NOT NULL DEFAULT '', `storeName` TEXT NOT NULL DEFAULT '', " +
+                "`sourceType` TEXT NOT NULL DEFAULT 'Google Shopping', `linkType` TEXT NOT NULL DEFAULT 'directo')"
+        )
+        oldDatabase.execSQL(
+            "CREATE INDEX `index_price_observations_productId_observedAt` " +
+                "ON `price_observations` (`productId`, `observedAt`)"
+        )
+        oldDatabase.execSQL(
+            "CREATE INDEX `index_price_observations_storeId_observedAt` " +
+                "ON `price_observations` (`storeId`, `observedAt`)"
+        )
+        oldDatabase.execSQL(
+            "INSERT INTO `products` (" +
+                "`id`, `title`, `brand`, `category`, `currentPrice`, `athMinPrice`, " +
+                "`athMinDate`, `athMinStore`, `athMaxPrice`, `avg90dPrice`, `officialPvp`, " +
+                "`currentStoreId`, `storeUrl`, `ean`, `imageResName`, `imageUrl`, `rating`, " +
+                "`reviewCount`, `wasRecentlyInflated`, `fakePriorPrice`, `isPriceVerified`) " +
+                "VALUES ('keep-v6-product', 'Producto conservado v6', 'Marca', 'COMPUTING', 123.45, 120.00, " +
+                "'Fecha guardada', 'Amazon.es', 180.00, 145.00, 180.00, 'amazon_es', " +
+                "'https://www.amazon.es/dp/V6', '', NULL, NULL, 0.0, 0, 0, NULL, 1)"
+        )
+        oldDatabase.execSQL(
+            "INSERT INTO `tracked_products` " +
+                "(`productId`, `targetAlertPrice`, `isNotificationEnabled`, `trackedAtTimestamp`, `notes`) " +
+                "VALUES ('keep-v6-product', 89.99, 1, 1700000000000, 'seguimiento previo a v7')"
+        )
+        oldDatabase.execSQL(
+            "INSERT INTO `price_observations` " +
+                "(`id`, `productId`, `storeId`, `price`, `currency`, `observedAt`, `sourceUrl`, " +
+                "`sourceName`, `isVerified`, `verificationNote`, `productTitle`, `storeName`, `sourceType`, `linkType`) " +
+                "VALUES (41, 'keep-v6-product', 'amazon_es', 123.45, 'EUR', 1700000000000, " +
+                "'https://www.amazon.es/dp/V6', 'Amazon.es', 1, 'guardada antes de migrar', " +
+                "'Producto conservado v6', 'Amazon.es', 'Amazon.es', 'directo')"
+        )
+        oldDatabase.execSQL(
+            "INSERT INTO `price_observations` " +
+                "(`id`, `productId`, `storeId`, `price`, `currency`, `observedAt`, `sourceUrl`, " +
+                "`sourceName`, `isVerified`, `verificationNote`, `productTitle`, `storeName`, `sourceType`, `linkType`) " +
+                "VALUES (42, 'keep-v6-product', 'amazon_es', 127.99, 'EUR', 1700000001000, " +
+                "'https://www.google.com/shopping/product/V6', 'Tienda pendiente', 0, 'pendiente de verificar', " +
+                "'Producto conservado v6', 'Tienda pendiente', 'Google Shopping', 'Google Shopping')"
+        )
+        oldDatabase.version = 6
+        oldDatabase.close()
+
+        val migratedDatabase = Room.databaseBuilder(
+            context,
+            AppDatabase::class.java,
+            databaseName
+        )
+            .addMigrations(AppDatabase.MIGRATION_6_7)
+            .allowMainThreadQueries()
+            .build()
+
+        try {
+            // Open triggers the 6 -> 7 migration, after both history rows were already stored.
+            migratedDatabase.openHelper.writableDatabase
+            runBlocking {
+                val product = migratedDatabase.productDao().getProductById("keep-v6-product")
+                assertNotNull("Product written before migration must survive", product)
+                assertEquals(123.45, product?.currentPrice ?: 0.0, 0.001)
+                assertEquals("Product schema migration only adds Google catalog ID", null, product?.googleProductId)
+
+                val tracking = migratedDatabase.trackedProductDao().getById("keep-v6-product")
+                assertNotNull("Watchlist row written before migration must survive", tracking)
+                assertEquals("seguimiento previo a v7", tracking?.notes)
+                assertEquals(89.99, tracking?.targetAlertPrice ?: 0.0, 0.001)
+
+                assertEquals("Both pre-migration observations must survive", 2,
+                    migratedDatabase.priceObservationDao().getObservationCount("keep-v6-product"))
+                assertEquals("The original verification state must be preserved", 1,
+                    migratedDatabase.priceObservationDao().getVerifiedObservationCount())
+                val verifiedHistory = migratedDatabase.priceObservationDao()
+                    .observeVerifiedHistory("keep-v6-product").first()
+                assertEquals(1, verifiedHistory.size)
+                assertEquals(41L, verifiedHistory.single().id)
+                assertEquals(123.45, verifiedHistory.single().price, 0.001)
+                assertEquals("Amazon.es", verifiedHistory.single().sourceName)
+                assertEquals("directo", verifiedHistory.single().linkType)
+            }
+        } finally {
+            migratedDatabase.close()
+            context.deleteDatabase(databaseName)
+        }
+    }
+
+    @Test
+    fun `migration from v2 to current schema preserves watchlist and stores link destination types`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val databaseName = "minimo_migration_preservation_test.db"
         context.deleteDatabase(databaseName)
@@ -1595,8 +1719,9 @@ class ExampleRobolectricTest {
         }
     }
 
+
     @Test
-    fun `Room startup removes legacy mock rows and keeps only real online products`() = runBlocking<Unit> {
+    fun `repository startup preserves observations and every followed product`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,
@@ -1604,127 +1729,161 @@ class ExampleRobolectricTest {
         ).allowMainThreadQueries().build()
         try {
             val now = System.currentTimeMillis()
+            fun product(
+                id: String,
+                title: String,
+                minDate: String = "Historial en construcción",
+                minStore: String = "Amazon.es"
+            ) = ProductEntity(
+                id = id,
+                title = title,
+                brand = "Marca de prueba",
+                category = "SMARTPHONES",
+                currentPrice = 199.99,
+                athMinPrice = 199.99,
+                athMinDate = minDate,
+                athMinStore = minStore,
+                athMaxPrice = 199.99,
+                avg90dPrice = 0.0,
+                officialPvp = 0.0,
+                currentStoreId = "amazon_es",
+                storeUrl = "https://www.amazon.es/dp/TEST",
+                ean = "",
+                isPriceVerified = false
+            )
+
+            // This looks like a legacy demo row, but it is explicitly followed by the user.
             database.productDao().insert(
-                ProductEntity(
-                    id = "demo_iphone_17_pro_max",
-                    title = "Apple iPhone 17 Pro Max",
-                    brand = "Apple",
-                    category = "SMARTPHONES",
-                    currentPrice = 6.53,
-                    athMinPrice = 6.53,
-                    athMinDate = "Datos de demostración",
-                    athMinStore = "Datos de demostración",
-                    athMaxPrice = 6.53,
-                    avg90dPrice = 6.53,
-                    officialPvp = 6.53,
-                    currentStoreId = "apple_store",
-                    storeUrl = "https://www.apple.com/es/",
-                    ean = "",
-                    isPriceVerified = false
+                product(
+                    id = "demo_followed_product",
+                    title = "Producto seguido con marcador heredado",
+                    minDate = "Datos de demostración",
+                    minStore = "Datos de demostración"
+                )
+            )
+            database.trackedProductDao().insertOrUpdate(
+                TrackedProductEntity(productId = "demo_followed_product", notes = "no borrar seguimiento")
+            )
+            database.productDao().insert(
+                product("followed_pending_product", "Producto seguido pendiente")
+            )
+            database.trackedProductDao().insertOrUpdate(
+                TrackedProductEntity(productId = "followed_pending_product", notes = "seguir esperando precio")
+            )
+            database.productDao().insert(
+                product("online_product_verified", "Producto con observación verificada")
+            )
+            database.productDao().insert(
+                product("online_product_pending", "Producto con observación pendiente")
+            )
+            database.productDao().insert(
+                product("orphan_without_observations", "Fila huérfana sin historial")
+            )
+
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "followed_pending_product",
+                    storeId = "amazon_es",
+                    price = 201.00,
+                    observedAt = now,
+                    sourceUrl = "https://www.amazon.es/dp/FOLLOWED",
+                    sourceName = "Amazon.es",
+                    isVerified = false,
+                    verificationNote = "precio real pendiente de validar",
+                    productTitle = "Producto seguido pendiente",
+                    storeName = "Amazon.es",
+                    sourceType = "Amazon.es",
+                    linkType = "directo"
                 )
             )
             database.priceObservationDao().insert(
                 PriceObservationEntity(
-                    productId = "demo_iphone_17_pro_max",
-                    storeId = "apple_store",
-                    price = 6.53,
-                    observedAt = now,
-                    sourceUrl = "https://www.apple.com/es/",
-                    sourceName = "Demo fixture",
-                    isVerified = true
+                    productId = "online_product_verified",
+                    storeId = "amazon_es",
+                    price = 199.99,
+                    observedAt = now + 1,
+                    sourceUrl = "https://www.amazon.es/dp/VERIFIED",
+                    sourceName = "Amazon.es",
+                    isVerified = true,
+                    productTitle = "Producto con observación verificada",
+                    storeName = "Amazon.es",
+                    sourceType = "Amazon.es",
+                    linkType = "directo"
                 )
             )
-            database.trackedProductDao().insertOrUpdate(
-                TrackedProductEntity(productId = "demo_iphone_17_pro_max")
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "online_product_pending",
+                    storeId = "tienda_es",
+                    price = 205.00,
+                    observedAt = now + 2,
+                    sourceUrl = "https://shop.example.es/product/PENDING",
+                    sourceName = "Tienda española",
+                    isVerified = false,
+                    verificationNote = "esperando comprobación",
+                    productTitle = "Producto con observación pendiente",
+                    storeName = "Tienda española",
+                    sourceType = "Google Shopping",
+                    linkType = "Google Shopping"
+                )
             )
             database.storeDao().insertAll(
                 listOf(
                     StoreEntity(
-                        id = "apple_store",
-                        name = "Apple Store",
-                        domain = "apple.com",
+                        id = "amazon_es",
+                        name = "Amazon.es",
+                        domain = "amazon.es",
                         brandColorHex = "#000000",
                         category = "Electrónica",
-                        physicalStoresInSpain = true,
-                        storeCountApprox = 1,
+                        physicalStoresInSpain = false,
+                        storeCountApprox = 0,
                         headquartersInSpain = "España",
-                        description = "Legacy row for cleanup test"
+                        description = "Fila persistida de tienda"
                     )
                 )
             )
 
-            database.productDao().insert(
-                ProductEntity(
-                    id = "online_product_redmi17",
-                    title = "Xiaomi Redmi 17 4GB 256GB",
-                    brand = "Xiaomi",
-                    category = "SMARTPHONES",
-                    currentPrice = 199.99,
-                    athMinPrice = 199.99,
-                    athMinDate = "Historial en curso",
-                    athMinStore = "Amazon.es",
-                    athMaxPrice = 199.99,
-                    avg90dPrice = 0.0,
-                    officialPvp = 0.0,
-                    currentStoreId = "amazon_es",
-                    storeUrl = "https://www.amazon.es/dp/TEST",
-                    ean = "",
-                    isPriceVerified = false
-                )
-            )
-            database.priceObservationDao().insert(
-                PriceObservationEntity(
-                    productId = "online_product_redmi17",
-                    storeId = "amazon_es",
-                    price = 199.99,
-                    observedAt = now,
-                    sourceUrl = "https://www.amazon.es/dp/TEST",
-                    sourceName = "Amazon.es",
-                    isVerified = true,
-                    productTitle = "Xiaomi Redmi 17 4GB 256GB",
-                    storeName = "Amazon.es",
-                    sourceType = "Google Shopping"
-                )
-            )
-
-            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
             val repository = ProductRepository(
                 storeDao = database.storeDao(),
                 productDao = database.productDao(),
                 trackedDao = database.trackedProductDao(),
                 priceObservationDao = database.priceObservationDao(),
-                externalScope = scope
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
             )
 
-            val products: List<Product> = withTimeout<List<Product>>(10_000) {
+            val products = withTimeout<List<Product>>(10_000) {
                 repository.allProductsStream.first { rows ->
-                    // Wait for cleanup and verification reconciliation, not the first transient Room emission.
-                    rows.size == 1 &&
-                        rows.singleOrNull()?.id == "online_product_redmi17" &&
-                        rows.singleOrNull()?.isPriceVerified == true
+                    rows.size == 4 &&
+                        rows.any { it.id == "online_product_verified" && it.isPriceVerified }
                 }
             }
-            assertEquals("Only the user-searched product with a real observation may remain", 1, products.size)
-            assertEquals("online_product_redmi17", products.single().id)
-            assertTrue("The real online price must remain verified", products.single().isPriceVerified)
-            assertEquals(1, products.single().priceHistory.size)
-
-            withTimeout(10_000) {
-                while (
-                    database.productDao().getProductCount() != 1 ||
-                    database.storeDao().getStoreCount() != 0 ||
-                    database.priceObservationDao().getObservationCount("demo_iphone_17_pro_max") != 0 ||
-                    database.trackedProductDao().getAllTracked().first().isNotEmpty()
-                ) kotlinx.coroutines.delay(10)
-            }
-            assertEquals(0, database.priceObservationDao().getObservationCount("demo_iphone_17_pro_max"))
-            assertEquals(1, database.priceObservationDao().getObservationCount("online_product_redmi17"))
-            assertTrue("Legacy mock tracking must be purged", database.trackedProductDao().getAllTracked().first().isEmpty())
-            assertEquals("Room's static store rows must also be empty", 0, database.storeDao().getStoreCount())
-            assertTrue(
-                "A real verified observation must repair a stale product verification flag",
-                database.productDao().getProductById("online_product_redmi17")?.isPriceVerified == true
+            assertEquals(
+                setOf(
+                    "demo_followed_product",
+                    "followed_pending_product",
+                    "online_product_verified",
+                    "online_product_pending"
+                ),
+                products.map { it.id }.toSet()
             )
+            assertEquals("A user-followed demo-labelled product must never be deleted", 4,
+                database.productDao().getProductCount())
+            assertNotNull(database.productDao().getProductById("demo_followed_product"))
+            assertNotNull(database.productDao().getProductById("followed_pending_product"))
+            assertEquals("Only the orphan row without history or tracking is eligible for cleanup", null,
+                database.productDao().getProductById("orphan_without_observations"))
+
+            assertEquals("Real but unverified observations are retained", 1,
+                database.priceObservationDao().getObservationCount("followed_pending_product"))
+            assertEquals(1, database.priceObservationDao().getObservationCount("online_product_verified"))
+            assertEquals(1, database.priceObservationDao().getObservationCount("online_product_pending"))
+            assertEquals("Verified status is not changed for pending observations", false,
+                database.productDao().getProductById("followed_pending_product")?.isPriceVerified)
+            assertEquals(1, database.priceObservationDao().getVerifiedObservationCount())
+
+            val followedIds = database.trackedProductDao().getAllTracked().first().map { it.productId }.toSet()
+            assertEquals(setOf("demo_followed_product", "followed_pending_product"), followedIds)
+            assertEquals("Stored shops are retained too", 1, database.storeDao().getStoreCount())
         } finally {
             database.close()
         }

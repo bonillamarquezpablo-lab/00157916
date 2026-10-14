@@ -58,17 +58,11 @@ class ProductRepository(
     private val _latestProducts = MutableStateFlow<List<Product>>(emptyList())
 
     init {
-        // Clean legacy demo rows and unverified history at startup. Preserve followed real products
-        // even if their first valid observation has not been recorded yet.
+        // Conservative cleanup: only discard product rows with no observation and no user tracking.
+        // Never delete observation history, tracked products/watchlist entries, or persisted stores.
         externalScope.launch {
-            priceObservationDao.deleteExplicitDemoObservations()
-            trackedDao.deleteTrackingForDemoProducts()
-            productDao.deleteExplicitDemoProducts()
-            priceObservationDao.deleteUnverifiedObservations()
-            productDao.deleteProductsWithoutVerifiedObservations()
+            productDao.deleteProductsWithoutObservations()
             productDao.markProductsWithVerifiedObservations()
-            trackedDao.deleteTrackingForMissingProducts()
-            storeDao.deleteAll()
         }
     }
 

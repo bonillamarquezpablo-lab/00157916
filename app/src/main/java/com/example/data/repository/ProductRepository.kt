@@ -198,12 +198,17 @@ class ProductRepository(
 
         // Do not discard unusually low prices: surface them with an explicit warning. They are
         // excluded from best-price selection and Room history unless they reach 30% of the median.
-        val prices = eligible.filterNot { it.isSecondHand || it.isAccessoryOffer }.map { it.price }.sorted()
-            .ifEmpty { eligible.map { it.price }.sorted() }
+        val prices = eligible.filterNot {
+            it.isSecondHand || it.isAccessoryOffer || it.isFitmentUnverified
+        }.map { it.price }.sorted()
+            .ifEmpty { eligible.filterNot { it.isFitmentUnverified }.map { it.price }.sorted() }
         val median = if (prices.size % 2 == 1) prices[prices.size / 2]
             else (prices[prices.size / 2 - 1] + prices[prices.size / 2]) / 2.0
         return eligible.map { result ->
-            result.copy(isSuspiciousPrice = median > 0.0 && result.price < median * 0.30)
+            result.copy(
+                isSuspiciousPrice = !result.isFitmentUnverified &&
+                    median > 0.0 && result.price < median * 0.30
+            )
         }
     }
 
@@ -230,6 +235,7 @@ class ProductRepository(
             val filtered = acceptedByKey[key(result)]
             val visibleButNotHistory = filtered != null && (
                 result.isSecondHand ||
+                    result.isFitmentUnverified ||
                     (isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
                         isAccessoryListing(result.title))
             )
@@ -288,10 +294,11 @@ class ProductRepository(
             "Amazon.es", "Google Shopping" -> sourceType
             else -> return 0
         }
-        // Suspicious prices remain visible and are retained as unverified Room observations;
-        // only second-hand/refurbished offers are excluded from the new-product history.
+        // Suspicious prices remain visible as unverified Room observations. Second-hand offers
+        // and wheel listings missing requested fitment dimensions stay visible in the search UI,
+        // but are not added to Mercado or its price history.
         val eligible = filterOnlineSearchResults(results, searchQuery)
-            .filterNot { it.isSecondHand }
+            .filterNot { it.isSecondHand || it.isFitmentUnverified }
             // Accessories remain visible in online search, but are not saved as the main device.
             .filterNot {
                 isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&

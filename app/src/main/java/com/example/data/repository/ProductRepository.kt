@@ -477,7 +477,7 @@ class ProductRepository(
 
     private fun isAccessoryListing(title: String): Boolean =
         Regex(
-            """(?i)\b(funda|fundas|carcasa|carcasas|cristal\s+templado|mop\s+kit|recambio|recambios|filtro|filtros|protector|adaptador|soporte|repuesto|repuestos|replacement|screen\s+protector|tempered\s+glass|cover|case)\b"""
+            """(?i)\b(p[oó]ster|posters|poster|fundas?|carcasas?|cristal\s+templado|mop\s+kit|recambios?|filtros?|protectores?|cargadores?|chargers?|charging|cables?|adaptadores?|hubs?|soportes?|repuestos?|replacement|screen\s+protector|tempered\s+glass|covers?|cases?)\b"""
         ).containsMatchIn(normalizedProductTitle(title))
 
     private fun explicitModelMarkers(text: String): Set<String> {
@@ -554,7 +554,7 @@ class ProductRepository(
 
     private fun isAccessorySearchQuery(query: String): Boolean =
         Regex(
-            """\b(funda|fundas|carcasa|carcasas|cristal templado|protector|cable|cables|cargador|adaptador|hub|mop kit|recambio|recambios|filtro|filtros|repuesto|repuestos|replacement|case|cover)\b"""
+            """\b(poster|posters|funda|fundas|carcasa|carcasas|cristal templado|protector|protectores|protector de pantalla|screen protector|tempered glass|cable|cables|cargador|cargadores|charger|chargers|charging|adaptador|adaptadores|hub|hubs|mop kit|recambio|recambios|filtro|filtros|repuesto|repuestos|replacement|case|cases|cover|covers)\b"""
         ).containsMatchIn(normalizedProductTitle(query))
 
     private fun isDeviceSearchQuery(query: String): Boolean {

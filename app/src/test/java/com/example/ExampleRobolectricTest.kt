@@ -789,7 +789,7 @@ class ExampleRobolectricTest {
 
 
     @Test
-    fun `online search stores valid offers once per store and day and marks low outliers` = runBlocking<Unit> {
+    fun `online search stores valid offers once per store and day and marks low outliers`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,

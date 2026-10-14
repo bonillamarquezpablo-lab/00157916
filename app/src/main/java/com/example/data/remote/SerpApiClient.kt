@@ -777,6 +777,36 @@ class SerpApiClient(
         return excludedTerms.containsMatchIn(conditionText)
     }
 
+    private fun nonNewRejectionReason(item: JSONObject, title: String): String {
+        val condition = listOf("second_hand_condition", "condition", "item_condition", "product_condition", "condition_description")
+            .mapNotNull { item.optString(it).takeIf { value -> value.isNotBlank() && value != "null" } }
+            .joinToString(" ")
+        val text = "$title $condition"
+        return if (Regex("""(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b|/\s*mes\b)""").containsMatchIn(text)) {
+            "Alquiler o cuota mensual"
+        } else {
+            "Segunda mano o reacondicionado"
+        }
+    }
+
+    private fun hasVariantMismatch(query: String, title: String): Boolean {
+        val q = query.lowercase(Locale.ROOT).replace(',', '.')
+        val t = title.lowercase(Locale.ROOT).replace(',', '.')
+        val units = listOf("mah", "wh", "w", "gb", "tb", "ml", "kg", "g", "l", "inch", "pulgadas")
+        for (unit in units) {
+            val qMatch = Regex("""(\d+(?:\.\d+)?)\s*\${Regex.escape(unit)}\b""").find(q) ?: continue
+            val tMatch = Regex("""(\d+(?:\.\d+)?)\s*\${Regex.escape(unit)}\b""").find(t) ?: continue
+            if (qMatch.groupValues[1].toDoubleOrNull() != tMatch.groupValues[1].toDoubleOrNull()) return true
+        }
+        val pack = Regex("""\b(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(ml|g|kg|l)\b""").find(t)
+        if (pack != null) {
+            val queryHasSamePack = Regex("""\b\${pack.groupValues[1]}\s*[x×]\s*\${Regex.escape(pack.groupValues[2])}\s*\${Regex.escape(pack.groupValues[3])}\b""").containsMatchIn(q)
+            val queryHasSingleUnit = Regex("""\b\${Regex.escape(pack.groupValues[2])}\s*\${Regex.escape(pack.groupValues[3])}\b""").containsMatchIn(q)
+            if (!queryHasSamePack && queryHasSingleUnit) return true
+        }
+        return false
+    }
+
     private fun isClearlyNonNewListing(item: JSONObject, title: String): Boolean {
         val excludedTerms = Regex(
             """(?i)(?:\b(segunda[\s_-]+mano|second[\s_-]*hand|pre[\s_-]*owned|used|usad[oa]s?|seminuev[oa]s?|reacondicionad[oa]s?|refurbished|renewed|open[\s_-]*box|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b|/\s*mes\b)"""

@@ -71,13 +71,11 @@ fun ProductDetailSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     val scrollState = rememberScrollState()
-    val archivedHistoryPoints = product.priceHistory.filter {
-        it.eventLabel.equals("Internet Archive", ignoreCase = true)
-    }
+    val archivedHistoryPoints = product.priceHistory.filter { it.isArchiveEvidence }
     val oldestArchivedDate = archivedHistoryPoints.minByOrNull { it.timestamp }?.let {
         SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(it.timestamp))
     }
-    val latestPricePoint = product.priceHistory.maxByOrNull { it.timestamp }
+    val latestPricePoint = product.priceHistory.filterNot { it.isArchiveEvidence }.maxByOrNull { it.timestamp }
     val currentSourceLabel = latestPricePoint
         ?.eventLabel
         ?.takeIf { it.isNotBlank() }
@@ -425,7 +423,7 @@ fun ProductDetailSheet(
 
             // Archive captures are intentionally excluded from the live-price chart and its date/minimum summaries.
             PriceHistoryChart(
-                priceHistory = if (product.isPriceVerified) product.priceHistory.filterNot { it.eventLabel.equals("Internet Archive", ignoreCase = true) } else emptyList(),
+                priceHistory = if (product.isPriceVerified) product.priceHistory.filterNot { it.isArchiveEvidence } else emptyList(),
                 avg90dPrice = product.avg90dPrice
             )
 

@@ -65,14 +65,18 @@ fun OnlineSearchScreen(
     onSearch: () -> Unit,
     onAmazonSearch: () -> Unit,
     onAmazonOnlyChange: (Boolean) -> Unit,
+    onShowSecondHandChange: (Boolean) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenProduct: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val allGroups = groupOnlineShoppingResults(state.onlineSearchResults)
+    val conditionFilteredResults = state.onlineSearchResults.filter {
+        state.onlineSearchShowSecondHand || !it.isSecondHand
+    }
+    val allGroups = groupOnlineShoppingResults(conditionFilteredResults)
     val amazonGroups = groupOnlineShoppingResults(
-        state.onlineSearchResults.filter { it.isAmazonOffer }
+        conditionFilteredResults.filter { it.isAmazonOffer }
     )
     val visibleGroups = if (state.onlineSearchAmazonOnly) amazonGroups else allGroups
 
@@ -184,6 +188,11 @@ fun OnlineSearchScreen(
                                 onClick = { onAmazonOnlyChange(true) },
                                 label = { Text("Solo Amazon (${amazonGroups.size})") }
                             )
+                            FilterChip(
+                                selected = state.onlineSearchShowSecondHand,
+                                onClick = { onShowSecondHandChange(!state.onlineSearchShowSecondHand) },
+                                label = { Text("Mostrar segunda mano") }
+                            )
                         }
                     }
                 }
@@ -266,6 +275,14 @@ private fun ShoppingResultCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (best.isSuspiciousPrice) {
+                        Text(
+                            "Precio sospechoso · no cuenta como mejor precio",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))

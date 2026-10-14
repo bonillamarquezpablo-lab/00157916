@@ -59,7 +59,7 @@ import com.example.ui.viewmodel.TrackerUiState
 import java.text.NumberFormat
 import java.util.Locale
 
-private data class OnlineSearchDisplayGroup(
+internal data class OnlineSearchDisplayGroup(
     val group: OnlineProductGroup,
     val stableKey: String
 )
@@ -68,7 +68,7 @@ private data class OnlineSearchDisplayGroup(
  * Apply view-only filters to the already loaded snapshot. Split groups by condition so used
  * offers can be appended as separate cards instead of replacing a new offer for the same model.
  */
-private fun buildOnlineSearchDisplayGroups(
+internal fun buildOnlineSearchDisplayGroups(
     results: List<SerpApiShoppingResult>,
     query: String,
     showSecondHand: Boolean,
@@ -90,22 +90,38 @@ private fun buildOnlineSearchDisplayGroups(
         filtered
     }
 
-    val displayGroups = mutableListOf<OnlineSearchDisplayGroup>()
-    fun appendGroups(segment: String, offers: List<SerpApiShoppingResult>) {
+    val mainDisplayGroups = mutableListOf<OnlineSearchDisplayGroup>()
+    val accessoryDisplayGroups = mutableListOf<OnlineSearchDisplayGroup>()
+    fun appendGroups(
+        destination: MutableList<OnlineSearchDisplayGroup>,
+        segment: String,
+        offers: List<SerpApiShoppingResult>
+    ) {
         groupOnlineShoppingResults(offers).forEach { group ->
-            displayGroups += OnlineSearchDisplayGroup(
+            destination += OnlineSearchDisplayGroup(
                 group = group,
                 stableKey = "${segment}|${group.identityKey}"
             )
         }
     }
 
-    // Main new offers first; second-hand versions of the same model stay separate and follow them.
-    appendGroups("new", mainProductOffers.filterNot { it.isSecondHand })
-    appendGroups("second-hand", mainProductOffers.filter { it.isSecondHand })
+    val newOffers = mainProductOffers.filterNot { it.isSecondHand }
+    val secondHandOffers = mainProductOffers.filter { it.isSecondHand }
+
+    // Keep new, used, and fitment-unconfirmed offers in separate cards, but rank all main-product
+    // cards together by comparable price. The second-hand toggle must not force used offers to the
+    // bottom of the list regardless of price.
+    appendGroups(mainDisplayGroups, "new", newOffers.filterNot { it.isFitmentUnverified })
+    appendGroups(mainDisplayGroups, "fitment-unconfirmed", newOffers.filter { it.isFitmentUnverified })
+    appendGroups(mainDisplayGroups, "second-hand", secondHandOffers.filterNot { it.isFitmentUnverified })
+    appendGroups(mainDisplayGroups, "second-hand-fitment-unconfirmed", secondHandOffers.filter { it.isFitmentUnverified })
+
     // Accessories remain visible but never take priority over the searched-for main product.
-    appendGroups("accessory", accessories)
-    return displayGroups
+    appendGroups(accessoryDisplayGroups, "accessory", accessories)
+    val priceOrder = compareBy<OnlineSearchDisplayGroup> { it.group.minPrice }
+        .thenBy { it.group.title.lowercase(Locale.ROOT) }
+        .thenBy { it.stableKey }
+    return mainDisplayGroups.sortedWith(priceOrder) + accessoryDisplayGroups.sortedWith(priceOrder)
 }
 
 @Composable
@@ -316,7 +332,11 @@ fun OnlineSearchScreen(
                 val group = displayGroup.group
                 ShoppingResultCard(
                     group = group,
-                    onOpenProduct = { onOpenProduct(group.identityKey) },
+                    onOpenProduct = if (group.offers.all { it.isFitmentUnverified }) {
+                        null
+                    } else {
+                        { onOpenProduct(group.identityKey) }
+                    },
                     onOpenBestOffer = {
                         val best = group.cheapestOffer
                         openStoreUrl(context, best.sourceUrl, preferAmazonApp = best.isAmazonOffer)
@@ -337,17 +357,22 @@ fun OnlineSearchScreen(
 @Composable
 private fun ShoppingResultCard(
     group: OnlineProductGroup,
-    onOpenProduct: () -> Unit,
+    onOpenProduct: (() -> Unit)?,
     onOpenBestOffer: () -> Unit
 ) {
     val best = group.cheapestOffer
+    val fitmentUnverified = group.offers.all { it.isFitmentUnverified }
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenProduct),
+        modifier = Modifier.fillMaxWidth().then(
+            if (onOpenProduct == null) Modifier else Modifier.clickable(onClick = onOpenProduct)
+        ),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (group.offers.all { it.isSecondHand } || group.offers.all { it.isAccessoryOffer }) {
+            if (group.offers.all { it.isSecondHand } ||
+                group.offers.all { it.isAccessoryOffer } || fitmentUnverified
+            ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (group.offers.all { it.isSecondHand }) {
                         ResultKindBadge("Segunda mano", accessory = false)
@@ -355,7 +380,17 @@ private fun ShoppingResultCard(
                     if (group.offers.all { it.isAccessoryOffer }) {
                         ResultKindBadge("Accesorio", accessory = true)
                     }
+                    if (fitmentUnverified) {
+                        ResultKindBadge("Medidas por confirmar", accessory = false)
+                    }
                 }
+            }
+            if (fitmentUnverified) {
+                Text(
+                    "El título no confirma todas las medidas solicitadas. Abre la oferta y verifica diámetro y anclaje. No se añade a Mercado ni al historial hasta confirmarlos.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
                 if (best.thumbnailUrl.isNotBlank()) {

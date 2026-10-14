@@ -38,7 +38,8 @@ data class SerpApiQuote(
     val sourceUrl: String,
     val storeId: String,
     val storeName: String,
-    val sourceName: String = "SerpApi · Google Shopping España"
+    val sourceName: String = "SerpApi · Google Shopping España",
+    val googleProductId: String? = null
 )
 
 data class SerpApiBatchResult(
@@ -484,6 +485,9 @@ class SerpApiClient(
                 ?.toIntOrNull()
                 ?.takeIf { it >= 0 }
 
+            val googleProductId = item.optString("product_id")
+                .takeIf { it.matches(Regex("[0-9]{5,}")) }
+                ?: extractGoogleShoppingProductId(item.optString("product_link"))
             SerpApiShoppingResult(
                 title = title,
                 price = price,
@@ -494,7 +498,8 @@ class SerpApiClient(
                 rating = rating,
                 reviewCount = reviewCount,
                 observedAt = observedAt,
-                condition = condition
+                condition = condition,
+                googleProductId = googleProductId
             )
         }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
             .sortedBy { it.price }
@@ -516,10 +521,131 @@ class SerpApiClient(
         )
     }
 
+    /**
+     * Fetches all retailer offers for a known Google Shopping catalog item. It costs one SerpApi
+     * search and uses the product_id from a previous Google Shopping result, so this must not
+     * silently fall back to a second keyword search.
+     */
+    suspend fun searchGoogleProductOffers(
+        token: String,
+        productId: String,
+        expectedTitle: String,
+        observedAt: Long = System.currentTimeMillis()
+    ): List<SerpApiShoppingResult> = withContext(Dispatchers.IO) {
+        val apiKey = token.trim()
+        require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
+        val safeProductId = productId.trim()
+            .takeIf { it.matches(Regex("[0-9]{5,}")) }
+            ?: throw SerpApiException("Este producto no tiene un ID de catálogo de Google Shopping válido; no se ha lanzado ninguna búsqueda.")
+        parseGoogleProductOffers(
+            root = executeJson(buildGoogleProductUrl(apiKey, safeProductId)),
+            expectedTitle = expectedTitle,
+            productId = safeProductId,
+            observedAt = observedAt
+        )
+    }
+
+    /** Parser isolated from network access so the full Google Product API shape can be tested offline. */
+    internal fun parseGoogleProductOffers(
+        root: JSONObject,
+        expectedTitle: String,
+        productId: String,
+        observedAt: Long = System.currentTimeMillis()
+    ): List<SerpApiShoppingResult> {
+        val error = root.optString("error").takeIf { it.isNotBlank() && it != "null" }
+        if (error != null) throw SerpApiException("SerpApi: $error")
+        val state = root.optJSONObject("search_metadata")?.optString("status")
+        if (state.equals("Error", ignoreCase = true)) {
+            throw SerpApiException("SerpApi no pudo obtener las tiendas de este producto.")
+        }
+        val product = root.optJSONObject("product_results") ?: return emptyList()
+        val catalogTitle = product.optString("title").trim()
+        // Refuse a stale or mismatched catalog ID before accepting any merchant row.
+        if (catalogTitle.isBlank() ||
+            hasVariantMismatch(expectedTitle, catalogTitle) ||
+            hasConflictingModelVariant(expectedTitle, catalogTitle) ||
+            !isPlausibleProductMatch(expectedTitle, catalogTitle)
+        ) return emptyList()
+
+        val stores = product.optJSONArray("stores")?.toObjects().orEmpty()
+        return stores.mapNotNull { store ->
+            val name = store.optString("name").trim().takeIf { it.isNotBlank() && it != "null" }
+                ?: return@mapNotNull null
+            val offerTitle = store.optString("title").trim().takeIf { it.isNotBlank() && it != "null" }.orEmpty()
+            val combinedTitle = listOf(catalogTitle, offerTitle).filter { it.isNotBlank() }.joinToString(" ")
+            if (isClearlyNonNewListing(store, combinedTitle)) return@mapNotNull null
+            val marketplaceSeller = Regex(
+                """(?i)\b(wallapop|milanuncios|ebay|vinted|amazon[\s_-]*warehouse|vendedor\s+particular|particular(?:es)?)\b"""
+            ).containsMatchIn("$name $offerTitle")
+            if (marketplaceSeller || (offerTitle.isNotBlank() &&
+                    (hasVariantMismatch(expectedTitle, offerTitle) ||
+                        hasConflictingModelVariant(expectedTitle, offerTitle)))) {
+                return@mapNotNull null
+            }
+            val paymentTerms = listOf(
+                store.optString("installments_description"),
+                store.optString("monthly_payment_duration"),
+                store.optString("down_payment"),
+                store.optString("alt_currency")
+            ).filter { it.isNotBlank() && it != "null" }.joinToString(" ")
+            if (Regex(
+                    """(?i)(?:\b(cuota|cuotas|mensual|monthly|installment|installments|por\s+mes|per\s+month|alquiler|rental|renting)\b|/\s*mes\b)"""
+                ).containsMatchIn(paymentTerms) ||
+                store.optInt("monthly_payment_duration", 0) > 0 ||
+                isRentalOrMonthlyListing(store, combinedTitle)
+            ) return@mapNotNull null
+
+            val priceText = store.optString("price")
+            if (hasExplicitForeignCurrency(priceText)) return@mapNotNull null
+            val extractedPrice = store.opt("extracted_price")
+                ?.takeIf { it !is JSONObject && it !is JSONArray }
+                ?.toString()
+                ?.toDoubleOrNull()
+                ?.takeIf { it.isFinite() && it > 0.0 }
+            val price = extractedPrice ?: parsePrice(priceText) ?: return@mapNotNull null
+            if (!price.isFinite() || price <= 0.0 ||
+                (extractedPrice == null &&
+                    !priceText.contains("€") &&
+                    !priceText.contains("EUR", ignoreCase = true))
+            ) return@mapNotNull null
+            val url = store.optString("link").takeIf(::isNavigableHttpUrl) ?: return@mapNotNull null
+            SerpApiShoppingResult(
+                title = catalogTitle,
+                price = price,
+                storeName = name,
+                sourceUrl = url,
+                thumbnailUrl = store.optString("logo").takeIf(::isHttpsUrl).orEmpty(),
+                delivery = store.optString("shipping").takeUnless { it == "null" }.orEmpty(),
+                rating = store.optDouble("rating", Double.NaN).takeIf { it.isFinite() && it in 0.0..5.0 },
+                reviewCount = store.optInt("reviews", -1).takeIf { it >= 0 },
+                observedAt = observedAt,
+                condition = store.optString("condition").takeUnless { it == "null" }.orEmpty(),
+                googleProductId = productId
+            )
+        }.distinctBy {
+            "\${it.storeName.trim().lowercase(Locale.ROOT)}|\${it.sourceUrl.trim().lowercase(Locale.ROOT)}|\${it.price}"
+        }.sortedBy { it.price }
+    }
+
+    private fun hasConflictingModelVariant(requested: String, returned: String): Boolean {
+        val queryWords = normalize(requested).split(' ').filter { it.isNotBlank() }.toSet()
+        val returnedWords = normalize(returned).split(' ').filter { it.isNotBlank() }.toSet()
+        val variantFamilies = listOf(
+            setOf("pro", "max", "plus", "ultra", "fe", "lite", "mini", "standard"),
+            setOf("fold", "flip"),
+            setOf("classic", "edge")
+        )
+        return variantFamilies.any { family ->
+            val requestedVariant = queryWords.intersect(family)
+            requestedVariant.isNotEmpty() && returnedWords.intersect(family) != requestedVariant
+        }
+    }
+
     suspend fun searchProducts(
         token: String,
         products: List<SerpApiRequestProduct>,
-        onStage: suspend (String) -> Unit = {}
+        onStage: suspend (String) -> Unit = {},
+        onQueryStarted: suspend (SerpApiRequestProduct) -> Unit = {}
     ): SerpApiBatchResult = withContext(Dispatchers.IO) {
         val apiKey = token.trim()
         require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
@@ -544,6 +670,7 @@ class SerpApiClient(
         requested.forEachIndexed { index, product ->
             onStage("Consultando Google Shopping España: ${index + 1}/${requested.size}…")
             try {
+                onQueryStarted(product)
                 val json = executeSearch(apiKey, product.queryTerm)
                 val productQuotes = parseQuotes(json, product)
                 if (productQuotes.isEmpty()) {
@@ -612,7 +739,19 @@ class SerpApiClient(
         return results.mapNotNull { item ->
             val title = item.optString("title").takeIf { it.isNotBlank() } ?: return@mapNotNull null
             if (isClearlyNonNewListing(item, title)) return@mapNotNull null
-            if (!isPlausibleProductMatch(requested.queryTerm, title)) return@mapNotNull null
+            if (hasVariantMismatch(requested.queryTerm, title) ||
+                hasConflictingModelVariant(requested.queryTerm, title)) return@mapNotNull null
+            val requestedEan = requested.ean.filter(Char::isDigit)
+            val responseEans = listOf("gtin", "gtins", "ean", "upc", "barcode", "product_ean", "product_gtin")
+                .flatMap { key ->
+                    when (val raw = item.opt(key)) {
+                        null, JSONObject.NULL -> emptyList()
+                        is JSONArray -> raw.toObjects().map { it.toString().filter(Char::isDigit) }
+                        else -> raw.toString().split(Regex("[,;\\s]+")).map { it.filter(Char::isDigit) }
+                    }
+                }.filter { it.length in 8..14 }
+            val eanMatch = requestedEan.length in 8..14 && responseEans.any { it == requestedEan }
+            if (!isPlausibleProductMatch(requested.queryTerm, title) && !eanMatch) return@mapNotNull null
 
             val priceText = item.optString("price")
             val extractedPrice = item.opt("extracted_price")
@@ -653,7 +792,10 @@ class SerpApiClient(
                 sourceUrl = url,
                 storeId = storeIdForHost(host, merchant),
                 storeName = merchant,
-                sourceName = "SerpApi · Google Shopping España"
+                sourceName = "SerpApi · Google Shopping España",
+                googleProductId = item.optString("product_id")
+                    .takeIf { it.matches(Regex("[0-9]{5,}")) }
+                    ?: extractGoogleShoppingProductId(item.optString("product_link"))
             )
         }.sortedBy { it.price }
     }
@@ -699,6 +841,17 @@ class SerpApiClient(
             .newBuilder()
             .addQueryParameter("engine", "google_shopping")
             .addQueryParameter("q", query)
+            .addQueryParameter("gl", "es")
+            .addQueryParameter("hl", "es")
+            .addQueryParameter("api_key", apiKey)
+            .build()
+
+    private fun buildGoogleProductUrl(apiKey: String, productId: String): HttpUrl =
+        "https://serpapi.com/search.json"
+            .toHttpUrl()
+            .newBuilder()
+            .addQueryParameter("engine", "google_product")
+            .addQueryParameter("product_id", productId)
             .addQueryParameter("gl", "es")
             .addQueryParameter("hl", "es")
             .addQueryParameter("api_key", apiKey)

@@ -246,7 +246,7 @@ class ProductRepository(
                     currentStoreId = storeId,
                     storeUrl = bestOffer.sourceUrl,
                     imageUrl = bestOffer.thumbnailUrl.takeIf { it.isNotBlank() } ?: existingProduct.imageUrl,
-                    isPriceVerified = group.offers.any { !it.isSuspiciousPrice }
+                    isPriceVerified = hasTrustedOffer || existingProduct.isPriceVerified
                 )
             } else {
                 ProductEntity(

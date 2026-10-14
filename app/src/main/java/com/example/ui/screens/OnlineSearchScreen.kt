@@ -54,6 +54,7 @@ import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.isAccessorySearchQuery
+import com.example.data.remote.isWheelFitmentQuery
 import com.example.ui.viewmodel.OnlineSearchProvider
 import com.example.ui.viewmodel.TrackerUiState
 import java.text.NumberFormat
@@ -123,14 +124,7 @@ internal fun buildOnlineSearchDisplayGroups(
         .thenBy { it.stableKey }
     val sortedMain = mainDisplayGroups.sortedWith(priceOrder)
     val sortedAccessories = accessoryDisplayGroups.sortedWith(priceOrder)
-    val normalizedWheelQuery = query
-        .replace(Regex("""\\(?=["”″])"""), "")
-        .replace('″', '"')
-        .replace('”', '"')
-    val isWheelFitmentSearch =
-        Regex("""(?i)\b(llantas?|ruedas?|wheels?|rims?)\b""").containsMatchIn(normalizedWheelQuery) &&
-            Regex("""(?i)\b[3456]\s*[x×]\s*(100|108|110|112|114(?:[.,]3)?|115|120|127|130|139(?:[.,]7)?)(?=\b|(?:et)?[0-9]{2,3}\b)""")
-                .containsMatchIn(normalizedWheelQuery)
+    val isWheelFitmentSearch = isWheelFitmentQuery(query)
     // For wheel-fitment searches, used wheels and new wheels are comparable offers: show them
     // together in one price order when the opt-in filter is enabled. Keep accessory prioritization
     // for other product searches so unrelated low-cost accessories do not outrank the main product.

@@ -322,19 +322,37 @@ class SerpApiClient(
         var rejectedForPriceOrCurrency = 0
         var rejectedForLink = 0
         var rejectedOther = 0
+        val discardedOffers = mutableListOf<RejectedOnlineOffer>()
+        fun recordDiscard(item: JSONObject, title: String, reason: String) {
+            discardedOffers += RejectedOnlineOffer(
+                title = title.ifBlank { "Título no disponible" },
+                priceLabel = item.optString("price").takeIf { it.isNotBlank() && it != "null" }
+                    ?: item.optString("extracted_price").takeIf { it.isNotBlank() && it != "null" }.orEmpty(),
+                reason = reason,
+                provider = "Google Shopping"
+            )
+        }
         val parsed = items.mapNotNull { item ->
             val title = item.optString("title").trim()
                 .takeIf { it.isNotBlank() && it != "null" }
                 ?: run {
                     rejectedOther++
+                    recordDiscard(item, "", "Datos incompletos")
                     return@mapNotNull null
                 }
             if (isClearlyNonNewListing(item, title)) {
                 rejectedOther++
+                recordDiscard(item, title, nonNewRejectionReason(item, title))
+                return@mapNotNull null
+            }
+            if (!query.isNullOrBlank() && hasVariantMismatch(query, title)) {
+                rejectedAsIrrelevant++
+                recordDiscard(item, title, "Otro modelo o variante (capacidad, potencia o pack distinto)")
                 return@mapNotNull null
             }
             if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
                 rejectedAsIrrelevant++
+                recordDiscard(item, title, "Otro modelo o título no coincidente")
                 return@mapNotNull null
             }
 
@@ -346,6 +364,7 @@ class SerpApiClient(
                 ?.takeIf { it.isFinite() && it > 0.0 }
             if (hasExplicitForeignCurrency(priceText)) {
                 rejectedForPriceOrCurrency++
+                recordDiscard(item, title, "Sin precio válido: moneda extranjera")
                 return@mapNotNull null
             }
             val price = extractedPrice ?: parsePrice(priceText)
@@ -355,6 +374,7 @@ class SerpApiClient(
                 (extractedPrice == null && !isEuroPrice)
             ) {
                 rejectedForPriceOrCurrency++
+                recordDiscard(item, title, "Sin precio válido en euros")
                 return@mapNotNull null
             }
 
@@ -404,6 +424,7 @@ class SerpApiClient(
             rejectedForPriceOrCurrency = rejectedForPriceOrCurrency,
             rejectedForLink = rejectedForLink,
             rejectedOther = rejectedOther,
+            discardedOffers = discardedOffers,
             firstResultFields = items.firstOrNull()
                 ?.keys()
                 ?.asSequence()
@@ -658,6 +679,36 @@ class SerpApiClient(
         (uri.scheme.equals("http", ignoreCase = true) ||
             uri.scheme.equals("https", ignoreCase = true)) && !uri.host.isNullOrBlank()
     }.getOrDefault(false)
+
+    private fun nonNewRejectionReason(item: JSONObject, title: String): String {
+        val condition = listOf("second_hand_condition", "condition", "item_condition", "product_condition", "condition_description")
+            .mapNotNull { item.optString(it).takeIf { value -> value.isNotBlank() && value != "null" } }
+            .joinToString(" ")
+        val text = "$title $condition"
+        return if (Regex("""(?i)\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes|/\s*mes)\b""").containsMatchIn(text)) {
+            "Alquiler o cuota mensual"
+        } else {
+            "Segunda mano o reacondicionado"
+        }
+    }
+
+    private fun hasVariantMismatch(query: String, title: String): Boolean {
+        val q = query.lowercase(Locale.ROOT).replace(',', '.')
+        val t = title.lowercase(Locale.ROOT).replace(',', '.')
+        val units = listOf("mah", "wh", "w", "gb", "tb", "ml", "kg", "g", "l", "inch", "pulgadas")
+        for (unit in units) {
+            val qMatch = Regex("""(\d+(?:\.\d+)?)\s*${Regex.escape(unit)}\b""").find(q) ?: continue
+            val tMatch = Regex("""(\d+(?:\.\d+)?)\s*${Regex.escape(unit)}\b""").find(t) ?: continue
+            if (qMatch.groupValues[1].toDoubleOrNull() != tMatch.groupValues[1].toDoubleOrNull()) return true
+        }
+        val pack = Regex("""\b(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(ml|g|kg|l)\b""").find(t)
+        if (pack != null) {
+            val queryHasSamePack = Regex("""\b${pack.groupValues[1]}\s*[x×]\s*${Regex.escape(pack.groupValues[2])}\s*${Regex.escape(pack.groupValues[3])}\b""").containsMatchIn(q)
+            val queryHasSingleUnit = Regex("""\b${Regex.escape(pack.groupValues[2])}\s*${Regex.escape(pack.groupValues[3])}\b""").containsMatchIn(q)
+            if (!queryHasSamePack && queryHasSingleUnit) return true
+        }
+        return false
+    }
 
     private fun isClearlyNonNewListing(item: JSONObject, title: String): Boolean {
         val excludedTerms = Regex(

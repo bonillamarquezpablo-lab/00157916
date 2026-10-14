@@ -64,7 +64,7 @@ class WaybackPriceHistoryClient(
             return@withContext WaybackBackfillResult()
         }
 
-        val attemptKey = attemptKey(originalUrl)
+        val attemptKey = attemptKey(originalUrl + "|" + expectedTitle)
         val lastAttempt = preferences.getLong(attemptKey, 0L)
         if (lastAttempt > 0L && now >= lastAttempt && now - lastAttempt < RETRY_INTERVAL_MS) {
             return@withContext WaybackBackfillResult(skippedRecently = true)
@@ -322,7 +322,7 @@ class WaybackPriceHistoryClient(
         return price.takeIf { it.isFinite() && it > 0.0 }
     }
 
-    private fun isEligibleDirectUrl(value: String): Boolean {
+    internal fun isEligibleDirectUrl(value: String): Boolean {
         val uri = runCatching { URI(value) }.getOrNull() ?: return false
         val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
         if (uri.scheme != "https" || host.isBlank() || uri.path.isNullOrBlank() || uri.path == "/") return false

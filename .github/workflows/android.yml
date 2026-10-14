@@ -59,6 +59,9 @@ jobs:
       - name: Ejecutar pruebas unitarias
         run: gradle :app:testDebugUnitTest --stacktrace
 
+      - name: Compilar pruebas de interfaz Compose
+        run: gradle :app:compileDebugAndroidTestKotlin --stacktrace
+
       - name: Restaurar clave de firma estable
         env:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}

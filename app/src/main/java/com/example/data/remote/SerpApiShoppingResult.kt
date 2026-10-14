@@ -161,7 +161,7 @@ private val ACCESSORY_LISTING_PATTERN = Regex(
 fun isAccessorySearchQuery(query: String): Boolean =
     ACCESSORY_LISTING_PATTERN.containsMatchIn(query)
 
-private fun normalizedWheelCategoryText(value: String): String =
+internal fun normalizedWheelCategoryText(value: String): String =
     Normalizer.normalize(value.lowercase(Locale.ROOT), Normalizer.Form.NFD)
         .replace(Regex("\\p{M}+"), "")
 

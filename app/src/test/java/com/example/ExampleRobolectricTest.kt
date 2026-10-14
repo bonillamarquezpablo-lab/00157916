@@ -984,6 +984,20 @@ class ExampleRobolectricTest {
             assertEquals("A model-specific query keeps matching accessories visible but rejects other models", 3, strictMatches.size)
             assertTrue(strictMatches.all { it.title.contains("Redmi 17", ignoreCase = true) })
 
+            val accessoryWithoutCapacity = normalNewPhone.copy(
+                title = "Funda Xiaomi Redmi 17 con tapa",
+                price = 7.99,
+                storeName = "Tienda de fundas",
+                sourceUrl = "https://www.example.com/redmi-17-case"
+            )
+            assertTrue(
+                "A matching accessory remains visible even when it omits the searched storage capacity",
+                repository.filterOnlineSearchResults(
+                    listOf(accessoryWithoutCapacity),
+                    "Xiaomi Redmi 17 5G 4GB 128GB"
+                ).any { it.isAccessoryOffer }
+            )
+
             val sonyFormattingVariant = results.first().copy(
                 title = "Sony 1000XM5 Wireless Headphones",
                 price = 229.99,

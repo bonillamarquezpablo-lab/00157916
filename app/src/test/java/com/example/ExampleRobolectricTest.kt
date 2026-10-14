@@ -1098,7 +1098,7 @@ class ExampleRobolectricTest {
 
         val polishWheel = report.results.single { it.title == titles[1] }
         assertFalse(polishWheel.isCategoryUnverified)
-        assertTrue("Unusual 14x6 ordering must not be marked confirmed without parsed diameter", polishWheel.isFitmentUnverified)
+        assertFalse("Reversed 14x6 notation still confirms the requested 14-inch diameter", polishWheel.isFitmentUnverified)
 
         val modelOnlyCandidates = report.results.filter { it.title == titles[2] || it.title == titles[3] }
         assertTrue(modelOnlyCandidates.all { it.isCategoryUnverified })

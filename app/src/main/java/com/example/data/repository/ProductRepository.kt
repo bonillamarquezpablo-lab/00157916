@@ -42,12 +42,8 @@ import java.util.TimeZone
 
 private fun PriceObservationEntity.isArchiveEvidence(): Boolean =
     evidenceType.equals("archive", ignoreCase = true) ||
-        sourceType.contains("Internet Archive", ignoreCase = true) ||
-        sourceType.contains("Wayback", ignoreCase = true) ||
-        sourceName.contains("Internet Archive", ignoreCase = true) ||
-        sourceName.contains("Wayback", ignoreCase = true) ||
-        sourceUrl.startsWith("https://web.archive.org/", ignoreCase = true) ||
-        sourceUrl.startsWith("http://web.archive.org/", ignoreCase = true)
+        sourceUrl.startsWith("https://web.archive.org/web/", ignoreCase = true) ||
+        sourceUrl.startsWith("http://web.archive.org/web/", ignoreCase = true)
 
 data class UrlAnalysisResult(
     val queryOrUrl: String,

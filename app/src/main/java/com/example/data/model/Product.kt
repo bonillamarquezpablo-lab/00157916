@@ -54,6 +54,27 @@ data class Product(
                 now - timestamps.last() <= MAX_PRICE_AGE_FOR_HISTORICAL_CLAIMS
         }
 
+    /**
+     * Price badge based on real saved daily observations. The newest point represents the
+     * current quote; only earlier points can establish a previous observed minimum.
+     */
+    val priceBadgeState: PriceBadgeState
+        get() {
+            val orderedPoints = priceHistory.sortedBy { it.timestamp }
+            val priorPrices = if (orderedPoints.size > 1) {
+                orderedPoints.dropLast(1).map { it.price }
+            } else {
+                emptyList()
+            }
+            return PriceBadgeClassifier.classify(
+                isPriceVerified = isPriceVerified,
+                currentPrice = currentPrice,
+                priorObservedPrices = priorPrices,
+                averagePrice = avg90dPrice,
+                hasValidAverage = hasSufficientHistory
+            )
+        }
+
     val verdict: DealVerdict
         get() = when {
             !isPriceVerified -> DealVerdict.unverified()

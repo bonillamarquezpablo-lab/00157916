@@ -890,7 +890,7 @@ class ExampleRobolectricTest {
         assertTrue(used.isSecondHand)
         assertTrue(
             report.discardedOffers.any {
-                it.title.contains("RIAL Kodiak") && it.reason.contains("incompatible", ignoreCase = true)
+                it.title.contains("RIAL Kodiak") && it.reason.contains("Diámetro distinto", ignoreCase = true)
             }
         )
         assertTrue(report.discardedOffers.any { it.title.startsWith("Tapacubos") })

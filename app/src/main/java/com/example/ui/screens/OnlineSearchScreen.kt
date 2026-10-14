@@ -53,10 +53,61 @@ import coil.compose.AsyncImage
 import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
+import com.example.data.remote.isAccessoryOffer
+import com.example.data.remote.isAccessorySearchQuery
 import com.example.ui.viewmodel.OnlineSearchProvider
 import com.example.ui.viewmodel.TrackerUiState
 import java.text.NumberFormat
 import java.util.Locale
+
+private data class OnlineSearchDisplayGroup(
+    val group: OnlineProductGroup,
+    val stableKey: String
+)
+
+/**
+ * Apply view-only filters to the already loaded snapshot. Split groups by condition so used
+ * offers can be appended as separate cards instead of replacing a new offer for the same model.
+ */
+private fun buildOnlineSearchDisplayGroups(
+    results: List<SerpApiShoppingResult>,
+    query: String,
+    showSecondHand: Boolean,
+    amazonOnly: Boolean
+): List<OnlineSearchDisplayGroup> {
+    val filtered = results.filter { result ->
+        (showSecondHand || !result.isSecondHand) &&
+            (!amazonOnly || result.isAmazonOffer)
+    }
+    val treatAccessoriesSeparately = !isAccessorySearchQuery(query)
+    val accessories = if (treatAccessoriesSeparately) {
+        filtered.filter { it.isAccessoryOffer }
+    } else {
+        emptyList()
+    }
+    val mainProductOffers = if (treatAccessoriesSeparately) {
+        filtered.filterNot { it.isAccessoryOffer }
+    } else {
+        filtered
+    }
+
+    val displayGroups = mutableListOf<OnlineSearchDisplayGroup>()
+    fun appendGroups(segment: String, offers: List<SerpApiShoppingResult>) {
+        groupOnlineShoppingResults(offers).forEach { group ->
+            displayGroups += OnlineSearchDisplayGroup(
+                group = group,
+                stableKey = "${segment}|${group.identityKey}"
+            )
+        }
+    }
+
+    // Main new offers first; second-hand versions of the same model stay separate and follow them.
+    appendGroups("new", mainProductOffers.filterNot { it.isSecondHand })
+    appendGroups("second-hand", mainProductOffers.filter { it.isSecondHand })
+    // Accessories remain visible but never take priority over the searched-for main product.
+    appendGroups("accessory", accessories)
+    return displayGroups
+}
 
 @Composable
 fun OnlineSearchScreen(
@@ -72,12 +123,17 @@ fun OnlineSearchScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val conditionFilteredResults = state.onlineSearchResults.filter {
-        state.onlineSearchShowSecondHand || !it.isSecondHand
-    }
-    val allGroups = groupOnlineShoppingResults(conditionFilteredResults)
-    val amazonGroups = groupOnlineShoppingResults(
-        conditionFilteredResults.filter { it.isAmazonOffer }
+    val allGroups = buildOnlineSearchDisplayGroups(
+        results = state.onlineSearchResults,
+        query = state.onlineSearchQuery,
+        showSecondHand = state.onlineSearchShowSecondHand,
+        amazonOnly = false
+    )
+    val amazonGroups = buildOnlineSearchDisplayGroups(
+        results = state.onlineSearchResults,
+        query = state.onlineSearchQuery,
+        showSecondHand = state.onlineSearchShowSecondHand,
+        amazonOnly = true
     )
     val visibleGroups = if (state.onlineSearchAmazonOnly) amazonGroups else allGroups
 
@@ -257,7 +313,8 @@ fun OnlineSearchScreen(
                     )
                 }
             }
-            items(visibleGroups, key = { it.identityKey }) { group ->
+            items(visibleGroups, key = { it.stableKey }) { displayGroup ->
+                val group = displayGroup.group
                 ShoppingResultCard(
                     group = group,
                     onOpenProduct = { onOpenProduct(group.identityKey) },
@@ -291,6 +348,16 @@ private fun ShoppingResultCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (group.offers.all { it.isSecondHand } || group.offers.all { it.isAccessoryOffer }) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (group.offers.all { it.isSecondHand }) {
+                        ResultKindBadge("Segunda mano", accessory = false)
+                    }
+                    if (group.offers.all { it.isAccessoryOffer }) {
+                        ResultKindBadge("Accesorio", accessory = true)
+                    }
+                }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
                 if (best.thumbnailUrl.isNotBlank()) {
                     AsyncImage(
@@ -359,6 +426,33 @@ private fun ShoppingResultCard(
                 Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
             }
         }
+    }
+}
+
+@Composable
+private fun ResultKindBadge(label: String, accessory: Boolean) {
+    val background = if (accessory) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.secondaryContainer
+    }
+    val foreground = if (accessory) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(background)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = foreground
+        )
     }
 }
 

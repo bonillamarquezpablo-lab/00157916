@@ -692,6 +692,21 @@ class ExampleRobolectricTest {
             }
         )
         assertTrue(report.discardedOffers.any { it.title.startsWith("Tapacubos") })
+
+        // Android/search input may preserve a backslash before the inch mark. It must still use
+        // wheel-fitment validation, keeping an unverified RIAL Milano candidate while rejecting
+        // the explicitly incompatible 7x16 5x112 RIAL Kodiak.
+        val escapedQuoteReport = client.parseShoppingResultsDetailed(
+            root = payload,
+            query = """llantas 14\\\" 5x100""",
+            observedAt = System.currentTimeMillis()
+        )
+        assertTrue(escapedQuoteReport.results.any { it.title == "RIAL Milano llanta" && it.isFitmentUnverified })
+        assertTrue(
+            escapedQuoteReport.discardedOffers.any {
+                it.title.contains("RIAL Kodiak") && it.reason.contains("Anclaje incompatible", ignoreCase = true)
+            }
+        )
     }
 
     @Test

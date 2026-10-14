@@ -129,7 +129,7 @@ class OnlineSearchScreenTest {
         // OFF + Todos: new shops and Amazon remain; Wallapop and Warehouse are hidden.
         assertVisibleText("Todos (5)")
         assertVisibleText("Solo Amazon (1)")
-        assertEquals(5, results.size)
+        assertEquals(9, results.size)
         assertTrue(results.any { it.storeName == "Wallapop" && it.isSecondHand })
         assertTrue(results.any { it.storeName == "Amazon Warehouse" && it.isSecondHand })
 
@@ -138,7 +138,7 @@ class OnlineSearchScreenTest {
         assertVisibleText("Todos (5)")
         assertVisibleText("Solo Amazon (1)")
         assertTrue(
-            composeRule.onAllNodesWithText("precio más bajo en Wallapop")
+            composeRule.onAllNodesWithText("2 tiendas · precio más bajo en Wallapop")
                 .fetchSemanticsNodes().isEmpty()
         )
 
@@ -147,7 +147,7 @@ class OnlineSearchScreenTest {
         assertVisibleText("Todos (6)")
         assertVisibleText("Solo Amazon (2)")
         assertVisibleText("Segunda mano")
-        assertVisibleText("precio más bajo en Amazon Warehouse")
+        assertVisibleText("1 tiendas · precio más bajo en Amazon Warehouse")
         assertTrue(
             composeRule.onAllNodesWithText("precio más bajo en Wallapop")
                 .fetchSemanticsNodes().isEmpty()

@@ -14,7 +14,6 @@ import com.example.data.remote.SerpApiQuote
 import com.example.data.remote.SerpApiRequestProduct
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
-import com.example.data.remote.isAccessoryOffer
 import org.json.JSONArray
 import org.json.JSONObject
 import okhttp3.OkHttpClient

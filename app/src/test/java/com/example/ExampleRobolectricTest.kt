@@ -561,6 +561,41 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun googleProductOffersKeepValidStoresAndRejectUsedForeignAndMonthlyFixtures() {
+        val client = SerpApiClient()
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "product_results": {
+                "title": "Sony WH-1000XM5 Wireless Headphones",
+                "stores": [
+                  {"name":"PcComponentes","title":"Sony WH-1000XM5","price":"299,99 €","extracted_price":299.99,"link":"https://www.pccomponentes.com/sony-wh1000xm5","condition":"new"},
+                  {"name":"Amazon.es","title":"Sony WH-1000XM5","price":"309,00 €","extracted_price":309.00,"link":"https://www.google.com/shopping/product/987654321?gl=es"},
+                  {"name":"Wallapop","title":"Sony WH-1000XM5","price":"120,00 €","extracted_price":120.00,"link":"https://es.wallapop.com/item/sony","condition":"used"},
+                  {"name":"Tienda cuotas","title":"Sony WH-1000XM5 19,99 €/mes","price":"19,99 €","extracted_price":19.99,"link":"https://shop.example.test/monthly"},
+                  {"name":"Foreign Shop","title":"Sony WH-1000XM5","price":"$250.00","extracted_price":250.00,"link":"https://shop.example.test/usd"}
+                ]
+              }
+            }
+            """.trimIndent()
+        )
+
+        val offers = client.parseGoogleProductOffers(
+            root = payload,
+            expectedTitle = "Sony WH-1000XM5 Wireless Headphones",
+            productId = "987654321",
+            observedAt = 1234L
+        )
+
+        assertEquals(2, offers.size)
+        assertEquals(listOf("PcComponentes", "Amazon.es"), offers.map { it.storeName })
+        assertEquals("directo", offers.first().linkType)
+        assertEquals("Google Shopping", offers.last().linkType)
+        assertTrue(offers.all { it.price > 0.0 && it.observedAt == 1234L })
+    }
+
+    @Test
     fun onlineShoppingSearchKeepsSafeEuroOffersAndSortsByPrice() {
         val client = SerpApiClient()
         val payload = JSONObject(

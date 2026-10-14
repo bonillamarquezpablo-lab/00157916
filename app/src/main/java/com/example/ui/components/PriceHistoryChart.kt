@@ -160,8 +160,7 @@ fun PriceHistoryChart(
                     Text(
                         text = observedMinimum?.let {
                             "Mín. del rango: ${String.format("%.2f", it.price)} €"
-                        } ?: "${historySummary.observationCount} observación" +
-                            if (historySummary.observationCount == 1) "" else "es",
+                        } ?: "${historySummary.observationCount} observación${if (historySummary.observationCount == 1) "" else "es"}",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (observedMinimum != null) Color(0xFF059669)

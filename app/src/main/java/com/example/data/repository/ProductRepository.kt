@@ -17,6 +17,7 @@ import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.onlineProductIdentityKey
+import com.example.data.remote.linkTypeForUrl
 import com.example.data.model.Store
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +33,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Calendar
 import java.util.Locale
+import java.util.TimeZone
 
 data class UrlAnalysisResult(
     val queryOrUrl: String,
@@ -49,16 +51,14 @@ class ProductRepository(
     private val priceObservationDao: PriceObservationDao,
     externalScope: CoroutineScope = CoroutineScope(Dispatchers.IO)
 ) {
-    // Room is the only product catalogue. Online searches are the sole source of persisted items.
+    // Room is the catalogue source of truth; only persisted products and verified observations
+    // may affect the product UI or its price history.
     private val _latestProducts = MutableStateFlow<List<Product>>(emptyList())
-    private val _simulationOverrides = MutableStateFlow<Map<String, Product>>(emptyMap())
 
     init {
-        // The database must never seed a demonstration catalogue. On upgrade, discard old rows
-        // that do not have real verified online observations and their orphaned watchlist/history.
-        // The static Store.ALL_STORES directory is read-only metadata and does not need Room rows.
+        // Clean legacy demo rows and unverified history at startup. Preserve followed real products
+        // even if their first valid observation has not been recorded yet.
         externalScope.launch {
-            // Purge demo-linked history and watchlist rows before removing the products themselves.
             priceObservationDao.deleteExplicitDemoObservations()
             trackedDao.deleteTrackingForDemoProducts()
             productDao.deleteExplicitDemoProducts()
@@ -76,40 +76,28 @@ class ProductRepository(
     }
 
     // Persisted Room rows + verified observations + local tracking are the canonical stream.
-    // A simulation is a temporary, clearly unverified overlay and never becomes a recorded price.
+    // No demo or simulated price points are composed into this flow.
     val allProductsStream: Flow<List<Product>> = combine(
         productDao.getAllProducts(),
         storeDao.getAllStores(),
         trackedDao.getAllTracked(),
-        priceObservationDao.observeAllVerified(),
-        _simulationOverrides
-    ) { productEntities, storeEntities, trackedEntities, observations, simulations ->
+        priceObservationDao.observeAllVerified()
+    ) { productEntities, storeEntities, trackedEntities, observations ->
         val stores = storeEntities.map { it.toDomainStore() }.ifEmpty { Store.ALL_STORES }
         val trackingMap = trackedEntities.associateBy { it.productId }
         val observationsByProduct = observations.groupBy { it.productId }
 
-        // Never render a Room product without at least one verified source-backed observation.
-        // This also prevents legacy/mock rows from flashing on screen while startup cleanup runs.
-        productEntities
-            .filter { entity ->
-                // Explicitly exclude legacy demo markers immediately, before async Room cleanup.
-                !entity.id.startsWith("demo_", ignoreCase = true) &&
-                    !entity.athMinDate.contains("demostración", ignoreCase = true) &&
-                    !entity.athMinStore.contains("demostración", ignoreCase = true) &&
-                    observationsByProduct[entity.id].orEmpty().isNotEmpty()
-            }
-            .map { entity ->
-                val product = entity.toDomainProduct(
-                    stores = stores,
-                    verifiedObservations = observationsByProduct[entity.id].orEmpty()
-                )
-                val shownProduct = simulations[product.id] ?: product
-                val trackingInfo = trackingMap[product.id]
-                shownProduct.copy(
-                    isTracked = trackingInfo != null,
-                    alertTargetPrice = trackingInfo?.targetAlertPrice
-                )
-            }
+        productEntities.map { entity ->
+            val product = entity.toDomainProduct(
+                stores = stores,
+                verifiedObservations = observationsByProduct[entity.id].orEmpty()
+            )
+            val trackingInfo = trackingMap[product.id]
+            product.copy(
+                isTracked = trackingInfo != null,
+                alertTargetPrice = trackingInfo?.targetAlertPrice
+            )
+        }
     }.onEach { currentProducts ->
         _latestProducts.value = currentProducts
     }
@@ -123,11 +111,12 @@ class ProductRepository(
     }
 
     /**
-     * Store only provider-backed, EUR offers with HTTPS destination URLs. A product is marked
-     * verified only if at least one validated offer was stored for that product.
+     * Store only provider-backed, valid EUR offers. Direct merchant URLs and Google Shopping
+     * destinations are both allowed; link type is recorded separately for the UI.
      */
     suspend fun recordSerpApiQuotes(quotes: List<SerpApiQuote>): Int {
-        // Resolve titles from persisted, user-searched products only.
+        // Resolve titles from persisted products only. The bundled demonstration catalogue is not
+        // a valid source for a real market observation.
         val storedProducts = productDao.getAllProductsSnapshot()
         val titleById = storedProducts.associate { it.id to it.title }.toMutableMap().apply {
             _latestProducts.value.forEach { product -> put(product.id, product.title) }
@@ -137,7 +126,7 @@ class ProductRepository(
             quote.productId.isNotBlank() &&
                 quote.price.isFinite() && quote.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
                 quote.currency == "EUR" &&
-                parseHttpUri(quote.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
+                quote.observedAt >= HISTORY_START_TIMESTAMP &&
                 isEligibleHistoryTitle(title) &&
                 isEligibleSeller(quote.storeName) &&
                 isPlausibleHistoryPrice(title, quote.price)
@@ -148,30 +137,23 @@ class ProductRepository(
         for (quote in validQuotes) {
             val productTitle = titleById[quote.productId] ?: continue
             val storeId = canonicalStoreId(quote.storeName, quote.sourceUrl)
-            val (dayStart, dayEnd) = localDayBounds(quote.observedAt)
-            if (priceObservationDao.getObservationForStoreProductDay(
-                    quote.productId, storeId, dayStart, dayEnd
-                ) != null
-            ) continue
-
-            priceObservationDao.insert(
-                PriceObservationEntity(
-                    productId = quote.productId,
-                    storeId = storeId,
-                    price = quote.price,
-                    currency = "EUR",
-                    observedAt = quote.observedAt,
-                    sourceUrl = quote.sourceUrl,
-                    sourceName = "Google Shopping",
-                    isVerified = true,
-                    verificationNote = "Precio observado por SerpApi; confirmar precio final y disponibilidad en la tienda.",
-                    productTitle = productTitle,
-                    storeName = quote.storeName,
-                    sourceType = "Google Shopping"
-                )
+            val observation = PriceObservationEntity(
+                productId = quote.productId,
+                storeId = storeId,
+                price = quote.price,
+                currency = "EUR",
+                observedAt = quote.observedAt,
+                sourceUrl = quote.sourceUrl,
+                sourceName = "Google Shopping",
+                isVerified = true,
+                verificationNote = "Precio observado por SerpApi; confirmar precio final y disponibilidad en la tienda.",
+                productTitle = productTitle,
+                storeName = quote.storeName,
+                sourceType = "Google Shopping",
+                linkType = linkTypeForUrl(quote.sourceUrl)
             )
+            if (saveDailyObservation(observation)) inserted++
             productDao.updatePriceVerification(quote.productId, true)
-            inserted++
         }
         // Preserve the previous test contract: a validated provider quote is a successful
         // configuration test even when today's copy was already recorded and deduplicated.
@@ -193,7 +175,7 @@ class ProductRepository(
                 result.storeName.isNotBlank() &&
                 result.price.isFinite() &&
                 result.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
-                parseHttpUri(result.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
+                result.observedAt >= HISTORY_START_TIMESTAMP &&
                 isEligibleHistoryTitle(result.title) &&
                 isEligibleSeller(result.storeName) &&
                 isPlausibleHistoryPrice(result.title, result.price) &&
@@ -241,9 +223,23 @@ class ProductRepository(
     private fun isPlausibleHistoryPrice(title: String, price: Double): Boolean {
         if (!price.isFinite() || price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR) return false
         val normalized = normalizedProductTitle(title)
-        // Low prices are normal for accessories; do not apply device floors to them.
+
+        // Some items are accessories but still have a meaningful minimum price.
+        // Check these before the broad accessory rule so a suspiciously cheap power bank
+        // cannot pass merely because the title also contains "battery".
+        val portableBattery = Regex(
+            """\b(power\s*bank|powerbank|bateria\s+externa|bateria\s+portatil|portable\s+battery)\b"""
+        ).containsMatchIn(normalized)
+        if (portableBattery && price < 5.0) return false
+
+        val powerStation = Regex(
+            """\b(power\s+station|portable\s+power\s+station|estacion\s+de\s+energia|generador\s+solar\s+portatil)\b"""
+        ).containsMatchIn(normalized)
+        if (powerStation && price < 80.0) return false
+
+        // Low prices are normal for ordinary cables, hubs and replacement accessories.
         val accessory = Regex(
-            """\b(funda|case|carcasa|protector|cristal|cable|cargador|adaptador|repuesto|replacement|cover|bumper|pantalla|bateria|solo caja|dummy)\b"""
+            """\b(funda|case|carcasa|protector|cristal|cable|cargador|adaptador|repuesto|replacement|cover|bumper|pantalla|bateria|solo caja|dummy|hub|usb|conector|enchufe)\b"""
         ).containsMatchIn(normalized)
         if (accessory) return true
 
@@ -347,33 +343,30 @@ class ProductRepository(
             productDao.insert(productEntity)
             if (existingProduct == null) currentEntities += productEntity
 
-            // Keep every distinct merchant observation in Room. The product chart later condenses
-            // these offers into one minimum-price point per local calendar day.
-            for (result in group.offers) {
+            // Keep one best offer per merchant and day. A later search updates that day's row
+            // rather than losing the refreshed price or creating a duplicate.
+            val bestOfferPerStore = group.offers
+                .groupBy { offer -> canonicalStoreId(offer.storeName, offer.sourceUrl) }
+                .values
+                .mapNotNull { offers -> offers.minByOrNull { it.price } }
+            for (result in bestOfferPerStore) {
                 val offerStoreId = canonicalStoreId(result.storeName, result.sourceUrl)
-                val (dayStart, dayEnd) = localDayBounds(result.observedAt)
-                if (priceObservationDao.getObservationForStoreProductDay(
-                        productId, offerStoreId, dayStart, dayEnd
-                    ) != null
-                ) continue
-
-                priceObservationDao.insert(
-                    PriceObservationEntity(
-                        productId = productId,
-                        storeId = offerStoreId,
-                        price = result.price,
-                        currency = "EUR",
-                        observedAt = result.observedAt,
-                        sourceUrl = result.sourceUrl,
-                        sourceName = normalizedSource,
-                        isVerified = true,
-                        verificationNote = "Resultado online válido en euros; precio y disponibilidad pendientes de confirmación en la tienda.",
-                        productTitle = result.title,
-                        storeName = result.storeName,
-                        sourceType = normalizedSource
-                    )
+                val observation = PriceObservationEntity(
+                    productId = productId,
+                    storeId = offerStoreId,
+                    price = result.price,
+                    currency = "EUR",
+                    observedAt = result.observedAt,
+                    sourceUrl = result.sourceUrl,
+                    sourceName = normalizedSource,
+                    isVerified = true,
+                    verificationNote = "Resultado online válido en euros; precio y disponibilidad pendientes de confirmación en la tienda.",
+                    productTitle = result.title,
+                    storeName = result.storeName,
+                    sourceType = normalizedSource,
+                    linkType = result.linkType
                 )
-                inserted++
+                if (saveDailyObservation(observation)) inserted++
             }
         }
         return inserted
@@ -395,6 +388,29 @@ class ProductRepository(
                 product.isPriceVerified &&
                 product.priceHistory.isNotEmpty()
         }
+    }
+
+    /**
+     * Save one verified row per product/merchant/local day. Only replace an existing row when
+     * the new search is newer, or has a lower price at the exact same timestamp.
+     */
+    private suspend fun saveDailyObservation(observation: PriceObservationEntity): Boolean {
+        val (dayStart, dayEnd) = localDayBounds(observation.observedAt)
+        val existing = priceObservationDao.getObservationForStoreProductDay(
+            observation.productId, observation.storeId, dayStart, dayEnd
+        )
+        if (existing == null) {
+            priceObservationDao.insert(observation)
+            return true
+        }
+
+        val isNewer = observation.observedAt > existing.observedAt
+        val sameTimeAndBetterPrice =
+            observation.observedAt == existing.observedAt && observation.price < existing.price
+        if (!isNewer && !sameTimeAndBetterPrice) return false
+
+        priceObservationDao.update(observation.copy(id = existing.id))
+        return true
     }
 
     private fun inferProductBrand(title: String): String {
@@ -469,10 +485,20 @@ class ProductRepository(
                 markers += token
             }
         }
-        // Headphones such as WH-1000XM5 are tokenized as "wh 1000xm5".
+        // Sony model codes are often formatted as "WH-1000XM5", "WH1000XM5" or
+        // "1000XM5". Add a canonical marker so harmless retailer formatting differences match.
+        val sonyModelCode = Regex("""^(?:wh)?\d{3,5}xm\d[a-z0-9]*$""")
+        tokens.filter(sonyModelCode::matches).forEach { token ->
+            val canonicalCode = token.removePrefix("wh")
+            markers += canonicalCode
+            markers += "wh$canonicalCode"
+        }
         if ("wh" in tokens) {
             tokens.getOrNull(tokens.indexOf("wh") + 1)?.let { next ->
-                if (Regex("""^\d+[a-z0-9]+$""").matches(next)) markers += "wh" + next
+                if (Regex("""^\d+[a-z0-9]+$""").matches(next)) {
+                    markers += "wh" + next
+                    markers += next
+                }
             }
         }
         return markers
@@ -491,6 +517,18 @@ class ProductRepository(
         val requestedVariants = normalizedProductTitle(query).split(' ').filter { it in variantWords }.toSet()
         val resultVariants = normalizedProductTitle(resultTitle).split(' ').filter { it in variantWords }.toSet()
         if (!resultVariants.containsAll(requestedVariants)) return true
+
+        // Do not accidentally accept an Ultra/Plus/FE result for a different requested variant,
+        // even when both titles contain the same base model number.
+        val exclusiveVariantFamilies = listOf(
+            setOf("pro", "max", "plus", "ultra", "fe", "lite", "mini"),
+            setOf("fold", "flip"),
+            setOf("classic", "edge")
+        )
+        for (family in exclusiveVariantFamilies) {
+            val requestedFamily = requestedVariants.intersect(family)
+            if (requestedFamily.isNotEmpty() && resultVariants.intersect(family) != requestedFamily) return true
+        }
 
         val memoryPattern = Regex("""\b\d+\s?(?:gb|tb)\b""")
         val requestedMemory = memoryPattern.findAll(normalizedProductTitle(query))
@@ -603,7 +641,12 @@ class ProductRepository(
     }
 
     private companion object {
-        const val MIN_HISTORY_PRICE_EUR = 5.0
+        // Fixed policy boundary: no stored row before this local Spain date contributes to history.
+        val HISTORY_START_TIMESTAMP: Long = Calendar.getInstance(TimeZone.getTimeZone("Europe/Madrid")).apply {
+            clear()
+            set(2026, Calendar.OCTOBER, 13, 0, 0, 0)
+        }.timeInMillis
+        const val MIN_HISTORY_PRICE_EUR = 0.50
         const val MAX_HISTORY_PRICE_EUR = 10000.0
         const val MIN_OUTLIER_PRICE_RATIO = 0.20
         const val ACCESSORY_PRICE_RATIO = 0.25
@@ -639,28 +682,6 @@ class ProductRepository(
                 )
             )
         }
-    }
-
-    fun simulatePriceDrop(productId: String, newLowPrice: Double? = null) {
-        val source = _latestProducts.value.firstOrNull { it.id == productId } ?: return
-        val droppedPrice = newLowPrice ?: (source.athMinPrice * 0.95)
-        val newPoint = PricePoint(
-            timestamp = System.currentTimeMillis(),
-            dateLabel = "Simulación",
-            price = droppedPrice,
-            storeName = source.currentStore.name,
-            eventLabel = "SIMULACIÓN DE DEMOSTRACIÓN — NO ES UN PRECIO REAL"
-        )
-        _simulationOverrides.value = _simulationOverrides.value + (
-            productId to source.copy(
-                currentPrice = droppedPrice,
-                athMinPrice = minOf(source.athMinPrice, droppedPrice),
-                athMinDate = "Simulación de demostración",
-                athMinStore = source.currentStore.name,
-                priceHistory = source.priceHistory + newPoint,
-                isPriceVerified = false
-            )
-        )
     }
 
     fun analyzeSpanishUrlOrQuery(input: String): UrlAnalysisResult {
@@ -764,7 +785,15 @@ class ProductRepository(
         stores: List<Store>,
         verifiedObservations: List<PriceObservationEntity>
     ): Product {
-        val sortedHistory = verifiedObservations.sortedBy { it.observedAt }
+        // Ignore legacy/imported timestamps before the policy start. Observations from either a
+        // direct retailer URL or a Google Shopping page can support visible history.
+        val sortedHistory = verifiedObservations.filter { observation ->
+            observation.observedAt >= HISTORY_START_TIMESTAMP &&
+                observation.currency == "EUR" &&
+                isEligibleHistoryTitle(observation.productTitle) &&
+                isEligibleSeller(observation.storeName) &&
+                isPlausibleHistoryPrice(observation.productTitle, observation.price)
+        }.sortedBy { it.observedAt }
         // Room keeps each store observation, but the chart must be a daily time series, not a
         // sequence of sellers from the same search. Plot the cheapest valid offer for each day.
         val latestDayStart = sortedHistory.lastOrNull()?.let { localDayBounds(it.observedAt).first }
@@ -779,8 +808,8 @@ class ProductRepository(
         val latestObservation = latestBatch.minByOrNull { it.price }
         val minObservation = snapshotHistory.minByOrNull { it.price }
         val maxObservation = snapshotHistory.maxByOrNull { it.price }
-        // The verified Room observation is authoritative; repair stale pre-v5 product flags.
-        val priceIsVerified = latestObservation != null
+        // Require both the explicit product flag and a provider-backed observation.
+        val priceIsVerified = isPriceVerified && latestObservation != null
         val effectiveHistory = if (priceIsVerified) snapshotHistory else emptyList()
         val effectiveStore = if (priceIsVerified) {
             observationStore(latestObservation!!, stores)
@@ -810,7 +839,8 @@ class ProductRepository(
                     price = observation.price,
                     inStock = false,
                     shippingInfo = "Consultar envío en la tienda",
-                    url = observation.sourceUrl
+                    url = observation.sourceUrl,
+                    linkType = observation.linkType
                 )
             }.sortedBy { it.price }
         } else {
@@ -824,7 +854,8 @@ class ProductRepository(
                 dateLabel = dateFormatter.format(Date(observation.observedAt)),
                 price = observation.price,
                 storeName = observation.storeName.ifBlank { observationStore(observation, stores).name },
-                eventLabel = observation.sourceType.ifBlank { observation.sourceName }
+                eventLabel = observation.sourceType.ifBlank { observation.sourceName },
+                linkType = observation.linkType
             )
         } else {
             emptyList()

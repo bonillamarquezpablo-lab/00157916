@@ -22,8 +22,7 @@ interface StoreDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(stores: List<StoreEntity>)
-
-    /** Remove old bundled directory rows; the application can use its read-only store registry. */
+ 
     @Query("DELETE FROM spanish_stores")
     suspend fun deleteAll(): Int
 }

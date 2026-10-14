@@ -29,6 +29,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeout
+import java.util.Locale
 
 enum class OnlineSearchProvider { GOOGLE_SHOPPING, AMAZON }
 

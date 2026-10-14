@@ -65,14 +65,19 @@ fun OnlineSearchScreen(
     onSearch: () -> Unit,
     onAmazonSearch: () -> Unit,
     onAmazonOnlyChange: (Boolean) -> Unit,
+    onToggleDiscarded: () -> Unit,
+    onShowSecondHandChange: (Boolean) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenProduct: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val allGroups = groupOnlineShoppingResults(state.onlineSearchResults)
+    val conditionFilteredResults = state.onlineSearchResults.filter {
+        state.onlineSearchShowSecondHand || !it.isSecondHand
+    }
+    val allGroups = groupOnlineShoppingResults(conditionFilteredResults)
     val amazonGroups = groupOnlineShoppingResults(
-        state.onlineSearchResults.filter { it.isAmazonOffer }
+        conditionFilteredResults.filter { it.isAmazonOffer }
     )
     val visibleGroups = if (state.onlineSearchAmazonOnly) amazonGroups else allGroups
 
@@ -164,6 +169,53 @@ fun OnlineSearchScreen(
                 Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        if (state.onlineSearchDiscardedOffers.isNotEmpty()) {
+            item {
+                OutlinedButton(
+                    onClick = onToggleDiscarded,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        if (state.showOnlineSearchDiscarded) "Ocultar descartados"
+                        else "Ver descartados (${state.onlineSearchDiscardedOffers.size})"
+                    )
+                }
+            }
+            if (state.showOnlineSearchDiscarded) {
+                items(
+                    count = state.onlineSearchDiscardedOffers.size,
+                    key = { index -> "discarded-${state.onlineSearchDiscardedOffers[index].provider}-${index}" }
+                ) { index ->
+                    val rejected = state.onlineSearchDiscardedOffers[index]
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(rejected.title, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                rejected.priceLabel.ifBlank { "Precio no disponible" },
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                rejected.reason,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Text(
+                                rejected.provider,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
         if (state.onlineSearchResults.isNotEmpty()) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -183,6 +235,13 @@ fun OnlineSearchScreen(
                                 selected = state.onlineSearchAmazonOnly,
                                 onClick = { onAmazonOnlyChange(true) },
                                 label = { Text("Solo Amazon (${amazonGroups.size})") }
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = state.onlineSearchShowSecondHand,
+                                onClick = { onShowSecondHandChange(!state.onlineSearchShowSecondHand) },
+                                label = { Text("Mostrar segunda mano") }
                             )
                         }
                     }
@@ -266,6 +325,14 @@ private fun ShoppingResultCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (group.offers.any { it.isSuspiciousPrice }) {
+                        Text(
+                            "Hay una oferta con precio sospechoso; se excluye del mejor precio",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))

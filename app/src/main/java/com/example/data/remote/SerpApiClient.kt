@@ -55,7 +55,8 @@ data class SerpApiShoppingSearchReport(
     val rejectedForPriceOrCurrency: Int,
     val rejectedForLink: Int,
     val rejectedOther: Int,
-    val firstResultFields: String = ""
+    val firstResultFields: String = "",
+    val discardedOffers: List<DiscardedOnlineOffer> = emptyList()
 ) {
     fun emptyResultMessage(query: String): String {
         if (rawResultCount == 0) {
@@ -321,19 +322,31 @@ class SerpApiClient(
         var rejectedForPriceOrCurrency = 0
         var rejectedForLink = 0
         var rejectedOther = 0
+        val discarded = mutableListOf<DiscardedOnlineOffer>()
+        fun reject(item: JSONObject, reason: String) {
+            discarded += DiscardedOnlineOffer(
+                title = item.optString("title").takeIf { it.isNotBlank() && it != "null" } ?: "(sin título)",
+                priceText = sequenceOf(item.optString("price"), item.optString("extracted_price"))
+                    .firstOrNull { it.isNotBlank() && it != "null" } ?: "(sin precio)",
+                reason = reason
+            )
+        }
         val parsed = items.mapNotNull { item ->
             val title = item.optString("title").trim()
                 .takeIf { it.isNotBlank() && it != "null" }
                 ?: run {
                     rejectedOther++
+                    reject(item, "Sin título válido")
                     return@mapNotNull null
                 }
             if (isClearlyNonNewListing(item, title)) {
                 rejectedOther++
+                reject(item, "Segunda mano, reacondicionado, alquiler o cuota")
                 return@mapNotNull null
             }
             if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
                 rejectedAsIrrelevant++
+                reject(item, "Otro modelo o producto no coincidente")
                 return@mapNotNull null
             }
 
@@ -345,6 +358,7 @@ class SerpApiClient(
                 ?.takeIf { it.isFinite() && it > 0.0 }
             if (hasExplicitForeignCurrency(priceText)) {
                 rejectedForPriceOrCurrency++
+                reject(item, "Moneda distinta del euro")
                 return@mapNotNull null
             }
             val price = extractedPrice ?: parsePrice(priceText)
@@ -354,6 +368,7 @@ class SerpApiClient(
                 (extractedPrice == null && !isEuroPrice)
             ) {
                 rejectedForPriceOrCurrency++
+                reject(item, "Sin precio válido en euros")
                 return@mapNotNull null
             }
 
@@ -407,7 +422,8 @@ class SerpApiClient(
                 ?.keys()
                 ?.asSequence()
                 ?.joinToString(", ")
-                .orEmpty()
+                .orEmpty(),
+            discardedOffers = discarded
         )
     }
 

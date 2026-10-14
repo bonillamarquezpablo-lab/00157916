@@ -441,7 +441,7 @@ class SerpApiClient(
                     .replace(Regex("\\p{M}+"), "")
                 if (listOf(
                     "tapacubo", "hubcap", "wheel cover", "wheel trim", "copricerchi",
-                    "coprimozzo", "enjoliveur", "radkappe", "radkappen", "kolpak", "kolpaki",
+                    "coprimozzo", "enjoliveur", "radkappe", "radkappen", "kolpak", "kolpaki", "kołpak", "kołpaki",
                     "cubrellanta", "cubrerueda"
                 ).any(lowerTitle::contains)) {
                     rejectedAsIrrelevant++

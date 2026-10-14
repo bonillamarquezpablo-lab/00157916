@@ -978,9 +978,17 @@ class SerpApiClient(
     )
 
     private fun parseWheelFitmentQuery(query: String): WheelFitmentQuery? {
-        if (!isWheelListing(query)) return null
-        val diameter = wheelDiameterInches(query) ?: return null
-        val boltPattern = wheelBoltPattern(query) ?: return null
+        // Search text can contain escaped or typographic inch marks from Android keyboards.
+        // Normalize them before fitment detection so generic titles such as "RIAL Milano llanta"
+        // remain candidates with unverified fitment instead of falling through to strict title match.
+        val normalizedQuery = query
+            .replace("\\\"", "\"")
+            .replace('″', '"')
+            .replace('”', '"')
+            .replace('“', '"')
+        if (!isWheelListing(normalizedQuery)) return null
+        val diameter = wheelDiameterInches(normalizedQuery) ?: return null
+        val boltPattern = wheelBoltPattern(normalizedQuery) ?: return null
         return WheelFitmentQuery(diameter, boltPattern)
     }
 
@@ -990,7 +998,7 @@ class SerpApiClient(
     private fun wheelDiameterInches(value: String): Int? {
         val patterns = listOf(
             Regex("""(?i)\bR\s*(1[0-9]|2[0-4])\b"""),
-            Regex("""(?i)\b(1[0-9]|2[0-4])\s*(?:["”]|pulg(?:adas?)?|inch(?:es)?)"""),
+            Regex("""(?i)\b(1[0-9]|2[0-4])\s*(?:["”″]|pulg(?:adas?)?|inch(?:es)?)"""),
             Regex("""(?i)\b\d{1,2}\s*[x×]\s*(1[0-9]|2[0-4])\b"""),
             Regex("""(?i)\b\d{3}/\d{2}/(1[0-9]|2[0-4])\b""")
         )

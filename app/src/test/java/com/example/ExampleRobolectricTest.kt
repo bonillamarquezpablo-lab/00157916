@@ -1009,7 +1009,7 @@ class ExampleRobolectricTest {
     @Test
     fun wheelSearchRecognizesMultilingualCategoryTermsAndSeparatesSetsFromSingleWheels() {
         val client = SerpApiClient()
-        val terms = listOf("llanta", "rueda", "aro", "Felgen", "Aluräder", "Alu", "jante", "cerchi", "wheel", "rim", "alloy")
+        val terms = listOf("llanta", "rueda", "aro", "Felgen", "Stahlfelge", "felge", "felgi", "felga", "Aluräder", "Alu", "jante", "cerchi", "wheel", "rim", "alloy")
         val items = org.json.JSONArray()
         terms.forEachIndexed { index, term ->
             items.put(
@@ -1052,6 +1052,60 @@ class ExampleRobolectricTest {
         assertEquals("A set and a single wheel must be separate cards", 2, groups.size)
         val setGroup = groups.single { it.wheelSetCount == 4 }
         assertEquals(108.0475, setGroup.minPrice, 0.0001)
+    }
+
+    @Test
+    fun genericWheelSearchKeepsGermanPolishAndKnownBrandCandidatesUnconfirmed() {
+        val client = SerpApiClient()
+        val items = org.json.JSONArray()
+        val titles = listOf(
+            "Stahlfelge 5x14 ET35 5x100 für VW Polo 1.2 TSI 2011-2014",
+            "Komplet felgi 299 14x6 5x100 ET35",
+            "OXXO Charon 5x100 57.1",
+            "OXXO Novel Black",
+            "Tapacubos 14\\\" 5x100"
+        )
+        titles.forEachIndexed { index, title ->
+            items.put(
+                JSONObject()
+                    .put("title", title)
+                    .put("price", "92,29 €")
+                    .put("extracted_price", 92.29 + index)
+                    .put("link", "https://shop.example/wheel-candidate-$index")
+                    .put("source", "Tienda $index")
+                    .put("condition", "new")
+            )
+        }
+
+        val report = client.parseShoppingResultsDetailed(
+            root = JSONObject()
+                .put("search_metadata", JSONObject().put("status", "Success"))
+                .put("shopping_results", items),
+            query = """llantas 14" 5x100""",
+            observedAt = System.currentTimeMillis()
+        )
+
+        val titlesShown = report.results.map { it.title }.toSet()
+        assertTrue(titlesShown.contains(titles[0]))
+        assertTrue(titlesShown.contains(titles[1]))
+        assertTrue(titlesShown.contains(titles[2]))
+        assertTrue(titlesShown.contains(titles[3]))
+        assertFalse(titlesShown.contains(titles[4]))
+
+        val steelWheel = report.results.single { it.title == titles[0] }
+        assertFalse(steelWheel.isCategoryUnverified)
+        assertFalse(steelWheel.isFitmentUnverified)
+
+        val polishWheel = report.results.single { it.title == titles[1] }
+        assertFalse(polishWheel.isCategoryUnverified)
+        assertTrue("Unusual 14x6 ordering must not be marked confirmed without parsed diameter", polishWheel.isFitmentUnverified)
+
+        val modelOnlyCandidates = report.results.filter { it.title == titles[2] || it.title == titles[3] }
+        assertTrue(modelOnlyCandidates.all { it.isCategoryUnverified })
+        assertTrue(modelOnlyCandidates.all { it.isFitmentUnverified })
+        assertTrue(report.discardedOffers.any {
+            it.title == titles[4] && it.reason == "Accesorio que no es una llanta"
+        })
     }
 
     @Test

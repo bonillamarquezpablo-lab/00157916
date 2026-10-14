@@ -343,6 +343,11 @@ class ProductRepository(
         }
         // Never let a suspicious, unverified observation replace a verified same-day quote.
         if (!observation.isVerified && existing.isVerified) return false
+        // A newly validated offer supersedes a previously unverified suspicious row.
+        if (observation.isVerified && !existing.isVerified) {
+            priceObservationDao.update(observation.copy(id = existing.id))
+            return true
+        }
 
         val isNewer = observation.observedAt > existing.observedAt
         val sameTimeAndBetterPrice =

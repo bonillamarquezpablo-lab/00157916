@@ -168,6 +168,7 @@ class ProductRepository(
         searchQuery: String = ""
     ): List<SerpApiShoppingResult> {
         val queryModelMarkers = explicitModelMarkers(searchQuery)
+        val deviceSearch = isDeviceSearchQuery(searchQuery)
         val eligible = results.filter { result ->
             result.title.isNotBlank() &&
                 result.storeName.isNotBlank() &&
@@ -176,7 +177,9 @@ class ProductRepository(
                 result.price <= MAX_HISTORY_PRICE_EUR &&
                 result.observedAt >= HISTORY_START_TIMESTAMP &&
                 !result.isRentalOrMonthly &&
-                !hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title)
+                !hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title) &&
+                // A model-specific device search must not present a case, mop kit or filter as the device.
+                !(deviceSearch && !isAccessorySearchQuery(searchQuery) && isAccessoryListing(result.title))
         }
         if (eligible.isEmpty()) return emptyList()
 

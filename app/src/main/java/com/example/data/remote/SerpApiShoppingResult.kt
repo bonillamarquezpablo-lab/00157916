@@ -177,7 +177,9 @@ fun containsWheelCategoryTerm(value: String): Boolean =
 fun wheelSetCountForTitle(title: String): Int? {
     val normalized = normalizedWheelCategoryText(title)
     if (!WHEEL_CATEGORY_PATTERN.containsMatchIn(normalized)) return null
-    val leadingCount = Regex("""^\s*(\d{1,2})\s+""")
+    // Retail titles commonly write four rims as both "4 Autec ..." and "4x Autec ...".
+    // Require a space after the x so PCD text such as "4x100" is never mistaken for a set count.
+    val leadingCount = Regex("""^\s*(\d{1,2})(?:\s*x\s+|\s+)(?=[\p{L}])""")
         .find(normalized)?.groupValues?.getOrNull(1)?.toIntOrNull()
         ?.takeIf { it in 2..20 }
     if (leadingCount != null) return leadingCount

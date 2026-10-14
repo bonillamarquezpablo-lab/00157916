@@ -65,6 +65,7 @@ fun OnlineSearchScreen(
     onSearch: () -> Unit,
     onAmazonSearch: () -> Unit,
     onAmazonOnlyChange: (Boolean) -> Unit,
+    onToggleDiscarded: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenProduct: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -162,6 +163,53 @@ fun OnlineSearchScreen(
         state.onlineSearchStatus?.let { status ->
             item {
                 Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        if (state.onlineSearchDiscardedOffers.isNotEmpty()) {
+            item {
+                OutlinedButton(
+                    onClick = onToggleDiscarded,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        if (state.showOnlineSearchDiscarded) "Ocultar descartados"
+                        else "Ver descartados (${state.onlineSearchDiscardedOffers.size})"
+                    )
+                }
+            }
+            if (state.showOnlineSearchDiscarded) {
+                items(
+                    count = state.onlineSearchDiscardedOffers.size,
+                    key = { index -> "discarded-${state.onlineSearchDiscardedOffers[index].provider}-${index}" }
+                ) { index ->
+                    val rejected = state.onlineSearchDiscardedOffers[index]
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(rejected.title, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                rejected.priceLabel.ifBlank { "Precio no disponible" },
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                rejected.reason,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Text(
+                                rejected.provider,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             }
         }
         if (state.onlineSearchResults.isNotEmpty()) {

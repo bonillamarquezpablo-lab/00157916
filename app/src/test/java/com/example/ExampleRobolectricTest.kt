@@ -1025,10 +1025,13 @@ class ExampleRobolectricTest {
             .put("shopping_results", JSONArray()
                 .put(item("Samsung Galaxy S26 Ultra 512 GB negro", link = "https://www.google.com/shopping/product/one"))
                 .put(item("Samsung Galaxy S26 Ultra 512 GB negro", price = "1.279,99 €", extractedPrice = 1279.99,
-                    link = "https://www.google.es/search?tbm=shop&q=galaxy")))
+                    link = "https://www.google.es/search?tbm=shop&q=galaxy"))
+                .put(item("Samsung Galaxy S26 Ultra 512 GB negro", price = "1.259,99 €", extractedPrice = 1259.99,
+                    link = "https://www.tienda.example/samsung-s26")))
         val validReport = client.parseShoppingResultsDetailed(mostlyGoogle, "Samsung Galaxy S26 Ultra 512 GB", 123L)
-        assertEquals("Google product/search links are valid destinations", 2, validReport.results.size)
-        assertTrue(validReport.results.all { it.linkType == "Google Shopping" })
+        assertEquals("Google product/search links are valid destinations alongside direct links", 3, validReport.results.size)
+        assertEquals(2, validReport.results.count { it.linkType == "Google Shopping" })
+        assertEquals(1, validReport.results.count { it.linkType == "directo" })
 
         val used = parse("Samsung Galaxy S26 Ultra 512 GB",
             item("Samsung Galaxy S26 Ultra 512 GB", condition = "used"))
@@ -1101,15 +1104,17 @@ class ExampleRobolectricTest {
             .put(item("Anker Power Bank 20.000 mAh cuota 4,99 €/mes", price = "4,99 €/mes", extractedPrice = 4.99))
             .put(item("Anker Power Bank 10.000 mAh", price = "19,99 €", extractedPrice = 19.99))
             .put(item("Tostadora de cocina", price = "12,99 €", extractedPrice = 12.99))
-            .put(item("Anker Power Bank 20.000 mAh", price = "$39.99", extractedPrice = 39.99)))
+            .put(item("Anker Power Bank 20.000 mAh", price = "$39.99", extractedPrice = 39.99))
+            .put(item("Anker Power Bank 20.000 mAh", price = "Consultar precio", extractedPrice = null)))
 
         assertEquals("Amazon.es numeric structured prices are accepted without the € glyph", 1, report.results.size)
-        assertEquals(6, report.discardedOffers.size)
+        assertEquals(7, report.discardedOffers.size)
         assertTrue(report.discardedOffers.any { it.reason.contains("Segunda mano") })
         assertTrue(report.discardedOffers.any { it.reason.contains("Alquiler o cuota") })
         assertTrue(report.discardedOffers.any { it.reason.contains("variante") })
         assertTrue(report.discardedOffers.any { it.reason.contains("Otro modelo") })
         assertTrue(report.discardedOffers.any { it.reason.contains("moneda extranjera") })
+        assertTrue(report.discardedOffers.any { it.reason.contains("Sin precio válido") })
     }
 
     @Test
@@ -1139,8 +1144,8 @@ class ExampleRobolectricTest {
             val discarded = repository.diagnoseOnlineSearchRejections(offers, "Samsung Galaxy S26 Ultra 512 GB")
             assertEquals("Four normal prices remain visible", 4, accepted.size)
             assertTrue(discarded.any { it.priceLabel.contains("99.99") && it.reason.contains("Precio sospechoso") })
-            assertEquals("Diagnostics do not write rejected rows into Room", 0,
-                database.priceObservationDao().getObservationCount("no-product-written"))
+            assertEquals("Viewing diagnostics does not persist accepted or rejected prices", 0,
+                database.priceObservationDao().getVerifiedObservationCount())
         } finally {
             database.close()
         }

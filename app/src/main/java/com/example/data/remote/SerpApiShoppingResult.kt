@@ -94,6 +94,34 @@ fun extractGoogleShoppingProductId(value: String): String? {
         ?.getOrNull(1)
 }
 
+/**
+ * Normalizes size notation typed on Android keyboards (straight/typographic quotes and escaped
+ * inch marks) so fitment-aware parsing and result sorting agree on whether this is a wheel search.
+ */
+fun normalizeWheelFitmentQuery(query: String): String = query
+    .replace("\\\\\"", "\\"")
+    .replace('″', '"')
+    .replace('”', '"')
+    .replace('“', '"')
+
+/**
+ * An explicit diameter plus PCD is a wheel-fitment query even when the user searches by model
+ * ("RIAL Milano 14\" 5x100") rather than starting with the word "llanta".
+ */
+fun isWheelFitmentQuery(query: String): Boolean {
+    val normalized = normalizeWheelFitmentQuery(query)
+    val hasPcd = Regex(
+        """(?i)\\b[3456]\\s*[x×]\\s*(100|108|110|112|114(?:[.,]3)?|115|120|127|130|139(?:[.,]7)?)(?=\\b|(?:et)?[0-9]{2,3}\\b)"""
+    ).containsMatchIn(normalized)
+    if (!hasPcd) return false
+    val hasDiameterWithUnit = Regex(
+        """(?i)\\b(?:R\\s*(1[0-9]|2[0-4])|(1[0-9]|2[0-4])\\s*(?:["”″]|pulg(?:adas?)?|inch(?:es)?))"""
+    ).containsMatchIn(normalized)
+    // Many Spanish searches omit the inch symbol when the PCD is explicit, e.g. "RIAL Milano 14 5x100".
+    val hasBareDiameter = Regex("""\\b(1[0-9]|2[0-4])\\b""").containsMatchIn(normalized)
+    return hasDiameterWithUnit || hasBareDiameter
+}
+
 /** Identifies the link destination without requiring a direct retailer URL or HTTPS. */
 fun isGoogleShoppingUrl(sourceUrl: String): Boolean {
     val uri = runCatching { URI(sourceUrl) }.getOrNull() ?: return false

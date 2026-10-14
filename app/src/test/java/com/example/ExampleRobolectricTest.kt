@@ -1086,13 +1086,15 @@ class ExampleRobolectricTest {
             observedAt = 1_800_000_000_000L
         )
         val fourWheelSet = SerpApiShoppingResult(
-            title = "4 Autec Zenit Felgen 5.5x14 5x100",
+            title = "4x Autec Zenit Felgen 5.5x14 5x100",
             price = 432.19,
             storeName = "Tienda juego",
             sourceUrl = "https://shop.example/four-wheel-set",
             observedAt = 1_800_000_000_000L
         )
         assertEquals(4, fourWheelSet.wheelSetCount)
+        assertEquals(4, wheelSetCountForTitle("4 Autec Zenit Felgen 5.5x14 5x100"))
+        assertEquals(null, wheelSetCountForTitle("4x100 5.5x14 5x100"))
         assertEquals(null, singleWheel.wheelSetCount)
         val groups = groupOnlineShoppingResults(listOf(singleWheel, fourWheelSet))
         assertEquals("A set and a single wheel must be separate cards", 2, groups.size)
@@ -1109,7 +1111,9 @@ class ExampleRobolectricTest {
             "Komplet felgi 299 14x6 5x100 ET35",
             "OXXO Charon 5x100 57.1",
             "OXXO Novel Black",
-            "Tapacubos 14\\\" 5x100"
+            "Tapacubos 14\\\" 5x100",
+            "Radkappen 14\\\" 5x100",
+            "Kołpaki 14\\\" 5x100"
         )
         titles.forEachIndexed { index, title ->
             items.put(
@@ -1137,6 +1141,8 @@ class ExampleRobolectricTest {
         assertTrue(titlesShown.contains(titles[2]))
         assertTrue(titlesShown.contains(titles[3]))
         assertFalse(titlesShown.contains(titles[4]))
+        assertFalse("German hubcaps must not be treated as rims", titlesShown.contains(titles[5]))
+        assertFalse("Polish hubcaps must not be treated as rims", titlesShown.contains(titles[6]))
 
         val steelWheel = report.results.single { it.title == titles[0] }
         assertFalse(steelWheel.isCategoryUnverified)

@@ -1050,7 +1050,10 @@ class SerpApiClient(
         val patterns = listOf(
             Regex("""(?i)\bR\s*(1[0-9]|2[0-4])\b"""),
             Regex("""(?i)\b(1[0-9]|2[0-4])\s*(?:["”″]|pulg(?:adas?)?|inch(?:es)?)"""),
-            Regex("""(?i)\b\d{1,2}\s*[x×]\s*(1[0-9]|2[0-4])\b"""),
+            // Standard width x diameter notation: 5.5x14 or 6x15.
+            Regex("""(?i)\b\d{1,2}(?:[.,]\d)?\s*[x×]\s*(1[0-9]|2[0-4])\b"""),
+            // Some international listings reverse the order: diameter x width, e.g. 14x6.
+            Regex("""(?i)\b(1[0-9]|2[0-4])\s*[x×]\s*\d{1,2}(?:[.,]\d)?\b"""),
             Regex("""(?i)\b\d{3}/\d{2}/(1[0-9]|2[0-4])\b""")
         )
         for (pattern in patterns) {

@@ -267,15 +267,43 @@ class SerpApiClient(
                 recordDiscard(item, title, nonNewRejectionReason(item, title))
                 return@mapNotNull null
             }
-            if (!query.isNullOrBlank() && hasVariantMismatch(query, title)) {
-                rejectedAsIrrelevant++
-                recordDiscard(item, title, "Otro modelo o variante (capacidad, potencia o pack distinto)")
-                return@mapNotNull null
-            }
-            if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
-                rejectedAsIrrelevant++
-                recordDiscard(item, title, "Otro modelo o título no coincidente")
-                return@mapNotNull null
+            var fitmentUnverified = false
+            val wheelFitmentQuery = query?.let(::parseWheelFitmentQuery)
+            if (wheelFitmentQuery != null) {
+                if (!isWheelListing(title)) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "No parece una llanta o rueda")
+                    return@mapNotNull null
+                }
+                val resultDiameter = wheelDiameterInches(title)
+                val resultPcd = wheelBoltPattern(title)
+                if (resultDiameter != null && resultDiameter != wheelFitmentQuery.diameterInches) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "Diámetro incompatible: se busca ${wheelFitmentQuery.diameterInches} pulgadas")
+                    return@mapNotNull null
+                }
+                if (resultPcd != null && resultPcd != wheelFitmentQuery.boltPattern) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "Anclaje incompatible: se busca ${wheelFitmentQuery.boltPattern}")
+                    return@mapNotNull null
+                }
+                // Some Shopping titles omit one or both fitment dimensions. Show those candidates,
+                // but label them clearly and never add their prices to Mercado/history until the
+                // exact size and bolt pattern can be confirmed from the listing.
+                fitmentUnverified =
+                    resultDiameter != wheelFitmentQuery.diameterInches ||
+                    resultPcd != wheelFitmentQuery.boltPattern
+            } else {
+                if (!query.isNullOrBlank() && hasVariantMismatch(query, title)) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "Otro modelo o variante (capacidad, potencia o pack distinto)")
+                    return@mapNotNull null
+                }
+                if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "Otro modelo o título no coincidente")
+                    return@mapNotNull null
+                }
             }
             // SerpApi's Amazon engine can expose the active offer as price/extracted_price,
             // or as primary_price/extracted_primary_price depending on the product layout.
@@ -499,7 +527,8 @@ class SerpApiClient(
                 reviewCount = reviewCount,
                 observedAt = observedAt,
                 condition = condition,
-                googleProductId = googleProductId
+                googleProductId = googleProductId,
+                isFitmentUnverified = fitmentUnverified
             )
         }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
             .sortedBy { it.price }
@@ -940,6 +969,46 @@ class SerpApiClient(
             "Alquiler o cuota mensual"
         } else {
             "Segunda mano o reacondicionado"
+        }
+    }
+
+    private data class WheelFitmentQuery(
+        val diameterInches: Int,
+        val boltPattern: String
+    )
+
+    private fun parseWheelFitmentQuery(query: String): WheelFitmentQuery? {
+        if (!isWheelListing(query)) return null
+        val diameter = wheelDiameterInches(query) ?: return null
+        val boltPattern = wheelBoltPattern(query) ?: return null
+        return WheelFitmentQuery(diameter, boltPattern)
+    }
+
+    private fun isWheelListing(value: String): Boolean =
+        Regex("""(?i)\b(llantas?|ruedas?|wheels?|rims?)\b""").containsMatchIn(value)
+
+    private fun wheelDiameterInches(value: String): Int? {
+        val patterns = listOf(
+            Regex("""(?i)\bR\s*(1[0-9]|2[0-4])\b"""),
+            Regex("""(?i)\b(1[0-9]|2[0-4])\s*(?:["”]|pulg(?:adas?)?|inch(?:es)?)"""),
+            Regex("""(?i)\b\d{1,2}\s*[x×]\s*(1[0-9]|2[0-4])\b"""),
+            Regex("""(?i)\b\d{3}/\d{2}/(1[0-9]|2[0-4])\b""")
+        )
+        for (pattern in patterns) {
+            val match = pattern.find(value) ?: continue
+            val group = match.groups.drop(1).firstOrNull { it != null }?.value ?: continue
+            group.toIntOrNull()?.let { return it }
+        }
+        return null
+    }
+
+    private fun wheelBoltPattern(value: String): String? {
+        val pattern = Regex(
+            """(?i)\b[3456]\s*[x×]\s*(100|108|110|112|114(?:[.,]3)?|115|120|127|130|139(?:[.,]7)?)(?=\b|(?:et)?[0-9]{2,3}\b)"""
+        )
+        val raw = pattern.find(value)?.groupValues?.getOrNull(1) ?: return null
+        return raw.replace(',', '.').toDoubleOrNull()?.let { number ->
+            if (number % 1.0 == 0.0) number.toInt().toString() else number.toString()
         }
     }
 

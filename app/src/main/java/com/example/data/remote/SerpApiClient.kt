@@ -437,7 +437,8 @@ class SerpApiClient(
             val wheelFitmentQuery = query?.let(::parseWheelFitmentQuery)
             if (wheelFitmentQuery != null) {
                 // Exclude explicit hubcap and decorative-cover listings from rim searches.
-                val lowerTitle = normalizedWheelCategoryText(title)
+                val lowerTitle = Normalizer.normalize(title.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+                    .replace(Regex("\\p{M}+"), "")
                 if (listOf("tapacubo", "hubcap", "wheel cover", "copricerchi", "cubrellanta", "cubrerueda").any(lowerTitle::contains)) {
                     rejectedAsIrrelevant++
                     recordDiscard(item, title, "Accesorio que no es una llanta")

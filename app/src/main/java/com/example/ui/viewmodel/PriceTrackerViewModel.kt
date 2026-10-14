@@ -8,6 +8,7 @@ import com.example.data.local.AppDatabase
 import com.example.data.remote.OnlineSearchCache
 import com.example.data.remote.WaybackPriceHistoryClient
 import com.example.data.remote.isGoogleShoppingUrl
+import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.SerpApiAccountInfo
 import com.example.data.remote.SerpApiClient
@@ -1120,12 +1121,26 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 checkedCount += archive.capturesChecked
                 foundCount += archive.quotes.size
                 archive.quotes.minOfOrNull { it.observedAt }?.let(archiveDates::add)
-                savedCount += repository.recordArchivedPriceHistory(
+                val newlySaved = repository.recordArchivedPriceHistory(
                     expectedTitle = candidate.title,
                     originalUrl = candidate.sourceUrl,
                     storeName = candidate.storeName,
                     quotes = archive.quotes
                 )
+                savedCount += newlySaved
+                if (newlySaved > 0) {
+                    val refreshedProduct = runCatching {
+                        withTimeout(10_000L) {
+                            repository.awaitProductForOnlineIdentity(onlineProductIdentityKey(candidate.title))
+                        }
+                    }.getOrNull()
+                    if (refreshedProduct != null) {
+                        val currentState = _uiState.value
+                        if (currentState.selectedProduct?.id == refreshedProduct.id) {
+                            _uiState.value = currentState.copy(selectedProduct = refreshedProduct)
+                        }
+                    }
+                }
             }
 
             if (skippedCount == candidates.size) return@launch

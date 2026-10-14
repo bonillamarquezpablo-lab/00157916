@@ -76,7 +76,7 @@ fun PriceHistoryChart(
 
     // Archive captures are shown separately in the product detail, not mixed into live-price claims.
     val validHistory = remember(priceHistory) {
-        sanitizePriceHistory(priceHistory.filterNot { it.eventLabel.equals("Internet Archive", ignoreCase = true) })
+        sanitizePriceHistory(priceHistory.filterNot { it.isArchiveEvidence })
     }
     val filteredPoints = remember(validHistory, selectedRange) {
         val days = selectedRange.days

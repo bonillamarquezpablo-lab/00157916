@@ -28,5 +28,8 @@ data class ProductEntity(
     val wasRecentlyInflated: Boolean = false,
     val fakePriorPrice: Double? = null,
     @ColumnInfo(defaultValue = "0")
-    val isPriceVerified: Boolean = false
+    val isPriceVerified: Boolean = false,
+    /** Google Shopping catalog ID for the one-search all-retailers product endpoint. */
+    @ColumnInfo(defaultValue = "NULL")
+    val googleProductId: String? = null
 )

@@ -8,7 +8,9 @@ import java.util.Locale
 
 data class CachedOnlineSearch(
     val results: List<SerpApiShoppingResult>,
-    val savedAt: Long
+    val savedAt: Long,
+    /** The original provider response is kept for reclassification without another search. */
+    val rawResponse: String? = null
 )
 
 /**
@@ -24,14 +26,29 @@ class OnlineSearchCache(context: Context) {
     fun read(provider: String, query: String, now: Long = System.currentTimeMillis()): CachedOnlineSearch? {
         val key = cacheKey(provider, query)
         val payload = preferences.getString(key, null) ?: return null
-        val savedAt = preferences.getLong("${key}_saved_at", 0L)
+        val savedAt = preferences.getLong(key + "_saved_at", 0L)
         val age = now - savedAt
         if (savedAt <= 0L || age < 0L || age >= CACHE_TTL_MS) {
-            preferences.edit().remove(key).remove("${key}_saved_at").apply()
+            preferences.edit().remove(key).remove(key + "_saved_at").apply()
             return null
         }
 
         return runCatching {
+            // New-format entries retain the complete response, not merely accepted offers.
+            if (payload.trimStart().startsWith("{")) {
+                val wrapper = JSONObject(payload)
+                val rawResponse = wrapper.optString("raw_response")
+                    .takeIf { it.isNotBlank() && it != "null" }
+                if (rawResponse != null) {
+                    return@runCatching CachedOnlineSearch(
+                        results = emptyList(),
+                        savedAt = savedAt,
+                        rawResponse = rawResponse
+                    )
+                }
+            }
+
+            // Backward compatibility for filtered results written by older app versions.
             val array = JSONArray(payload)
             val results = (0 until array.length()).mapNotNull { index ->
                 val item = array.optJSONObject(index) ?: return@mapNotNull null
@@ -56,13 +73,57 @@ class OnlineSearchCache(context: Context) {
                     rating = rating,
                     reviewCount = reviewCount,
                     observedAt = item.optLong("observedAt", savedAt),
-                    primeEligible = item.optBoolean("primeEligible", false)
+                    primeEligible = item.optBoolean("primeEligible", false),
+                    isFitmentUnverified = item.optBoolean("isFitmentUnverified", false),
+                    isCategoryUnverified = item.optBoolean("isCategoryUnverified", false)
                 )
             }
             CachedOnlineSearch(results = results, savedAt = savedAt)
         }.getOrElse {
-            preferences.edit().remove(key).remove("${key}_saved_at").apply()
+            preferences.edit().remove(key).remove(key + "_saved_at").apply()
             null
+        }
+    }
+
+    /** Removes one provider/query entry so an explicit refresh can bypass the 24-hour cache. */
+    fun invalidate(provider: String, query: String) {
+        val key = cacheKey(provider, query)
+        preferences.edit().remove(key).remove(key + "_saved_at").apply()
+    }
+
+    /** Stores an unfiltered provider response for 24 hours without credentials. */
+    fun writeRaw(
+        provider: String,
+        query: String,
+        rawResponse: String,
+        now: Long = System.currentTimeMillis()
+    ) {
+        val root = runCatching { JSONObject(rawResponse) }.getOrNull() ?: return
+        stripSensitiveFields(root)
+        pruneExpiredAndOldEntries(now)
+        val key = cacheKey(provider, query)
+        val payload = JSONObject()
+            .put("cache_version", 2)
+            .put("raw_response", root.toString())
+        preferences.edit()
+            .putString(key, payload.toString())
+            .putLong(key + "_saved_at", now)
+            .apply()
+    }
+
+    private fun stripSensitiveFields(value: Any?) {
+        val sensitive = Regex("""(?i)^(?:api[_-]?key|apikey|access[_-]?token|token|client[_-]?secret|secret|authorization|credential)$""")
+        when (value) {
+            is JSONObject -> {
+                val names = value.keys().asSequence().toList()
+                names.forEach { name ->
+                    if (sensitive.matches(name)) value.remove(name)
+                    else stripSensitiveFields(value.opt(name))
+                }
+            }
+            is JSONArray -> {
+                for (index in 0 until value.length()) stripSensitiveFields(value.opt(index))
+            }
         }
     }
 
@@ -82,6 +143,8 @@ class OnlineSearchCache(context: Context) {
                 put("reviewCount", result.reviewCount ?: JSONObject.NULL)
                 put("observedAt", result.observedAt)
                 put("primeEligible", result.primeEligible)
+                put("isFitmentUnverified", result.isFitmentUnverified)
+                put("isCategoryUnverified", result.isCategoryUnverified)
             })
         }
         preferences.edit()
@@ -116,11 +179,11 @@ class OnlineSearchCache(context: Context) {
         val bytes = MessageDigest.getInstance("SHA-256")
             .digest("${provider.trim().uppercase(Locale.ROOT)}|$normalized".toByteArray(Charsets.UTF_8))
         val digest = bytes.joinToString("") { byte -> "%02x".format(byte) }
-        return "search_$digest"
+        return "search_raw_v2_$digest"
     }
 
     companion object {
-        const val CACHE_TTL_MS = 55L * 60L * 1000L
+        const val CACHE_TTL_MS = 24L * 60L * 60L * 1000L
         private const val MAX_CACHED_SEARCHES = 40
     }
 }

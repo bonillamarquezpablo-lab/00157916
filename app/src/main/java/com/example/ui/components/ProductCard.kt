@@ -182,7 +182,14 @@ fun ProductCard(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Verdict Badge
+            // Evidence-based hero badge: never call the first quote a historical minimum.
+            HeroPriceBadge(
+                state = product.priceBadgeState,
+                modifier = Modifier.fillMaxWidth(),
+                compact = true
+            )
+
+            // Existing deal analysis certificate.
             DealVerdictBadge(verdict = product.verdict, compact = false)
 
             Spacer(modifier = Modifier.height(10.dp))

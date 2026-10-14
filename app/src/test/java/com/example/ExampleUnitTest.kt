@@ -2,6 +2,8 @@ package com.example
 
 import com.example.data.model.DealVerdict
 import com.example.data.model.PricePoint
+import com.example.data.model.sanitizePriceHistory
+import com.example.data.model.summarizePriceHistory
 import com.example.data.model.Product
 import com.example.data.model.Store
 import com.example.data.model.VerdictLevel
@@ -13,6 +15,7 @@ import com.example.data.remote.onlineProductIdentityKey
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ExampleUnitTest {
@@ -99,6 +102,55 @@ class ExampleUnitTest {
             listOf(30, 90, 183, 365, 730, 1095, 1460, null),
             ChartRange.values().map { it.days }
         )
+    }
+
+    @Test
+    fun oneQuoteCannotBePresentedAsAnObservedHistoricalMinimum() {
+        val summary = summarizePriceHistory(
+            listOf(
+                PricePoint(
+                    timestamp = 1_797_000_000_000L,
+                    dateLabel = "13 oct 2026",
+                    price = 41.63,
+                    storeName = "Tienda consultada"
+                )
+            )
+        )
+
+        assertEquals(1, summary.observationCount)
+        assertNull("One record is not a comparable historical minimum", summary.minimumObservedPoint)
+    }
+
+    @Test
+    fun minimumIsDerivedFromPointsShownAndKeepsExactCents() {
+        val summary = summarizePriceHistory(
+            listOf(
+                PricePoint(1_796_900_000_000L, "12 oct 2026", 42.49, "Tienda A"),
+                PricePoint(1_797_000_000_000L, "13 oct 2026", 41.63, "Tienda B"),
+                PricePoint(1_797_000_000_000L, "13 oct 2026", 43.10, "Tienda C")
+            )
+        )
+
+        assertEquals(2, summary.observationCount)
+        assertEquals(1_796_900_000_000L, summary.firstObservedAt)
+        assertEquals(41.63, summary.minimumObservedPoint?.price ?: -1.0, 0.001)
+    }
+
+    @Test
+    fun duplicateTimestampOrInvalidPricesCannotFabricateASecondObservation() {
+        val points = listOf(
+            PricePoint(1_797_000_000_000L, "13 oct 2026", 41.63, "Tienda A"),
+            PricePoint(1_797_000_000_000L, "13 oct 2026", 40.00, "Tienda B"),
+            PricePoint(1_797_000_000_001L, "13 oct 2026", Double.NaN, "Tienda C"),
+            PricePoint(0L, "sin fecha", 1.0, "Tienda D")
+        )
+
+        val sanitized = sanitizePriceHistory(points)
+        val summary = summarizePriceHistory(points)
+        assertEquals("Only one dated snapshot should remain", 1, sanitized.size)
+        assertEquals(1, summary.observationCount)
+        assertNull(summary.minimumObservedPoint)
+        assertEquals(40.00, sanitized.single().price, 0.001)
     }
 
     @Test

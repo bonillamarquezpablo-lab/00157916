@@ -12,12 +12,17 @@ import com.example.data.model.PricePoint
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.StoreOffer
+import com.example.data.remote.ArchivedPriceQuote
 import com.example.data.remote.SerpApiQuote
 import com.example.data.remote.SerpApiShoppingResult
+import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.linkTypeForUrl
+import com.example.data.remote.isWheelFitmentQuery
+import com.example.data.remote.containsWheelCategoryTerm
+import com.example.data.remote.wheelSetCountForTitle
 import com.example.data.model.Store
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -56,16 +61,11 @@ class ProductRepository(
     private val _latestProducts = MutableStateFlow<List<Product>>(emptyList())
 
     init {
-        // Store metadata is bundled; product rows are not. The user's online searches populate
-        // Room, while existing rows and tracking settings from older versions are preserved.
+        // Conservative cleanup: only discard product rows with no observation and no user tracking.
+        // Never delete observation history, tracked products/watchlist entries, or persisted stores.
         externalScope.launch {
-            val configuredStores = SpanishMarketData.getInitialStoreEntities()
-            val existingStoreIds = storeDao.getAllStoresSnapshot().map { it.id }.toSet()
-            val missingStores = configuredStores.filter { it.id !in existingStoreIds }
-            if (missingStores.isNotEmpty()) storeDao.insertAll(missingStores)
-
-            // Product rows are no longer seeded from the demo catalogue. Existing Room rows
-            // remain untouched for safety; Mercado hides unverified, untracked sample products.
+            productDao.deleteProductsWithoutObservations()
+            productDao.markProductsWithVerifiedObservations()
         }
     }
 
@@ -123,7 +123,7 @@ class ProductRepository(
         val validQuotes = quotes.filter { quote ->
             val title = titleById[quote.productId].orEmpty()
             quote.productId.isNotBlank() &&
-                quote.price.isFinite() && quote.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
+                quote.price.isFinite() && quote.price > 0.0 && quote.price <= MAX_HISTORY_PRICE_EUR &&
                 quote.currency == "EUR" &&
                 quote.observedAt >= HISTORY_START_TIMESTAMP &&
                 isEligibleHistoryTitle(title) &&
@@ -153,6 +153,12 @@ class ProductRepository(
             )
             if (saveDailyObservation(observation)) inserted++
             productDao.updatePriceVerification(quote.productId, true)
+            quote.googleProductId?.takeIf { it.isNotBlank() }?.let { googleId ->
+                val savedProduct = productDao.getProductById(quote.productId)
+                if (savedProduct != null && savedProduct.googleProductId != googleId) {
+                    productDao.insert(savedProduct.copy(googleProductId = googleId))
+                }
+            }
         }
         // Preserve the previous test contract: a validated provider quote is a successful
         // configuration test even when today's copy was already recorded and deduplicated.
@@ -167,104 +173,137 @@ class ProductRepository(
         results: List<SerpApiShoppingResult>,
         searchQuery: String = ""
     ): List<SerpApiShoppingResult> {
-        val deviceSearch = isDeviceSearchQuery(searchQuery)
         val queryModelMarkers = explicitModelMarkers(searchQuery)
         val eligible = results.filter { result ->
+            val accessoryForMainSearch =
+                isDeviceSearchQuery(searchQuery) &&
+                    !isAccessorySearchQuery(searchQuery) &&
+                    isAccessoryListing(result.title)
             result.title.isNotBlank() &&
                 result.storeName.isNotBlank() &&
                 result.price.isFinite() &&
-                result.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
+                result.price > 0.0 &&
+                result.price <= MAX_HISTORY_PRICE_EUR &&
                 result.observedAt >= HISTORY_START_TIMESTAMP &&
-                isEligibleHistoryTitle(result.title) &&
-                isEligibleSeller(result.storeName) &&
-                isPlausibleHistoryPrice(result.title, result.price) &&
-                !hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title) &&
-                // A device-specific query should never show cases, filters, mop kits or other
-                // accessories as if they were the requested device. Brand-only accessory searches
-                // remain unrestricted, preserving UGREEN cable/hub deals.
-                !(deviceSearch && !isAccessorySearchQuery(searchQuery) && isAccessoryListing(result.title))
+                !result.isRentalOrMonthly &&
+                !hasStrictModelMismatch(
+                    searchQuery,
+                    queryModelMarkers,
+                    result.title,
+                    allowAccessoryMemoryMismatch = accessoryForMainSearch
+                )
+        }
+        if (eligible.isEmpty()) return emptyList()
+
+        // Compare outliers only with the same product identity, not every result returned by
+        // a broad search. This is especially important for wheels: one 14-inch rim at 111 EUR
+        // must not be treated as suspicious merely because a different listing is a four-rim set.
+        val queryHasWheelSize = Regex("""(?i)\b(1[0-9]|2[0-4])\b""").containsMatchIn(searchQuery)
+        val wheelTitleCount = eligible.count { containsWheelCategoryTerm(it.title) }
+        val isWheelSearch = isWheelFitmentQuery(searchQuery) ||
+            containsWheelCategoryTerm(searchQuery) ||
+            (queryHasWheelSize && wheelTitleCount >= 2)
+
+        // Compare set prices only against other sets of the same count, never against a single wheel.
+        fun wheelBundleCount(title: String): String =
+            wheelSetCountForTitle(title)?.toString() ?: "single"
+
+        fun comparisonKey(result: SerpApiShoppingResult): String {
+            val identity = onlineProductIdentityKey(result.title)
+            return if (isWheelSearch) identity + "|wheel-set:" + wheelBundleCount(result.title) else identity
         }
 
-        // Retain the 25% accessory outlier guard for queries that ask about an entire device but
-        // lack a fully identifiable model. Median is robust against an extreme provider quote.
-        val fullProductPrices = if (deviceSearch) {
-            eligible.filterNot { isAccessoryListing(it.title) }.map { it.price }.sorted()
-        } else emptyList()
-        val referenceProductPrice = fullProductPrices.takeIf { it.isNotEmpty() }?.let { prices ->
-            if (prices.size % 2 == 1) prices[prices.size / 2]
-            else (prices[prices.size / 2 - 1] + prices[prices.size / 2]) / 2.0
-        }
-
-        val coded = eligible.map { result -> result to modelCode(result.title) }
-        return coded.filter { (candidate, code) ->
-            if (deviceSearch && isAccessoryListing(candidate.title) &&
-                referenceProductPrice != null &&
-                candidate.price < referenceProductPrice * ACCESSORY_PRICE_RATIO
-            ) {
-                false
-            } else if (code == null) {
-                true
+        val suspiciousByGroup = eligible.groupBy(::comparisonKey).mapValues { (_, comparableOffers) ->
+            val trustedPrices = comparableOffers.filterNot {
+                it.isSecondHand || it.isAccessoryOffer || it.isFitmentUnverified || it.isCategoryUnverified
+            }.map { it.price }.sorted()
+            val fallbackPrices = comparableOffers.filterNot { it.isFitmentUnverified }
+                .map { it.price }.sorted()
+            val prices = trustedPrices.ifEmpty { fallbackPrices }
+            if (prices.size < 2) {
+                // One listing alone provides no same-product reference for a statistical outlier.
+                false to (prices.singleOrNull() ?: 0.0)
             } else {
-                val comparablePrices = coded
-                    .filter { (_, otherCode) -> otherCode == code }
-                    .map { (other, _) -> other.price }
-                    .sorted()
-                if (comparablePrices.size < 3) {
-                    true
-                } else {
-                    val median = comparablePrices[comparablePrices.size / 2]
-                    candidate.price >= median * MIN_OUTLIER_PRICE_RATIO
-                }
+                val median = if (prices.size % 2 == 1) prices[prices.size / 2]
+                    else (prices[prices.size / 2 - 1] + prices[prices.size / 2]) / 2.0
+                true to median
             }
-        }.map { (result, _) -> result }
+        }
+        return eligible.map { result ->
+            val (hasComparableReference, median) = suspiciousByGroup[comparisonKey(result)] ?: (false to 0.0)
+            result.copy(
+                isSuspiciousPrice = !result.isFitmentUnverified &&
+                    hasComparableReference && median > 0.0 && result.price < median * 0.30
+            )
+        }
     }
 
-    private fun isPlausibleHistoryPrice(title: String, price: Double): Boolean {
-        if (!price.isFinite() || price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR) return false
-        val normalized = normalizedProductTitle(title)
+    /**
+     * Explains online offers rejected by trust/history rules without saving them.
+     * This is a pure in-memory diagnosis: it does not write Room or affect best-price selection.
+     */
+    fun diagnoseOnlineSearchRejections(
+        results: List<SerpApiShoppingResult>,
+        searchQuery: String = ""
+    ): List<RejectedOnlineOffer> {
+        val accepted = filterOnlineSearchResults(results, searchQuery)
+        fun key(result: SerpApiShoppingResult): String =
+            listOf(
+                result.title.trim().lowercase(Locale.ROOT),
+                result.storeName.trim().lowercase(Locale.ROOT),
+                result.price.toString(),
+                result.sourceUrl.trim().lowercase(Locale.ROOT)
+            ).joinToString("|")
+        val acceptedByKey = accepted.associateBy(::key)
+        val queryModelMarkers = explicitModelMarkers(searchQuery)
 
-        // Some items are accessories but still have a meaningful minimum price.
-        // Check these before the broad accessory rule so a suspiciously cheap power bank
-        // cannot pass merely because the title also contains "battery".
-        val portableBattery = Regex(
-            """\b(power\s*bank|powerbank|bateria\s+externa|bateria\s+portatil|portable\s+battery)\b"""
-        ).containsMatchIn(normalized)
-        if (portableBattery && price < 5.0) return false
+        return results.mapNotNull { result ->
+            val filtered = acceptedByKey[key(result)]
+            val visibleButNotHistory = filtered != null && (
+                result.isSecondHand ||
+                    result.isFitmentUnverified ||
+                    result.isCategoryUnverified ||
+                    (isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
+                        isAccessoryListing(result.title))
+            )
+            if (visibleButNotHistory) return@mapNotNull null
+            val reason = when {
+                result.title.isBlank() || result.storeName.isBlank() ->
+                    "Datos incompletos"
+                !result.price.isFinite() || result.price <= 0.0 || result.price > MAX_HISTORY_PRICE_EUR ->
+                    "Sin precio válido"
+                result.isRentalOrMonthly ->
+                    "Alquiler o cuota mensual"
+                result.isSecondHand ->
+                    "Segunda mano o reacondicionado"
+                hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title) ->
+                    "Otro modelo o variante"
+                !isEligibleSeller(result.storeName) ->
+                    "Otro modelo o vendedor no elegible"
+                !isEligibleHistoryTitle(result.title) ->
+                    "Título no elegible para historial"
+                filtered == null ->
+                    "Otro modelo o vendedor no elegible"
+                filtered.isSuspiciousPrice ->
+                    "Precio sospechoso: demasiado bajo frente a ofertas comparables"
+                !isPlausibleHistoryPrice(result.title, result.price) ->
+                    "Precio sospechoso"
+                else -> null
+            } ?: return@mapNotNull null
 
-        val powerStation = Regex(
-            """\b(power\s+station|portable\s+power\s+station|estacion\s+de\s+energia|generador\s+solar\s+portatil)\b"""
-        ).containsMatchIn(normalized)
-        if (powerStation && price < 80.0) return false
-
-        // Low prices are normal for ordinary cables, hubs and replacement accessories.
-        val accessory = Regex(
-            """\b(funda|case|carcasa|protector|cristal|cable|cargador|adaptador|repuesto|replacement|cover|bumper|pantalla|bateria|solo caja|dummy|hub|usb|conector|enchufe)\b"""
-        ).containsMatchIn(normalized)
-        if (accessory) return true
-
-        val smartphone = Regex(
-            """\b(iphone|redmi|poco|pixel|oneplus|realme|oppo|vivo|honor|smartphone|galaxy\s+(s|a|z|m)\s?\d{1,2})\b"""
-        ).containsMatchIn(normalized)
-        if (smartphone && price < 45.0) return false
-
-        val tablet = Regex("""\b(ipad|tablet|galaxy\s+tab|lenovo\s+tab)\b""")
-            .containsMatchIn(normalized)
-        if (tablet && price < 50.0) return false
-
-        val laptop = Regex("""\b(laptop|portatil|macbook|chromebook|notebook)\b""")
-            .containsMatchIn(normalized)
-        if (laptop && price < 100.0) return false
-
-        val television = Regex("""\b(oled|qled|televisor|television|smart\s+tv|tv\s+(oled|qled|samsung|lg|sony))\b""")
-            .containsMatchIn(normalized)
-        if (television && price < 80.0) return false
-
-        val console = Regex("""\b(playstation\s*5|ps5|xbox\s+(series|one)|nintendo\s+switch)\b""")
-            .containsMatchIn(normalized)
-        if (console && price < 70.0) return false
-
-        return true
+            RejectedOnlineOffer(
+                title = result.title.ifBlank { "Título no disponible" },
+                priceLabel = if (result.price.isFinite() && result.price > 0.0)
+                    String.format(Locale.ROOT, "%.2f", result.price)
+                else "Precio no disponible",
+                reason = reason,
+                provider = if (result.isAmazonOffer) "Amazon.es" else "Google Shopping"
+            )
+        }.distinctBy { "${it.provider}|${it.title}|${it.priceLabel}|${it.reason}" }
     }
+
+    private fun isPlausibleHistoryPrice(title: String, price: Double): Boolean =
+        price.isFinite() && price > 0.0 && price <= MAX_HISTORY_PRICE_EUR
 
     /**
      * Persist each valid "new in store" result returned by a manual online search.
@@ -282,7 +321,16 @@ class ProductRepository(
             "Amazon.es", "Google Shopping" -> sourceType
             else -> return 0
         }
+        // Suspicious prices remain visible as unverified Room observations. Second-hand offers
+        // and wheel listings missing requested fitment dimensions stay visible in the search UI,
+        // but are not added to Mercado or its price history.
         val eligible = filterOnlineSearchResults(results, searchQuery)
+            .filterNot { it.isSecondHand || it.isFitmentUnverified || it.isCategoryUnverified }
+            // Accessories remain visible in online search, but are not saved as the main device.
+            .filterNot {
+                isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
+                    isAccessoryListing(it.title)
+            }
         if (eligible.isEmpty()) return 0
 
         var inserted = 0
@@ -297,8 +345,11 @@ class ProductRepository(
             val productId = existingProduct?.id
                 ?: stableOnlineId("online_product_", group.identityKey)
             val displayTitle = existingProduct?.title?.takeIf { it.isNotBlank() } ?: group.title
-            val currentMinimum = group.minPrice
-            val highestToday = group.offers.maxOfOrNull { it.price } ?: currentMinimum
+            val hasTrustedOffer = group.offers.any { !it.isSuspiciousPrice }
+            val currentMinimum = if (hasTrustedOffer) group.minPrice else existingProduct?.currentPrice ?: 0.0
+            val highestToday = group.offers.maxOfOrNull { offer ->
+                offer.price / (offer.wheelSetCount ?: 1)
+            } ?: currentMinimum
             val productEntity = if (existingProduct != null) {
                 existingProduct.copy(
                     title = displayTitle,
@@ -315,7 +366,10 @@ class ProductRepository(
                     currentStoreId = storeId,
                     storeUrl = bestOffer.sourceUrl,
                     imageUrl = bestOffer.thumbnailUrl.takeIf { it.isNotBlank() } ?: existingProduct.imageUrl,
-                    isPriceVerified = true
+                    isPriceVerified = hasTrustedOffer || existingProduct.isPriceVerified,
+                    googleProductId = bestOffer.googleProductId
+                        ?: group.offers.firstNotNullOfOrNull { it.googleProductId }
+                        ?: existingProduct.googleProductId
                 )
             } else {
                 ProductEntity(
@@ -336,7 +390,9 @@ class ProductRepository(
                     imageUrl = bestOffer.thumbnailUrl.takeIf { it.isNotBlank() },
                     rating = 0.0,
                     reviewCount = 0,
-                    isPriceVerified = true
+                    isPriceVerified = group.offers.any { !it.isSuspiciousPrice },
+                    googleProductId = bestOffer.googleProductId
+                        ?: group.offers.firstNotNullOfOrNull { it.googleProductId }
                 )
             }
             productDao.insert(productEntity)
@@ -347,19 +403,26 @@ class ProductRepository(
             val bestOfferPerStore = group.offers
                 .groupBy { offer -> canonicalStoreId(offer.storeName, offer.sourceUrl) }
                 .values
-                .mapNotNull { offers -> offers.minByOrNull { it.price } }
+                .mapNotNull { offers ->
+                    offers.filterNot { it.isSuspiciousPrice }.minByOrNull { it.price }
+                        ?: offers.minByOrNull { it.price }
+                }
             for (result in bestOfferPerStore) {
                 val offerStoreId = canonicalStoreId(result.storeName, result.sourceUrl)
                 val observation = PriceObservationEntity(
                     productId = productId,
                     storeId = offerStoreId,
-                    price = result.price,
+                    price = result.price / (result.wheelSetCount ?: 1),
                     currency = "EUR",
                     observedAt = result.observedAt,
                     sourceUrl = result.sourceUrl,
                     sourceName = normalizedSource,
-                    isVerified = true,
-                    verificationNote = "Resultado online válido en euros; precio y disponibilidad pendientes de confirmación en la tienda.",
+                    isVerified = !result.isSuspiciousPrice,
+                    verificationNote = if (result.isSuspiciousPrice) {
+                        "Precio sospechoso: inferior al 30 % de la mediana de la búsqueda. Conservado como observación sin verificar y excluido del mejor precio."
+                    } else {
+                        "Resultado online válido en euros; precio y disponibilidad pendientes de confirmación en la tienda."
+                    },
                     productTitle = result.title,
                     storeName = result.storeName,
                     sourceType = normalizedSource,
@@ -369,6 +432,136 @@ class ProductRepository(
             }
         }
         return inserted
+    }
+
+    /**
+     * Persists prices parsed from public Internet Archive captures for a product that already has
+     * a current provider-backed row. Archive points use capture time as observedAt and separately
+     * record when Mínimo imported them. They never update the product's current price.
+     */
+    suspend fun recordArchivedPriceHistory(
+        expectedTitle: String,
+        originalUrl: String,
+        storeName: String,
+        quotes: List<ArchivedPriceQuote>
+    ): Int {
+        if (expectedTitle.isBlank() || originalUrl.isBlank() || quotes.isEmpty()) return 0
+        val originalUri = parseHttpUri(originalUrl) ?: return 0
+        if (!originalUri.scheme.equals("https", ignoreCase = true)) return 0
+
+        val products = productDao.getAllProductsSnapshot()
+        val identity = onlineProductIdentityKey(expectedTitle)
+        val product = products.firstOrNull {
+            onlineProductIdentityKey(it.title) == identity && it.isPriceVerified
+        } ?: return 0
+        val now = System.currentTimeMillis()
+        val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)
+        val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
+        val storeId = canonicalStoreId(merchantName, originalUrl)
+        var inserted = 0
+
+        for (quote in quotes.distinctBy { it.observedAt to it.price }) {
+            val snapshotUri = parseHttpUri(quote.snapshotUrl) ?: continue
+            if (!snapshotUri.host.equals("web.archive.org", ignoreCase = true)) continue
+            val snapshotTimestamp = Regex("""^/web/(\d{14})id_/""")
+                .find(snapshotUri.path.orEmpty())?.groupValues?.getOrNull(1)?.let { rawTimestamp ->
+                    runCatching {
+                        SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+                            isLenient = false
+                            timeZone = TimeZone.getTimeZone("UTC")
+                        }.parse(rawTimestamp)?.time
+                    }.getOrNull()
+                } ?: continue
+            if (kotlin.math.abs(snapshotTimestamp - quote.observedAt) > 1_000L) continue
+            if (!quote.originalUrl.trimEnd('/').equals(originalUrl.trimEnd('/'), ignoreCase = true)) continue
+            if (quote.currency != "EUR" ||
+                !quote.price.isFinite() ||
+                quote.price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR ||
+                quote.observedAt < earliestAllowed ||
+                quote.observedAt >= now ||
+                quote.productTitle.isBlank()
+            ) continue
+
+            val observation = PriceObservationEntity(
+                productId = product.id,
+                storeId = storeId,
+                price = quote.price,
+                currency = "EUR",
+                observedAt = quote.observedAt,
+                sourceUrl = quote.snapshotUrl,
+                sourceName = "Internet Archive (Wayback Machine)",
+                isVerified = true,
+                verificationNote = "Precio EUR extraído de metadatos de producto en una captura pública archivada. Es un precio histórico anunciado; no confirma impuestos, envío, disponibilidad ni precio final.",
+                productTitle = quote.productTitle,
+                storeName = merchantName,
+                sourceType = "Internet Archive",
+                linkType = "Archivo histórico",
+                collectedAt = now,
+                evidenceType = "archive",
+                sourcePageUrl = originalUrl
+            )
+            if (saveDailyObservation(observation)) inserted++
+        }
+        return inserted
+    }
+
+    /**
+     * Save a single Google Product API response against the already-identified product row.
+     * No new catalogue product is created and no observation is saved if the product was not
+     * safely identified by the API parser.
+     */
+    suspend fun recordProductComparisonOffers(
+        productId: String,
+        expectedTitle: String,
+        offers: List<SerpApiShoppingResult>
+    ): Int {
+        val product = productDao.getProductById(productId) ?: return 0
+        if (expectedTitle.isBlank() || onlineProductIdentityKey(product.title) != onlineProductIdentityKey(expectedTitle)) {
+            return 0
+        }
+        val valid = filterOnlineSearchResults(offers, expectedTitle)
+            .filterNot { it.isSecondHand || it.isRentalOrMonthly }
+            .filter { isEligibleSeller(it.storeName) && isEligibleHistoryTitle(it.title) }
+            .groupBy { canonicalStoreId(it.storeName, it.sourceUrl) }
+            .values
+            .mapNotNull { rows ->
+                rows.filterNot { it.isSuspiciousPrice }.minByOrNull { it.price }
+                    ?: rows.minByOrNull { it.price }
+            }
+        if (valid.isEmpty()) return 0
+
+        var savedCount = 0
+        for (offer in valid) {
+            val storeId = canonicalStoreId(offer.storeName, offer.sourceUrl)
+            val observation = PriceObservationEntity(
+                productId = productId,
+                storeId = storeId,
+                price = offer.price / (offer.wheelSetCount ?: 1),
+                currency = "EUR",
+                observedAt = offer.observedAt,
+                sourceUrl = offer.sourceUrl,
+                sourceName = "SerpApi · Google Product API",
+                isVerified = !offer.isSuspiciousPrice,
+                verificationNote = if (offer.isSuspiciousPrice) {
+                    "Precio sospechoso según la mediana de ofertas; conservado sin verificar."
+                } else {
+                    "Oferta de tienda recuperada con Google Product API; confirma precio final y disponibilidad."
+                },
+                productTitle = product.title,
+                storeName = offer.storeName,
+                sourceType = "Google Shopping",
+                linkType = offer.linkType
+            )
+            if (saveDailyObservation(observation)) savedCount++
+        }
+        if (savedCount > 0) {
+            productDao.updatePriceVerification(productId, true)
+            val googleId = valid.firstNotNullOfOrNull { it.googleProductId }
+            if (!googleId.isNullOrBlank() && product.googleProductId != googleId) {
+                productDao.insert(product.copy(googleProductId = googleId))
+            }
+        }
+        return savedCount
     }
 
     /** Resolve a persisted online product when a grouped result card is tapped. */
@@ -400,6 +593,13 @@ class ProductRepository(
         )
         if (existing == null) {
             priceObservationDao.insert(observation)
+            return true
+        }
+        // Never let a suspicious, unverified observation replace a verified same-day quote.
+        if (!observation.isVerified && existing.isVerified) return false
+        // A newly validated offer supersedes a previously unverified suspicious row.
+        if (observation.isVerified && !existing.isVerified) {
+            priceObservationDao.update(observation.copy(id = existing.id))
             return true
         }
 
@@ -462,7 +662,7 @@ class ProductRepository(
 
     private fun isAccessoryListing(title: String): Boolean =
         Regex(
-            """(?i)\b(funda|fundas|carcasa|carcasas|cristal\s+templado|mop\s+kit|recambio|recambios|filtro|filtros|protector|adaptador|soporte|repuesto|repuestos|replacement|screen\s+protector|tempered\s+glass|cover|case)\b"""
+            """(?i)\b(p[oó]ster(?:es|s)?|poster(?:es|s)?|fundas?|carcasas?|cristal\s+templado|mop\s+kit|recambios?|filtros?|protector(?:es)?|cargador(?:es)?|chargers?|charging|cables?|adaptador(?:es)?|hubs?|soportes?|repuestos?|replacement|screen\s+protector|tempered\s+glass|covers?|cases?)\b"""
         ).containsMatchIn(normalizedProductTitle(title))
 
     private fun explicitModelMarkers(text: String): Set<String> {
@@ -506,7 +706,8 @@ class ProductRepository(
     private fun hasStrictModelMismatch(
         query: String,
         queryMarkers: Set<String>,
-        resultTitle: String
+        resultTitle: String,
+        allowAccessoryMemoryMismatch: Boolean = false
     ): Boolean {
         if (queryMarkers.isEmpty()) return false
         val resultMarkers = explicitModelMarkers(resultTitle)
@@ -534,12 +735,13 @@ class ProductRepository(
             .map { it.value.replace(" ", "") }.toSet()
         val availableMemory = memoryPattern.findAll(normalizedProductTitle(resultTitle))
             .map { it.value.replace(" ", "") }.toSet()
-        return requestedMemory.isNotEmpty() && !availableMemory.containsAll(requestedMemory)
+        return !allowAccessoryMemoryMismatch &&
+            requestedMemory.isNotEmpty() && !availableMemory.containsAll(requestedMemory)
     }
 
     private fun isAccessorySearchQuery(query: String): Boolean =
         Regex(
-            """\b(funda|fundas|carcasa|carcasas|cristal templado|protector|cable|cables|cargador|adaptador|hub|mop kit|recambio|recambios|filtro|filtros|repuesto|repuestos|replacement|case|cover)\b"""
+            """\b(poster(?:es|s)?|funda|fundas|carcasa|carcasas|cristal templado|protector|protectores|protector de pantalla|screen protector|tempered glass|cable|cables|cargador|cargadores|charger|chargers|charging|adaptador|adaptadores|hub|hubs|mop kit|recambio|recambios|filtro|filtros|repuesto|repuestos|replacement|case|cases|cover|covers)\b"""
         ).containsMatchIn(normalizedProductTitle(query))
 
     private fun isDeviceSearchQuery(query: String): Boolean {
@@ -640,7 +842,7 @@ class ProductRepository(
     }
 
     private companion object {
-        // Fixed policy boundary: no stored row before this local Spain date contributes to history.
+        // Live provider rows before this local Spain date remain excluded; verified archive rows bypass this boundary only through evidenceType=archive.
         val HISTORY_START_TIMESTAMP: Long = Calendar.getInstance(TimeZone.getTimeZone("Europe/Madrid")).apply {
             clear()
             set(2026, Calendar.OCTOBER, 13, 0, 0, 0)
@@ -784,25 +986,34 @@ class ProductRepository(
         stores: List<Store>,
         verifiedObservations: List<PriceObservationEntity>
     ): Product {
-        // Ignore legacy/imported timestamps before the policy start. Observations from either a
-        // direct retailer URL or a Google Shopping page can support visible history.
+        // Live rows retain the policy boundary so legacy/demo prices cannot enter the chart.
+        // Independently sourced historical archive points may predate that boundary, but only
+        // when the row explicitly carries archive provenance from the v8 schema.
         val sortedHistory = verifiedObservations.filter { observation ->
-            observation.observedAt >= HISTORY_START_TIMESTAMP &&
+            val eligibleDate = observation.evidenceType == "archive" ||
+                observation.observedAt >= HISTORY_START_TIMESTAMP
+            eligibleDate &&
                 observation.currency == "EUR" &&
-                isEligibleHistoryTitle(observation.productTitle) &&
-                isEligibleSeller(observation.storeName) &&
-                isPlausibleHistoryPrice(observation.productTitle, observation.price)
+                observation.price.isFinite() &&
+                observation.price > 0.0 &&
+                observation.price <= MAX_HISTORY_PRICE_EUR
         }.sortedBy { it.observedAt }
-        // Room keeps each store observation, but the chart must be a daily time series, not a
-        // sequence of sellers from the same search. Plot the cheapest valid offer for each day.
-        val latestDayStart = sortedHistory.lastOrNull()?.let { localDayBounds(it.observedAt).first }
-        val latestBatch = sortedHistory.filter {
-            latestDayStart != null && localDayBounds(it.observedAt).first == latestDayStart
+        val liveHistory = sortedHistory.filter { it.evidenceType != "archive" }
+        // Current price/store must always come from a live provider observation, never a Wayback
+        // snapshot, even when an archived snapshot was captured later in the same calendar day.
+        val latestLiveDayStart = liveHistory.lastOrNull()?.let { localDayBounds(it.observedAt).first }
+        val latestBatch = liveHistory.filter {
+            latestLiveDayStart != null && localDayBounds(it.observedAt).first == latestLiveDayStart
         }
+        // One point per local day. Prefer a live observation for a day when available; otherwise
+        // use its lowest verified archive quote. Gaps remain gaps, with no interpolated values.
         val snapshotHistory = sortedHistory
             .groupBy { localDayBounds(it.observedAt).first }
             .values
-            .mapNotNull { dayOffers -> dayOffers.minByOrNull { it.price } }
+            .mapNotNull { dayOffers ->
+                val liveOffers = dayOffers.filter { it.evidenceType != "archive" }
+                (liveOffers.ifEmpty { dayOffers }).minByOrNull { it.price }
+            }
             .sortedBy { localDayBounds(it.observedAt).first }
         val latestObservation = latestBatch.minByOrNull { it.price }
         val minObservation = snapshotHistory.minByOrNull { it.price }
@@ -824,7 +1035,7 @@ class ProductRepository(
             uniqueTimestamps.size >= 3 &&
             uniqueTimestamps.last() - uniqueTimestamps.first() >= ninetyDaysMs &&
             lastNinetyDays.map { it.observedAt }.distinct().size >= 3 &&
-            now - (sortedHistory.maxOfOrNull { it.observedAt } ?: 0L) <= 7L * 24L * 60L * 60L * 1000L
+            now - (liveHistory.maxOfOrNull { it.observedAt } ?: 0L) <= 7L * 24L * 60L * 60L * 1000L
         val current = if (priceIsVerified) latestObservation!!.price else currentPrice
         // These bounds describe the actual saved daily series; the 90-day average remains
         // unavailable until enough dates have accumulated.
@@ -886,7 +1097,8 @@ class ProductRepository(
             imageResName = imageResName,
             imageUrl = imageUrl.orEmpty(),
             isPriceVerified = priceIsVerified,
-            priceObservedAt = latestObservation?.observedAt.takeIf { priceIsVerified }
+            priceObservedAt = latestObservation?.observedAt.takeIf { priceIsVerified },
+            googleProductId = googleProductId
         )
     }
 

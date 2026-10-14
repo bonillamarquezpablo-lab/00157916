@@ -38,6 +38,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -77,6 +78,7 @@ fun MarketScreen(
     onSortChange: (SortOption) -> Unit,
     onProductClick: (Product) -> Unit,
     onToggleTrack: (Product) -> Unit,
+    onPrepareTrackedRefresh: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showSortMenu by remember { mutableStateOf(false) }
@@ -434,6 +436,50 @@ fun MarketScreen(
                             )
                         }
                     }
+                }
+            }
+        }
+
+        // Manual refresh for followed products; no background work or hidden quota usage.
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onPrepareTrackedRefresh,
+                    enabled = !uiState.isRefreshingPrices &&
+                        !uiState.isOnlineSearching &&
+                        !uiState.isPreparingSerpApiAction &&
+                        !uiState.isExecutingSerpApiAction &&
+                        !uiState.isCheckingSerpApiAccount,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("update_tracked_products_button")
+                ) {
+                    Text(
+                        when {
+                            uiState.isPreparingSerpApiAction -> "Comprobando saldo…"
+                            uiState.isExecutingSerpApiAction -> "Actualizando guardados…"
+                            else -> "Actualizar guardados"
+                        }
+                    )
+                }
+                Text(
+                    "Solo fichas seguidas (marcador verde «Siguiendo») · manual · máximo 10 por pulsación · no repite consultas antes de 24 h",
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                uiState.serpApiActionStatus?.let { status ->
+                    Text(
+                        status,
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }

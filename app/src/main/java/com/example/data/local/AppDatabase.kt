@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TrackedProductEntity::class,
         PriceObservationEntity::class
     ],
-    version = 6,
+    version = 8,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -114,6 +114,36 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Keeps existing products and history while adding the Google Shopping catalog ID. */
+        val MIGRATION_6_7: Migration = object : Migration(6, 7) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE `products` ADD COLUMN `googleProductId` TEXT DEFAULT NULL"
+                )
+            }
+        }
+
+        /**
+         * Separates the time a price was acquired from the historical observation date and
+         * marks archive-backed rows explicitly so old demo/legacy live rows remain excluded.
+         */
+        val MIGRATION_7_8: Migration = object : Migration(7, 8) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE price_observations ADD COLUMN collectedAt INTEGER NOT NULL DEFAULT 0"
+                )
+                database.execSQL(
+                    "UPDATE price_observations SET collectedAt = observedAt WHERE collectedAt = 0"
+                )
+                database.execSQL(
+                    "ALTER TABLE price_observations ADD COLUMN evidenceType TEXT NOT NULL DEFAULT 'live'"
+                )
+                database.execSQL(
+                    "ALTER TABLE price_observations ADD COLUMN sourcePageUrl TEXT NOT NULL DEFAULT ''"
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -124,7 +154,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "minimo_spanish_market.db"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                     .build()
                 INSTANCE = instance
                 instance

@@ -22,4 +22,5 @@ interface TrackedProductDao {
 
     @Query("UPDATE tracked_products SET targetAlertPrice = :targetPrice WHERE productId = :productId")
     suspend fun updateTargetPrice(productId: String, targetPrice: Double?)
+
 }

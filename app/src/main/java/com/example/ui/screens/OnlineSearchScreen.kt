@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.Storefront
@@ -53,10 +54,87 @@ import coil.compose.AsyncImage
 import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
+import com.example.data.remote.isAccessorySearchQuery
+import com.example.data.remote.isWheelFitmentQuery
 import com.example.ui.viewmodel.OnlineSearchProvider
 import com.example.ui.viewmodel.TrackerUiState
 import java.text.NumberFormat
 import java.util.Locale
+
+internal data class OnlineSearchDisplayGroup(
+    val group: OnlineProductGroup,
+    val stableKey: String
+)
+
+/**
+ * Apply view-only filters to the already loaded snapshot. Split groups by condition so used
+ * offers can be appended as separate cards instead of replacing a new offer for the same model.
+ */
+internal fun buildOnlineSearchDisplayGroups(
+    results: List<SerpApiShoppingResult>,
+    query: String,
+    showSecondHand: Boolean,
+    amazonOnly: Boolean
+): List<OnlineSearchDisplayGroup> {
+    val filtered = results.filter { result ->
+        (showSecondHand || !result.isSecondHand) &&
+            (!amazonOnly || result.isAmazonOffer)
+    }
+    val treatAccessoriesSeparately = !isAccessorySearchQuery(query)
+    val accessories = if (treatAccessoriesSeparately) {
+        filtered.filter { it.isAccessoryOffer }
+    } else {
+        emptyList()
+    }
+    val mainProductOffers = if (treatAccessoriesSeparately) {
+        filtered.filterNot { it.isAccessoryOffer }
+    } else {
+        filtered
+    }
+
+    val mainDisplayGroups = mutableListOf<OnlineSearchDisplayGroup>()
+    val accessoryDisplayGroups = mutableListOf<OnlineSearchDisplayGroup>()
+    fun appendGroups(
+        destination: MutableList<OnlineSearchDisplayGroup>,
+        segment: String,
+        offers: List<SerpApiShoppingResult>
+    ) {
+        groupOnlineShoppingResults(offers).forEach { group ->
+            destination += OnlineSearchDisplayGroup(
+                group = group,
+                stableKey = "${segment}|${group.identityKey}"
+            )
+        }
+    }
+
+    val newOffers = mainProductOffers.filterNot { it.isSecondHand }
+    val secondHandOffers = mainProductOffers.filter { it.isSecondHand }
+
+    // Keep new, used, and fitment-unconfirmed offers in separate cards, but rank all main-product
+    // cards together by comparable price. The second-hand toggle must not force used offers to the
+    // bottom of the list regardless of price.
+    appendGroups(mainDisplayGroups, "new", newOffers.filterNot { it.isFitmentUnverified })
+    appendGroups(mainDisplayGroups, "fitment-unconfirmed", newOffers.filter { it.isFitmentUnverified })
+    appendGroups(mainDisplayGroups, "second-hand", secondHandOffers.filterNot { it.isFitmentUnverified })
+    appendGroups(mainDisplayGroups, "second-hand-fitment-unconfirmed", secondHandOffers.filter { it.isFitmentUnverified })
+
+    // Accessories remain visible but never take priority over the searched-for main product.
+    appendGroups(accessoryDisplayGroups, "accessory", accessories)
+    val priceOrder = compareBy<OnlineSearchDisplayGroup> { it.group.minPrice }
+        .thenBy { it.group.title.lowercase(Locale.ROOT) }
+        .thenBy { it.stableKey }
+    val sortedMain = mainDisplayGroups.sortedWith(priceOrder)
+    val sortedAccessories = accessoryDisplayGroups.sortedWith(priceOrder)
+    val isWheelFitmentSearch = isWheelFitmentQuery(query)
+    // For wheel-fitment searches, used wheels and new wheels are comparable offers: show them
+    // together in one price order when the opt-in filter is enabled. Keep accessory prioritization
+    // for other product searches so unrelated low-cost accessories do not outrank the main product.
+    return if (isWheelFitmentSearch) {
+        (sortedMain + sortedAccessories).sortedWith(priceOrder)
+    } else {
+        sortedMain + sortedAccessories
+    }
+}
 
 @Composable
 fun OnlineSearchScreen(
@@ -64,15 +142,26 @@ fun OnlineSearchScreen(
     onQueryChange: (String) -> Unit,
     onSearch: () -> Unit,
     onAmazonSearch: () -> Unit,
+    onForceRefresh: () -> Unit,
     onAmazonOnlyChange: (Boolean) -> Unit,
+    onToggleDiscarded: () -> Unit,
+    onShowSecondHandChange: (Boolean) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenProduct: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val allGroups = groupOnlineShoppingResults(state.onlineSearchResults)
-    val amazonGroups = groupOnlineShoppingResults(
-        state.onlineSearchResults.filter { it.isAmazonOffer }
+    val allGroups = buildOnlineSearchDisplayGroups(
+        results = state.onlineSearchResults,
+        query = state.onlineSearchQuery,
+        showSecondHand = state.onlineSearchShowSecondHand,
+        amazonOnly = false
+    )
+    val amazonGroups = buildOnlineSearchDisplayGroups(
+        results = state.onlineSearchResults,
+        query = state.onlineSearchQuery,
+        showSecondHand = state.onlineSearchShowSecondHand,
+        amazonOnly = true
     )
     val visibleGroups = if (state.onlineSearchAmazonOnly) amazonGroups else allGroups
 
@@ -136,6 +225,18 @@ fun OnlineSearchScreen(
                             Text("Buscar precios de Amazon.es en Mínimo")
                         }
                     }
+                    if (state.onlineSearchResults.isNotEmpty()) {
+                        OutlinedButton(
+                            onClick = onForceRefresh,
+                            enabled = !state.isOnlineSearching && !state.isRefreshingPrices &&
+                                state.onlineSearchQuery.trim().length >= 2,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Actualizar resultados ahora (puede consumir cuota)")
+                        }
+                    }
                     Text(
                         "Consulta el catálogo público de Amazon.es y muestra los precios aquí. No necesita abrir la app de Amazon, pero no puede leer tus cupones o precios personalizados de la cuenta Prime.",
                         style = MaterialTheme.typography.bodySmall,
@@ -164,6 +265,53 @@ fun OnlineSearchScreen(
                 Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        if (state.onlineSearchDiscardedOffers.isNotEmpty()) {
+            item {
+                OutlinedButton(
+                    onClick = onToggleDiscarded,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        if (state.showOnlineSearchDiscarded) "Ocultar descartados"
+                        else "Ver descartados (${state.onlineSearchDiscardedOffers.size})"
+                    )
+                }
+            }
+            if (state.showOnlineSearchDiscarded) {
+                items(
+                    count = state.onlineSearchDiscardedOffers.size,
+                    key = { index -> "discarded-${state.onlineSearchDiscardedOffers[index].provider}-${index}" }
+                ) { index ->
+                    val rejected = state.onlineSearchDiscardedOffers[index]
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(rejected.title, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                rejected.priceLabel.ifBlank { "Precio no disponible" },
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                rejected.reason,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Text(
+                                rejected.provider,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
         if (state.onlineSearchResults.isNotEmpty()) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -185,6 +333,13 @@ fun OnlineSearchScreen(
                                 label = { Text("Solo Amazon (${amazonGroups.size})") }
                             )
                         }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = state.onlineSearchShowSecondHand,
+                                onClick = { onShowSecondHandChange(!state.onlineSearchShowSecondHand) },
+                                label = { Text("Mostrar segunda mano") }
+                            )
+                        }
                     }
                 }
             }
@@ -198,10 +353,15 @@ fun OnlineSearchScreen(
                     )
                 }
             }
-            items(visibleGroups, key = { it.identityKey }) { group ->
+            items(visibleGroups, key = { it.stableKey }) { displayGroup ->
+                val group = displayGroup.group
                 ShoppingResultCard(
                     group = group,
-                    onOpenProduct = { onOpenProduct(group.identityKey) },
+                    onOpenProduct = if (group.offers.all { it.isFitmentUnverified }) {
+                        null
+                    } else {
+                        { onOpenProduct(group.identityKey) }
+                    },
                     onOpenBestOffer = {
                         val best = group.cheapestOffer
                         openStoreUrl(context, best.sourceUrl, preferAmazonApp = best.isAmazonOffer)
@@ -222,16 +382,50 @@ fun OnlineSearchScreen(
 @Composable
 private fun ShoppingResultCard(
     group: OnlineProductGroup,
-    onOpenProduct: () -> Unit,
+    onOpenProduct: (() -> Unit)?,
     onOpenBestOffer: () -> Unit
 ) {
     val best = group.cheapestOffer
+    val fitmentUnverified = group.offers.all { it.isFitmentUnverified }
+    val categoryUnverified = group.offers.all { it.isCategoryUnverified }
+    val wheelSetCount = group.wheelSetCount
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenProduct),
+        modifier = Modifier.fillMaxWidth().then(
+            if (onOpenProduct == null) Modifier else Modifier.clickable(onClick = onOpenProduct)
+        ),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (group.offers.all { it.isSecondHand } ||
+                group.offers.all { it.isAccessoryOffer } || fitmentUnverified ||
+                categoryUnverified || wheelSetCount != null
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (group.offers.all { it.isSecondHand }) {
+                        ResultKindBadge("Segunda mano", accessory = false)
+                    }
+                    if (group.offers.all { it.isAccessoryOffer }) {
+                        ResultKindBadge("Accesorio", accessory = true)
+                    }
+                    if (wheelSetCount != null) {
+                        ResultKindBadge("Juego de $wheelSetCount", accessory = false)
+                    }
+                    if (fitmentUnverified) {
+                        ResultKindBadge("Medidas por confirmar", accessory = false)
+                    }
+                    if (categoryUnverified) {
+                        ResultKindBadge("Por confirmar", accessory = false)
+                    }
+                }
+            }
+            if (fitmentUnverified) {
+                Text(
+                    "El título no confirma todas las medidas solicitadas. Comprueba diámetro, anclaje, ancho y ET cuando se hayan solicitado. No se añade a Mercado ni al historial hasta confirmar la compatibilidad.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
                 if (best.thumbnailUrl.isNotBlank()) {
                     AsyncImage(
@@ -251,21 +445,45 @@ private fun ShoppingResultCard(
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(group.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     Text(
-                        "Desde " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(group.minPrice),
+                        if (wheelSetCount != null) {
+                            "Desde " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(group.minPrice) + " / llanta"
+                        } else {
+                            "Desde " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(group.minPrice)
+                        },
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        "${group.storeCount} tiendas · precio más bajo en ${best.storeName}",
+                        if (wheelSetCount != null) {
+                            "${group.storeCount} tiendas · precio por llanta más bajo en ${best.storeName}"
+                        } else {
+                            "${group.storeCount} tiendas · precio más bajo en ${best.storeName}"
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium
                     )
+                    if (wheelSetCount != null) {
+                        Text(
+                            "Precio total del juego de $wheelSetCount: " +
+                                NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(best.price),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Text(
                         "${group.offers.size} ofertas · toca para ver tiendas e historial",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (group.offers.any { it.isSuspiciousPrice }) {
+                        Text(
+                            "Hay una oferta con precio sospechoso; se excluye del mejor precio",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
@@ -292,6 +510,33 @@ private fun ShoppingResultCard(
                 Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
             }
         }
+    }
+}
+
+@Composable
+private fun ResultKindBadge(label: String, accessory: Boolean) {
+    val background = if (accessory) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.secondaryContainer
+    }
+    val foreground = if (accessory) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(background)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = foreground
+        )
     }
 }
 

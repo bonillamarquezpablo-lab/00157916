@@ -42,5 +42,14 @@ data class PriceObservationEntity(
     val sourceType: String = "Google Shopping",
     /** Where the saved URL opens: the merchant directly or an intermediate Google page. */
     @ColumnInfo(defaultValue = "'directo'")
-    val linkType: String = "directo"
+    val linkType: String = "directo",
+    /** When Mínimo acquired the row; differs from observedAt for imported historical evidence. */
+    @ColumnInfo(defaultValue = "0")
+    val collectedAt: Long = System.currentTimeMillis(),
+    /** Evidence class: live observation or verified historical archive capture. */
+    @ColumnInfo(defaultValue = "'live'")
+    val evidenceType: String = "live",
+    /** Original merchant product page for archive-backed rows; sourceUrl points to the snapshot. */
+    @ColumnInfo(defaultValue = "''")
+    val sourcePageUrl: String = ""
 )

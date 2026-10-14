@@ -38,7 +38,8 @@ data class SerpApiQuote(
     val sourceUrl: String,
     val storeId: String,
     val storeName: String,
-    val sourceName: String = "SerpApi · Google Shopping España"
+    val sourceName: String = "SerpApi · Google Shopping España",
+    val googleProductId: String? = null
 )
 
 data class SerpApiBatchResult(
@@ -55,25 +56,33 @@ data class SerpApiShoppingSearchReport(
     val rejectedForPriceOrCurrency: Int,
     val rejectedForLink: Int,
     val rejectedOther: Int,
-    val firstResultFields: String = ""
+    val firstResultFields: String = "",
+    val discardedOffers: List<RejectedOnlineOffer> = emptyList(),
+    val providerName: String = "Google Shopping",
+    /** Unfiltered provider response; stored locally without credentials for later reclassification. */
+    val rawResponse: String? = null
 ) {
     fun emptyResultMessage(query: String): String {
         if (rawResultCount == 0) {
-            return "Google Shopping no devolvió productos para «$query». Prueba con el modelo exacto o inténtalo más tarde; no se ha guardado ningún precio."
+            return "$providerName no devolvió productos para «$query». Prueba con el modelo exacto o inténtalo más tarde; no se ha guardado ningún precio."
         }
+        val detailedReasons = discardedOffers.groupingBy { it.reason }.eachCount()
+            .entries.joinToString("; ") { "${it.value} por ${it.key.lowercase(Locale.ROOT)}" }
         val reasons = mutableListOf<String>()
         if (rejectedAsIrrelevant > 0) reasons += "$rejectedAsIrrelevant no coincidían suficientemente con la búsqueda"
         if (rejectedForPriceOrCurrency > 0) reasons += "$rejectedForPriceOrCurrency no tenían un precio en euros verificable"
         if (rejectedForLink > 0) reasons += "$rejectedForLink no tenían un enlace utilizable"
-        if (rejectedOther > 0) reasons += "$rejectedOther estaban incompletos"
-        val detail = reasons.joinToString("; ").ifBlank { "ninguno pasó los filtros de seguridad" }
+        if (rejectedOther > 0) reasons += "$rejectedOther tenían condición no válida o datos incompletos"
+        val detail = detailedReasons.ifBlank {
+            reasons.joinToString("; ").ifBlank { "ninguno pasó los filtros de seguridad" }
+        }
         val fieldDiagnostic = if (
             results.isEmpty() &&
             rejectedForLink > 0 &&
             rejectedForLink == rawResultCount &&
             firstResultFields.isNotBlank()
         ) " Campos recibidos: $firstResultFields." else ""
-        return "Google Shopping devolvió $rawResultCount resultados para «$query», pero ninguno era utilizable: $detail.$fieldDiagnostic No se ha guardado ningún precio."
+        return "$providerName devolvió $rawResultCount resultados para «$query», pero ninguno era utilizable: $detail.$fieldDiagnostic No se ha guardado ningún precio."
     }
 }
 
@@ -194,7 +203,8 @@ class SerpApiClient(
         require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
         val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
         require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
-        parseShoppingResultsDetailed(executeSearch(apiKey, normalizedQuery), normalizedQuery)
+        val response = executeSearch(apiKey, normalizedQuery)
+        parseShoppingResultsDetailed(response, normalizedQuery).copy(rawResponse = response.toString())
     }
 
     /**
@@ -202,18 +212,30 @@ class SerpApiClient(
      * snapshot through SerpApi; it cannot see the user's signed-in account or personalized coupons.
      */
     suspend fun searchAmazonOnline(token: String, query: String): List<SerpApiShoppingResult> =
-        withContext(Dispatchers.IO) {
-            val apiKey = token.trim()
-            require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
-            val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
-            require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
-            parseAmazonResults(executeAmazonSearch(apiKey, normalizedQuery))
-        }
+        searchAmazonOnlineWithDiagnostics(token, query).results
+
+    suspend fun searchAmazonOnlineWithDiagnostics(
+        token: String,
+        query: String
+    ): SerpApiShoppingSearchReport = withContext(Dispatchers.IO) {
+        val apiKey = token.trim()
+        require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
+        val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
+        require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
+        val response = executeAmazonSearch(apiKey, normalizedQuery)
+        parseAmazonResultsDetailed(response, normalizedQuery).copy(rawResponse = response.toString())
+    }
 
     internal fun parseAmazonResults(
         root: JSONObject,
         observedAt: Long = System.currentTimeMillis()
-    ): List<SerpApiShoppingResult> {
+    ): List<SerpApiShoppingResult> = parseAmazonResultsDetailed(root, null, observedAt).results
+
+    internal fun parseAmazonResultsDetailed(
+        root: JSONObject,
+        query: String?,
+        observedAt: Long = System.currentTimeMillis()
+    ): SerpApiShoppingSearchReport {
         val error = root.optString("error").takeIf { it.isNotBlank() && it != "null" }
         if (error != null) throw SerpApiException(error)
         val status = root.optJSONObject("search_metadata")?.optString("status")
@@ -222,10 +244,43 @@ class SerpApiClient(
         }
 
         val items = root.optJSONArray("organic_results")?.toObjects().orEmpty()
-        return items.mapNotNull { item ->
+        var rejectedAsIrrelevant = 0
+        var rejectedForPriceOrCurrency = 0
+        var rejectedForLink = 0
+        var rejectedOther = 0
+        val discardedOffers = mutableListOf<RejectedOnlineOffer>()
+        fun recordDiscard(item: JSONObject, title: String, reason: String) {
+            discardedOffers += RejectedOnlineOffer(
+                title = title.ifBlank { "Título no disponible" },
+                priceLabel = sequenceOf(item.optString("price"), item.optString("primary_price"),
+                    item.optString("extracted_price"), item.optString("extracted_primary_price"))
+                    .firstOrNull { it.isNotBlank() && it != "null" }.orEmpty(),
+                reason = reason,
+                provider = "Amazon.es"
+            )
+        }
+        val parsed = items.mapNotNull { item ->
             val title = item.optString("title").trim()
-                .takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
-            if (isClearlyNonNewListing(item, title)) return@mapNotNull null
+                .takeIf { it.isNotBlank() && it != "null" } ?: run {
+                    rejectedOther++
+                    recordDiscard(item, "", "Datos incompletos")
+                    return@mapNotNull null
+                }
+            if (isClearlyNonNewListing(item, title)) {
+                rejectedOther++
+                recordDiscard(item, title, nonNewRejectionReason(item, title))
+                return@mapNotNull null
+            }
+            if (!query.isNullOrBlank() && hasVariantMismatch(query, title)) {
+                rejectedAsIrrelevant++
+                recordDiscard(item, title, "Otro modelo o variante (capacidad, potencia o pack distinto)")
+                return@mapNotNull null
+            }
+            if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
+                rejectedAsIrrelevant++
+                recordDiscard(item, title, "Otro modelo o título no coincidente")
+                return@mapNotNull null
+            }
             // SerpApi's Amazon engine can expose the active offer as price/extracted_price,
             // or as primary_price/extracted_primary_price depending on the product layout.
             val priceText = sequenceOf(
@@ -243,7 +298,11 @@ class SerpApiClient(
             // Amazon.es is a Spanish storefront; when its structured numeric price is present,
             // it is a EUR amount even if the formatted label is omitted by a result layout.
             val price = extractedPrice ?: parsePrice(priceText)
-            if (price == null || !price.isFinite() || price <= 0.0) return@mapNotNull null
+            if (price == null || !price.isFinite() || price <= 0.0) {
+                rejectedForPriceOrCurrency++
+                recordDiscard(item, title, "Sin precio válido en euros")
+                return@mapNotNull null
+            }
             val isEuroPrice = priceText.contains("€") ||
                 priceText.contains("EUR", ignoreCase = true)
             // A structured numeric price is useful even when SerpApi omits the formatted label,
@@ -252,11 +311,23 @@ class SerpApiClient(
                 listOf('$', '£', '¥', '₹').any { priceText.contains(it) } ||
                     listOf("USD", "GBP", "CAD", "AUD", "NZD", "JPY", "INR", "CHF")
                         .any { currency -> priceText.contains(currency, ignoreCase = true) }
-            if (explicitlyForeignCurrency) return@mapNotNull null
-            if (extractedPrice == null && !isEuroPrice) return@mapNotNull null
+            if (explicitlyForeignCurrency) {
+                rejectedForPriceOrCurrency++
+                recordDiscard(item, title, "Sin precio válido: moneda extranjera")
+                return@mapNotNull null
+            }
+            if (extractedPrice == null && !isEuroPrice) {
+                rejectedForPriceOrCurrency++
+                recordDiscard(item, title, "Sin precio válido en euros")
+                return@mapNotNull null
+            }
 
             val url = sequenceOf(item.optString("link_clean"), item.optString("link"))
-                .firstOrNull { isAmazonSpainUrl(it) } ?: return@mapNotNull null
+                .firstOrNull { isAmazonSpainUrl(it) } ?: run {
+                    rejectedForLink++
+                    recordDiscard(item, title, "Datos incompletos: sin enlace válido de Amazon.es")
+                    return@mapNotNull null
+                }
             val thumbnail = item.optString("thumbnail").takeIf { isHttpsUrl(it) }.orEmpty()
             val delivery = when (val raw = item.opt("delivery")) {
                 is JSONArray -> (0 until raw.length())
@@ -286,7 +357,18 @@ class SerpApiClient(
             )
         }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
             .sortedBy { it.price }
-            .take(30)
+            .take(MAX_ONLINE_RESULTS)
+
+        return SerpApiShoppingSearchReport(
+            results = parsed,
+            rawResultCount = items.size,
+            rejectedAsIrrelevant = rejectedAsIrrelevant,
+            rejectedForPriceOrCurrency = rejectedForPriceOrCurrency,
+            rejectedForLink = rejectedForLink,
+            rejectedOther = rejectedOther,
+            discardedOffers = discardedOffers,
+            providerName = "Amazon.es"
+        )
     }
 
     internal fun parseShoppingResults(
@@ -321,20 +403,122 @@ class SerpApiClient(
         var rejectedForPriceOrCurrency = 0
         var rejectedForLink = 0
         var rejectedOther = 0
+        val discardedOffers = mutableListOf<RejectedOnlineOffer>()
+        fun recordDiscard(item: JSONObject, title: String, reason: String) {
+            discardedOffers += RejectedOnlineOffer(
+                title = title.ifBlank { "Título no disponible" },
+                priceLabel = item.optString("price").takeIf { it.isNotBlank() && it != "null" }
+                    ?: item.optString("extracted_price").takeIf { it.isNotBlank() && it != "null" }.orEmpty(),
+                reason = reason,
+                provider = "Google Shopping"
+            )
+        }
         val parsed = items.mapNotNull { item ->
             val title = item.optString("title").trim()
                 .takeIf { it.isNotBlank() && it != "null" }
                 ?: run {
                     rejectedOther++
+                    recordDiscard(item, "", "Datos incompletos")
                     return@mapNotNull null
                 }
-            if (isClearlyNonNewListing(item, title)) {
+            val condition = sequenceOf(
+                "second_hand_condition", "condition", "item_condition",
+                "product_condition", "condition_description"
+            ).mapNotNull { key ->
+                item.optString(key).takeIf { it.isNotBlank() && it != "null" }
+            }.firstOrNull().orEmpty()
+            if (isRentalOrMonthlyListing(item, title)) {
                 rejectedOther++
+                recordDiscard(item, title, "Alquiler o cuota mensual")
                 return@mapNotNull null
             }
-            if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
-                rejectedAsIrrelevant++
-                return@mapNotNull null
+            var fitmentUnverified = false
+            var categoryUnverified = false
+            val wheelFitmentQuery = query?.let(::parseWheelFitmentQuery)
+            if (wheelFitmentQuery != null) {
+                // Exclude explicit hubcap and decorative-cover listings from rim searches.
+                val lowerTitle = Normalizer.normalize(title.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+                    .replace(Regex("\\p{M}+"), "")
+                if (listOf(
+                    "tapacubo", "hubcap", "wheel cover", "wheel trim", "copricerchi",
+                    "coprimozzo", "enjoliveur", "radkappe", "radkappen", "kolpak", "kolpaki", "kołpak", "kołpaki",
+                    "cubrellanta", "cubrerueda"
+                ).any(lowerTitle::contains)) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "Accesorio que no es una llanta")
+                    return@mapNotNull null
+                }
+                val modelQuery = query?.let(::wheelModelQuery).orEmpty()
+                val modelMatches = modelQuery.isBlank() || isPlausibleProductMatch(modelQuery, title)
+                if (!modelMatches) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "Otro modelo o título no coincidente")
+                    return@mapNotNull null
+                }
+                // When the query only specifies generic fitment (no wheel model), do not
+                // accept obvious non-wheel accessories such as hubcaps as uncertain wheel results.
+                // A named/model-specific match may still lack category words and remains explicitly
+                // unverified, rather than being silently discarded.
+                if (modelQuery.isBlank() && !isWheelListing(title) && !hasGenericWheelEvidence(title)) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "No parece una llanta o rueda")
+                    return@mapNotNull null
+                }
+                categoryUnverified = !isWheelListing(title)
+                val resultDiameter = wheelDiameterInches(title)
+                val resultPcd = wheelBoltPattern(title)
+                if (resultDiameter != null && resultDiameter != wheelFitmentQuery.diameterInches) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "Diámetro distinto: " + resultDiameter +
+                        " pulgadas (buscaste " + wheelFitmentQuery.diameterInches + " pulgadas)")
+                    return@mapNotNull null
+                }
+                if (resultPcd != null && resultPcd != wheelFitmentQuery.boltPattern) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "Anclaje distinto: " + resultPcd +
+                        " (buscaste " + wheelFitmentQuery.boltPattern + ")")
+                    return@mapNotNull null
+                }
+                val resultWidth = wheelWidthInches(title)
+                if (wheelFitmentQuery.widthInches != null && resultWidth != null &&
+                    kotlin.math.abs(resultWidth - wheelFitmentQuery.widthInches) > 0.01
+                ) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(
+                        item,
+                        title,
+                        "Ancho distinto: " + formatWheelNumber(resultWidth) +
+                            " pulgadas (buscaste " + formatWheelNumber(wheelFitmentQuery.widthInches) + " pulgadas)"
+                    )
+                    return@mapNotNull null
+                }
+                val resultOffset = wheelOffsetMm(title)
+                if (wheelFitmentQuery.offsetMm != null && resultOffset != null &&
+                    resultOffset != wheelFitmentQuery.offsetMm
+                ) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(
+                        item,
+                        title,
+                        "ET distinto: " + resultOffset + " (buscaste ET" + wheelFitmentQuery.offsetMm + ")"
+                    )
+                    return@mapNotNull null
+                }
+                fitmentUnverified =
+                    resultDiameter != wheelFitmentQuery.diameterInches ||
+                    resultPcd != wheelFitmentQuery.boltPattern ||
+                    (wheelFitmentQuery.widthInches != null && resultWidth != wheelFitmentQuery.widthInches) ||
+                    (wheelFitmentQuery.offsetMm != null && resultOffset != wheelFitmentQuery.offsetMm)            } else {
+                if (!query.isNullOrBlank() && hasVariantMismatch(query, title)) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "Otro modelo o variante (capacidad, potencia o pack distinto)")
+                    return@mapNotNull null
+                }
+                if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "Otro modelo o título no coincidente")
+                    return@mapNotNull null
+                }
             }
 
             val priceText = item.optString("price")
@@ -345,6 +529,7 @@ class SerpApiClient(
                 ?.takeIf { it.isFinite() && it > 0.0 }
             if (hasExplicitForeignCurrency(priceText)) {
                 rejectedForPriceOrCurrency++
+                recordDiscard(item, title, "Sin precio válido: moneda extranjera")
                 return@mapNotNull null
             }
             val price = extractedPrice ?: parsePrice(priceText)
@@ -354,6 +539,7 @@ class SerpApiClient(
                 (extractedPrice == null && !isEuroPrice)
             ) {
                 rejectedForPriceOrCurrency++
+                recordDiscard(item, title, "Sin precio válido en euros")
                 return@mapNotNull null
             }
 
@@ -381,6 +567,9 @@ class SerpApiClient(
                 ?.toIntOrNull()
                 ?.takeIf { it >= 0 }
 
+            val googleProductId = item.optString("product_id")
+                .takeIf { it.matches(Regex("[0-9]{5,}")) }
+                ?: extractGoogleShoppingProductId(item.optString("product_link"))
             SerpApiShoppingResult(
                 title = title,
                 price = price,
@@ -390,11 +579,15 @@ class SerpApiClient(
                 delivery = delivery,
                 rating = rating,
                 reviewCount = reviewCount,
-                observedAt = observedAt
+                observedAt = observedAt,
+                condition = condition,
+                googleProductId = googleProductId,
+                isFitmentUnverified = fitmentUnverified,
+                isCategoryUnverified = categoryUnverified
             )
         }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
             .sortedBy { it.price }
-            .take(30)
+            .take(MAX_ONLINE_RESULTS)
 
         return SerpApiShoppingSearchReport(
             results = parsed,
@@ -403,6 +596,7 @@ class SerpApiClient(
             rejectedForPriceOrCurrency = rejectedForPriceOrCurrency,
             rejectedForLink = rejectedForLink,
             rejectedOther = rejectedOther,
+            discardedOffers = discardedOffers,
             firstResultFields = items.firstOrNull()
                 ?.keys()
                 ?.asSequence()
@@ -411,10 +605,131 @@ class SerpApiClient(
         )
     }
 
+    /**
+     * Fetches all retailer offers for a known Google Shopping catalog item. It costs one SerpApi
+     * search and uses the product_id from a previous Google Shopping result, so this must not
+     * silently fall back to a second keyword search.
+     */
+    suspend fun searchGoogleProductOffers(
+        token: String,
+        productId: String,
+        expectedTitle: String,
+        observedAt: Long = System.currentTimeMillis()
+    ): List<SerpApiShoppingResult> = withContext(Dispatchers.IO) {
+        val apiKey = token.trim()
+        require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
+        val safeProductId = productId.trim()
+            .takeIf { it.matches(Regex("[0-9]{5,}")) }
+            ?: throw SerpApiException("Este producto no tiene un ID de catálogo de Google Shopping válido; no se ha lanzado ninguna búsqueda.")
+        parseGoogleProductOffers(
+            root = executeJson(buildGoogleProductUrl(apiKey, safeProductId)),
+            expectedTitle = expectedTitle,
+            productId = safeProductId,
+            observedAt = observedAt
+        )
+    }
+
+    /** Parser isolated from network access so the full Google Product API shape can be tested offline. */
+    internal fun parseGoogleProductOffers(
+        root: JSONObject,
+        expectedTitle: String,
+        productId: String,
+        observedAt: Long = System.currentTimeMillis()
+    ): List<SerpApiShoppingResult> {
+        val error = root.optString("error").takeIf { it.isNotBlank() && it != "null" }
+        if (error != null) throw SerpApiException("SerpApi: $error")
+        val state = root.optJSONObject("search_metadata")?.optString("status")
+        if (state.equals("Error", ignoreCase = true)) {
+            throw SerpApiException("SerpApi no pudo obtener las tiendas de este producto.")
+        }
+        val product = root.optJSONObject("product_results") ?: return emptyList()
+        val catalogTitle = product.optString("title").trim()
+        // Refuse a stale or mismatched catalog ID before accepting any merchant row.
+        if (catalogTitle.isBlank() ||
+            hasVariantMismatch(expectedTitle, catalogTitle) ||
+            hasConflictingModelVariant(expectedTitle, catalogTitle) ||
+            !isPlausibleProductMatch(expectedTitle, catalogTitle)
+        ) return emptyList()
+
+        val stores = product.optJSONArray("stores")?.toObjects().orEmpty()
+        return stores.mapNotNull { store ->
+            val name = store.optString("name").trim().takeIf { it.isNotBlank() && it != "null" }
+                ?: return@mapNotNull null
+            val offerTitle = store.optString("title").trim().takeIf { it.isNotBlank() && it != "null" }.orEmpty()
+            val combinedTitle = listOf(catalogTitle, offerTitle).filter { it.isNotBlank() }.joinToString(" ")
+            if (isClearlyNonNewListing(store, combinedTitle)) return@mapNotNull null
+            val marketplaceSeller = Regex(
+                """(?i)\b(wallapop|milanuncios|ebay|vinted|amazon[\s_-]*warehouse|vendedor\s+particular|particular(?:es)?)\b"""
+            ).containsMatchIn("$name $offerTitle")
+            if (marketplaceSeller || (offerTitle.isNotBlank() &&
+                    (hasVariantMismatch(expectedTitle, offerTitle) ||
+                        hasConflictingModelVariant(expectedTitle, offerTitle)))) {
+                return@mapNotNull null
+            }
+            val paymentTerms = listOf(
+                store.optString("installments_description"),
+                store.optString("monthly_payment_duration"),
+                store.optString("down_payment"),
+                store.optString("alt_currency")
+            ).filter { it.isNotBlank() && it != "null" }.joinToString(" ")
+            if (Regex(
+                    """(?i)(?:\b(cuota|cuotas|mensual|monthly|installment|installments|por\s+mes|per\s+month|alquiler|rental|renting)\b|/\s*mes\b)"""
+                ).containsMatchIn(paymentTerms) ||
+                store.optInt("monthly_payment_duration", 0) > 0 ||
+                isRentalOrMonthlyListing(store, combinedTitle)
+            ) return@mapNotNull null
+
+            val priceText = store.optString("price")
+            if (hasExplicitForeignCurrency(priceText)) return@mapNotNull null
+            val extractedPrice = store.opt("extracted_price")
+                ?.takeIf { it !is JSONObject && it !is JSONArray }
+                ?.toString()
+                ?.toDoubleOrNull()
+                ?.takeIf { it.isFinite() && it > 0.0 }
+            val price = extractedPrice ?: parsePrice(priceText) ?: return@mapNotNull null
+            if (!price.isFinite() || price <= 0.0 ||
+                (extractedPrice == null &&
+                    !priceText.contains("€") &&
+                    !priceText.contains("EUR", ignoreCase = true))
+            ) return@mapNotNull null
+            val url = store.optString("link").takeIf(::isNavigableHttpUrl) ?: return@mapNotNull null
+            SerpApiShoppingResult(
+                title = catalogTitle,
+                price = price,
+                storeName = name,
+                sourceUrl = url,
+                thumbnailUrl = store.optString("logo").takeIf(::isHttpsUrl).orEmpty(),
+                delivery = store.optString("shipping").takeUnless { it == "null" }.orEmpty(),
+                rating = store.optDouble("rating", Double.NaN).takeIf { it.isFinite() && it in 0.0..5.0 },
+                reviewCount = store.optInt("reviews", -1).takeIf { it >= 0 },
+                observedAt = observedAt,
+                condition = store.optString("condition").takeUnless { it == "null" }.orEmpty(),
+                googleProductId = productId
+            )
+        }.distinctBy {
+            "${it.storeName.trim().lowercase(Locale.ROOT)}|${it.sourceUrl.trim().lowercase(Locale.ROOT)}|${it.price}"
+        }.sortedBy { it.price }
+    }
+
+    private fun hasConflictingModelVariant(requested: String, returned: String): Boolean {
+        val queryWords = normalize(requested).split(' ').filter { it.isNotBlank() }.toSet()
+        val returnedWords = normalize(returned).split(' ').filter { it.isNotBlank() }.toSet()
+        val variantFamilies = listOf(
+            setOf("pro", "max", "plus", "ultra", "fe", "lite", "mini", "standard"),
+            setOf("fold", "flip"),
+            setOf("classic", "edge")
+        )
+        return variantFamilies.any { family ->
+            val requestedVariant = queryWords.intersect(family)
+            requestedVariant.isNotEmpty() && returnedWords.intersect(family) != requestedVariant
+        }
+    }
+
     suspend fun searchProducts(
         token: String,
         products: List<SerpApiRequestProduct>,
-        onStage: suspend (String) -> Unit = {}
+        onStage: suspend (String) -> Unit = {},
+        onQueryStarted: suspend (SerpApiRequestProduct) -> Unit = {}
     ): SerpApiBatchResult = withContext(Dispatchers.IO) {
         val apiKey = token.trim()
         require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
@@ -439,6 +754,7 @@ class SerpApiClient(
         requested.forEachIndexed { index, product ->
             onStage("Consultando Google Shopping España: ${index + 1}/${requested.size}…")
             try {
+                onQueryStarted(product)
                 val json = executeSearch(apiKey, product.queryTerm)
                 val productQuotes = parseQuotes(json, product)
                 if (productQuotes.isEmpty()) {
@@ -507,7 +823,19 @@ class SerpApiClient(
         return results.mapNotNull { item ->
             val title = item.optString("title").takeIf { it.isNotBlank() } ?: return@mapNotNull null
             if (isClearlyNonNewListing(item, title)) return@mapNotNull null
-            if (!isPlausibleProductMatch(requested.queryTerm, title)) return@mapNotNull null
+            if (hasVariantMismatch(requested.queryTerm, title) ||
+                hasConflictingModelVariant(requested.queryTerm, title)) return@mapNotNull null
+            val requestedEan = requested.ean.filter(Char::isDigit)
+            val responseEans = listOf("gtin", "gtins", "ean", "upc", "barcode", "product_ean", "product_gtin")
+                .flatMap { key ->
+                    when (val raw = item.opt(key)) {
+                        null, JSONObject.NULL -> emptyList()
+                        is JSONArray -> raw.toObjects().map { it.toString().filter(Char::isDigit) }
+                        else -> raw.toString().split(Regex("[,;\\s]+")).map { it.filter(Char::isDigit) }
+                    }
+                }.filter { it.length in 8..14 }
+            val eanMatch = requestedEan.length in 8..14 && responseEans.any { it == requestedEan }
+            if (!isPlausibleProductMatch(requested.queryTerm, title) && !eanMatch) return@mapNotNull null
 
             val priceText = item.optString("price")
             val extractedPrice = item.opt("extracted_price")
@@ -548,7 +876,10 @@ class SerpApiClient(
                 sourceUrl = url,
                 storeId = storeIdForHost(host, merchant),
                 storeName = merchant,
-                sourceName = "SerpApi · Google Shopping España"
+                sourceName = "SerpApi · Google Shopping España",
+                googleProductId = item.optString("product_id")
+                    .takeIf { it.matches(Regex("[0-9]{5,}")) }
+                    ?: extractGoogleShoppingProductId(item.optString("product_link"))
             )
         }.sortedBy { it.price }
     }
@@ -594,6 +925,19 @@ class SerpApiClient(
             .newBuilder()
             .addQueryParameter("engine", "google_shopping")
             .addQueryParameter("q", query)
+            .addQueryParameter("num", MAX_ONLINE_RESULTS.toString())
+            .addQueryParameter("gl", "es")
+            .addQueryParameter("hl", "es")
+            .addQueryParameter("api_key", apiKey)
+            .build()
+
+    private fun buildGoogleProductUrl(apiKey: String, productId: String): HttpUrl =
+        "https://serpapi.com/search.json"
+            .toHttpUrl()
+            .newBuilder()
+            .addQueryParameter("engine", "google_product")
+            .addQueryParameter("product_id", productId)
+            .addQueryParameter("offers", "true")
             .addQueryParameter("gl", "es")
             .addQueryParameter("hl", "es")
             .addQueryParameter("api_key", apiKey)
@@ -658,9 +1002,170 @@ class SerpApiClient(
             uri.scheme.equals("https", ignoreCase = true)) && !uri.host.isNullOrBlank()
     }.getOrDefault(false)
 
+    private fun isRentalOrMonthlyListing(item: JSONObject, title: String): Boolean {
+        val excludedTerms = Regex(
+            """(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b|/\s*mes\b)"""
+        )
+        if (excludedTerms.containsMatchIn(title)) return true
+        val conditionText = listOf(
+            "second_hand_condition", "condition", "item_condition",
+            "product_condition", "condition_description"
+        ).mapNotNull { key ->
+            item.opt(key)?.toString()?.takeUnless { it.isBlank() || it == "null" }
+        }.joinToString(" ")
+        return excludedTerms.containsMatchIn(conditionText)
+    }
+
+    private fun nonNewRejectionReason(item: JSONObject, title: String): String {
+        val condition = listOf("second_hand_condition", "condition", "item_condition", "product_condition", "condition_description")
+            .mapNotNull { item.optString(it).takeIf { value -> value.isNotBlank() && value != "null" } }
+            .joinToString(" ")
+        val text = "$title $condition"
+        return if (Regex("""(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b|/\s*mes\b)""").containsMatchIn(text)) {
+            "Alquiler o cuota mensual"
+        } else {
+            "Segunda mano o reacondicionado"
+        }
+    }
+
+    private data class WheelFitmentQuery(
+        val diameterInches: Int,
+        val boltPattern: String,
+        val widthInches: Double?,
+        val offsetMm: Int?
+    )
+
+    private fun parseWheelFitmentQuery(query: String): WheelFitmentQuery? {
+        // An explicit diameter plus PCD identifies a wheel search even if the query begins with
+        // a model name ("RIAL Milano 14\" 5x100") instead of the word "llanta".
+        val normalizedQuery = normalizeWheelFitmentQuery(query)
+        // A diameter plus PCD is sufficient even when the user starts with a wheel model name
+        // rather than a generic word such as "llanta".
+        val diameter = wheelDiameterInches(normalizedQuery)
+            ?: Regex("""\b(1[0-9]|2[0-4])\b""").find(normalizedQuery)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?: return null
+        val boltPattern = wheelBoltPattern(normalizedQuery) ?: return null
+        return WheelFitmentQuery(
+            diameterInches = diameter,
+            boltPattern = boltPattern,
+            widthInches = wheelWidthInches(normalizedQuery),
+            offsetMm = wheelOffsetMm(normalizedQuery)
+        )
+    }
+
+    private fun wheelModelQuery(query: String): String =
+        Normalizer.normalize(normalizeWheelFitmentQuery(query).lowercase(Locale.ROOT), Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "")
+            // Remove full width/diameter expressions first so "5.5x14" does not leave a
+            // stray width token that can interfere with matching the actual wheel model.
+            .replace(Regex("""(?i)\b(?:[3-9](?:[.,]\d)?|1[0-2](?:[.,]\d)?)\s*J?\s*[x×]\s*(?:1[0-9]|2[0-4])\b"""), " ")
+            .replace(Regex("""(?i)\b(?:1[0-9]|2[0-4])\s*[x×]\s*(?:[3-9](?:[.,]\d)?|1[0-2](?:[.,]\d)?)\s*J?\b"""), " ")
+            .replace(Regex("""(?i)\b[3456]\s*[x×]\s*(?:100|108|110|112|114(?:[.,]3)?|115|120|127|130|139(?:[.,]7)?)(?=\b|(?:et)?[0-9]{2,3}\b)"""), " ")
+            .replace(Regex("""(?i)\b(?:R\s*)?(?:1[0-9]|2[0-4])\s*(?:["”″]|pulg(?:adas?)?|inch(?:es)?)?\b"""), " ")
+            .replace(Regex("""(?i)\bET\s*[+-]?\s*\d{1,3}\b"""), " ")
+            .replace(Regex("""(?i)\b(llantas?|ruedas?|aros?|wheels?|rims?|felgen?|stahlfelge|stahlfelgen|felgi|felga|alufelgen?|alurader|alu|jantes?|cerchi|alloy|PCD)\b"""), " ")
+            .replace(Regex("""[^a-zA-Z0-9]+"""), " ")
+            .trim()
+            .replace(Regex("""\s+"""), " ")
+
+    private fun isWheelListing(value: String): Boolean =
+        containsWheelCategoryTerm(value)
+
+    /**
+     * Generic fitment searches can return real alloy-wheel models without a category word.
+     * Retain those only as unverified candidates when their title contains wheel specifications
+     * or a recognized wheel maker; obvious hubcaps are rejected earlier.
+     */
+    private fun hasGenericWheelEvidence(value: String): Boolean {
+        val hasTechnicalSpec = wheelDiameterInches(value) != null ||
+            wheelBoltPattern(value) != null ||
+            Regex("""(?i)\bET\s*-?\s*\d{2,3}\b""").containsMatchIn(value) ||
+            Regex("""(?i)\b(?:CB|DIA|center\s*bore|nabenbohrung)\s*\d{2,3}(?:[.,]\d)?\b""")
+                .containsMatchIn(value)
+        val knownWheelMaker = Regex(
+            """(?i)\b(oxxo|mak|dezent|alutec|autec|rial|borbet|ronal|aez|oz|bbs|enkei|ats|dotz|keskin|alcar|mwd?|magnetto|platin|rc[\s-]?design|cms|msw|tomason|fondmetal|momo|sparco)\b"""
+        ).containsMatchIn(value)
+        return hasTechnicalSpec || knownWheelMaker
+    }
+
+    private fun wheelDiameterInches(value: String): Int? {
+        val patterns = listOf(
+            Regex("""(?i)\bR\s*(1[0-9]|2[0-4])\b"""),
+            Regex("""(?i)\b(1[0-9]|2[0-4])\s*(?:["”″]|pulg(?:adas?)?|inch(?:es)?)"""),
+            // Standard width x diameter notation: 5.5x14, 5.5Jx14 or 6x15.
+            Regex("""(?i)\b(?:[3-9](?:[.,]\d)?|1[0-2](?:[.,]\d)?)\s*J?\s*[x×]\s*(1[0-9]|2[0-4])\b"""),
+            // Some international listings reverse the order: diameter x width, e.g. 14x6.
+            Regex("""(?i)\b(1[0-9]|2[0-4])\s*[x×]\s*(?:[3-9](?:[.,]\d)?|1[0-2](?:[.,]\d)?)\s*J?\b"""),
+            Regex("""(?i)\b\d{3}/\d{2}/(1[0-9]|2[0-4])\b""")
+        )
+        for (pattern in patterns) {
+            val match = pattern.find(value) ?: continue
+            val group = match.groups.drop(1).firstOrNull { it != null }?.value ?: continue
+            group.toIntOrNull()?.let { return it }
+        }
+        return null
+    }
+
+    /** Extracts rim width in inches from both 5.5Jx14 and 14x5.5 notation. */
+    private fun wheelWidthInches(value: String): Double? {
+        val standard = Regex(
+            """(?i)\b([3-9](?:[.,]\d)?|1[0-2](?:[.,]\d)?)\s*J?\s*[x×]\s*(?:1[0-9]|2[0-4])\b"""
+        ).find(value)?.groupValues?.getOrNull(1)
+        val reversed = if (standard == null) {
+            Regex(
+                """(?i)\b(?:1[0-9]|2[0-4])\s*[x×]\s*([3-9](?:[.,]\d)?|1[0-2](?:[.,]\d)?)\s*J?\b"""
+            ).find(value)?.groupValues?.getOrNull(1)
+        } else null
+        return (standard ?: reversed)?.replace(',', '.')?.toDoubleOrNull()
+    }
+
+    /** Extracts ET/offset values only when explicitly labelled, never from arbitrary numbers. */
+    private fun wheelOffsetMm(value: String): Int? =
+        Regex("""(?i)\bET\s*([+-]?\s*\d{1,3})\b""")
+            .find(value)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.replace(Regex("""\s+"""), "")
+            ?.toIntOrNull()
+            ?.takeIf { it in -100..100 }
+
+    private fun formatWheelNumber(value: Double): String =
+        if (value % 1.0 == 0.0) value.toInt().toString() else value.toString()
+
+    private fun wheelBoltPattern(value: String): String? {
+        // A PCD is the complete bolt pattern (bolt count x pitch-circle diameter).
+        // Comparing only "100" would incorrectly treat 4x100 wheels as compatible with 5x100.
+        val pattern = Regex(
+            """(?i)\b([3456])\s*[x×]\s*(100|108|110|112|114(?:[.,]3)?|115|120|127|130|139(?:[.,]7)?)(?=\b|(?:et)?[0-9]{2,3}\b)"""
+        )
+        val match = pattern.find(value) ?: return null
+        val boltCount = match.groupValues[1].toIntOrNull() ?: return null
+        val rawPcd = match.groupValues[2].replace(',', '.').toDoubleOrNull() ?: return null
+        val normalizedPcd = if (rawPcd % 1.0 == 0.0) rawPcd.toInt().toString() else rawPcd.toString()
+        return "${boltCount}x${normalizedPcd}"
+    }
+
+    private fun hasVariantMismatch(query: String, title: String): Boolean {
+        val q = query.lowercase(Locale.ROOT).replace(',', '.')
+        val t = title.lowercase(Locale.ROOT).replace(',', '.')
+        val units = listOf("mah", "wh", "w", "gb", "tb", "ml", "kg", "g", "l", "inch", "pulgadas")
+        for (unit in units) {
+            val qMatch = Regex("""(\d+(?:\.\d+)?)\s*${Regex.escape(unit)}\b""").find(q) ?: continue
+            val tMatch = Regex("""(\d+(?:\.\d+)?)\s*${Regex.escape(unit)}\b""").find(t) ?: continue
+            if (qMatch.groupValues[1].toDoubleOrNull() != tMatch.groupValues[1].toDoubleOrNull()) return true
+        }
+        val pack = Regex("""\b(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(ml|g|kg|l)\b""").find(t)
+        if (pack != null) {
+            val queryHasSamePack = Regex("""\b${pack.groupValues[1]}\s*[x×]\s*${Regex.escape(pack.groupValues[2])}\s*${Regex.escape(pack.groupValues[3])}\b""").containsMatchIn(q)
+            val queryHasSingleUnit = Regex("""\b${Regex.escape(pack.groupValues[2])}\s*${Regex.escape(pack.groupValues[3])}\b""").containsMatchIn(q)
+            if (!queryHasSamePack && queryHasSingleUnit) return true
+        }
+        return false
+    }
+
     private fun isClearlyNonNewListing(item: JSONObject, title: String): Boolean {
         val excludedTerms = Regex(
-            """(?i)\b(segunda[\s_-]+mano|second[\s_-]*hand|pre[\s_-]*owned|used|usad[oa]s?|seminuev[oa]s?|reacondicionad[oa]s?|refurbished|renewed|open[\s_-]*box|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b"""
+            """(?i)(?:\b(segunda[\s_-]+mano|second[\s_-]*hand|pre[\s_-]*owned|used|usad[oa]s?|seminuev[oa]s?|reacondicionad[oa]s?|refurbished|renewed|open[\s_-]*box|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b|/\s*mes\b)"""
         )
         if (excludedTerms.containsMatchIn(title)) return true
 
@@ -808,6 +1313,7 @@ class SerpApiClient(
 
     private companion object {
         const val MAX_PRODUCTS_PER_BATCH = 40
+        const val MAX_ONLINE_RESULTS = 100
         const val INTER_REQUEST_DELAY_MS = 1_200L
         val STOP_WORDS = setOf(
             "the", "and", "for", "with", "in", "on", "de", "del", "la", "el", "los", "las",

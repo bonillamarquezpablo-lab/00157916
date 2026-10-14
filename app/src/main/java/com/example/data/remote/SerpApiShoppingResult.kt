@@ -1,7 +1,16 @@
 package com.example.data.remote
 
 import java.net.URI
+import java.text.Normalizer
 import java.util.Locale
+
+/** Rejected/hidden offers are transient diagnostics and are never persisted to Room. */
+data class RejectedOnlineOffer(
+    val title: String,
+    val priceLabel: String,
+    val reason: String,
+    val provider: String
+)
 
 /**
  * One result from a manual Google Shopping query.
@@ -18,7 +27,17 @@ data class SerpApiShoppingResult(
     val reviewCount: Int? = null,
     val observedAt: Long,
     /** Whether Amazon reports Prime delivery eligibility; not a personalized account price. */
-    val primeEligible: Boolean = false
+    val primeEligible: Boolean = false,
+    /** Provider condition, retained so the UI can reveal used/refurbished offers on request. */
+    val condition: String = "new",
+    /** True for offers far below the result-set median; visible but excluded from best-price/history calculations. */
+    val isSuspiciousPrice: Boolean = false,
+    /** Google Shopping catalog identity used to fetch the full list of retailer offers. */
+    val googleProductId: String? = null,
+    /** A wheel result whose title omits one or more requested fitment dimensions. */
+    val isFitmentUnverified: Boolean = false,
+    /** The title may match the requested model, but does not clearly identify a wheel. */
+    val isCategoryUnverified: Boolean = false
 ) {
     /**
      * True when the accepted URL stays on a Google domain rather than opening the seller directly.
@@ -26,6 +45,25 @@ data class SerpApiShoppingResult(
      */
     val isGoogleShoppingProductLink: Boolean
         get() = isGoogleShoppingUrl(sourceUrl)
+
+    val isSecondHand: Boolean
+        get() {
+            val listingText = "$title $storeName $sourceUrl $condition"
+            return isSecondHandCondition(condition) ||
+                SECOND_HAND_LISTING_PATTERN.containsMatchIn(listingText) ||
+                SECOND_HAND_CONDITION_PATTERN.containsMatchIn(title)
+        }
+
+    /** True for accessory listings that belong at the end of a main-product search. */
+    val isAccessoryOffer: Boolean
+        get() = ACCESSORY_LISTING_PATTERN.containsMatchIn(title)
+
+    val isRentalOrMonthly: Boolean
+        get() = Regex(
+            """(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b|/\s*mes\b)"""
+        ).containsMatchIn(title) || Regex(
+            """(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b|/\s*mes\b)"""
+        ).containsMatchIn(condition)
 
     /** Stored label describing where tapping this offer opens. */
     val linkType: String
@@ -41,6 +79,54 @@ data class SerpApiShoppingResult(
                 host.startsWith("amazon.") ||
                 host.contains(".amazon.")
         }
+
+    /** Number of individual wheels represented by this offer, if it is explicitly a set. */
+    val wheelSetCount: Int?
+        get() = wheelSetCountForTitle(title)
+}
+
+/**
+ * Extracts Google's catalog product ID from SerpApi's product_id or product_link conventions.
+ * A numeric catalog ID is required by SerpApi's Google Product API.
+ */
+fun extractGoogleShoppingProductId(value: String): String? {
+    if (value.isBlank()) return null
+    val decoded = value
+        .replace("%3A", ":", ignoreCase = true)
+        .replace("%2C", ",", ignoreCase = true)
+        .replace("&amp;", "&", ignoreCase = true)
+    return Regex("""(?:/shopping/product/|catalogid\s*[:=]\s*)([0-9]{5,})""", RegexOption.IGNORE_CASE)
+        .find(decoded)
+        ?.groupValues
+        ?.getOrNull(1)
+}
+
+/**
+ * Normalizes size notation typed on Android keyboards (straight/typographic quotes and escaped
+ * inch marks) so fitment-aware parsing and result sorting agree on whether this is a wheel search.
+ */
+fun normalizeWheelFitmentQuery(query: String): String = query
+    .replace(Regex("""\\(?=["”″])"""), "")
+    .replace('″', '"')
+    .replace('”', '"')
+    .replace('“', '"')
+
+/**
+ * An explicit diameter plus PCD is a wheel-fitment query even when the user searches by model
+ * ("RIAL Milano 14\" 5x100") rather than starting with the word "llanta".
+ */
+fun isWheelFitmentQuery(query: String): Boolean {
+    val normalized = normalizeWheelFitmentQuery(query)
+    val hasPcd = Regex(
+        """(?i)\b[3456]\s*[x×]\s*(100|108|110|112|114(?:[.,]3)?|115|120|127|130|139(?:[.,]7)?)(?=\b|(?:et)?[0-9]{2,3}\b)"""
+    ).containsMatchIn(normalized)
+    if (!hasPcd) return false
+    val hasDiameterWithUnit = Regex(
+        """(?i)\b(?:R\s*(1[0-9]|2[0-4])|(1[0-9]|2[0-4])\s*(?:["”″]|pulg(?:adas?)?|inch(?:es)?))"""
+    ).containsMatchIn(normalized)
+    // Many Spanish searches omit the inch symbol when the PCD is explicit, e.g. "RIAL Milano 14 5x100".
+    val hasBareDiameter = Regex("""\b(1[0-9]|2[0-4])\b""").containsMatchIn(normalized)
+    return hasDiameterWithUnit || hasBareDiameter
 }
 
 /** Identifies the link destination without requiring a direct retailer URL or HTTPS. */
@@ -55,6 +141,53 @@ fun isGoogleShoppingUrl(sourceUrl: String): Boolean {
 fun linkTypeForUrl(sourceUrl: String): String =
     if (isGoogleShoppingUrl(sourceUrl)) "Google Shopping" else "directo"
 
+fun isSecondHandCondition(condition: String): Boolean = Regex(
+    """(?i)\b(used|second[\s_-]*hand|pre[\s_-]*owned|usad[oa]s?|seminuev[oa]s?|refurbished|reacondicionad[oa]s?|renewed|open[\s_-]*box)\b"""
+).containsMatchIn(condition)
+
+private val SECOND_HAND_CONDITION_PATTERN = Regex(
+    """(?i)\b(segunda[\s_-]+mano|second[\s_-]*hand|pre[\s_-]*owned|used|usad[oa]s?|seminuev[oa]s?|reacondicionad[oa]s?|refurbished|renewed|open[\s_-]*box)\b"""
+)
+
+private val SECOND_HAND_LISTING_PATTERN = Regex(
+    """(?i)\b(wallapop|milanuncios|ebay|vinted|particular(?:es)?|amazon[\s_-]*warehouse)\b"""
+)
+
+private val ACCESSORY_LISTING_PATTERN = Regex(
+    """(?i)\b(p[oó]ster(?:es)?|poster(?:s)?|funda(?:s)?|carcasa(?:s)?|cases?|covers?|cargador(?:es)?|chargers?|charging|protectores?|protector(?:es)?|screen\s+protector|protector\s+de\s+pantalla|cristal(?:es)?\s+templado|cables?|adaptadores?|hubs?|filtros?|recambios?|repuestos?|soportes?)\b"""
+)
+
+/** Accessory queries are intentional accessory searches and should not be re-labelled as accessories. */
+fun isAccessorySearchQuery(query: String): Boolean =
+    ACCESSORY_LISTING_PATTERN.containsMatchIn(query)
+
+internal fun normalizedWheelCategoryText(value: String): String =
+    Normalizer.normalize(value.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+        .replace(Regex("\\p{M}+"), "")
+
+private val WHEEL_CATEGORY_PATTERN = Regex(
+    """(?<![\p{L}\p{N}])(?:llantas?|ruedas?|aros?|wheel(?:s)?|rims?|(?:stahl|alu)?felg(?:e|en|a|i)|alufelgen?|alurader|alu|jantes?|cerchi|alloy)(?![\p{L}\p{N}])"""
+)
+
+/** Recognizes common Spanish, German, French, Italian and English wheel/rim vocabulary. */
+fun containsWheelCategoryTerm(value: String): Boolean =
+    WHEEL_CATEGORY_PATTERN.containsMatchIn(normalizedWheelCategoryText(value))
+
+/** Detects explicit wheel-set counts, including leading titles such as "4 Autec ... Felgen". */
+fun wheelSetCountForTitle(title: String): Int? {
+    val normalized = normalizedWheelCategoryText(title)
+    if (!WHEEL_CATEGORY_PATTERN.containsMatchIn(normalized)) return null
+    // Retail titles commonly write four rims as both "4 Autec ..." and "4x Autec ...".
+    // Require a space after the x so PCD text such as "4x100" is never mistaken for a set count.
+    val leadingCount = Regex("""^\s*(\d{1,2})(?:\s*x\s+|\s+)(?=[\p{L}])""")
+        .find(normalized)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        ?.takeIf { it in 2..20 }
+    if (leadingCount != null) return leadingCount
+    return Regex("""\b(?:juego|set|kit|pack)\s+(?:(?:de|of)\s+)?(\d{1,2})\b""")
+        .find(normalized)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        ?.takeIf { it in 2..20 }
+}
+
 /**
  * One exact product/model grouping in the online results. Individual retailer listings remain
  * separate offers so the detail sheet can show their prices and Room history.
@@ -65,10 +198,19 @@ data class OnlineProductGroup(
     val offers: List<SerpApiShoppingResult>
 ) {
     val cheapestOffer: SerpApiShoppingResult
-        get() = offers.minBy { it.price }
+        get() = offers.filterNot { it.isSuspiciousPrice }.minByOrNull { it.price }
+            ?: offers.minBy { it.price }
 
+    val wheelSetCount: Int?
+        get() = cheapestOffer.wheelSetCount
+
+    /** For a set, the comparable displayed price is the per-wheel price, not the whole set. */
     val minPrice: Double
-        get() = cheapestOffer.price
+        get() {
+            val offer = cheapestOffer
+            val count = offer.wheelSetCount
+            return if (count != null) offer.price / count else offer.price
+        }
 
     val storeCount: Int
         get() = offers.map { it.storeName.trim().lowercase(Locale.ROOT) }.distinct().size
@@ -129,7 +271,7 @@ fun onlineProductIdentityKey(title: String): String {
         .sorted()
         .joinToString("+")
     val accessoryType = listOf(
-        "cristal templado", "screen protector", "mop kit", "funda",
+        "cristal templado", "screen protector", "mop kit", "poster", "funda",
         "carcasa", "case", "cover", "protector", "cable", "cargador", "adaptador", "hub",
         "filtro", "recambio", "repuesto", "soporte"
     ).firstOrNull { type ->
@@ -210,17 +352,21 @@ fun onlineProductIdentityKey(title: String): String {
         technicalSpecs.takeIf { it.isNotBlank() }?.let { "specs:$it" }
     ).filterNotNull().joinToString("|")
 
-    if (model != null) return (listOf(brand, model).filter { it.isNotBlank() } + suffix)
-        .joinToString("|")
+    val wheelSetSuffix = wheelSetCountForTitle(title)?.let { "wheel-set:$it" }
+    if (model != null) {
+        val identity = (listOf(brand, model).filter { it.isNotBlank() } + suffix).joinToString("|")
+        return wheelSetSuffix?.let { "$identity|$it" } ?: identity
+    }
 
     val ignored = setOf("the", "and", "for", "with", "de", "del", "la", "las", "el", "los", "un", "una", "con", "para", "by", "from")
     val coreTokens = normalized.split(' ')
         .filter { it.isNotBlank() && it !in ignored }
         .distinct()
         .sorted()
-    return ((if (brand.isNotBlank()) listOf(brand) + coreTokens.filterNot { it == brand } else coreTokens) + suffix)
+    val identity = ((if (brand.isNotBlank()) listOf(brand) + coreTokens.filterNot { it == brand } else coreTokens) + suffix)
         .joinToString(" ")
         .ifBlank { normalized }
+    return wheelSetSuffix?.let { "$identity|$it" } ?: identity
 }
 
 /** Groups repeated seller listings into one product card, retaining all separate offers. */

@@ -6,13 +6,19 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.AppDatabase
 import com.example.data.local.PriceObservationEntity
 import com.example.data.local.ProductEntity
+import com.example.data.local.StoreEntity
+import com.example.data.local.TrackedProductEntity
 import com.example.data.model.Product
 import com.example.data.repository.ProductRepository
 import com.example.data.repository.SpanishMarketData
 import com.example.data.remote.SerpApiClient
+import com.example.data.remote.ArchivedPriceQuote
 import com.example.data.remote.SerpApiQuote
 import com.example.data.remote.SerpApiRequestProduct
+import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
+import com.example.data.remote.wheelSetCountForTitle
+import org.json.JSONArray
 import org.json.JSONObject
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -65,6 +71,10 @@ class ExampleRobolectricTest {
                     ean = "",
                     isPriceVerified = false
                 )
+            )
+            // The startup cleanup must not discard a product just because it is awaiting a verified quote.
+            database.trackedProductDao().insertOrUpdate(
+                TrackedProductEntity(productId = "sony_wh1000xm5")
             )
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
             val repository = ProductRepository(
@@ -146,6 +156,85 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `followed products appear in the tracked refresh stream and can be unfollowed`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            database.productDao().insert(
+                ProductEntity(
+                    id = "sample-followed-product",
+                    title = "Producto de prueba seguido",
+                    brand = "Marca de prueba",
+                    category = "TV_AUDIO",
+                    currentPrice = 49.99,
+                    athMinPrice = 49.99,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "Amazon.es",
+                    athMaxPrice = 49.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "amazon_es",
+                    storeUrl = "https://www.amazon.es/dp/TEST",
+                    ean = "",
+                    isPriceVerified = true
+                )
+            )
+            // Give the tracking-flow fixture a source-backed observation instead of relying only on
+            // a potentially stale isPriceVerified flag.
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "sample-followed-product",
+                    storeId = "amazon_es",
+                    price = 49.99,
+                    currency = "EUR",
+                    observedAt = System.currentTimeMillis(),
+                    sourceUrl = "https://www.amazon.es/dp/TEST",
+                    sourceName = "Amazon.es",
+                    isVerified = true,
+                    verificationNote = "Verified fixture for tracking flow test",
+                    productTitle = "Producto de prueba seguido",
+                    storeName = "Amazon.es",
+                    sourceType = "Amazon.es",
+                    linkType = "directo"
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = scope
+            )
+
+            val initiallyTracked = withTimeout<List<Product>>(10_000) {
+                repository.trackedProductsStream.first { it.isEmpty() }
+            }
+            assertTrue(initiallyTracked.isEmpty())
+
+            repository.toggleTracking("sample-followed-product")
+            val followed = withTimeout<List<Product>>(10_000) {
+                repository.trackedProductsStream.first { products ->
+                    products.any { it.id == "sample-followed-product" && it.isTracked }
+                }
+            }
+            assertEquals(1, followed.size)
+            assertTrue(followed.single().isTracked)
+
+            repository.toggleTracking("sample-followed-product")
+            val unfollowed = withTimeout<List<Product>>(10_000) {
+                repository.trackedProductsStream.first { it.isEmpty() }
+            }
+            assertTrue(unfollowed.isEmpty())
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun `SerpApi quotes accept direct and Google links while rejecting invalid price currency and model`() {
         val requested = SerpApiRequestProduct(
             id = "demo_galaxy_s26_ultra",
@@ -209,6 +298,115 @@ class ExampleRobolectricTest {
         assertEquals("Google Shopping", com.example.data.remote.linkTypeForUrl(quotes[2].sourceUrl))
         assertTrue(quotes.all { it.currency == "EUR" && it.observedAt == 123L })
         assertTrue(quotes.all { it.productId == "demo_galaxy_s26_ultra" })
+    }
+
+    @Test
+    fun `googleShopping accepts all valid offers when most links point to Google`() {
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {"title":"Samsung Galaxy S26 Ultra 512GB Negro","price":"1.299,99 €","extracted_price":1299.99,"product_link":"https://www.google.com/shopping/product/gs1","source":"Tienda Uno","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512GB Negro","price":"1.279,99 €","extracted_price":1279.99,"product_link":"https://www.google.com/shopping/product/gs2","source":"Tienda Dos","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512GB Negro","price":"1.249,99 €","extracted_price":1249.99,"link":"https://www.google.es/search?tbm=shop&q=gs3","source":"Tienda Tres","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512GB Negro","price":"1.219,99 €","extracted_price":1219.99,"product_link":"https://www.google.com/shopping/product/gs4","source":"Tienda Cuatro","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512GB Negro","price":"1.199,99 €","extracted_price":1199.99,"product_link":"https://www.google.com/shopping/product/gs5","source":"Tienda Cinco","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512GB usado","price":"899,99 €","extracted_price":899.99,"product_link":"https://www.google.com/shopping/product/gs-used","source":"Tienda Segunda Mano","second_hand_condition":"used"},
+                {"title":"Samsung Galaxy S26 Ultra 512GB alquiler mensual","price":"49,99 €","extracted_price":49.99,"product_link":"https://www.google.com/shopping/product/gs-rent","source":"Alquiler","second_hand_condition":"new"}
+              ]
+            }
+            """.trimIndent()
+        )
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = payload,
+            query = "Samsung Galaxy S26 Ultra 512 GB",
+            observedAt = 123L
+        )
+        assertEquals("All six valid new/used offers survive Google destination links", 6, report.results.size)
+        assertEquals(5, report.results.count { it.linkType == "Google Shopping" && !it.isSecondHand })
+        assertEquals(1, report.results.count { it.isSecondHand })
+        assertTrue(report.results.none { it.title.contains("alquiler", ignoreCase = true) })
+    }
+
+    @Test
+    fun `positive sub-five-euro offer is kept but flagged below thirty percent of median`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val timestamp = System.currentTimeMillis()
+            val results = listOf(
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 1.99, "Tienda barata", "https://www.google.com/shopping/product/cheap", observedAt = timestamp),
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 39.99, "Tienda 2", "https://www.google.com/shopping/product/p2", observedAt = timestamp),
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 42.99, "Tienda 3", "https://www.google.com/shopping/product/p3", observedAt = timestamp),
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 44.99, "Tienda 4", "https://www.google.com/shopping/product/p4", observedAt = timestamp),
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 49.99, "Tienda 5", "https://www.google.com/shopping/product/p5", observedAt = timestamp)
+            )
+            val filtered = repository.filterOnlineSearchResults(results, "Anker Power Bank 20000mAh")
+            assertEquals("Suspicious offers remain visible instead of being discarded", 5, filtered.size)
+            assertTrue(filtered.single { it.price == 1.99 }.isSuspiciousPrice)
+            assertTrue(filtered.filter { it.price > 1.99 }.none { it.isSuspiciousPrice })
+            assertEquals("The cheapest trusted offer is used for group best-price calculations", 39.99,
+                groupOnlineShoppingResults(filtered).single().cheapestOffer.price, 0.001)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun `wheel prices compare single rims with four rim sets`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val timestamp = System.currentTimeMillis()
+            val offers = listOf(
+                "RIAL Milano" to 111.00,
+                "RIAL Milano" to 142.80,
+                "4x Llantas RIAL MILANO Titanio" to 464.10,
+                "4x Llantas RIAL MILANO Titanio" to 516.53,
+                "4x Llantas RIAL MILANO Titanio" to 540.00,
+                "4x Llantas RIAL MILANO Titanio" to 550.00
+            ).mapIndexed { index, (title, price) ->
+                SerpApiShoppingResult(
+                    title = title,
+                    price = price,
+                    storeName = "Tienda $index",
+                    sourceUrl = "https://www.google.com/shopping/product/wheel-$index",
+                    observedAt = timestamp,
+                    condition = "new"
+                )
+            }
+
+            val filtered = repository.filterOnlineSearchResults(offers, "RIAL Milano 14")
+
+            assertEquals("All valid wheel candidates remain visible", offers.size, filtered.size)
+            assertTrue(
+                "Single-rim offers at 111 and 142.80 EUR should be compared with each other",
+                filtered.filter { it.title == "RIAL Milano" }.none { it.isSuspiciousPrice }
+            )
+            assertTrue(
+                "Four-rim set prices must not make a single rim look suspicious",
+                filtered.filter { it.title.startsWith("4x Llantas") }.none { it.isSuspiciousPrice }
+            )
+        } finally {
+            database.close()
+        }
     }
 
     @Test
@@ -327,6 +525,10 @@ class ExampleRobolectricTest {
                     isPriceVerified = false
                 )
             )
+            // Keep this unverified product as an explicit user-tracked item until the provider refreshes it.
+            database.trackedProductDao().insertOrUpdate(
+                TrackedProductEntity(productId = "live-test-product")
+            )
             val repository = ProductRepository(
                 storeDao = database.storeDao(),
                 productDao = database.productDao(),
@@ -389,8 +591,136 @@ class ExampleRobolectricTest {
         assertEquals("Mínimo", appName)
     }
 
+
     @Test
-    fun `migration 2 to 6 preserves watchlist and stores link destination types`() {
+    fun `migration from version 6 to 7 preserves preexisting products observations and tracking`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val databaseName = "minimo_v6_preservation_test.db"
+        context.deleteDatabase(databaseName)
+
+        // Construct a real version-6 database, including history written before migration starts.
+        val oldDatabase = context.openOrCreateDatabase(databaseName, Context.MODE_PRIVATE, null)
+        oldDatabase.execSQL(
+            "CREATE TABLE `spanish_stores` (" +
+                "`id` TEXT NOT NULL, `name` TEXT NOT NULL, `domain` TEXT NOT NULL, " +
+                "`brandColorHex` TEXT NOT NULL, `category` TEXT NOT NULL, " +
+                "`physicalStoresInSpain` INTEGER NOT NULL, `storeCountApprox` INTEGER NOT NULL, " +
+                "`headquartersInSpain` TEXT NOT NULL, `description` TEXT NOT NULL, PRIMARY KEY(`id`))"
+        )
+        oldDatabase.execSQL(
+            "CREATE TABLE `products` (" +
+                "`id` TEXT NOT NULL, `title` TEXT NOT NULL, `brand` TEXT NOT NULL, " +
+                "`category` TEXT NOT NULL, `currentPrice` REAL NOT NULL, `athMinPrice` REAL NOT NULL, " +
+                "`athMinDate` TEXT NOT NULL, `athMinStore` TEXT NOT NULL, `athMaxPrice` REAL NOT NULL, " +
+                "`avg90dPrice` REAL NOT NULL, `officialPvp` REAL NOT NULL, `currentStoreId` TEXT NOT NULL, " +
+                "`storeUrl` TEXT NOT NULL, `ean` TEXT NOT NULL, `imageResName` TEXT, `imageUrl` TEXT, " +
+                "`rating` REAL NOT NULL, `reviewCount` INTEGER NOT NULL, " +
+                "`wasRecentlyInflated` INTEGER NOT NULL, `fakePriorPrice` REAL, " +
+                "`isPriceVerified` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`))"
+        )
+        oldDatabase.execSQL(
+            "CREATE TABLE `tracked_products` (" +
+                "`productId` TEXT NOT NULL, `targetAlertPrice` REAL, " +
+                "`isNotificationEnabled` INTEGER NOT NULL, `trackedAtTimestamp` INTEGER NOT NULL, " +
+                "`notes` TEXT NOT NULL, PRIMARY KEY(`productId`))"
+        )
+        oldDatabase.execSQL(
+            "CREATE TABLE `price_observations` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `productId` TEXT NOT NULL, " +
+                "`storeId` TEXT NOT NULL, `price` REAL NOT NULL, `currency` TEXT NOT NULL, " +
+                "`observedAt` INTEGER NOT NULL, `sourceUrl` TEXT NOT NULL, `sourceName` TEXT NOT NULL, " +
+                "`isVerified` INTEGER NOT NULL, `verificationNote` TEXT, " +
+                "`productTitle` TEXT NOT NULL DEFAULT '', `storeName` TEXT NOT NULL DEFAULT '', " +
+                "`sourceType` TEXT NOT NULL DEFAULT 'Google Shopping', `linkType` TEXT NOT NULL DEFAULT 'directo')"
+        )
+        oldDatabase.execSQL(
+            "CREATE INDEX `index_price_observations_productId_observedAt` " +
+                "ON `price_observations` (`productId`, `observedAt`)"
+        )
+        oldDatabase.execSQL(
+            "CREATE INDEX `index_price_observations_storeId_observedAt` " +
+                "ON `price_observations` (`storeId`, `observedAt`)"
+        )
+        oldDatabase.execSQL(
+            "INSERT INTO `products` (" +
+                "`id`, `title`, `brand`, `category`, `currentPrice`, `athMinPrice`, " +
+                "`athMinDate`, `athMinStore`, `athMaxPrice`, `avg90dPrice`, `officialPvp`, " +
+                "`currentStoreId`, `storeUrl`, `ean`, `imageResName`, `imageUrl`, `rating`, " +
+                "`reviewCount`, `wasRecentlyInflated`, `fakePriorPrice`, `isPriceVerified`) " +
+                "VALUES ('keep-v6-product', 'Producto conservado v6', 'Marca', 'COMPUTING', 123.45, 120.00, " +
+                "'Fecha guardada', 'Amazon.es', 180.00, 145.00, 180.00, 'amazon_es', " +
+                "'https://www.amazon.es/dp/V6', '', NULL, NULL, 0.0, 0, 0, NULL, 1)"
+        )
+        oldDatabase.execSQL(
+            "INSERT INTO `tracked_products` " +
+                "(`productId`, `targetAlertPrice`, `isNotificationEnabled`, `trackedAtTimestamp`, `notes`) " +
+                "VALUES ('keep-v6-product', 89.99, 1, 1700000000000, 'seguimiento previo a v7')"
+        )
+        oldDatabase.execSQL(
+            "INSERT INTO `price_observations` " +
+                "(`id`, `productId`, `storeId`, `price`, `currency`, `observedAt`, `sourceUrl`, " +
+                "`sourceName`, `isVerified`, `verificationNote`, `productTitle`, `storeName`, `sourceType`, `linkType`) " +
+                "VALUES (41, 'keep-v6-product', 'amazon_es', 123.45, 'EUR', 1700000000000, " +
+                "'https://www.amazon.es/dp/V6', 'Amazon.es', 1, 'guardada antes de migrar', " +
+                "'Producto conservado v6', 'Amazon.es', 'Amazon.es', 'directo')"
+        )
+        oldDatabase.execSQL(
+            "INSERT INTO `price_observations` " +
+                "(`id`, `productId`, `storeId`, `price`, `currency`, `observedAt`, `sourceUrl`, " +
+                "`sourceName`, `isVerified`, `verificationNote`, `productTitle`, `storeName`, `sourceType`, `linkType`) " +
+                "VALUES (42, 'keep-v6-product', 'amazon_es', 127.99, 'EUR', 1700000001000, " +
+                "'https://www.google.com/shopping/product/V6', 'Tienda pendiente', 0, 'pendiente de verificar', " +
+                "'Producto conservado v6', 'Tienda pendiente', 'Google Shopping', 'Google Shopping')"
+        )
+        oldDatabase.version = 6
+        oldDatabase.close()
+
+        val migratedDatabase = Room.databaseBuilder(
+            context,
+            AppDatabase::class.java,
+            databaseName
+        )
+            .addMigrations(AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8)
+            .allowMainThreadQueries()
+            .build()
+
+        try {
+            // Open triggers the 6 -> 7 migration, after both history rows were already stored.
+            migratedDatabase.openHelper.writableDatabase
+            runBlocking {
+                val product = migratedDatabase.productDao().getProductById("keep-v6-product")
+                assertNotNull("Product written before migration must survive", product)
+                assertEquals(123.45, product?.currentPrice ?: 0.0, 0.001)
+                assertEquals("Product schema migration only adds Google catalog ID", null, product?.googleProductId)
+
+                val tracking = migratedDatabase.trackedProductDao().getById("keep-v6-product")
+                assertNotNull("Watchlist row written before migration must survive", tracking)
+                assertEquals("seguimiento previo a v7", tracking?.notes)
+                assertEquals(89.99, tracking?.targetAlertPrice ?: 0.0, 0.001)
+
+                assertEquals("Both pre-migration observations must survive", 2,
+                    migratedDatabase.priceObservationDao().getObservationCount("keep-v6-product"))
+                assertEquals("The original verification state must be preserved", 1,
+                    migratedDatabase.priceObservationDao().getVerifiedObservationCount())
+                val verifiedHistory = migratedDatabase.priceObservationDao()
+                    .observeVerifiedHistory("keep-v6-product").first()
+                assertEquals(1, verifiedHistory.size)
+                assertEquals(41L, verifiedHistory.single().id)
+                assertEquals(123.45, verifiedHistory.single().price, 0.001)
+                assertEquals("Amazon.es", verifiedHistory.single().sourceName)
+                assertEquals("directo", verifiedHistory.single().linkType)
+                assertEquals("live", verifiedHistory.single().evidenceType)
+                assertEquals(1_700_000_000_000L, verifiedHistory.single().collectedAt)
+                assertEquals("", verifiedHistory.single().sourcePageUrl)
+            }
+        } finally {
+            migratedDatabase.close()
+            context.deleteDatabase(databaseName)
+        }
+    }
+
+    @Test
+    fun `migration from v2 to current schema preserves watchlist and stores link destination types`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val databaseName = "minimo_migration_preservation_test.db"
         context.deleteDatabase(databaseName)
@@ -443,7 +773,7 @@ class ExampleRobolectricTest {
             AppDatabase::class.java,
             databaseName
         )
-            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6)
+            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8)
             .allowMainThreadQueries()
             .build()
 
@@ -495,6 +825,554 @@ class ExampleRobolectricTest {
             migratedDatabase.close()
             context.deleteDatabase(databaseName)
         }
+    }
+
+    @Test
+    fun wheelFitmentSearchKeepsPlausibleUnknownsLabeledAndRejectsExplicitMismatches() {
+        val client = SerpApiClient()
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {
+                  "title": "Magnetto Wheels MW R1-1672 Llantas de acero 14\" 5x100 negras",
+                  "price": "59,00 €",
+                  "extracted_price": 59.00,
+                  "link": "https://shop.example.test/magnetto",
+                  "source": "Tienda nueva",
+                  "condition": "new"
+                },
+                {
+                  "title": "RIAL Milano llanta",
+                  "price": "94,99 €",
+                  "extracted_price": 94.99,
+                  "link": "https://shop.example.test/rial-milano",
+                  "source": "Tienda de llantas",
+                  "condition": "new"
+                },
+                {
+                  "title": "RIAL Kodiak llanta 7x16 5x112",
+                  "price": "94,99 €",
+                  "extracted_price": 94.99,
+                  "link": "https://shop.example.test/rial-kodiak",
+                  "source": "Tienda de llantas",
+                  "condition": "new"
+                },
+                {
+                  "title": "Tapacubos 14\" 5x100",
+                  "price": "19,99 €",
+                  "extracted_price": 19.99,
+                  "link": "https://shop.example.test/hubcap",
+                  "source": "Tienda de accesorios",
+                  "condition": "new"
+                },
+                {
+                  "title": "Llantas Seat Ibiza 165/70/14 81T neumáticos 5x100",
+                  "price": "25,00 €",
+                  "extracted_price": 25.00,
+                  "link": "https://es.wallapop.com/item/seat-ibiza",
+                  "source": "Wallapop",
+                  "second_hand_condition": "used"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val report = client.parseShoppingResultsDetailed(
+            root = payload,
+            query = """llantas 14" 5x100""",
+            observedAt = System.currentTimeMillis()
+        )
+
+        assertEquals("Titles accepted: ${report.results.joinToString { it.title }}", 3, report.results.size)
+        val confirmed = report.results.first { it.title.startsWith("Magnetto") }
+        assertFalse(confirmed.isFitmentUnverified)
+        val candidate = report.results.first { it.title == "RIAL Milano llanta" }
+        assertTrue(candidate.isFitmentUnverified)
+        val used = report.results.first { it.storeName == "Wallapop" }
+        assertTrue(used.isSecondHand)
+        assertTrue(
+            report.discardedOffers.any {
+                it.title.contains("RIAL Kodiak") && it.reason.contains("Diámetro distinto", ignoreCase = true)
+            }
+        )
+        assertTrue(report.discardedOffers.any { it.title.startsWith("Tapacubos") })
+
+        // Android/search input may preserve a backslash before the inch mark. It must still use
+        // wheel-fitment validation, keeping an unverified RIAL Milano candidate while rejecting
+        // the explicitly incompatible 7x16 5x112 RIAL Kodiak.
+        val escapedQuoteReport = client.parseShoppingResultsDetailed(
+            root = payload,
+            query = """llantas 14\" 5x100""",
+            observedAt = System.currentTimeMillis()
+        )
+        assertTrue(escapedQuoteReport.results.any { it.title == "RIAL Milano llanta" && it.isFitmentUnverified })
+        assertTrue(
+            escapedQuoteReport.discardedOffers.any {
+                it.title.contains("RIAL Kodiak") && it.reason.contains("Diámetro distinto: 16 pulgadas", ignoreCase = true)
+            }
+        )
+    }
+
+    @Test
+    fun modelFirstWheelSearchValidatesFitmentWithoutRequiringTheWordLlantas() {
+        val client = SerpApiClient()
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {"title":"RIAL Milano llanta","price":"111,00 €","extracted_price":111.00,"link":"https://oponeo.example/rial-milano","source":"Oponeo.es","condition":"new"},
+                {"title":"RIAL Milano llanta 14 pulgadas 5x100","price":"142,80 €","extracted_price":142.80,"link":"https://tienda.example/rial-milano-5x100","source":"Tienda Rial","condition":"new"},
+                {"title":"RIAL Kodiak llanta","price":"94,99 €","extracted_price":94.99,"link":"https://tienda.example/rial-kodiak","source":"Tienda Rial","condition":"new"},
+                {"title":"RIAL U1","price":"133,78 €","extracted_price":133.78,"link":"https://tienda.example/rial-u1","source":"Tienda Rial","condition":"new"},
+                {"title":"VW UP! Llanta Merano 14 pulgadas 5.0Jx14 ET35 OEM","price":"149,99 €","extracted_price":149.99,"link":"https://tienda.example/vw-merano","source":"Tienda VW","condition":"new"},
+                {"title":"4x Llantas RIAL MILANO Titanio 5.5Jx14 ET35 4x100","price":"516,53 €","extracted_price":516.53,"link":"https://tienda.example/rial-set-4x100","source":"Tienda Rial","condition":"new"},
+                {"title":"RIAL Milano llanta 16 pulgadas 5x112","price":"154,60 €","extracted_price":154.60,"link":"https://tienda.example/rial-milano-5x112","source":"Tienda Rial","condition":"new"},
+                {"title":"RIAL Milano llanta usada 14 pulgadas 5x100","price":"65,00 €","extracted_price":65.00,"link":"https://es.wallapop.com/item/rial-milano","source":"Wallapop","second_hand_condition":"used"}
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val query = "RIAL Milano 14\" 5x100"
+        val report = client.parseShoppingResultsDetailed(
+            root = payload,
+            query = query,
+            observedAt = System.currentTimeMillis()
+        )
+
+        val singleRimWithoutFitment = report.results.first { it.title == "RIAL Milano llanta" }
+        assertTrue(singleRimWithoutFitment.isFitmentUnverified)
+        assertTrue(report.results.any { it.title == "RIAL Milano llanta 14 pulgadas 5x100" && !it.isFitmentUnverified })
+        assertTrue(report.results.any { it.isSecondHand && it.storeName == "Wallapop" })
+        assertTrue(report.results.none { it.title.contains("RIAL Kodiak") || it.title == "RIAL U1" })
+        assertTrue(report.results.none { it.title.contains("VW UP!") })
+        assertTrue(report.results.none { it.title.contains("4x Llantas") })
+        assertTrue(report.results.none { it.title.contains("5x112") })
+        assertTrue(report.discardedOffers.any { it.title.contains("RIAL Kodiak") && it.reason.contains("modelo", ignoreCase = true) })
+        assertTrue(report.discardedOffers.any { it.title.contains("4x Llantas") && it.reason.contains("anclaje", ignoreCase = true) })
+
+        val escapedQuoteReport = client.parseShoppingResultsDetailed(
+            root = payload,
+            query = """RIAL Milano 14\" 5x100""",
+            observedAt = System.currentTimeMillis()
+        )
+        assertTrue(escapedQuoteReport.results.any { it.title == "RIAL Milano llanta" && it.isFitmentUnverified })
+        assertTrue(escapedQuoteReport.results.none { it.title.contains("RIAL Kodiak") })
+    }
+
+    @Test
+    fun wheelSearchKeepsMatchingModelWithoutCategoryWordsAndReportsExactFitmentMismatch() {
+        val client = SerpApiClient()
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {"title":"Autec Zenit","price":"123,15 €","extracted_price":123.15,"link":"https://shop.example/zenit","source":"Tienda Uno","condition":"new"},
+                {"title":"Autec Zenit 5.5x14 Llanta","price":"133,12 €","extracted_price":133.12,"link":"https://shop.example/zenit-55x14","source":"Tienda Dos","condition":"new"},
+                {"title":"Autec Xenos","price":"132,81 €","extracted_price":132.81,"link":"https://shop.example/xenos","source":"Tienda Tres","condition":"new"},
+                {"title":"Llantas Autec Xenos","price":"540,00 €","extracted_price":540.00,"link":"https://shop.example/xenos-set","source":"Tienda Cuatro","condition":"new"},
+                {"title":"4 Autec Zenit Felgen 5,5x14 4x100 SIL für Opel Corsa Aluräder","price":"432,19 €","extracted_price":432.19,"link":"https://shop.example/zenit-4x100","source":"Tienda Cinco","condition":"new"}
+              ]
+            }
+            """.trimIndent()
+        )
+        val report = client.parseShoppingResultsDetailed(
+            root = payload,
+            query = "autec zenit 14 5x100",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals(setOf("Autec Zenit", "Autec Zenit 5.5x14 Llanta"),
+            report.results.map { it.title }.toSet())
+        val bareModel = report.results.single { it.title == "Autec Zenit" }
+        assertTrue(bareModel.isFitmentUnverified)
+        assertTrue(bareModel.isCategoryUnverified)
+        val partialMeasures = report.results.single { it.title == "Autec Zenit 5.5x14 Llanta" }
+        assertTrue(partialMeasures.isFitmentUnverified)
+        assertFalse(partialMeasures.isCategoryUnverified)
+
+        assertTrue(report.discardedOffers.any {
+            it.title == "Autec Xenos" && it.reason.contains("Otro modelo", ignoreCase = true)
+        })
+        assertTrue(report.discardedOffers.any {
+            it.title == "Llantas Autec Xenos" && it.reason.contains("Otro modelo", ignoreCase = true)
+        })
+        assertTrue(report.discardedOffers.any {
+            it.title.startsWith("4 Autec Zenit Felgen") &&
+                it.reason == "Anclaje distinto: 4x100 (buscaste 5x100)"
+        })
+        assertFalse(report.discardedOffers.any {
+            it.title.startsWith("4 Autec Zenit Felgen") && it.reason == "No parece una llanta o rueda"
+        })
+    }
+
+    @Test
+    fun wheelSearchValidatesExplicitWidthAndEtAndLabelsMissingSpecs() {
+        val client = SerpApiClient()
+        val items = JSONArray()
+        val titles = listOf(
+            "Autec Zenit 5.5Jx14 ET35 5x100",
+            "Autec Zenit 6Jx14 ET35 5x100",
+            "Autec Zenit 5.5Jx14 ET38 5x100",
+            "Autec Zenit 5.5Jx14 5x100",
+            "Autec Zenit 5.5Jx15 ET35 5x100"
+        )
+        titles.forEachIndexed { index, title ->
+            items.put(
+                JSONObject()
+                    .put("title", title)
+                    .put("price", "140,00 €")
+                    .put("extracted_price", 140.0 + index)
+                    .put("link", "https://shop.example/wheel-fitment-$index")
+                    .put("source", "Tienda $index")
+                    .put("condition", "new")
+            )
+        }
+
+        val report = client.parseShoppingResultsDetailed(
+            root = JSONObject()
+                .put("search_metadata", JSONObject().put("status", "Success"))
+                .put("shopping_results", items),
+            query = "autec zenit 5.5x14 ET35 5x100",
+            observedAt = System.currentTimeMillis()
+        )
+
+        assertEquals(listOf(titles[0], titles[3]), report.results.map { it.title })
+        assertFalse(report.results.single { it.title == titles[0] }.isFitmentUnverified)
+        assertTrue("Missing ET must remain visible but unconfirmed", report.results.single { it.title == titles[3] }.isFitmentUnverified)
+
+        assertTrue(report.discardedOffers.any {
+            it.title == titles[1] && it.reason == "Ancho distinto: 6 pulgadas (buscaste 5.5 pulgadas)"
+        })
+        assertTrue(report.discardedOffers.any {
+            it.title == titles[2] && it.reason == "ET distinto: 38 (buscaste ET35)"
+        })
+        assertTrue(report.discardedOffers.any {
+            it.title == titles[4] && it.reason == "Diámetro distinto: 15 pulgadas (buscaste 14 pulgadas)"
+        })
+    }
+
+    @Test
+    fun wheelSearchRecognizesMultilingualCategoryTermsAndSeparatesSetsFromSingleWheels() {
+        val client = SerpApiClient()
+        val terms = listOf("llanta", "rueda", "aro", "Felgen", "Stahlfelge", "felge", "felgi", "felga", "Aluräder", "Alu", "jante", "cerchi", "wheel", "rim", "alloy")
+        val items = org.json.JSONArray()
+        terms.forEachIndexed { index, term ->
+            items.put(
+                JSONObject()
+                    .put("title", "Autec Zenit 5.5x14 5x100 " + term)
+                    .put("price", "145,00 €")
+                    .put("extracted_price", 145.00)
+                    .put("link", "https://shop.example/wheel-" + index)
+                    .put("source", "Tienda " + index)
+                    .put("condition", "new")
+            )
+        }
+        val multilingual = client.parseShoppingResultsDetailed(
+            root = JSONObject()
+                .put("search_metadata", JSONObject().put("status", "Success"))
+                .put("shopping_results", items),
+            query = "autec zenit 14 5x100",
+            observedAt = 1_800_000_000_000L
+        )
+        assertEquals("Every requested language term must be recognized", terms.size, multilingual.results.size)
+        assertTrue(multilingual.results.none { it.isCategoryUnverified || it.isFitmentUnverified })
+
+        val singleWheel = SerpApiShoppingResult(
+            title = "Autec Zenit 5.5x14 5x100 alloy wheel",
+            price = 133.12,
+            storeName = "Tienda individual",
+            sourceUrl = "https://shop.example/single-wheel",
+            observedAt = 1_800_000_000_000L
+        )
+        val fourWheelSet = SerpApiShoppingResult(
+            title = "4x Autec Zenit Felgen 5.5x14 5x100",
+            price = 432.19,
+            storeName = "Tienda juego",
+            sourceUrl = "https://shop.example/four-wheel-set",
+            observedAt = 1_800_000_000_000L
+        )
+        assertEquals(4, fourWheelSet.wheelSetCount)
+        assertEquals(4, wheelSetCountForTitle("4 Autec Zenit Felgen 5.5x14 5x100"))
+        assertEquals(null, wheelSetCountForTitle("4x100 Felgen 5.5x14 5x100"))
+        assertEquals(null, singleWheel.wheelSetCount)
+        val groups = groupOnlineShoppingResults(listOf(singleWheel, fourWheelSet))
+        assertEquals("A set and a single wheel must be separate cards", 2, groups.size)
+        val setGroup = groups.single { it.wheelSetCount == 4 }
+        assertEquals(108.0475, setGroup.minPrice, 0.0001)
+    }
+
+    @Test
+    fun genericWheelSearchKeepsGermanPolishAndKnownBrandCandidatesUnconfirmed() {
+        val client = SerpApiClient()
+        val items = org.json.JSONArray()
+        val titles = listOf(
+            "Stahlfelge 5x14 ET35 5x100 für VW Polo 1.2 TSI 2011-2014",
+            "Komplet felgi 299 14x6 5x100 ET35",
+            "OXXO Charon 5x100 57.1",
+            "OXXO Novel Black",
+            "Tapacubos 14\\\" 5x100",
+            "Radkappen 14\\\" 5x100",
+            "Kołpaki 14\\\" 5x100"
+        )
+        titles.forEachIndexed { index, title ->
+            items.put(
+                JSONObject()
+                    .put("title", title)
+                    .put("price", "92,29 €")
+                    .put("extracted_price", 92.29 + index)
+                    .put("link", "https://shop.example/wheel-candidate-$index")
+                    .put("source", "Tienda $index")
+                    .put("condition", "new")
+            )
+        }
+
+        val report = client.parseShoppingResultsDetailed(
+            root = JSONObject()
+                .put("search_metadata", JSONObject().put("status", "Success"))
+                .put("shopping_results", items),
+            query = """llantas 14" 5x100""",
+            observedAt = System.currentTimeMillis()
+        )
+
+        val titlesShown = report.results.map { it.title }.toSet()
+        assertTrue(titlesShown.contains(titles[0]))
+        assertTrue(titlesShown.contains(titles[1]))
+        assertTrue(titlesShown.contains(titles[2]))
+        assertTrue(titlesShown.contains(titles[3]))
+        assertFalse(titlesShown.contains(titles[4]))
+        assertFalse("German hubcaps must not be treated as rims", titlesShown.contains(titles[5]))
+        assertFalse("Polish hubcaps must not be treated as rims", titlesShown.contains(titles[6]))
+
+        val steelWheel = report.results.single { it.title == titles[0] }
+        assertFalse(steelWheel.isCategoryUnverified)
+        assertFalse(steelWheel.isFitmentUnverified)
+
+        val polishWheel = report.results.single { it.title == titles[1] }
+        assertFalse(polishWheel.isCategoryUnverified)
+        assertFalse("Reversed 14x6 notation still confirms the requested 14-inch diameter", polishWheel.isFitmentUnverified)
+
+        val modelOnlyCandidates = report.results.filter { it.title == titles[2] || it.title == titles[3] }
+        assertTrue(modelOnlyCandidates.all { it.isCategoryUnverified })
+        assertTrue(modelOnlyCandidates.all { it.isFitmentUnverified })
+        assertTrue(report.discardedOffers.any {
+            it.title == titles[4] && it.reason == "Accesorio que no es una llanta"
+        })
+    }
+
+    @Test
+    fun germanWheelListingsAreRecognizedAndWrongPcdIsReportedAsFitmentMismatch() {
+        val client = SerpApiClient()
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {
+                  "title": "4 Autec Zenit Felgen 5,5x14 4x100 ANTM für Dacia Logan Sandero",
+                  "price": "432,19 €",
+                  "extracted_price": 432.19,
+                  "link": "https://shop.example.test/autec-4x100-set",
+                  "source": "Tienda europea",
+                  "condition": "new"
+                },
+                {
+                  "title": "Autec Zenit Felgen 5,5x14 ANTM",
+                  "price": "133,12 €",
+                  "extracted_price": 133.12,
+                  "link": "https://shop.example.test/autec-unknown-pcd",
+                  "source": "Tienda europea",
+                  "condition": "new"
+                },
+                {
+                  "title": "Autec Zenit Aluräder 5,5x14 5x100",
+                  "price": "145,00 €",
+                  "extracted_price": 145.00,
+                  "link": "https://shop.example.test/autec-5x100",
+                  "source": "Tienda europea",
+                  "condition": "new"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val report = client.parseShoppingResultsDetailed(
+            root = payload,
+            query = """autec zenit 14" 5x100""",
+            observedAt = System.currentTimeMillis()
+        )
+
+        // A real rim with omitted PCD remains visible but is explicitly marked unconfirmed.
+        val unconfirmed = report.results.first { it.title.contains("Felgen") }
+        assertTrue(unconfirmed.isFitmentUnverified)
+
+        // The 4x100 set must be rejected for the actual reason (PCD mismatch), not because its
+        // German title failed the generic wheel/rim classifier.
+        assertTrue(report.results.none { it.title.contains("4x100") })
+        assertTrue(
+            report.discardedOffers.any {
+                it.title.contains("4x100") &&
+                    it.reason.contains("Anclaje distinto", ignoreCase = true)
+            }
+        )
+        assertFalse(
+            report.discardedOffers.any {
+                it.title.contains("4x100") &&
+                    it.reason.contains("No parece una llanta o rueda", ignoreCase = true)
+            }
+        )
+
+        // German "alloy wheels" (Aluräder) with a matching PCD are accepted as confirmed.
+        val matching = report.results.first { it.title.contains("Aluräder") }
+        assertFalse(matching.isFitmentUnverified)
+    }
+
+    @Test
+    fun archiveBackfillAddsOldHistoryWithoutReplacingCurrentPrice() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val now = System.currentTimeMillis()
+            val title = "Anker Prime 27K Power Bank"
+            val originalUrl = "https://shop.example/products/anker-prime-27k"
+            val liveOffer = SerpApiShoppingResult(
+                title = title,
+                price = 99.99,
+                storeName = "Tienda directa",
+                sourceUrl = originalUrl,
+                observedAt = now,
+                condition = "new"
+            )
+            assertTrue(repository.recordOnlineSearchResults(listOf(liveOffer), "GOOGLE_SHOPPING", title) > 0)
+
+            val archivedAt = now - 1_550L * 24L * 60L * 60L * 1000L
+            val archiveTimestamp = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.format(java.util.Date(archivedAt))
+            val archiveQuote = ArchivedPriceQuote(
+                observedAt = archivedAt,
+                price = 79.99,
+                currency = "EUR",
+                productTitle = title,
+                originalUrl = originalUrl,
+                snapshotUrl = "https://web.archive.org/web/" + archiveTimestamp + "id_/" + originalUrl
+            )
+            assertEquals(1, repository.recordArchivedPriceHistory(
+                expectedTitle = title,
+                originalUrl = originalUrl,
+                storeName = "Tienda directa",
+                quotes = listOf(archiveQuote)
+            ))
+
+            val productId = database.productDao().getAllProductsSnapshot().single().id
+            val observations = database.priceObservationDao().observeVerifiedHistory(productId).first()
+            assertEquals(2, observations.size)
+            val archived = observations.first { it.evidenceType == "archive" }
+            assertEquals(archivedAt, archived.observedAt)
+            assertTrue(archived.collectedAt >= now)
+            assertEquals(originalUrl, archived.sourcePageUrl)
+            assertEquals("Internet Archive", archived.sourceType)
+
+            val product = withTimeout<com.example.data.model.Product>(10_000L) {
+                repository.allProductsStream.first { list ->
+                    list.any { it.id == productId && it.priceHistory.any { point -> point.eventLabel == "Internet Archive" } }
+                }.first { it.id == productId }
+            }
+            assertEquals("Historical archive data must never replace the current quote", 99.99, product.currentPrice, 0.001)
+            assertTrue(product.priceHistory.any { it.timestamp == archivedAt && it.price == 79.99 })
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun fitmentUnconfirmedWheelCandidatesAreNotSavedToMercadoOrHistory() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val result = SerpApiShoppingResult(
+                title = "RIAL Milano llanta",
+                price = 94.99,
+                storeName = "Tienda de llantas",
+                sourceUrl = "https://shop.example.test/rial-milano",
+                observedAt = System.currentTimeMillis(),
+                condition = "new",
+                isFitmentUnverified = true
+            )
+
+            val saved = repository.recordOnlineSearchResults(
+                results = listOf(result),
+                sourceType = "GOOGLE_SHOPPING",
+                searchQuery = """llantas 14" 5x100"""
+            )
+
+            assertEquals(0, saved)
+            assertTrue(database.productDao().getAllProductsSnapshot().isEmpty())
+            assertEquals(0, database.priceObservationDao().getVerifiedObservationCount())
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun googleProductOffersKeepValidStoresAndRejectUsedForeignAndMonthlyFixtures() {
+        val client = SerpApiClient()
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "product_results": {
+                "title": "Sony WH-1000XM5 Wireless Headphones",
+                "stores": [
+                  {"name":"PcComponentes","title":"Sony WH-1000XM5","price":"299,99 €","extracted_price":299.99,"link":"https://www.pccomponentes.com/sony-wh1000xm5","condition":"new"},
+                  {"name":"Amazon.es","title":"Sony WH-1000XM5","price":"309,00 €","extracted_price":309.00,"link":"https://www.google.com/shopping/product/987654321?gl=es"},
+                  {"name":"Wallapop","title":"Sony WH-1000XM5","price":"120,00 €","extracted_price":120.00,"link":"https://es.wallapop.com/item/sony","condition":"used"},
+                  {"name":"Tienda cuotas","title":"Sony WH-1000XM5 19,99 €/mes","price":"19,99 €","extracted_price":19.99,"link":"https://shop.example.test/monthly"},
+                  {"name":"Foreign Shop","title":"Sony WH-1000XM5","price":"$250.00","extracted_price":250.00,"link":"https://shop.example.test/usd"}
+                ]
+              }
+            }
+            """.trimIndent()
+        )
+
+        val offers = client.parseGoogleProductOffers(
+            root = payload,
+            expectedTitle = "Sony WH-1000XM5",
+            productId = "987654321",
+            observedAt = 1234L
+        )
+
+        assertEquals("Offers parsed: ${offers.map { "${it.storeName}=${it.price} (${it.linkType})" }}", 2, offers.size)
+        assertEquals(listOf("PcComponentes", "Amazon.es"), offers.map { it.storeName })
+        assertEquals("directo", offers.first().linkType)
+        assertEquals("Google Shopping", offers.last().linkType)
+        assertTrue(offers.all { it.price > 0.0 && it.observedAt == 1234L })
     }
 
     @Test
@@ -637,7 +1515,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `condition metadata blocks used and refurbished listings even if titles omit it`() {
+    fun `condition metadata marks used and refurbished offers for the opt-in filter`() {
         val report = SerpApiClient().parseShoppingResultsDetailed(
             root = JSONObject(
                 """
@@ -677,9 +1555,10 @@ class ExampleRobolectricTest {
         )
 
         assertEquals(3, report.rawResultCount)
-        assertEquals(1, report.results.size)
-        assertEquals(249.99, report.results.single().price, 0.001)
-        assertEquals(2, report.rejectedOther)
+        assertEquals(3, report.results.size)
+        assertEquals(2, report.results.count { it.isSecondHand })
+        assertEquals(249.99, report.results.single { !it.isSecondHand }.price, 0.001)
+        assertEquals(0, report.rejectedOther)
     }
 
     @Test
@@ -726,7 +1605,7 @@ class ExampleRobolectricTest {
 
 
     @Test
-    fun `online search stores real offers once per store and day and rejects used listings and low outliers`() = runBlocking<Unit> {
+    fun `online search stores valid offers once per store and day and marks low outliers`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,
@@ -817,12 +1696,12 @@ class ExampleRobolectricTest {
                 "A result stamped before 13 October 2026 must not enter live history",
                 repository.filterOnlineSearchResults(listOf(prePolicySnapshot)).isNotEmpty()
             )
-            assertFalse(
-                "A €9.90 Redmi phone listing is implausible for a new-in-store offer",
-                filteredResults.any { it.title.contains("Redmi 17", ignoreCase = true) && it.price < 45.0 }
+            assertTrue(
+                "A positive-price listing is not discarded by a hard-coded device price floor",
+                filteredResults.any { it.title.contains("Redmi 17", ignoreCase = true) && it.price == 9.90 }
             )
-            assertFalse(
-                "Offers from the Rentik renting provider must not be stored as new-in-store offers",
+            assertTrue(
+                "A seller name alone is not proof of renting; explicit condition/title signals decide",
                 filteredResults.any { it.storeName.equals("Rentik", ignoreCase = true) }
             )
             assertTrue(
@@ -833,9 +1712,9 @@ class ExampleRobolectricTest {
                 "Low-priced real accessories should remain eligible",
                 filteredResults.any { it.title.contains("UGREEN USB 2.0 Hub") }
             )
-            assertFalse(
-                "A sub-€5 20,000mAh power bank is suspicious and must not be saved",
-                filteredResults.any { it.title.contains("Power Bank", ignoreCase = true) && it.price < 5.0 }
+            assertTrue(
+                "A sub-€5 positive price is retained; the relative median rule decides suspicion",
+                filteredResults.any { it.title.contains("Power Bank", ignoreCase = true) && it.price == 2.99 }
             )
 
             val excludedSellerResults = listOf(
@@ -849,10 +1728,11 @@ class ExampleRobolectricTest {
                     sourceUrl = "https://www.example.com/xiaomi-cuota"
                 )
             )
-            assertTrue(
-                "Second-hand marketplaces and subscription listings must be excluded",
-                repository.filterOnlineSearchResults(excludedSellerResults, "Xiaomi Redmi 17").isEmpty()
-            )
+            val filteredMarketplaceResults = repository.filterOnlineSearchResults(excludedSellerResults, "Xiaomi Redmi 17")
+            assertEquals("Listings are not discarded merely because of seller name", 4, filteredMarketplaceResults.size)
+            assertTrue("Monthly payment listings are still excluded", filteredMarketplaceResults.none {
+                it.title.contains("cuota", ignoreCase = true)
+            })
 
             val vacuumListings = listOf(
                 cheapLegitimateAccessory.copy(
@@ -884,13 +1764,13 @@ class ExampleRobolectricTest {
                 vacuumListings,
                 "Xiaomi Vacuum Cleaner G10"
             )
-            assertFalse(
-                "An accessory must not appear as a whole device for a model-specific search",
+            assertTrue(
+                "Accessories should remain visible in online results, marked and sorted by the UI",
                 filteredVacuumListings.any { it.title.contains("Mop Kit", ignoreCase = true) }
             )
             assertEquals(
-                "The three legitimate vacuum offers should remain",
-                3,
+                "The three main vacuum offers and the visible accessory should remain",
+                4,
                 filteredVacuumListings.size
             )
             assertTrue(
@@ -916,8 +1796,22 @@ class ExampleRobolectricTest {
                 )
             )
             val strictMatches = repository.filterOnlineSearchResults(deviceSearchListings, "Xiaomi Redmi 17")
-            assertEquals("A model-specific query must exclude other models and cases", 2, strictMatches.size)
+            assertEquals("A model-specific query keeps matching accessories visible but rejects other models", 3, strictMatches.size)
             assertTrue(strictMatches.all { it.title.contains("Redmi 17", ignoreCase = true) })
+
+            val accessoryWithoutCapacity = normalNewPhone.copy(
+                title = "Funda Xiaomi Redmi 17 con tapa",
+                price = 7.99,
+                storeName = "Tienda de fundas",
+                sourceUrl = "https://www.example.com/redmi-17-case"
+            )
+            assertTrue(
+                "A matching accessory remains visible even when it omits the searched storage capacity",
+                repository.filterOnlineSearchResults(
+                    listOf(accessoryWithoutCapacity),
+                    "Xiaomi Redmi 17 5G 4GB 128GB"
+                ).any { it.isAccessoryOffer }
+            )
 
             val sonyFormattingVariant = results.first().copy(
                 title = "Sony 1000XM5 Wireless Headphones",
@@ -934,16 +1828,19 @@ class ExampleRobolectricTest {
             )
 
             val grouped = groupOnlineShoppingResults(strictMatches)
-            assertEquals("Repeated seller listings of one model make one product card", 1, grouped.size)
-            assertEquals(2, grouped.single().offers.size)
-            assertEquals(179.99, grouped.single().minPrice, 0.001)
+            assertEquals("The main product and its accessory form separate cards", 2, grouped.size)
+            val mainProductGroup = grouped.single { group -> group.offers.none { it.isAccessoryOffer } }
+            assertEquals(2, mainProductGroup.offers.size)
+            assertEquals(179.99, mainProductGroup.minPrice, 0.001)
+            assertTrue(grouped.single { group -> group.offers.all { it.isAccessoryOffer } }
+                .title.contains("Funda", ignoreCase = true))
 
             val inserted = repository.recordOnlineSearchResults(results, "GOOGLE_SHOPPING")
-            assertEquals("Only the two plausible new offers should be stored", 2, inserted)
+            assertEquals("Two normal offers and one suspicious unverified observation should be stored", 3, inserted)
             val stored = withTimeout<List<PriceObservationEntity>>(10_000) {
                 database.priceObservationDao().observeAllVerified().first { it.size >= 2 }
             }
-            assertEquals(2, stored.size)
+            assertEquals("Only the two non-suspicious offers count as verified history", 2, stored.size)
             val sonyProductId = stored.first().productId
             assertTrue("Both retailer offers must attach to one saved product", stored.all { it.productId == sonyProductId })
             assertTrue(stored.all { it.productTitle == "Sony WH-1000XM5 Wireless Headphones" })
@@ -951,6 +1848,7 @@ class ExampleRobolectricTest {
             assertNotNull("Online searches must add a real product row to Room", persistedProduct)
             assertTrue("Searched products must be marked as source-verified", persistedProduct?.isPriceVerified == true)
             assertTrue(stored.all { it.currency == "EUR" && it.sourceType == "Google Shopping" })
+            assertEquals(3, database.priceObservationDao().getObservationCount(sonyProductId))
             val savedGoogleOffer = stored.single { it.storeName == "PcComponentes" }
             assertTrue(savedGoogleOffer.sourceUrl.contains("google.com/shopping/product"))
             assertEquals("Google Shopping", savedGoogleOffer.linkType)
@@ -994,6 +1892,340 @@ class ExampleRobolectricTest {
                 .format(java.util.Date(productWithDailyHistory.priceHistory[1].timestamp))
             assertTrue("Daily history points must come from distinct calendar dates", firstHistoryDate != secondHistoryDate)
             assertEquals(4, database.priceObservationDao().getVerifiedObservationCount())
+        } finally {
+            database.close()
+        }
+    }
+
+
+
+    @Test
+    fun `Google Shopping fixture reports accepted offers and a reason for every rejected offer`() {
+        val client = SerpApiClient()
+        fun parse(query: String, item: JSONObject) = client.parseShoppingResultsDetailed(
+            JSONObject().put("search_metadata", JSONObject().put("status", "Success"))
+                .put("shopping_results", JSONArray().put(item)),
+            query = query,
+            observedAt = 123L
+        )
+        fun item(
+            title: String,
+            price: String = "1.299,99 €",
+            extractedPrice: Double? = 1299.99,
+            link: String = "https://www.google.com/shopping/product/123",
+            condition: String? = null
+        ): JSONObject = JSONObject().put("title", title).put("price", price)
+            .put("source", "Tienda de ejemplo").put("product_link", link).apply {
+                if (extractedPrice != null) put("extracted_price", extractedPrice)
+                if (condition != null) put("second_hand_condition", condition)
+            }
+
+        val mostlyGoogle = JSONObject().put("search_metadata", JSONObject().put("status", "Success"))
+            .put("shopping_results", JSONArray()
+                .put(item("Samsung Galaxy S26 Ultra 512 GB negro", link = "https://www.google.com/shopping/product/one"))
+                .put(item("Samsung Galaxy S26 Ultra 512 GB negro", price = "1.279,99 €", extractedPrice = 1279.99,
+                    link = "https://www.google.es/search?tbm=shop&q=galaxy"))
+                .put(item("Samsung Galaxy S26 Ultra 512 GB negro", price = "1.259,99 €", extractedPrice = 1259.99,
+                    link = "https://www.tienda.example/samsung-s26")))
+        val validReport = client.parseShoppingResultsDetailed(mostlyGoogle, "Samsung Galaxy S26 Ultra 512 GB", 123L)
+        assertEquals("Google product/search links are valid destinations alongside direct links", 3, validReport.results.size)
+        assertEquals(2, validReport.results.count { it.linkType == "Google Shopping" })
+        assertEquals(1, validReport.results.count { it.linkType == "directo" })
+
+        val used = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Samsung Galaxy S26 Ultra 512 GB", condition = "used"))
+        assertEquals("Used offers stay available to the opt-in second-hand filter", 1, used.results.size)
+        assertTrue(used.results.single().isSecondHand)
+        assertEquals("used", used.results.single().condition)
+
+        val refurbished = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Samsung Galaxy S26 Ultra 512 GB", condition = "refurbished"))
+        assertTrue(refurbished.results.single().isSecondHand)
+        assertEquals("refurbished", refurbished.results.single().condition)
+
+        val rental = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Samsung Galaxy S26 Ultra 512 GB alquiler"))
+        assertTrue(rental.discardedOffers.single().reason.contains("Alquiler o cuota"))
+
+        val monthly = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Samsung Galaxy S26 Ultra 512 GB 49,99 €/mes", price = "49,99 €/mes", extractedPrice = 49.99))
+        assertEquals("A monthly installment must never become a product offer", 0, monthly.results.size)
+        assertEquals("The excluded installment must be visible in diagnostics", 1, monthly.discardedOffers.size)
+        assertTrue(monthly.discardedOffers.single().reason.contains("Alquiler o cuota"))
+
+        val pack = parse("Detergente líquido 300 ml",
+            item("Detergente líquido 12x300 ml"))
+        assertTrue(pack.discardedOffers.single().reason.contains("pack distinto"))
+
+        val wrongVariant = parse("Anker Prime 20.000 mAh 200 W",
+            item("Anker Prime 10.000 mAh 100 W"))
+        assertTrue(wrongVariant.discardedOffers.single().reason.contains("variante"))
+
+        val noEuroSymbol = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Samsung Galaxy S26 Ultra 512 GB", price = "1299.99"))
+        assertEquals("Structured price from Spain's Google Shopping response is EUR even without the € glyph",
+            1, noEuroSymbol.results.size)
+
+        val noEuroEvidence = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Samsung Galaxy S26 Ultra 512 GB", price = "1299.99", extractedPrice = null))
+        assertTrue("Without the euro symbol or structured price, currency cannot be verified",
+            noEuroEvidence.discardedOffers.single().reason.contains("Sin precio válido"))
+
+        val dollars = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Samsung Galaxy S26 Ultra 512 GB", price = "$999.99", extractedPrice = 999.99))
+        assertTrue(dollars.discardedOffers.single().reason.contains("moneda extranjera"))
+
+        val missingPrice = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Samsung Galaxy S26 Ultra 512 GB", price = "", extractedPrice = null))
+        assertTrue(missingPrice.discardedOffers.single().reason.contains("Sin precio válido"))
+
+        val wrongTitle = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Tostadora de cocina", price = "19,99 €", extractedPrice = 19.99))
+        assertTrue(wrongTitle.discardedOffers.single().reason.contains("Otro modelo"))
+    }
+
+    @Test
+    fun `Amazon es fixture reports condition currency monthly and model rejection reasons`() {
+        val client = SerpApiClient()
+        fun parse(query: String, items: JSONArray) = client.parseAmazonResultsDetailed(
+            JSONObject().put("search_metadata", JSONObject().put("status", "Success"))
+                .put("organic_results", items),
+            query = query,
+            observedAt = 123L
+        )
+        fun item(
+            title: String,
+            price: String = "129,99 €",
+            extractedPrice: Double? = 129.99,
+            condition: String? = null
+        ): JSONObject = JSONObject().put("title", title).put("price", price)
+            .put("link", "https://www.amazon.es/dp/B0EXAMPLE").apply {
+                if (extractedPrice != null) put("extracted_price", extractedPrice)
+                if (condition != null) put("second_hand_condition", condition)
+            }
+
+        val query = "Anker Power Bank 20.000 mAh"
+        val report = parse(query, JSONArray()
+            .put(item("Anker Power Bank 20.000 mAh", price = "39.99", extractedPrice = 39.99))
+            .put(item("Anker Power Bank 20.000 mAh", condition = "used"))
+            .put(item("Anker Power Bank 20.000 mAh alquiler mensual"))
+            .put(item("Anker Power Bank 20.000 mAh cuota 4,99 €/mes", price = "4,99 €/mes", extractedPrice = 4.99))
+            .put(item("Anker Power Bank 10.000 mAh", price = "19,99 €", extractedPrice = 19.99))
+            .put(item("Tostadora de cocina", price = "12,99 €", extractedPrice = 12.99))
+            .put(item("Anker Power Bank 20.000 mAh", price = "$39.99", extractedPrice = 39.99))
+            .put(item("Anker Power Bank 20.000 mAh", price = "Consultar precio", extractedPrice = null))
+            .put(item("Anker Power Bank 20.000 mAh", price = "39.99", extractedPrice = null)))
+
+        assertEquals("Amazon.es numeric structured prices are accepted without the € glyph", 1, report.results.size)
+        assertEquals(8, report.discardedOffers.size)
+        assertTrue(report.discardedOffers.any { it.reason.contains("Segunda mano") })
+        assertTrue(report.discardedOffers.any { it.reason.contains("Alquiler o cuota") })
+        assertTrue(report.discardedOffers.any { it.reason.contains("variante") })
+        assertTrue(report.discardedOffers.any { it.reason.contains("Otro modelo") })
+        assertTrue(report.discardedOffers.any { it.reason.contains("moneda extranjera") })
+        assertTrue(report.discardedOffers.any { it.reason.contains("Sin precio válido") })
+    }
+
+    @Test
+    fun `repository explains unusually low prices relative to comparable offers without saving them`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val timestamp = System.currentTimeMillis()
+            val offers = listOf(999.99, 1049.99, 1099.99, 1149.99, 99.99).mapIndexed { index, price ->
+                com.example.data.remote.SerpApiShoppingResult(
+                    title = "Samsung Galaxy S26 Ultra 512 GB",
+                    price = price,
+                    storeName = "Tienda ${index + 1}",
+                    sourceUrl = "https://www.google.com/shopping/product/${index + 1}",
+                    observedAt = timestamp
+                )
+            }
+            val accepted = repository.filterOnlineSearchResults(offers, "Samsung Galaxy S26 Ultra 512 GB")
+            val discarded = repository.diagnoseOnlineSearchRejections(offers, "Samsung Galaxy S26 Ultra 512 GB")
+            assertEquals("Low outlier remains visible but is explicitly marked", 5, accepted.size)
+            assertTrue(accepted.single { it.price == 99.99 }.isSuspiciousPrice)
+            assertTrue(discarded.any { it.priceLabel.contains("99.99") && it.reason.contains("Precio sospechoso") })
+            assertEquals("Viewing diagnostics does not persist accepted or rejected prices", 0,
+                database.priceObservationDao().getVerifiedObservationCount())
+        } finally {
+            database.close()
+        }
+    }
+
+
+    @Test
+    fun `repository startup preserves observations and every followed product`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val now = System.currentTimeMillis()
+            fun product(
+                id: String,
+                title: String,
+                minDate: String = "Historial en construcción",
+                minStore: String = "Amazon.es"
+            ) = ProductEntity(
+                id = id,
+                title = title,
+                brand = "Marca de prueba",
+                category = "SMARTPHONES",
+                currentPrice = 199.99,
+                athMinPrice = 199.99,
+                athMinDate = minDate,
+                athMinStore = minStore,
+                athMaxPrice = 199.99,
+                avg90dPrice = 0.0,
+                officialPvp = 0.0,
+                currentStoreId = "amazon_es",
+                storeUrl = "https://www.amazon.es/dp/TEST",
+                ean = "",
+                isPriceVerified = false
+            )
+
+            // This looks like a legacy demo row, but it is explicitly followed by the user.
+            database.productDao().insert(
+                product(
+                    id = "demo_followed_product",
+                    title = "Producto seguido con marcador heredado",
+                    minDate = "Datos de demostración",
+                    minStore = "Datos de demostración"
+                )
+            )
+            database.trackedProductDao().insertOrUpdate(
+                TrackedProductEntity(productId = "demo_followed_product", notes = "no borrar seguimiento")
+            )
+            database.productDao().insert(
+                product("followed_pending_product", "Producto seguido pendiente")
+            )
+            database.trackedProductDao().insertOrUpdate(
+                TrackedProductEntity(productId = "followed_pending_product", notes = "seguir esperando precio")
+            )
+            database.productDao().insert(
+                product("online_product_verified", "Producto con observación verificada")
+            )
+            database.productDao().insert(
+                product("online_product_pending", "Producto con observación pendiente")
+            )
+            database.productDao().insert(
+                product("orphan_without_observations", "Fila huérfana sin historial")
+            )
+
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "followed_pending_product",
+                    storeId = "amazon_es",
+                    price = 201.00,
+                    observedAt = now,
+                    sourceUrl = "https://www.amazon.es/dp/FOLLOWED",
+                    sourceName = "Amazon.es",
+                    isVerified = false,
+                    verificationNote = "precio real pendiente de validar",
+                    productTitle = "Producto seguido pendiente",
+                    storeName = "Amazon.es",
+                    sourceType = "Amazon.es",
+                    linkType = "directo"
+                )
+            )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "online_product_verified",
+                    storeId = "amazon_es",
+                    price = 199.99,
+                    observedAt = now + 1,
+                    sourceUrl = "https://www.amazon.es/dp/VERIFIED",
+                    sourceName = "Amazon.es",
+                    isVerified = true,
+                    productTitle = "Producto con observación verificada",
+                    storeName = "Amazon.es",
+                    sourceType = "Amazon.es",
+                    linkType = "directo"
+                )
+            )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "online_product_pending",
+                    storeId = "tienda_es",
+                    price = 205.00,
+                    observedAt = now + 2,
+                    sourceUrl = "https://shop.example.es/product/PENDING",
+                    sourceName = "Tienda española",
+                    isVerified = false,
+                    verificationNote = "esperando comprobación",
+                    productTitle = "Producto con observación pendiente",
+                    storeName = "Tienda española",
+                    sourceType = "Google Shopping",
+                    linkType = "Google Shopping"
+                )
+            )
+            database.storeDao().insertAll(
+                listOf(
+                    StoreEntity(
+                        id = "amazon_es",
+                        name = "Amazon.es",
+                        domain = "amazon.es",
+                        brandColorHex = "#000000",
+                        category = "Electrónica",
+                        physicalStoresInSpain = false,
+                        storeCountApprox = 0,
+                        headquartersInSpain = "España",
+                        description = "Fila persistida de tienda"
+                    )
+                )
+            )
+
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+
+            val products = withTimeout<List<Product>>(10_000) {
+                repository.allProductsStream.first { rows ->
+                    rows.size == 4 &&
+                        rows.any { it.id == "online_product_verified" && it.isPriceVerified }
+                }
+            }
+            assertEquals(
+                setOf(
+                    "demo_followed_product",
+                    "followed_pending_product",
+                    "online_product_verified",
+                    "online_product_pending"
+                ),
+                products.map { it.id }.toSet()
+            )
+            assertEquals("A user-followed demo-labelled product must never be deleted", 4,
+                database.productDao().getProductCount())
+            assertNotNull(database.productDao().getProductById("demo_followed_product"))
+            assertNotNull(database.productDao().getProductById("followed_pending_product"))
+            assertEquals("Only the orphan row without history or tracking is eligible for cleanup", null,
+                database.productDao().getProductById("orphan_without_observations"))
+
+            assertEquals("Real but unverified observations are retained", 1,
+                database.priceObservationDao().getObservationCount("followed_pending_product"))
+            assertEquals(1, database.priceObservationDao().getObservationCount("online_product_verified"))
+            assertEquals(1, database.priceObservationDao().getObservationCount("online_product_pending"))
+            assertEquals("Verified status is not changed for pending observations", false,
+                database.productDao().getProductById("followed_pending_product")?.isPriceVerified)
+            assertEquals(1, database.priceObservationDao().getVerifiedObservationCount())
+
+            val followedIds = database.trackedProductDao().getAllTracked().first().map { it.productId }.toSet()
+            assertEquals(setOf("demo_followed_product", "followed_pending_product"), followedIds)
+            assertEquals("Stored shops are retained too", 1, database.storeDao().getStoreCount())
         } finally {
             database.close()
         }

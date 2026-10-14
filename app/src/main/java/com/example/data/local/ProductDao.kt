@@ -20,6 +20,17 @@ interface ProductDao {
     @Query("SELECT * FROM products WHERE id = :productId LIMIT 1")
     suspend fun getProductById(productId: String): ProductEntity?
 
+    /**
+     * Remove only orphan catalogue rows. Any observation (even pending verification) or watchlist
+     * entry is evidence that the product may matter to the user and must preserve the row.
+     */
+    @Query("DELETE FROM products WHERE id NOT IN (SELECT DISTINCT productId FROM price_observations) AND id NOT IN (SELECT productId FROM tracked_products)")
+    suspend fun deleteProductsWithoutObservations(): Int
+
+    /** Reconcile the cached verification flag from source-backed observations. */
+    @Query("UPDATE products SET isPriceVerified = 1 WHERE id IN (SELECT DISTINCT productId FROM price_observations WHERE isVerified = 1)")
+    suspend fun markProductsWithVerifiedObservations(): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(products: List<ProductEntity>)
 

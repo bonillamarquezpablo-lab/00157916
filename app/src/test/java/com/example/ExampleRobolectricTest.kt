@@ -12,6 +12,7 @@ import com.example.data.repository.SpanishMarketData
 import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiQuote
 import com.example.data.remote.SerpApiRequestProduct
+import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
 import org.json.JSONObject
 import okhttp3.OkHttpClient

@@ -181,6 +181,26 @@ class ExampleRobolectricTest {
                     isPriceVerified = true
                 )
             )
+            // The startup cleanup correctly removes orphan products without a verified source
+            // observation. Give this fixture real source-backed state so it tests tracking rather
+            // than relying on a stale isPriceVerified flag.
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "sample-followed-product",
+                    storeId = "amazon_es",
+                    price = 49.99,
+                    currency = "EUR",
+                    observedAt = System.currentTimeMillis(),
+                    sourceUrl = "https://www.amazon.es/dp/TEST",
+                    sourceName = "Amazon.es",
+                    isVerified = true,
+                    verificationNote = "Verified fixture for tracking flow test",
+                    productTitle = "Producto de prueba seguido",
+                    storeName = "Amazon.es",
+                    sourceType = "Amazon.es",
+                    linkType = "directo"
+                )
+            )
             val repository = ProductRepository(
                 storeDao = database.storeDao(),
                 productDao = database.productDao(),

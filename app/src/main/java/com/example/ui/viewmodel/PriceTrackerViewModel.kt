@@ -467,6 +467,196 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    /**
+     * Account lookup is free. The paid refresh only begins after the dialog confirms the exact
+     * query count and current balance.
+     */
+    fun prepareTrackedRefresh() {
+        val current = _uiState.value
+        if (current.isRefreshingPrices || current.isOnlineSearching ||
+            current.isPreparingSerpApiAction || current.isExecutingSerpApiAction ||
+            current.isCheckingSerpApiAccount
+        ) return
+        pendingTrackedRefreshProducts = emptyList()
+        pendingCompareStoresProduct = null
+        _uiState.value = current.copy(
+            isPreparingSerpApiAction = true,
+            serpApiActionConfirmation = null,
+            serpApiActionStatus = "Comprobando productos guardados y saldo de SerpApi…"
+        )
+        viewModelScope.launch {
+            try {
+                val token = serpApiTokenStore.read()
+                if (token.isNullOrBlank()) {
+                    val message = serpApiTokenStore.lastReadErrorMessage()
+                        ?: "Guarda una clave de SerpApi en Ajustes antes de actualizar los productos seguidos."
+                    _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+                val accountInfo = readAccountInfo(token)
+                if (accountInfo == null) {
+                    val message = "No se pudo comprobar el saldo de SerpApi. No se ha iniciado ninguna búsqueda ni gastado cuota."
+                    _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+                accountStatusBlockMessage(accountInfo)?.let { message ->
+                    _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+
+                val now = System.currentTimeMillis()
+                val tracked = withTimeout(10_000L) { repository.trackedProductsStream.first() }
+                val eligible = tracked
+                    .filter { product ->
+                        val lastAttempt = priceRefreshPreferences.getLong("tracked_attempt_${product.id}", 0L)
+                        lastAttempt <= 0L || now - lastAttempt >= TRACKED_REFRESH_COOLDOWN_MS
+                    }
+                    .sortedWith(
+                        compareBy<Product> { priceRefreshPreferences.getLong("tracked_attempt_${it.id}", 0L) }
+                            .thenBy { it.title.lowercase(Locale.ROOT) }
+                    )
+                if (eligible.isEmpty()) {
+                    val message = if (tracked.isEmpty()) {
+                        "No tienes productos guardados para actualizar."
+                    } else {
+                        "Todos los productos guardados ya se consultaron hace menos de 24 horas. No se ha gastado cuota."
+                    }
+                    _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+
+                val firstTen = eligible.take(MAX_TRACKED_REFRESH_PER_TAP)
+                val searches = minOf(firstTen.size, accountCapacity(accountInfo))
+                if (searches <= 0) {
+                    val message = quotaBlockMessage(accountInfo)
+                    _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+                pendingTrackedRefreshProducts = firstTen.take(searches)
+                val selectionNote = when {
+                    eligible.size > MAX_TRACKED_REFRESH_PER_TAP ->
+                        "Hay ${eligible.size} productos pendientes; esta pulsación prioriza los 10 consultados hace más tiempo."
+                    searches < firstTen.size ->
+                        "Por el saldo disponible solo se podrán consultar ${searches} de ${firstTen.size} productos pendientes."
+                    else -> "Se omiten los productos consultados en las últimas 24 horas."
+                }
+                _uiState.value = _uiState.value.copy(
+                    serpApiActionConfirmation = SerpApiActionConfirmation(
+                        type = SerpApiActionType.UPDATE_TRACKED,
+                        title = "Actualizar guardados",
+                        searchesToSpend = searches,
+                        remainingSearches = accountInfo.searchesRemaining,
+                        remainingThisHour = accountInfo.remainingThisHour,
+                        message = "$selectionNote Cada producto consume 1 búsqueda, aunque SerpApi no encuentre una coincidencia segura."
+                    ),
+                    serpApiActionStatus = null
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: SerpApiException) {
+                val message = error.message ?: "No se pudo comprobar SerpApi."
+                _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
+                showSnackbar(message)
+            } catch (_: Exception) {
+                val message = "No se pudieron preparar los productos guardados. No se ha confirmado ni iniciado ninguna búsqueda."
+                _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
+                showSnackbar(message)
+            } finally {
+                _uiState.value = _uiState.value.copy(isPreparingSerpApiAction = false)
+            }
+        }
+    }
+
+    /** Prepare the single-search Google Product API request for a product detail. */
+    fun prepareCompareStores(product: Product) {
+        val current = _uiState.value
+        if (current.isRefreshingPrices || current.isOnlineSearching ||
+            current.isPreparingSerpApiAction || current.isExecutingSerpApiAction ||
+            current.isCheckingSerpApiAccount
+        ) return
+        val googleProductId = product.googleProductId?.takeIf { it.isNotBlank() }
+            ?: extractGoogleShoppingProductId(product.storeUrl)
+            ?: product.offers.firstNotNullOfOrNull { extractGoogleShoppingProductId(it.url) }
+        if (googleProductId.isNullOrBlank()) {
+            val message = "Esta ficha todavía no tiene un ID de catálogo de Google Shopping. Repite la búsqueda online del producto para obtenerlo; no se ha gastado cuota."
+            _uiState.value = current.copy(serpApiActionStatus = message)
+            showSnackbar(message)
+            return
+        }
+        val lastAttempt = priceRefreshPreferences.getLong("compare_stores_attempt_${product.id}", 0L)
+        if (lastAttempt > 0L && System.currentTimeMillis() - lastAttempt < TRACKED_REFRESH_COOLDOWN_MS) {
+            val message = "Las tiendas de este producto se consultaron hace menos de 24 horas. No se ha repetido la búsqueda ni gastado cuota."
+            _uiState.value = current.copy(serpApiActionStatus = message)
+            showSnackbar(message)
+            return
+        }
+        pendingTrackedRefreshProducts = emptyList()
+        pendingCompareStoresProduct = product.copy(googleProductId = googleProductId)
+        _uiState.value = current.copy(
+            isPreparingSerpApiAction = true,
+            serpApiActionConfirmation = null,
+            serpApiActionStatus = "Comprobando saldo de SerpApi…"
+        )
+        viewModelScope.launch {
+            try {
+                val token = serpApiTokenStore.read()
+                if (token.isNullOrBlank()) {
+                    val message = serpApiTokenStore.lastReadErrorMessage()
+                        ?: "Guarda una clave de SerpApi en Ajustes antes de comparar tiendas."
+                    _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+                val accountInfo = readAccountInfo(token)
+                if (accountInfo == null) {
+                    val message = "No se pudo comprobar el saldo. No se ha iniciado ninguna búsqueda ni gastado cuota."
+                    _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+                accountStatusBlockMessage(accountInfo)?.let { message ->
+                    _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+                if (accountCapacity(accountInfo) < 1) {
+                    val message = quotaBlockMessage(accountInfo)
+                    _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
+                    showSnackbar(message)
+                    return@launch
+                }
+                _uiState.value = _uiState.value.copy(
+                    serpApiActionConfirmation = SerpApiActionConfirmation(
+                        type = SerpApiActionType.COMPARE_STORES,
+                        title = "Comparar tiendas",
+                        searchesToSpend = 1,
+                        remainingSearches = accountInfo.searchesRemaining,
+                        remainingThisHour = accountInfo.remainingThisHour,
+                        message = "Consultar todas las ofertas disponibles para «${product.title}». La petición no se repetirá durante 24 horas, incluso si Google no devuelve coincidencias válidas."
+                    ),
+                    serpApiActionStatus = null
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: SerpApiException) {
+                val message = error.message ?: "No se pudo comprobar SerpApi."
+                _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
+                showSnackbar(message)
+            } catch (_: Exception) {
+                val message = "No se pudo preparar la comparación de tiendas. No se ha iniciado ninguna búsqueda."
+                _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
+                showSnackbar(message)
+            } finally {
+                _uiState.value = _uiState.value.copy(isPreparingSerpApiAction = false)
+            }
+        }
+    }
+
     fun onOnlineSearchQueryChange(query: String) {
         _uiState.value = _uiState.value.copy(
             onlineSearchQuery = query,

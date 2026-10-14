@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.Business
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Storefront
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -37,6 +38,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -293,7 +295,8 @@ fun MainScreen(
                         onStoreFilterSelect = viewModel::onStoreFilterSelect,
                         onSortChange = viewModel::onSortOptionChange,
                         onProductClick = viewModel::onSelectProduct,
-                        onToggleTrack = { prod -> viewModel.toggleTracking(prod) }
+                        onToggleTrack = { prod -> viewModel.toggleTracking(prod) },
+                        onPrepareTrackedRefresh = viewModel::prepareTrackedRefresh
                     )
                 }
                 MainTab.ATH_DEALS -> {
@@ -345,6 +348,36 @@ fun MainScreen(
             onDismiss = { viewModel.onSelectProduct(null) },
             onOpenSetAlert = {
                 viewModel.onOpenAlertSetting(product)
+            },
+            onCompareStores = { viewModel.prepareCompareStores(product) },
+            serpApiActionStatus = uiState.serpApiActionStatus,
+            isComparingStores = uiState.isPreparingSerpApiAction ||
+                (uiState.isExecutingSerpApiAction && uiState.activeSerpApiAction == com.example.ui.viewmodel.SerpApiActionType.COMPARE_STORES)
+        )
+    }
+
+    uiState.serpApiActionConfirmation?.let { confirmation ->
+        AlertDialog(
+            onDismissRequest = viewModel::cancelSerpApiAction,
+            title = { Text(confirmation.title) },
+            text = {
+                androidx.compose.foundation.layout.Column(
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(confirmation.message)
+                    Text("Esta acción gastará ${confirmation.searchesToSpend} búsqueda(s) de SerpApi.")
+                    Text("Te quedan ${confirmation.remainingSearches} búsquedas.")
+                    confirmation.remainingThisHour?.let { Text("Disponibles esta hora: $it.") }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = viewModel::confirmSerpApiAction,
+                    enabled = !uiState.isExecutingSerpApiAction
+                ) { Text("Confirmar") }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelSerpApiAction) { Text("Cancelar") }
             }
         )
     }

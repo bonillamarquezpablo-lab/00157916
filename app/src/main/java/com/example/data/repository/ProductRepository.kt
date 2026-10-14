@@ -209,8 +209,10 @@ class ProductRepository(
             "Amazon.es", "Google Shopping" -> sourceType
             else -> return 0
         }
+        // Suspicious prices remain visible and are retained as unverified Room observations;
+        // only second-hand/refurbished offers are excluded from the new-product history.
         val eligible = filterOnlineSearchResults(results, searchQuery)
-            .filterNot { it.isSecondHand || it.isSuspiciousPrice }
+            .filterNot { it.isSecondHand }
         if (eligible.isEmpty()) return 0
 
         var inserted = 0
@@ -243,7 +245,7 @@ class ProductRepository(
                     currentStoreId = storeId,
                     storeUrl = bestOffer.sourceUrl,
                     imageUrl = bestOffer.thumbnailUrl.takeIf { it.isNotBlank() } ?: existingProduct.imageUrl,
-                    isPriceVerified = true
+                    isPriceVerified = group.offers.any { !it.isSuspiciousPrice }
                 )
             } else {
                 ProductEntity(
@@ -264,7 +266,7 @@ class ProductRepository(
                     imageUrl = bestOffer.thumbnailUrl.takeIf { it.isNotBlank() },
                     rating = 0.0,
                     reviewCount = 0,
-                    isPriceVerified = true
+                    isPriceVerified = group.offers.any { !it.isSuspiciousPrice }
                 )
             }
             productDao.insert(productEntity)
@@ -275,7 +277,10 @@ class ProductRepository(
             val bestOfferPerStore = group.offers
                 .groupBy { offer -> canonicalStoreId(offer.storeName, offer.sourceUrl) }
                 .values
-                .mapNotNull { offers -> offers.minByOrNull { it.price } }
+                .mapNotNull { offers ->
+                    offers.filterNot { it.isSuspiciousPrice }.minByOrNull { it.price }
+                        ?: offers.minByOrNull { it.price }
+                }
             for (result in bestOfferPerStore) {
                 val offerStoreId = canonicalStoreId(result.storeName, result.sourceUrl)
                 val observation = PriceObservationEntity(
@@ -286,8 +291,12 @@ class ProductRepository(
                     observedAt = result.observedAt,
                     sourceUrl = result.sourceUrl,
                     sourceName = normalizedSource,
-                    isVerified = true,
-                    verificationNote = "Resultado online válido en euros; precio y disponibilidad pendientes de confirmación en la tienda.",
+                    isVerified = !result.isSuspiciousPrice,
+                    verificationNote = if (result.isSuspiciousPrice) {
+                        "Precio sospechoso: inferior al 30 % de la mediana de la búsqueda. Conservado como observación sin verificar y excluido del mejor precio."
+                    } else {
+                        "Resultado online válido en euros; precio y disponibilidad pendientes de confirmación en la tienda."
+                    },
                     productTitle = result.title,
                     storeName = result.storeName,
                     sourceType = normalizedSource,
@@ -330,6 +339,8 @@ class ProductRepository(
             priceObservationDao.insert(observation)
             return true
         }
+        // Never let a suspicious, unverified observation replace a verified same-day quote.
+        if (!observation.isVerified && existing.isVerified) return false
 
         val isNewer = observation.observedAt > existing.observedAt
         val sameTimeAndBetterPrice =

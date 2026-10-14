@@ -82,6 +82,7 @@ data class TrackerUiState(
     val serpApiAccountStatus: String? = null,
     val isPreparingSerpApiAction: Boolean = false,
     val isExecutingSerpApiAction: Boolean = false,
+    val activeSerpApiAction: SerpApiActionType? = null,
     val serpApiActionConfirmation: SerpApiActionConfirmation? = null,
     val serpApiActionStatus: String? = null,
     val snackbarMessage: String? = null
@@ -672,6 +673,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(
             serpApiActionConfirmation = null,
             isExecutingSerpApiAction = true,
+            activeSerpApiAction = confirmation.type,
             serpApiActionStatus = "Preparando la consulta confirmada…"
         )
         viewModelScope.launch {
@@ -693,7 +695,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             } finally {
                 pendingTrackedRefreshProducts = emptyList()
                 pendingCompareStoresProduct = null
-                _uiState.value = _uiState.value.copy(isExecutingSerpApiAction = false)
+                _uiState.value = _uiState.value.copy(
+                    isExecutingSerpApiAction = false,
+                    activeSerpApiAction = null
+                )
             }
         }
     }

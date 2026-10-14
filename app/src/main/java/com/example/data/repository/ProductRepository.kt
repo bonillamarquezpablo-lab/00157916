@@ -12,6 +12,7 @@ import com.example.data.model.PricePoint
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.StoreOffer
+import com.example.data.remote.ArchivedPriceQuote
 import com.example.data.remote.SerpApiQuote
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.RejectedOnlineOffer
@@ -429,6 +430,67 @@ class ProductRepository(
                 )
                 if (saveDailyObservation(observation)) inserted++
             }
+        }
+        return inserted
+    }
+
+    /**
+     * Persists prices parsed from public Internet Archive captures for a product that already has
+     * a current provider-backed row. Archive points use capture time as observedAt and separately
+     * record when Mínimo imported them. They never update the product's current price.
+     */
+    suspend fun recordArchivedPriceHistory(
+        expectedTitle: String,
+        originalUrl: String,
+        storeName: String,
+        quotes: List<ArchivedPriceQuote>
+    ): Int {
+        if (expectedTitle.isBlank() || originalUrl.isBlank() || quotes.isEmpty()) return 0
+        val originalUri = parseHttpUri(originalUrl) ?: return 0
+        if (!originalUri.scheme.equals("https", ignoreCase = true)) return 0
+
+        val products = productDao.getAllProductsSnapshot()
+        val identity = onlineProductIdentityKey(expectedTitle)
+        val product = products.firstOrNull {
+            onlineProductIdentityKey(it.title) == identity && it.isPriceVerified
+        } ?: return 0
+        val now = System.currentTimeMillis()
+        val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)
+        val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
+        val storeId = canonicalStoreId(merchantName, originalUrl)
+        var inserted = 0
+
+        for (quote in quotes.distinctBy { it.observedAt to it.price }) {
+            val snapshotUri = parseHttpUri(quote.snapshotUrl) ?: continue
+            if (!snapshotUri.host.equals("web.archive.org", ignoreCase = true)) continue
+            if (!quote.originalUrl.trimEnd('/').equals(originalUrl.trimEnd('/'), ignoreCase = true)) continue
+            if (quote.currency != "EUR" ||
+                !quote.price.isFinite() ||
+                quote.price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR ||
+                quote.observedAt < earliestAllowed ||
+                quote.observedAt >= now ||
+                quote.productTitle.isBlank()
+            ) continue
+
+            val observation = PriceObservationEntity(
+                productId = product.id,
+                storeId = storeId,
+                price = quote.price,
+                currency = "EUR",
+                observedAt = quote.observedAt,
+                sourceUrl = quote.snapshotUrl,
+                sourceName = "Internet Archive (Wayback Machine)",
+                isVerified = true,
+                verificationNote = "Precio EUR extraído de metadatos de producto en una captura pública archivada. Es un precio histórico anunciado; no confirma impuestos, envío, disponibilidad ni precio final.",
+                productTitle = quote.productTitle,
+                storeName = merchantName,
+                sourceType = "Internet Archive",
+                linkType = "Archivo histórico",
+                collectedAt = now,
+                evidenceType = "archive",
+                sourcePageUrl = originalUrl
+            )
+            if (saveDailyObservation(observation)) inserted++
         }
         return inserted
     }
@@ -914,25 +976,34 @@ class ProductRepository(
         stores: List<Store>,
         verifiedObservations: List<PriceObservationEntity>
     ): Product {
-        // Ignore legacy/imported timestamps before the policy start. Observations from either a
-        // direct retailer URL or a Google Shopping page can support visible history.
+        // Live rows retain the policy boundary so legacy/demo prices cannot enter the chart.
+        // Independently sourced historical archive points may predate that boundary, but only
+        // when the row explicitly carries archive provenance from the v8 schema.
         val sortedHistory = verifiedObservations.filter { observation ->
-            observation.observedAt >= HISTORY_START_TIMESTAMP &&
+            val eligibleDate = observation.evidenceType == "archive" ||
+                observation.observedAt >= HISTORY_START_TIMESTAMP
+            eligibleDate &&
                 observation.currency == "EUR" &&
                 observation.price.isFinite() &&
                 observation.price > 0.0 &&
                 observation.price <= MAX_HISTORY_PRICE_EUR
         }.sortedBy { it.observedAt }
-        // Room keeps each store observation, but the chart must be a daily time series, not a
-        // sequence of sellers from the same search. Plot the cheapest valid offer for each day.
-        val latestDayStart = sortedHistory.lastOrNull()?.let { localDayBounds(it.observedAt).first }
-        val latestBatch = sortedHistory.filter {
-            latestDayStart != null && localDayBounds(it.observedAt).first == latestDayStart
+        val liveHistory = sortedHistory.filter { it.evidenceType != "archive" }
+        // Current price/store must always come from a live provider observation, never a Wayback
+        // snapshot, even when an archived snapshot was captured later in the same calendar day.
+        val latestLiveDayStart = liveHistory.lastOrNull()?.let { localDayBounds(it.observedAt).first }
+        val latestBatch = liveHistory.filter {
+            latestLiveDayStart != null && localDayBounds(it.observedAt).first == latestLiveDayStart
         }
+        // One point per local day. Prefer a live observation for a day when available; otherwise
+        // use its lowest verified archive quote. Gaps remain gaps, with no interpolated values.
         val snapshotHistory = sortedHistory
             .groupBy { localDayBounds(it.observedAt).first }
             .values
-            .mapNotNull { dayOffers -> dayOffers.minByOrNull { it.price } }
+            .mapNotNull { dayOffers ->
+                val liveOffers = dayOffers.filter { it.evidenceType != "archive" }
+                (liveOffers.ifEmpty { dayOffers }).minByOrNull { it.price }
+            }
             .sortedBy { localDayBounds(it.observedAt).first }
         val latestObservation = latestBatch.minByOrNull { it.price }
         val minObservation = snapshotHistory.minByOrNull { it.price }
@@ -954,7 +1025,7 @@ class ProductRepository(
             uniqueTimestamps.size >= 3 &&
             uniqueTimestamps.last() - uniqueTimestamps.first() >= ninetyDaysMs &&
             lastNinetyDays.map { it.observedAt }.distinct().size >= 3 &&
-            now - (sortedHistory.maxOfOrNull { it.observedAt } ?: 0L) <= 7L * 24L * 60L * 60L * 1000L
+            now - (liveHistory.maxOfOrNull { it.observedAt } ?: 0L) <= 7L * 24L * 60L * 60L * 1000L
         val current = if (priceIsVerified) latestObservation!!.price else currentPrice
         // These bounds describe the actual saved daily series; the 90-day average remains
         // unavailable until enough dates have accumulated.

@@ -171,6 +171,10 @@ class ProductRepository(
     ): List<SerpApiShoppingResult> {
         val queryModelMarkers = explicitModelMarkers(searchQuery)
         val eligible = results.filter { result ->
+            val accessoryForMainSearch =
+                isDeviceSearchQuery(searchQuery) &&
+                    !isAccessorySearchQuery(searchQuery) &&
+                    isAccessoryListing(result.title)
             result.title.isNotBlank() &&
                 result.storeName.isNotBlank() &&
                 result.price.isFinite() &&
@@ -178,7 +182,12 @@ class ProductRepository(
                 result.price <= MAX_HISTORY_PRICE_EUR &&
                 result.observedAt >= HISTORY_START_TIMESTAMP &&
                 !result.isRentalOrMonthly &&
-                !hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title)
+                !hasStrictModelMismatch(
+                    searchQuery,
+                    queryModelMarkers,
+                    result.title,
+                    allowAccessoryMemoryMismatch = accessoryForMainSearch
+                )
         }
         if (eligible.isEmpty()) return emptyList()
 
@@ -477,7 +486,7 @@ class ProductRepository(
 
     private fun isAccessoryListing(title: String): Boolean =
         Regex(
-            """(?i)\b(p[oó]ster|posters|poster|fundas?|carcasas?|cristal\s+templado|mop\s+kit|recambios?|filtros?|protectores?|cargadores?|chargers?|charging|cables?|adaptadores?|hubs?|soportes?|repuestos?|replacement|screen\s+protector|tempered\s+glass|covers?|cases?)\b"""
+            """(?i)\b(p[oó]ster(?:es|s)?|poster(?:es|s)?|fundas?|carcasas?|cristal\s+templado|mop\s+kit|recambios?|filtros?|protectores?|cargadores?|chargers?|charging|cables?|adaptadores?|hubs?|soportes?|repuestos?|replacement|screen\s+protector|tempered\s+glass|covers?|cases?)\b"""
         ).containsMatchIn(normalizedProductTitle(title))
 
     private fun explicitModelMarkers(text: String): Set<String> {
@@ -521,7 +530,8 @@ class ProductRepository(
     private fun hasStrictModelMismatch(
         query: String,
         queryMarkers: Set<String>,
-        resultTitle: String
+        resultTitle: String,
+        allowAccessoryMemoryMismatch: Boolean = false
     ): Boolean {
         if (queryMarkers.isEmpty()) return false
         val resultMarkers = explicitModelMarkers(resultTitle)
@@ -549,12 +559,13 @@ class ProductRepository(
             .map { it.value.replace(" ", "") }.toSet()
         val availableMemory = memoryPattern.findAll(normalizedProductTitle(resultTitle))
             .map { it.value.replace(" ", "") }.toSet()
-        return requestedMemory.isNotEmpty() && !availableMemory.containsAll(requestedMemory)
+        return !allowAccessoryMemoryMismatch &&
+            requestedMemory.isNotEmpty() && !availableMemory.containsAll(requestedMemory)
     }
 
     private fun isAccessorySearchQuery(query: String): Boolean =
         Regex(
-            """\b(poster|posters|funda|fundas|carcasa|carcasas|cristal templado|protector|protectores|protector de pantalla|screen protector|tempered glass|cable|cables|cargador|cargadores|charger|chargers|charging|adaptador|adaptadores|hub|hubs|mop kit|recambio|recambios|filtro|filtros|repuesto|repuestos|replacement|case|cases|cover|covers)\b"""
+            """\b(poster(?:es|s)?|funda|fundas|carcasa|carcasas|cristal templado|protector|protectores|protector de pantalla|screen protector|tempered glass|cable|cables|cargador|cargadores|charger|chargers|charging|adaptador|adaptadores|hub|hubs|mop kit|recambio|recambios|filtro|filtros|repuesto|repuestos|replacement|case|cases|cover|covers)\b"""
         ).containsMatchIn(normalizedProductTitle(query))
 
     private fun isDeviceSearchQuery(query: String): Boolean {

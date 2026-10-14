@@ -852,6 +852,7 @@ class SerpApiClient(
             .newBuilder()
             .addQueryParameter("engine", "google_product")
             .addQueryParameter("product_id", productId)
+            .addQueryParameter("offers", "true")
             .addQueryParameter("gl", "es")
             .addQueryParameter("hl", "es")
             .addQueryParameter("api_key", apiKey)

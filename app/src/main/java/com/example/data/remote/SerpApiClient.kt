@@ -436,6 +436,13 @@ class SerpApiClient(
             var categoryUnverified = false
             val wheelFitmentQuery = query?.let(::parseWheelFitmentQuery)
             if (wheelFitmentQuery != null) {
+                // Exclude explicit hubcap and decorative-cover listings from rim searches.
+                val lowerTitle = normalizedWheelCategoryText(title)
+                if (listOf("tapacubo", "hubcap", "wheel cover", "copricerchi", "cubrellanta", "cubrerueda").any(lowerTitle::contains)) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "Accesorio que no es una llanta")
+                    return@mapNotNull null
+                }
                 val modelQuery = query?.let(::wheelModelQuery).orEmpty()
                 val modelMatches = modelQuery.isBlank() || isPlausibleProductMatch(modelQuery, title)
                 if (!modelMatches) {

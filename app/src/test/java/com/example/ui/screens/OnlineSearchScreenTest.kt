@@ -86,7 +86,8 @@ class OnlineSearchScreenTest {
 
     @Test
     fun secondHandOffersJoinTheSamePriceOrderWhenEnabled() {
-        val query = "llantas 14\" 5x100"
+        // Model-first searches still contain an explicit diameter + PCD and must share one price order.
+        val query = "RIAL Milano 14\" 5x100"
         val rows = listOf(
             SerpApiShoppingResult(
                 title = "Magnetto MW R1-1672 llanta de acero 14 pulgadas 5x100",

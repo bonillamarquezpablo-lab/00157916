@@ -46,7 +46,7 @@ class PriceAlertWorker(
         } else {
             0
         }
-        val remainingDailyQuota = (MAX_PRODUCTS_PER_DAY - usedToday).coerceAtLeast(0)
+        val remainingDailyQuota = (PriceHistoryCollectionPolicy.MAX_PRODUCTS_PER_DAY - usedToday).coerceAtLeast(0)
         if (remainingDailyQuota == 0) return Result.success()
 
         val lastCheckedAt = tracked.associate { watch ->

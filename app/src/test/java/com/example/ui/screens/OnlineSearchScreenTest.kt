@@ -149,7 +149,7 @@ class OnlineSearchScreenTest {
         assertVisibleText("Segunda mano")
         assertVisibleText("1 tiendas · precio más bajo en Amazon Warehouse")
         assertTrue(
-            composeRule.onAllNodesWithText("precio más bajo en Wallapop")
+            composeRule.onAllNodesWithText("2 tiendas · precio más bajo en Wallapop")
                 .fetchSemanticsNodes().isEmpty()
         )
 
@@ -157,7 +157,7 @@ class OnlineSearchScreenTest {
         clickFilter("Todos (6)")
         assertVisibleText("Todos (6)")
         assertVisibleText("Solo Amazon (2)")
-        assertVisibleText("precio más bajo en Wallapop")
+        assertVisibleText("2 tiendas · precio más bajo en Wallapop")
         assertVisibleText("Accesorio")
         assertVisibleText("Póster Samsung Galaxy S26 Ultra 512 GB")
         assertEquals("Changing either filter must not start another SerpApi search", 0, searchInvocations)

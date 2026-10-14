@@ -33,6 +33,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -98,6 +99,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         const val TRACKED_REFRESH_COOLDOWN_MS = 24L * 60L * 60L * 1000L
         const val MAX_TRACKED_REFRESH_PER_TAP = 10
         const val MAX_ARCHIVE_PAGES_PER_SEARCH = 2
+        const val MAX_ARCHIVE_BACKFILL_MS = 8_000L
     }
 
     private val database = AppDatabase.getInstance(application)
@@ -113,6 +115,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     private val serpApiClient = SerpApiClient()
     private val onlineSearchCache = OnlineSearchCache(application)
     private val waybackPriceHistoryClient = WaybackPriceHistoryClient(application)
+    private val waybackPreferences = application.getSharedPreferences(
+        "minimo_wayback_backfill",
+        Context.MODE_PRIVATE
+    )
     private val onlineDiscardedCache = mutableMapOf<String, List<RejectedOnlineOffer>>()
 
     private fun onlineSearchCacheKey(provider: OnlineSearchProvider, query: String): String =
@@ -1086,6 +1092,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         query: String,
         provider: OnlineSearchProvider
     ) {
+        if (!waybackPreferences.getBoolean("enabled", true)) return
+
         val candidates = results
             .filterNot { it.isSecondHand || it.isRentalOrMonthly || it.isFitmentUnverified || it.isCategoryUnverified }
             .filter { waybackPriceHistoryClient.isEligibleDirectUrl(it.sourceUrl) && !isGoogleShoppingUrl(it.sourceUrl) }
@@ -1102,81 +1110,100 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             return
         }
 
+        // This is a detached best-effort job: the online result state is already published.
+        // A strict total deadline plus short HTTP call timeouts ensures Wayback cannot hold up
+        // search results, navigation or the next search.
         viewModelScope.launch {
-            var savedCount = 0
-            var checkedCount = 0
-            var foundCount = 0
-            var skippedCount = 0
-            val archiveDates = mutableListOf<Long>()
-            for (candidate in candidates) {
-                val archive = waybackPriceHistoryClient.fetchHistory(
-                    originalUrl = candidate.sourceUrl,
-                    expectedTitle = candidate.title
-                )
-                if (archive.skippedRecently) {
-                    skippedCount++
-                    continue
-                }
-                if (!archive.available) continue
-                checkedCount += archive.capturesChecked
-                foundCount += archive.quotes.size
-                archive.quotes.minOfOrNull { it.observedAt }?.let(archiveDates::add)
-                val newlySaved = repository.recordArchivedPriceHistory(
-                    expectedTitle = candidate.title,
-                    originalUrl = candidate.sourceUrl,
-                    storeName = candidate.storeName,
-                    quotes = archive.quotes
-                )
-                savedCount += newlySaved
-                if (newlySaved > 0) {
-                    val identityKey = onlineProductIdentityKey(candidate.title)
-                    val refreshedProduct = runCatching {
-                        withTimeout(10_000L) {
-                            repository.allProductsStream.first { products ->
-                                products.any { product ->
-                                    onlineProductIdentityKey(product.title) == identityKey &&
-                                        product.priceHistory.any {
-                                            it.eventLabel.equals("Internet Archive", ignoreCase = true)
-                                        }
-                                }
-                            }.first { product ->
-                                onlineProductIdentityKey(product.title) == identityKey &&
-                                    product.priceHistory.any {
-                                        it.eventLabel.equals("Internet Archive", ignoreCase = true)
+            val completed = withTimeoutOrNull(MAX_ARCHIVE_BACKFILL_MS) {
+                var savedCount = 0
+                var checkedCount = 0
+                var foundCount = 0
+                var skippedCount = 0
+                val archiveDates = mutableListOf<Long>()
+
+                for (candidate in candidates) {
+                    if (!waybackPreferences.getBoolean("enabled", true)) {
+                        return@withTimeoutOrNull true
+                    }
+                    val archive = waybackPriceHistoryClient.fetchHistory(
+                        originalUrl = candidate.sourceUrl,
+                        expectedTitle = candidate.title
+                    )
+                    if (archive.skippedRecently) {
+                        skippedCount++
+                        continue
+                    }
+                    if (!archive.available) continue
+                    checkedCount += archive.capturesChecked
+                    foundCount += archive.quotes.size
+                    archive.quotes.minOfOrNull { it.observedAt }?.let(archiveDates::add)
+
+                    val newlySaved = repository.recordArchivedPriceHistory(
+                        expectedTitle = candidate.title,
+                        originalUrl = candidate.sourceUrl,
+                        storeName = candidate.storeName,
+                        quotes = archive.quotes
+                    )
+                    savedCount += newlySaved
+                    if (newlySaved > 0) {
+                        val identityKey = onlineProductIdentityKey(candidate.title)
+                        val refreshedProduct = try {
+                            withTimeout(1_500L) {
+                                repository.allProductsStream.first { products ->
+                                    products.any { product ->
+                                        onlineProductIdentityKey(product.title) == identityKey &&
+                                            product.priceHistory.any { it.isArchiveEvidence }
                                     }
+                                }.first { product ->
+                                    onlineProductIdentityKey(product.title) == identityKey &&
+                                        product.priceHistory.any { it.isArchiveEvidence }
+                                }
+                            }
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            null
+                        }
+                        if (refreshedProduct != null) {
+                            val currentState = _uiState.value
+                            if (currentState.selectedProduct?.id == refreshedProduct.id) {
+                                _uiState.value = currentState.copy(selectedProduct = refreshedProduct)
                             }
                         }
-                    }.getOrNull()
-                    if (refreshedProduct != null) {
-                        val currentState = _uiState.value
-                        if (currentState.selectedProduct?.id == refreshedProduct.id) {
-                            _uiState.value = currentState.copy(selectedProduct = refreshedProduct)
-                        }
                     }
                 }
+
+                if (skippedCount == candidates.size) return@withTimeoutOrNull true
+                val notice = when {
+                    savedCount > 0 -> {
+                        val oldest = archiveDates.minOrNull()?.let { timestamp ->
+                            SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(timestamp))
+                        }
+                        " Histórico gratuito recuperado de Internet Archive: $savedCount precios antiguos guardados" +
+                            (oldest?.let { ", con capturas desde $it" } ?: "") +
+                            ". Son precios anunciados en páginas archivadas; puede haber huecos y no garantizan envío, stock ni precio final."
+                    }
+                    foundCount > 0 -> {
+                        " Se encontraron capturas con precios previos, pero no se añadieron porque no se pudo vincular la ficha a un producto verificado o ya existía el registro diario."
+                    }
+                    checkedCount > 0 -> {
+                        " Se consultaron $checkedCount capturas gratuitas, pero ninguna expuso un precio EUR verificable para el producto exacto. No se han rellenado datos ausentes."
+                    }
+                    else -> {
+                        " No se recuperó histórico gratuito de las páginas consultadas: puede que no estén archivadas o que su precio no aparezca en metadatos verificables."
+                    }
+                }
+                appendArchiveNotice(query, provider, notice)
+                true
             }
 
-            if (skippedCount == candidates.size) return@launch
-            val notice = when {
-                savedCount > 0 -> {
-                    val oldest = archiveDates.minOrNull()?.let { timestamp ->
-                        SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(timestamp))
-                    }
-                    " Histórico gratuito recuperado de Internet Archive: $savedCount precios antiguos guardados" +
-                        (oldest?.let { ", con capturas desde $it" } ?: "") +
-                        ". Son precios anunciados en páginas archivadas; puede haber huecos y no garantizan envío, stock ni precio final."
-                }
-                foundCount > 0 -> {
-                    " Se encontraron capturas con precios previos, pero no se añadieron porque no se pudo vincular la ficha a un producto verificado o ya existía el registro diario."
-                }
-                checkedCount > 0 -> {
-                    " Se consultaron $checkedCount capturas gratuitas, pero ninguna expuso un precio EUR verificable para el producto exacto. No se han rellenado datos ausentes."
-                }
-                else -> {
-                    " No se recuperó histórico gratuito de las páginas consultadas: puede que no estén archivadas o que su precio no aparezca en metadatos verificables."
-                }
+            if (completed == null && waybackPreferences.getBoolean("enabled", true)) {
+                appendArchiveNotice(
+                    query,
+                    provider,
+                    " La consulta de Wayback se detuvo al alcanzar el límite de 8 segundos; los resultados de búsqueda no se ven afectados."
+                )
             }
-            appendArchiveNotice(query, provider, notice)
         }
     }
 

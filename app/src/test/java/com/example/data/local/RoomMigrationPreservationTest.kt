@@ -101,6 +101,7 @@ class RoomMigrationPreservationTest {
             val observed = runBlocking {
                 migrated.priceObservationDao().observeVerifiedHistory("real-product-1").first()
             }
+            assertEquals("No genuine observations may be dropped by migration", if (startVersion == 8) 3 else 1, observed.size)
             val expectedLive = observed.first { it.sourceUrl == "https://shop.example/product/real-1" }
             assertEquals(101L, expectedLive.id)
             assertEquals(349.95, expectedLive.price, 0.001)
@@ -131,6 +132,28 @@ class RoomMigrationPreservationTest {
                 assertEquals(1_791_234_569_000L, ambiguous.observedAt)
                 assertEquals(1_791_234_570_000L, ambiguous.collectedAt)
                 assertEquals("", ambiguous.sourcePageUrl)
+                assertEquals(
+                    PriceObservationEntity(
+                        id = 103L,
+                        productId = "real-product-1",
+                        storeId = "real-store-1",
+                        price = 17.49,
+                        currency = "EUR",
+                        observedAt = 1_791_234_569_000L,
+                        sourceUrl = "https://shop.example/product/ambiguous",
+                        sourceName = "Wayback partner feed",
+                        isVerified = true,
+                        verificationNote = "metadata dudosos de proveedor",
+                        productTitle = "Producto real guardado",
+                        storeName = "Comercio Real",
+                        sourceType = "Google Shopping",
+                        linkType = "directo",
+                        collectedAt = 1_791_234_570_000L,
+                        evidenceType = "live",
+                        sourcePageUrl = ""
+                    ),
+                    ambiguous
+                )
             }
         } finally {
             migrated.close()

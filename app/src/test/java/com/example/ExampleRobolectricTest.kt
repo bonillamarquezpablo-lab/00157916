@@ -881,7 +881,7 @@ class ExampleRobolectricTest {
             observedAt = System.currentTimeMillis()
         )
 
-        assertEquals(3, report.results.size)
+        assertEquals("Titles accepted: ${report.results.joinToString { it.title }}", 3, report.results.size)
         val confirmed = report.results.first { it.title.startsWith("Magnetto") }
         assertFalse(confirmed.isFitmentUnverified)
         val candidate = report.results.first { it.title == "RIAL Milano llanta" }
@@ -906,7 +906,7 @@ class ExampleRobolectricTest {
         assertTrue(escapedQuoteReport.results.any { it.title == "RIAL Milano llanta" && it.isFitmentUnverified })
         assertTrue(
             escapedQuoteReport.discardedOffers.any {
-                it.title.contains("RIAL Kodiak") && it.reason.contains("incompatible", ignoreCase = true)
+                it.title.contains("RIAL Kodiak") && it.reason.contains("Diámetro distinto: 16 pulgadas", ignoreCase = true)
             }
         )
     }

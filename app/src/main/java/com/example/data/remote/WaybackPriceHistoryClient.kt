@@ -1,6 +1,7 @@
 package com.example.data.remote
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -49,9 +50,9 @@ data class WaybackBackfillResult(
 class WaybackPriceHistoryClient(
     context: Context,
     private val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(6, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
-        .callTimeout(7, TimeUnit.SECONDS)
+        .connectTimeout(2, TimeUnit.SECONDS)
+        .readTimeout(2, TimeUnit.SECONDS)
+        .callTimeout(3, TimeUnit.SECONDS)
         .build()
 ) {
     private val preferences = context.applicationContext.getSharedPreferences(
@@ -65,6 +66,9 @@ class WaybackPriceHistoryClient(
         now: Long = System.currentTimeMillis(),
         lookbackDays: Int = DEFAULT_LOOKBACK_DAYS
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
+        if (!preferences.getBoolean("enabled", true)) {
+            return@withContext WaybackBackfillResult()
+        }
         if (!isEligibleDirectUrl(originalUrl) || expectedTitle.isBlank()) {
             return@withContext WaybackBackfillResult()
         }
@@ -83,6 +87,8 @@ class WaybackPriceHistoryClient(
                 if (!response.isSuccessful) return@withContext WaybackBackfillResult()
                 parseCaptureIndex(response.body?.string().orEmpty())
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
             return@withContext WaybackBackfillResult()
         }
@@ -99,6 +105,8 @@ class WaybackPriceHistoryClient(
                             http.newCall(request).execute().use { response ->
                                 if (response.isSuccessful) response.body?.string() else null
                             }
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
                         } catch (_: Exception) {
                             null
                         } ?: return@withPermit SnapshotFetch(false, null)

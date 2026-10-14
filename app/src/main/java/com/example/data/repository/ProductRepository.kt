@@ -40,6 +40,15 @@ import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
 
+private fun PriceObservationEntity.isArchiveEvidence(): Boolean =
+    evidenceType.equals("archive", ignoreCase = true) ||
+        sourceType.contains("Internet Archive", ignoreCase = true) ||
+        sourceType.contains("Wayback", ignoreCase = true) ||
+        sourceName.contains("Internet Archive", ignoreCase = true) ||
+        sourceName.contains("Wayback", ignoreCase = true) ||
+        sourceUrl.startsWith("https://web.archive.org/", ignoreCase = true) ||
+        sourceUrl.startsWith("http://web.archive.org/", ignoreCase = true)
+
 data class UrlAnalysisResult(
     val queryOrUrl: String,
     val identifiedStore: Store?,
@@ -989,8 +998,11 @@ class ProductRepository(
         // Live rows retain the policy boundary so legacy/demo prices cannot enter the chart.
         // Independently sourced historical archive points may predate that boundary, but only
         // when the row explicitly carries archive provenance from the v8 schema.
+        // Wayback provenance is detected by the durable Room marker and, for defensive
+        // compatibility, by unmistakable archive source fields. Only archive rows bypass the
+        // live-history date boundary; all other live observations remain unchanged.
         val sortedHistory = verifiedObservations.filter { observation ->
-            val eligibleDate = observation.evidenceType == "archive" ||
+            val eligibleDate = observation.isArchiveEvidence() ||
                 observation.observedAt >= HISTORY_START_TIMESTAMP
             eligibleDate &&
                 observation.currency == "EUR" &&
@@ -998,22 +1010,19 @@ class ProductRepository(
                 observation.price > 0.0 &&
                 observation.price <= MAX_HISTORY_PRICE_EUR
         }.sortedBy { it.observedAt }
-        val liveHistory = sortedHistory.filter { it.evidenceType != "archive" }
-        // Current price/store must always come from a live provider observation, never a Wayback
-        // snapshot, even when an archived snapshot was captured later in the same calendar day.
+        val liveHistory = sortedHistory.filterNot { it.isArchiveEvidence() }
+        val archiveHistory = sortedHistory.filter { it.isArchiveEvidence() }
+        // Current price/store can only come from a live provider observation.
         val latestLiveDayStart = liveHistory.lastOrNull()?.let { localDayBounds(it.observedAt).first }
         val latestBatch = liveHistory.filter {
             latestLiveDayStart != null && localDayBounds(it.observedAt).first == latestLiveDayStart
         }
-        // One point per local day. Prefer a live observation for a day when available; otherwise
-        // use its lowest verified archive quote. Gaps remain gaps, with no interpolated values.
-        val snapshotHistory = sortedHistory
+        // Every live-history calculation uses live observations only. Archive captures never
+        // contribute to observed minimum/maximum, averages, sufficiency or chart date boundaries.
+        val snapshotHistory = liveHistory
             .groupBy { localDayBounds(it.observedAt).first }
             .values
-            .mapNotNull { dayOffers ->
-                val liveOffers = dayOffers.filter { it.evidenceType != "archive" }
-                (liveOffers.ifEmpty { dayOffers }).minByOrNull { it.price }
-            }
+            .mapNotNull { dayOffers -> dayOffers.minByOrNull { it.price } }
             .sortedBy { localDayBounds(it.observedAt).first }
         val latestObservation = latestBatch.minByOrNull { it.price }
         val minObservation = snapshotHistory.minByOrNull { it.price }
@@ -1058,7 +1067,7 @@ class ProductRepository(
         }
         val dateFormatter = SimpleDateFormat("dd MMM yyyy", Locale("es", "ES"))
         // Plot just one genuine point per local date: the cheapest valid offer observed that day.
-        val historyPoints = if (priceIsVerified) snapshotHistory.map { observation ->
+        val liveHistoryPoints = snapshotHistory.map { observation ->
             PricePoint(
                 timestamp = observation.observedAt,
                 dateLabel = dateFormatter.format(Date(observation.observedAt)),
@@ -1066,8 +1075,24 @@ class ProductRepository(
                 storeName = observation.storeName.ifBlank { observationStore(observation, stores).name },
                 eventLabel = observation.sourceType.ifBlank { observation.sourceName },
                 linkType = observation.linkType,
-                sourceUrl = observation.sourceUrl
+                sourceUrl = observation.sourceUrl,
+                evidenceType = "live"
             )
+        }
+        val archivedHistoryPoints = archiveHistory.map { observation ->
+            PricePoint(
+                timestamp = observation.observedAt,
+                dateLabel = dateFormatter.format(Date(observation.observedAt)),
+                price = observation.price,
+                storeName = observation.storeName.ifBlank { observationStore(observation, stores).name },
+                eventLabel = "Internet Archive",
+                linkType = "Archivo histórico",
+                sourceUrl = observation.sourceUrl,
+                evidenceType = "archive"
+            )
+        }
+        val historyPoints = if (priceIsVerified) {
+            (liveHistoryPoints + archivedHistoryPoints).sortedBy { it.timestamp }
         } else {
             emptyList()
         }

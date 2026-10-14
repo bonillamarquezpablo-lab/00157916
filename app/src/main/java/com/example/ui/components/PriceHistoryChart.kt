@@ -74,7 +74,10 @@ fun PriceHistoryChart(
     var selectedRange by remember { mutableStateOf(ChartRange.ALL) }
     var selectedPointIndex by remember { mutableIntStateOf(-1) }
 
-    val validHistory = remember(priceHistory) { sanitizePriceHistory(priceHistory) }
+    // Archive captures are shown separately in the product detail, not mixed into live-price claims.
+    val validHistory = remember(priceHistory) {
+        sanitizePriceHistory(priceHistory.filterNot { it.eventLabel.equals("Internet Archive", ignoreCase = true) })
+    }
     val filteredPoints = remember(validHistory, selectedRange) {
         val days = selectedRange.days
         if (days == null) validHistory

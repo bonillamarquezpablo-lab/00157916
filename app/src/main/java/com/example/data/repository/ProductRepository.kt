@@ -20,6 +20,8 @@ import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.linkTypeForUrl
 import com.example.data.remote.isWheelFitmentQuery
+import com.example.data.remote.containsWheelCategoryTerm
+import com.example.data.remote.wheelSetCountForTitle
 import com.example.data.model.Store
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -195,23 +197,15 @@ class ProductRepository(
         // Compare outliers only with the same product identity, not every result returned by
         // a broad search. This is especially important for wheels: one 14-inch rim at 111 EUR
         // must not be treated as suspicious merely because a different listing is a four-rim set.
-        val wheelTitlePattern = Regex("""(?i)\b(llantas?|ruedas?|wheels?|rims?|felgen)\b""")
         val queryHasWheelSize = Regex("""(?i)\b(1[0-9]|2[0-4])\b""").containsMatchIn(searchQuery)
-        val wheelTitleCount = eligible.count { wheelTitlePattern.containsMatchIn(it.title) }
+        val wheelTitleCount = eligible.count { containsWheelCategoryTerm(it.title) }
         val isWheelSearch = isWheelFitmentQuery(searchQuery) ||
-            Regex("""(?i)\b(llantas?|ruedas?|wheels?|rims?)\b""").containsMatchIn(searchQuery) ||
+            containsWheelCategoryTerm(searchQuery) ||
             (queryHasWheelSize && wheelTitleCount >= 2)
 
-        fun wheelBundleCount(title: String): String {
-            if (!wheelTitlePattern.containsMatchIn(title)) return "unspecified"
-            val count = Regex(
-                """(?i)\b(?:kit|juego|set)\s*(?:de\s*)?(\d+)\s*(?:[x×]\s*)?(?:llantas?|ruedas?|wheels?|rims?|felgen)\b"""
-            ).find(title)?.groupValues?.getOrNull(1)
-                ?: Regex(
-                    """(?i)\b(\d+)\s*(?:[x×]\s*)?(?:[a-z0-9]+\s+){0,2}(?:llantas?|ruedas?|wheels?|rims?|felgen)\b"""
-                ).find(title)?.groupValues?.getOrNull(1)
-            return count?.toIntOrNull()?.takeIf { it in 1..20 }?.toString() ?: "unspecified"
-        }
+        // Compare set prices only against other sets of the same count, never against a single wheel.
+        fun wheelBundleCount(title: String): String =
+            wheelSetCountForTitle(title)?.toString() ?: "single"
 
         fun comparisonKey(result: SerpApiShoppingResult): String {
             val identity = onlineProductIdentityKey(result.title)

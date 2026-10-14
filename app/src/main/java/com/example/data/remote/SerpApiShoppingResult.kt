@@ -79,7 +79,6 @@ data class SerpApiShoppingResult(
                 host.startsWith("amazon.") ||
                 host.contains(".amazon.")
         }
-}
 
     /** Number of individual wheels represented by this offer, if it is explicitly a set. */
     val wheelSetCount: Int?

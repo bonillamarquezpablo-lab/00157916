@@ -30,7 +30,9 @@ data class SerpApiShoppingResult(
     /** Provider condition, retained so the UI can reveal used/refurbished offers on request. */
     val condition: String = "new",
     /** True for offers far below the result-set median; visible but excluded from best-price/history calculations. */
-    val isSuspiciousPrice: Boolean = false
+    val isSuspiciousPrice: Boolean = false,
+    /** Google Shopping catalog identity used to fetch the full list of retailer offers. */
+    val googleProductId: String? = null
 ) {
     /**
      * True when the accepted URL stays on a Google domain rather than opening the seller directly.
@@ -72,6 +74,22 @@ data class SerpApiShoppingResult(
                 host.startsWith("amazon.") ||
                 host.contains(".amazon.")
         }
+}
+
+/**
+ * Extracts Google's catalog product ID from SerpApi's product_id or product_link conventions.
+ * A numeric catalog ID is required by SerpApi's Google Product API.
+ */
+fun extractGoogleShoppingProductId(value: String): String? {
+    if (value.isBlank()) return null
+    val decoded = value
+        .replace("%3A", ":", ignoreCase = true)
+        .replace("%2C", ",", ignoreCase = true)
+        .replace("&amp;", "&", ignoreCase = true)
+    return Regex("""(?:/shopping/product/|catalogid\s*[:=]\s*)([0-9]{5,})""", RegexOption.IGNORE_CASE)
+        .find(decoded)
+        ?.groupValues
+        ?.getOrNull(1)
 }
 
 /** Identifies the link destination without requiring a direct retailer URL or HTTPS. */

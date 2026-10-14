@@ -167,56 +167,26 @@ class ProductRepository(
         results: List<SerpApiShoppingResult>,
         searchQuery: String = ""
     ): List<SerpApiShoppingResult> {
-        val deviceSearch = isDeviceSearchQuery(searchQuery)
         val queryModelMarkers = explicitModelMarkers(searchQuery)
         val eligible = results.filter { result ->
             result.title.isNotBlank() &&
                 result.storeName.isNotBlank() &&
                 result.price.isFinite() &&
-                result.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
+                result.price > 0.0 &&
+                result.price <= MAX_HISTORY_PRICE_EUR &&
                 result.observedAt >= HISTORY_START_TIMESTAMP &&
-                isEligibleHistoryTitle(result.title) &&
-                isEligibleSeller(result.storeName) &&
-                isPlausibleHistoryPrice(result.title, result.price) &&
-                !hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title) &&
-                // A device-specific query should never show cases, filters, mop kits or other
-                // accessories as if they were the requested device. Brand-only accessory searches
-                // remain unrestricted, preserving UGREEN cable/hub deals.
-                !(deviceSearch && !isAccessorySearchQuery(searchQuery) && isAccessoryListing(result.title))
+                !hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title)
         }
+        if (eligible.isEmpty()) return emptyList()
 
-        // Retain the 25% accessory outlier guard for queries that ask about an entire device but
-        // lack a fully identifiable model. Median is robust against an extreme provider quote.
-        val fullProductPrices = if (deviceSearch) {
-            eligible.filterNot { isAccessoryListing(it.title) }.map { it.price }.sorted()
-        } else emptyList()
-        val referenceProductPrice = fullProductPrices.takeIf { it.isNotEmpty() }?.let { prices ->
-            if (prices.size % 2 == 1) prices[prices.size / 2]
+        // Do not discard unusually low prices: surface them with an explicit warning. They are
+        // excluded from best-price selection and Room history unless they reach 30% of the median.
+        val prices = eligible.map { it.price }.sorted()
+        val median = if (prices.size % 2 == 1) prices[prices.size / 2]
             else (prices[prices.size / 2 - 1] + prices[prices.size / 2]) / 2.0
+        return eligible.map { result ->
+            result.copy(isSuspiciousPrice = median > 0.0 && result.price < median * 0.30)
         }
-
-        val coded = eligible.map { result -> result to modelCode(result.title) }
-        return coded.filter { (candidate, code) ->
-            if (deviceSearch && isAccessoryListing(candidate.title) &&
-                referenceProductPrice != null &&
-                candidate.price < referenceProductPrice * ACCESSORY_PRICE_RATIO
-            ) {
-                false
-            } else if (code == null) {
-                true
-            } else {
-                val comparablePrices = coded
-                    .filter { (_, otherCode) -> otherCode == code }
-                    .map { (other, _) -> other.price }
-                    .sorted()
-                if (comparablePrices.size < 3) {
-                    true
-                } else {
-                    val median = comparablePrices[comparablePrices.size / 2]
-                    candidate.price >= median * MIN_OUTLIER_PRICE_RATIO
-                }
-            }
-        }.map { (result, _) -> result }
     }
 
     private fun isPlausibleHistoryPrice(title: String, price: Double): Boolean {
@@ -229,7 +199,6 @@ class ProductRepository(
         val portableBattery = Regex(
             """\b(power\s*bank|powerbank|bateria\s+externa|bateria\s+portatil|portable\s+battery)\b"""
         ).containsMatchIn(normalized)
-        if (portableBattery && price < 5.0) return false
 
         val powerStation = Regex(
             """\b(power\s+station|portable\s+power\s+station|estacion\s+de\s+energia|generador\s+solar\s+portatil)\b"""
@@ -283,6 +252,7 @@ class ProductRepository(
             else -> return 0
         }
         val eligible = filterOnlineSearchResults(results, searchQuery)
+            .filterNot { it.isSecondHand || it.isSuspiciousPrice }
         if (eligible.isEmpty()) return 0
 
         var inserted = 0

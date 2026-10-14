@@ -987,7 +987,8 @@ class SerpApiClient(
         // An explicit diameter plus PCD identifies a wheel search even if the query begins with
         // a model name ("RIAL Milano 14\" 5x100") instead of the word "llanta".
         val normalizedQuery = normalizeWheelFitmentQuery(query)
-        if (!isWheelFitmentQuery(normalizedQuery)) return null
+        // A diameter plus PCD is sufficient even when the user starts with a wheel model name
+        // rather than a generic word such as "llanta".
         val diameter = wheelDiameterInches(normalizedQuery)
             ?: Regex("""\b(1[0-9]|2[0-4])\b""").find(normalizedQuery)?.groupValues?.getOrNull(1)?.toIntOrNull()
             ?: return null

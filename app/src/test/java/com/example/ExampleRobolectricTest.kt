@@ -148,6 +148,66 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `followed products appear in the tracked refresh stream and can be unfollowed`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            database.productDao().insert(
+                ProductEntity(
+                    id = "sample-followed-product",
+                    title = "Producto de prueba seguido",
+                    brand = "Marca de prueba",
+                    category = "TV_AUDIO",
+                    currentPrice = 49.99,
+                    athMinPrice = 49.99,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "Amazon.es",
+                    athMaxPrice = 49.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "amazon_es",
+                    storeUrl = "https://www.amazon.es/dp/TEST",
+                    ean = "",
+                    isPriceVerified = true
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = scope
+            )
+
+            val initiallyTracked = withTimeout<List<Product>>(10_000) {
+                repository.trackedProductsStream.first { it.isEmpty() }
+            }
+            assertTrue(initiallyTracked.isEmpty())
+
+            repository.toggleTracking("sample-followed-product")
+            val followed = withTimeout<List<Product>>(10_000) {
+                repository.trackedProductsStream.first { products ->
+                    products.any { it.id == "sample-followed-product" && it.isTracked }
+                }
+            }
+            assertEquals(1, followed.size)
+            assertTrue(followed.single().isTracked)
+
+            repository.toggleTracking("sample-followed-product")
+            val unfollowed = withTimeout<List<Product>>(10_000) {
+                repository.trackedProductsStream.first { it.isEmpty() }
+            }
+            assertTrue(unfollowed.isEmpty())
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun `SerpApi quotes accept direct and Google links while rejecting invalid price currency and model`() {
         val requested = SerpApiRequestProduct(
             id = "demo_galaxy_s26_ultra",

@@ -70,6 +70,12 @@ fun ProductDetailSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     val scrollState = rememberScrollState()
+    val archivedHistoryPoints = product.priceHistory.filter {
+        it.eventLabel.equals("Internet Archive", ignoreCase = true)
+    }
+    val oldestArchivedDate = archivedHistoryPoints.minByOrNull { it.timestamp }?.let {
+        SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(it.timestamp))
+    }
     val latestPricePoint = product.priceHistory.maxByOrNull { it.timestamp }
     val currentSourceLabel = latestPricePoint
         ?.eventLabel
@@ -367,8 +373,33 @@ fun ProductDetailSheet(
                 }
             }
 
-            // Room observations are the only source for this chart. Empty/demo products show
-            // an explicit empty state; no generated or simulated points are ever plotted.
+            if (product.isPriceVerified) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        "Historial anterior a Mínimo",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        if (archivedHistoryPoints.isNotEmpty()) {
+                            "Historial gratuito recuperado de Internet Archive: " +
+                                archivedHistoryPoints.size + " puntos de capturas verificables" +
+                                (oldestArchivedDate?.let { " desde $it" } ?: "") +
+                                ". Puede haber huecos; estos precios anunciados no garantizan stock, envío ni precio final."
+                        } else {
+                            "Todavía no hay capturas antiguas gratuitas verificadas para esta ficha. Mínimo las buscará cuando haya un enlace directo de tienda con páginas archivadas disponibles."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // The chart combines verified live observations with explicitly labelled archive captures.
+            // Missing dates are left missing; no historical prices are extrapolated or interpolated.
             PriceHistoryChart(
                 priceHistory = if (product.isPriceVerified) product.priceHistory else emptyList(),
                 avg90dPrice = product.avg90dPrice

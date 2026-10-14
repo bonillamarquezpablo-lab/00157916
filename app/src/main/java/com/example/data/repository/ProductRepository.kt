@@ -463,7 +463,7 @@ class ProductRepository(
         for (quote in quotes.distinctBy { it.observedAt to it.price }) {
             val snapshotUri = parseHttpUri(quote.snapshotUrl) ?: continue
             if (!snapshotUri.host.equals("web.archive.org", ignoreCase = true)) continue
-            val snapshotTimestamp = Regex("""^/web/(\\d{14})id_/""")
+            val snapshotTimestamp = Regex("""^/web/(\d{14})id_/""")
                 .find(snapshotUri.path.orEmpty())?.groupValues?.getOrNull(1)?.let { rawTimestamp ->
                     runCatching {
                         SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {

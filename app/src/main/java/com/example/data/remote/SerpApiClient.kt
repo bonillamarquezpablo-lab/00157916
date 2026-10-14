@@ -203,13 +203,18 @@ class SerpApiClient(
      * snapshot through SerpApi; it cannot see the user's signed-in account or personalized coupons.
      */
     suspend fun searchAmazonOnline(token: String, query: String): List<SerpApiShoppingResult> =
-        withContext(Dispatchers.IO) {
-            val apiKey = token.trim()
-            require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
-            val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
-            require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
-            parseAmazonResults(executeAmazonSearch(apiKey, normalizedQuery))
-        }
+        searchAmazonOnlineWithDiagnostics(token, query).results
+
+    suspend fun searchAmazonOnlineWithDiagnostics(
+        token: String,
+        query: String
+    ): SerpApiShoppingSearchReport = withContext(Dispatchers.IO) {
+        val apiKey = token.trim()
+        require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
+        val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
+        require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
+        parseAmazonResultsDetailed(executeAmazonSearch(apiKey, normalizedQuery), normalizedQuery)
+    }
 
     internal fun parseAmazonResults(
         root: JSONObject,

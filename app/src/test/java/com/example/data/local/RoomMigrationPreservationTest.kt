@@ -30,7 +30,7 @@ class RoomMigrationPreservationTest {
         assertMigrationPreservesRealData(startVersion = 8)
     }
 
-    private fun assertMigrationPreservesRealData(startVersion: Int) {
+    private fun assertMigrationPreservesRealData(startVersion: Int) = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "migration-preservation-v$startVersion.db"
         context.deleteDatabase(name)

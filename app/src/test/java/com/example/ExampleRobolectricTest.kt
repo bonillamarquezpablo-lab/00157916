@@ -1063,6 +1063,11 @@ class ExampleRobolectricTest {
         assertEquals("Structured price from Spain's Google Shopping response is EUR even without the € glyph",
             1, noEuroSymbol.results.size)
 
+        val noEuroEvidence = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Samsung Galaxy S26 Ultra 512 GB", price = "1299.99", extractedPrice = null))
+        assertTrue("Without the euro symbol or structured price, currency cannot be verified",
+            noEuroEvidence.discardedOffers.single().reason.contains("Sin precio válido"))
+
         val dollars = parse("Samsung Galaxy S26 Ultra 512 GB",
             item("Samsung Galaxy S26 Ultra 512 GB", price = "$999.99", extractedPrice = 999.99))
         assertTrue(dollars.discardedOffers.single().reason.contains("moneda extranjera"))
@@ -1105,10 +1110,11 @@ class ExampleRobolectricTest {
             .put(item("Anker Power Bank 10.000 mAh", price = "19,99 €", extractedPrice = 19.99))
             .put(item("Tostadora de cocina", price = "12,99 €", extractedPrice = 12.99))
             .put(item("Anker Power Bank 20.000 mAh", price = "$39.99", extractedPrice = 39.99))
-            .put(item("Anker Power Bank 20.000 mAh", price = "Consultar precio", extractedPrice = null)))
+            .put(item("Anker Power Bank 20.000 mAh", price = "Consultar precio", extractedPrice = null))
+            .put(item("Anker Power Bank 20.000 mAh", price = "39.99", extractedPrice = null)))
 
         assertEquals("Amazon.es numeric structured prices are accepted without the € glyph", 1, report.results.size)
-        assertEquals(7, report.discardedOffers.size)
+        assertEquals(8, report.discardedOffers.size)
         assertTrue(report.discardedOffers.any { it.reason.contains("Segunda mano") })
         assertTrue(report.discardedOffers.any { it.reason.contains("Alquiler o cuota") })
         assertTrue(report.discardedOffers.any { it.reason.contains("variante") })

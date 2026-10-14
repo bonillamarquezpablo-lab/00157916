@@ -58,16 +58,17 @@ class ProductRepository(
     private val _latestProducts = MutableStateFlow<List<Product>>(emptyList())
 
     init {
-        // Store metadata is bundled; product rows are not. The user's online searches populate
-        // Room, while existing rows and tracking settings from older versions are preserved.
+        // Clean legacy demo rows and unverified history at startup. Preserve followed real products
+        // even if their first valid observation has not been recorded yet.
         externalScope.launch {
-            val configuredStores = SpanishMarketData.getInitialStoreEntities()
-            val existingStoreIds = storeDao.getAllStoresSnapshot().map { it.id }.toSet()
-            val missingStores = configuredStores.filter { it.id !in existingStoreIds }
-            if (missingStores.isNotEmpty()) storeDao.insertAll(missingStores)
-
-            // Product rows are no longer seeded from the demo catalogue. Existing Room rows
-            // remain untouched for safety; Mercado hides unverified, untracked sample products.
+            priceObservationDao.deleteExplicitDemoObservations()
+            trackedDao.deleteTrackingForDemoProducts()
+            productDao.deleteExplicitDemoProducts()
+            priceObservationDao.deleteUnverifiedObservations()
+            productDao.deleteProductsWithoutVerifiedObservations()
+            productDao.markProductsWithVerifiedObservations()
+            trackedDao.deleteTrackingForMissingProducts()
+            storeDao.deleteAll()
         }
     }
 

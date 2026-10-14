@@ -6,6 +6,8 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.AppDatabase
 import com.example.data.local.PriceObservationEntity
 import com.example.data.local.ProductEntity
+import com.example.data.local.StoreEntity
+import com.example.data.local.TrackedProductEntity
 import com.example.data.model.Product
 import com.example.data.repository.ProductRepository
 import com.example.data.repository.SpanishMarketData
@@ -67,6 +69,10 @@ class ExampleRobolectricTest {
                     ean = "",
                     isPriceVerified = false
                 )
+            )
+            // An unverified product survives startup cleanup only when it is on the user's watchlist.
+            database.trackedProductDao().insertOrUpdate(
+                TrackedProductEntity(productId = "sony_wh1000xm5")
             )
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
             val repository = ProductRepository(
@@ -497,6 +503,10 @@ class ExampleRobolectricTest {
                     ean = "",
                     isPriceVerified = false
                 )
+            )
+            // Keep this unverified product as an explicit user-tracked item until the provider refreshes it.
+            database.trackedProductDao().insertOrUpdate(
+                TrackedProductEntity(productId = "live-test-product")
             )
             val repository = ProductRepository(
                 storeDao = database.storeDao(),
@@ -1564,4 +1574,140 @@ class ExampleRobolectricTest {
             database.close()
         }
     }
+
+    @Test
+    fun `Room startup removes legacy mock rows and keeps only real online products`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val now = System.currentTimeMillis()
+            database.productDao().insert(
+                ProductEntity(
+                    id = "demo_iphone_17_pro_max",
+                    title = "Apple iPhone 17 Pro Max",
+                    brand = "Apple",
+                    category = "SMARTPHONES",
+                    currentPrice = 6.53,
+                    athMinPrice = 6.53,
+                    athMinDate = "Datos de demostración",
+                    athMinStore = "Datos de demostración",
+                    athMaxPrice = 6.53,
+                    avg90dPrice = 6.53,
+                    officialPvp = 6.53,
+                    currentStoreId = "apple_store",
+                    storeUrl = "https://www.apple.com/es/",
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "demo_iphone_17_pro_max",
+                    storeId = "apple_store",
+                    price = 6.53,
+                    observedAt = now,
+                    sourceUrl = "https://www.apple.com/es/",
+                    sourceName = "Demo fixture",
+                    isVerified = true
+                )
+            )
+            database.trackedProductDao().insertOrUpdate(
+                TrackedProductEntity(productId = "demo_iphone_17_pro_max")
+            )
+            database.storeDao().insertAll(
+                listOf(
+                    StoreEntity(
+                        id = "apple_store",
+                        name = "Apple Store",
+                        domain = "apple.com",
+                        brandColorHex = "#000000",
+                        category = "Electrónica",
+                        physicalStoresInSpain = true,
+                        storeCountApprox = 1,
+                        headquartersInSpain = "España",
+                        description = "Legacy row for cleanup test"
+                    )
+                )
+            )
+
+            database.productDao().insert(
+                ProductEntity(
+                    id = "online_product_redmi17",
+                    title = "Xiaomi Redmi 17 4GB 256GB",
+                    brand = "Xiaomi",
+                    category = "SMARTPHONES",
+                    currentPrice = 199.99,
+                    athMinPrice = 199.99,
+                    athMinDate = "Historial en curso",
+                    athMinStore = "Amazon.es",
+                    athMaxPrice = 199.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "amazon_es",
+                    storeUrl = "https://www.amazon.es/dp/TEST",
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "online_product_redmi17",
+                    storeId = "amazon_es",
+                    price = 199.99,
+                    observedAt = now,
+                    sourceUrl = "https://www.amazon.es/dp/TEST",
+                    sourceName = "Amazon.es",
+                    isVerified = true,
+                    productTitle = "Xiaomi Redmi 17 4GB 256GB",
+                    storeName = "Amazon.es",
+                    sourceType = "Google Shopping"
+                )
+            )
+
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = scope
+            )
+
+            val products: List<Product> = withTimeout<List<Product>>(10_000) {
+                repository.allProductsStream.first { rows ->
+                    // Wait for cleanup and verification reconciliation, not the first transient Room emission.
+                    rows.size == 1 &&
+                        rows.singleOrNull()?.id == "online_product_redmi17" &&
+                        rows.singleOrNull()?.isPriceVerified == true
+                }
+            }
+            assertEquals("Only the user-searched product with a real observation may remain", 1, products.size)
+            assertEquals("online_product_redmi17", products.single().id)
+            assertTrue("The real online price must remain verified", products.single().isPriceVerified)
+            assertEquals(1, products.single().priceHistory.size)
+
+            withTimeout(10_000) {
+                while (
+                    database.productDao().getProductCount() != 1 ||
+                    database.storeDao().getStoreCount() != 0 ||
+                    database.priceObservationDao().getObservationCount("demo_iphone_17_pro_max") != 0 ||
+                    database.trackedProductDao().getAllTracked().first().isNotEmpty()
+                ) kotlinx.coroutines.delay(10)
+            }
+            assertEquals(0, database.priceObservationDao().getObservationCount("demo_iphone_17_pro_max"))
+            assertEquals(1, database.priceObservationDao().getObservationCount("online_product_redmi17"))
+            assertTrue("Legacy mock tracking must be purged", database.trackedProductDao().getAllTracked().first().isEmpty())
+            assertEquals("Room's static store rows must also be empty", 0, database.storeDao().getStoreCount())
+            assertTrue(
+                "A real verified observation must repair a stale product verification flag",
+                database.productDao().getProductById("online_product_redmi17")?.isPriceVerified == true
+            )
+        } finally {
+            database.close()
+        }
+    }
+
 }

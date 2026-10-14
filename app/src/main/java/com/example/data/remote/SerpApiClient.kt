@@ -353,7 +353,7 @@ class SerpApiClient(
             )
         }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
             .sortedBy { it.price }
-            .take(30)
+            .take(MAX_ONLINE_RESULTS)
 
         return SerpApiShoppingSearchReport(
             results = parsed,
@@ -538,7 +538,7 @@ class SerpApiClient(
             )
         }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
             .sortedBy { it.price }
-            .take(30)
+            .take(MAX_ONLINE_RESULTS)
 
         return SerpApiShoppingSearchReport(
             results = parsed,
@@ -876,6 +876,7 @@ class SerpApiClient(
             .newBuilder()
             .addQueryParameter("engine", "google_shopping")
             .addQueryParameter("q", query)
+            .addQueryParameter("num", MAX_ONLINE_RESULTS.toString())
             .addQueryParameter("gl", "es")
             .addQueryParameter("hl", "es")
             .addQueryParameter("api_key", apiKey)
@@ -1204,6 +1205,7 @@ class SerpApiClient(
 
     private companion object {
         const val MAX_PRODUCTS_PER_BATCH = 40
+        const val MAX_ONLINE_RESULTS = 100
         const val INTER_REQUEST_DELAY_MS = 1_200L
         val STOP_WORDS = setOf(
             "the", "and", "for", "with", "in", "on", "de", "del", "la", "el", "los", "las",

@@ -22,4 +22,12 @@ interface TrackedProductDao {
 
     @Query("UPDATE tracked_products SET targetAlertPrice = :targetPrice WHERE productId = :productId")
     suspend fun updateTargetPrice(productId: String, targetPrice: Double?)
+
+    /** Remove tracking rows left behind by deleted products. */
+    @Query("DELETE FROM tracked_products WHERE productId NOT IN (SELECT id FROM products)")
+    suspend fun deleteTrackingForMissingProducts(): Int
+
+    /** Remove tracking attached to explicit legacy demo rows. */
+    @Query("DELETE FROM tracked_products WHERE productId IN (SELECT id FROM products WHERE id LIKE 'demo_%' OR lower(athMinDate) LIKE '%demostración%' OR lower(athMinStore) LIKE '%demostración%')")
+    suspend fun deleteTrackingForDemoProducts(): Int
 }

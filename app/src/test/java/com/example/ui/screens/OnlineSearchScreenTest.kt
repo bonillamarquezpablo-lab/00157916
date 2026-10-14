@@ -85,6 +85,63 @@ class OnlineSearchScreenTest {
 
 
     @Test
+    fun secondHandOffersJoinTheSamePriceOrderWhenEnabled() {
+        val query = "llantas 14\" 5x100"
+        val rows = listOf(
+            SerpApiShoppingResult(
+                title = "Magnetto MW R1-1672 llanta de acero 14 pulgadas 5x100",
+                price = 59.00,
+                storeName = "Tienda nueva",
+                sourceUrl = "https://shop.example.test/magnetto",
+                observedAt = 123L,
+                condition = "new"
+            ),
+            SerpApiShoppingResult(
+                title = "Llantas Seat Ibiza 165/70/14 81T neumáticos 5x100",
+                price = 25.00,
+                storeName = "Wallapop",
+                sourceUrl = "https://es.wallapop.com/item/seat-ibiza",
+                observedAt = 123L,
+                condition = "used"
+            ),
+            SerpApiShoppingResult(
+                title = "Llantas 14 5x100 Volkswagen",
+                price = 40.00,
+                storeName = "Vendedor particular",
+                sourceUrl = "https://particular.example.test/llantas-vw",
+                observedAt = 123L,
+                condition = "used"
+            ),
+            SerpApiShoppingResult(
+                title = "Nueva llanta de hierro de 14 pulgadas 5x100",
+                price = 60.00,
+                storeName = "Otra tienda",
+                sourceUrl = "https://shop.example.test/steel-wheel",
+                observedAt = 123L,
+                condition = "new"
+            )
+        )
+
+        val allVisible = buildOnlineSearchDisplayGroups(
+            results = rows,
+            query = query,
+            showSecondHand = true,
+            amazonOnly = false
+        )
+        assertEquals(listOf(25.0, 40.0, 59.0, 60.0), allVisible.map { it.group.minPrice })
+        assertTrue(allVisible.first().group.offers.all { it.isSecondHand })
+
+        val newOnly = buildOnlineSearchDisplayGroups(
+            results = rows,
+            query = query,
+            showSecondHand = false,
+            amazonOnly = false
+        )
+        assertEquals(listOf(59.0, 60.0), newOnly.map { it.group.minPrice })
+        assertTrue(newOnly.none { display -> display.group.offers.any { it.isSecondHand } })
+    }
+
+    @Test
     fun allFourFilterCombinationsUseLoadedResultsAndKeepCategoriesSeparate() {
         val query = "Samsung Galaxy S26 Ultra 512 GB"
         val results = exampleShoppingResponse(query)

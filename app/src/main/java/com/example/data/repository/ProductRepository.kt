@@ -250,7 +250,7 @@ class ProductRepository(
                 reason = reason,
                 provider = if (result.isAmazonOffer) "Amazon.es" else "Google Shopping"
             )
-        }.distinctBy { "\${it.provider}|\${it.title}|\${it.priceLabel}|\${it.reason}" }
+        }.distinctBy { "${it.provider}|${it.title}|${it.priceLabel}|${it.reason}" }
     }
 
     private fun isPlausibleHistoryPrice(title: String, price: Double): Boolean =

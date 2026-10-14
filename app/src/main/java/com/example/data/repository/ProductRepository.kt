@@ -123,7 +123,7 @@ class ProductRepository(
         val validQuotes = quotes.filter { quote ->
             val title = titleById[quote.productId].orEmpty()
             quote.productId.isNotBlank() &&
-                quote.price.isFinite() && quote.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
+                quote.price.isFinite() && quote.price > 0.0 && quote.price <= MAX_HISTORY_PRICE_EUR &&
                 quote.currency == "EUR" &&
                 quote.observedAt >= HISTORY_START_TIMESTAMP &&
                 isEligibleHistoryTitle(title) &&
@@ -189,51 +189,8 @@ class ProductRepository(
         }
     }
 
-    private fun isPlausibleHistoryPrice(title: String, price: Double): Boolean {
-        if (!price.isFinite() || price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR) return false
-        val normalized = normalizedProductTitle(title)
-
-        // Some items are accessories but still have a meaningful minimum price.
-        // Check these before the broad accessory rule so a suspiciously cheap power bank
-        // cannot pass merely because the title also contains "battery".
-        val portableBattery = Regex(
-            """\b(power\s*bank|powerbank|bateria\s+externa|bateria\s+portatil|portable\s+battery)\b"""
-        ).containsMatchIn(normalized)
-
-        val powerStation = Regex(
-            """\b(power\s+station|portable\s+power\s+station|estacion\s+de\s+energia|generador\s+solar\s+portatil)\b"""
-        ).containsMatchIn(normalized)
-        if (powerStation && price < 80.0) return false
-
-        // Low prices are normal for ordinary cables, hubs and replacement accessories.
-        val accessory = Regex(
-            """\b(funda|case|carcasa|protector|cristal|cable|cargador|adaptador|repuesto|replacement|cover|bumper|pantalla|bateria|solo caja|dummy|hub|usb|conector|enchufe)\b"""
-        ).containsMatchIn(normalized)
-        if (accessory) return true
-
-        val smartphone = Regex(
-            """\b(iphone|redmi|poco|pixel|oneplus|realme|oppo|vivo|honor|smartphone|galaxy\s+(s|a|z|m)\s?\d{1,2})\b"""
-        ).containsMatchIn(normalized)
-        if (smartphone && price < 45.0) return false
-
-        val tablet = Regex("""\b(ipad|tablet|galaxy\s+tab|lenovo\s+tab)\b""")
-            .containsMatchIn(normalized)
-        if (tablet && price < 50.0) return false
-
-        val laptop = Regex("""\b(laptop|portatil|macbook|chromebook|notebook)\b""")
-            .containsMatchIn(normalized)
-        if (laptop && price < 100.0) return false
-
-        val television = Regex("""\b(oled|qled|televisor|television|smart\s+tv|tv\s+(oled|qled|samsung|lg|sony))\b""")
-            .containsMatchIn(normalized)
-        if (television && price < 80.0) return false
-
-        val console = Regex("""\b(playstation\s*5|ps5|xbox\s+(series|one)|nintendo\s+switch)\b""")
-            .containsMatchIn(normalized)
-        if (console && price < 70.0) return false
-
-        return true
-    }
+    private fun isPlausibleHistoryPrice(title: String, price: Double): Boolean =
+        price.isFinite() && price > 0.0 && price <= MAX_HISTORY_PRICE_EUR
 
     /**
      * Persist each valid "new in store" result returned by a manual online search.
@@ -759,9 +716,9 @@ class ProductRepository(
         val sortedHistory = verifiedObservations.filter { observation ->
             observation.observedAt >= HISTORY_START_TIMESTAMP &&
                 observation.currency == "EUR" &&
-                isEligibleHistoryTitle(observation.productTitle) &&
-                isEligibleSeller(observation.storeName) &&
-                isPlausibleHistoryPrice(observation.productTitle, observation.price)
+                observation.price.isFinite() &&
+                observation.price > 0.0 &&
+                observation.price <= MAX_HISTORY_PRICE_EUR
         }.sortedBy { it.observedAt }
         // Room keeps each store observation, but the chart must be a daily time series, not a
         // sequence of sellers from the same search. Plot the cheapest valid offer for each day.

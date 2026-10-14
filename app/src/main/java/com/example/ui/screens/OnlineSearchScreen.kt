@@ -53,7 +53,6 @@ import coil.compose.AsyncImage
 import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
-import com.example.data.remote.isAccessoryOffer
 import com.example.data.remote.isAccessorySearchQuery
 import com.example.ui.viewmodel.OnlineSearchProvider
 import com.example.ui.viewmodel.TrackerUiState

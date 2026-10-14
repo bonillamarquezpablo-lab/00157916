@@ -3,6 +3,14 @@ package com.example.data.remote
 import java.net.URI
 import java.util.Locale
 
+/** An offer hidden by the online-search parser or quality filters; diagnostics only, never persisted. */
+data class RejectedOnlineOffer(
+    val title: String,
+    val priceLabel: String,
+    val reason: String,
+    val provider: String
+)
+
 /**
  * One result from a manual Google Shopping query.
  * Prices are point-in-time observations and must be rechecked at the seller.

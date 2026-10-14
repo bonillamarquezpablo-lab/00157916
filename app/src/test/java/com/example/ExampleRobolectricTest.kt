@@ -335,7 +335,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun \`wheel prices compare one-rim listings with one another, not four-rim sets\`() = runBlocking<Unit> {
+    fun wheelPricesCompareSingleRimsWithFourRimSets() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries().build()

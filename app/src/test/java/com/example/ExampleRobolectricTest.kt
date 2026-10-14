@@ -588,7 +588,7 @@ class ExampleRobolectricTest {
             observedAt = 1234L
         )
 
-        assertEquals(2, offers.size)
+        assertEquals("Offers parsed: ${offers.map { "${it.storeName}=${it.price} (${it.linkType})" }}", 2, offers.size)
         assertEquals(listOf("PcComponentes", "Amazon.es"), offers.map { it.storeName })
         assertEquals("directo", offers.first().linkType)
         assertEquals("Google Shopping", offers.last().linkType)

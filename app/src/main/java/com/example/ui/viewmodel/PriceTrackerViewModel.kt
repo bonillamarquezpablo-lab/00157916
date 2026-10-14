@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
 import com.example.data.remote.OnlineSearchCache
+import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.SerpApiAccountInfo
 import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiException
@@ -57,9 +58,12 @@ data class TrackerUiState(
     val priceRefreshStatus: String? = null,
     val onlineSearchQuery: String = "",
     val onlineSearchResults: List<SerpApiShoppingResult> = emptyList(),
+    val onlineSearchDiscardedOffers: List<RejectedOnlineOffer> = emptyList(),
+    val showOnlineSearchDiscarded: Boolean = false,
     val isOnlineSearching: Boolean = false,
     val onlineSearchStatus: String? = null,
     val onlineSearchAmazonOnly: Boolean = false,
+    val onlineSearchShowSecondHand: Boolean = false,
     val onlineSearchProvider: OnlineSearchProvider = OnlineSearchProvider.GOOGLE_SHOPPING,
     val isCheckingSerpApiAccount: Boolean = false,
     val serpApiAccountStatus: String? = null,
@@ -80,6 +84,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     private val serpApiTokenStore = SerpApiTokenStore(application)
     private val serpApiClient = SerpApiClient()
     private val onlineSearchCache = OnlineSearchCache(application)
+    private val onlineDiscardedCache = mutableMapOf<String, List<RejectedOnlineOffer>>()
+
+    private fun onlineSearchCacheKey(provider: OnlineSearchProvider, query: String): String =
+        "${provider.name}|${query.trim().lowercase(Locale.ROOT)}"
     private val priceRefreshPreferences = application.getSharedPreferences(
         "minimo_serpapi_refresh_state",
         Context.MODE_PRIVATE
@@ -440,12 +448,24 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(
             onlineSearchQuery = query,
             onlineSearchResults = emptyList(),
+            onlineSearchDiscardedOffers = emptyList(),
+            showOnlineSearchDiscarded = false,
             onlineSearchStatus = null
         )
     }
 
     fun onOnlineSearchAmazonOnlyChange(onlyAmazon: Boolean) {
         _uiState.value = _uiState.value.copy(onlineSearchAmazonOnly = onlyAmazon)
+    }
+
+    fun onToggleOnlineSearchDiscarded() {
+        _uiState.value = _uiState.value.copy(
+            showOnlineSearchDiscarded = !_uiState.value.showOnlineSearchDiscarded
+        )
+    }
+
+    fun onOnlineSearchShowSecondHandChange(show: Boolean) {
+        _uiState.value = _uiState.value.copy(onlineSearchShowSecondHand = show)
     }
 
     /** Open the Room-backed detail sheet for a grouped online product card. */
@@ -490,6 +510,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             isOnlineSearching = true,
             onlineSearchStatus = searchingMessage,
             onlineSearchResults = emptyList(),
+            onlineSearchDiscardedOffers = emptyList(),
+            showOnlineSearchDiscarded = false,
             onlineSearchProvider = provider,
             onlineSearchAmazonOnly = provider == OnlineSearchProvider.AMAZON
         )
@@ -506,9 +528,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         val cacheNotice = "Resultados guardados hace $ageMinutes min; no se ha consumido otra búsqueda."
                         val savedObservations = repository.recordOnlineSearchResults(safeCachedResults, provider.name, query)
                         val historyNotice = onlineHistoryNotice(savedObservations, safeCachedResults.size)
-                        val filterNotice = onlineFilterNotice(cached.results.size, safeCachedResults.size)
+                        val cachedDiscarded = onlineDiscardedCache[onlineSearchCacheKey(provider, query)]
+                            ?: repository.diagnoseOnlineSearchRejections(cached.results, query)
+                        val filterNotice = onlineFilterNotice(cachedDiscarded)
                         _uiState.value = _uiState.value.copy(
                             onlineSearchResults = safeCachedResults,
+                            onlineSearchDiscardedOffers = cachedDiscarded,
+                            showOnlineSearchDiscarded = false,
                             onlineSearchStatus = "$base $cacheNotice$filterNotice $historyNotice"
                         )
                         return@launch
@@ -544,35 +570,40 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     return@launch
                 }
 
-                val googleReport = if (provider == OnlineSearchProvider.GOOGLE_SHOPPING) {
+                val providerReport = if (provider == OnlineSearchProvider.GOOGLE_SHOPPING) {
                     serpApiClient.searchOnlineWithDiagnostics(token, query)
                 } else {
-                    null
+                    serpApiClient.searchAmazonOnlineWithDiagnostics(token, query)
                 }
-                val rawResults = googleReport?.results
-                    ?: serpApiClient.searchAmazonOnline(token, query)
+                val rawResults = providerReport.results
+                val repositoryDiscarded = repository.diagnoseOnlineSearchRejections(rawResults, query)
                 // Use the same plausibility rules for visible cards, cache entries and Room history.
                 val results = repository.filterOnlineSearchResults(rawResults, query)
+                val discarded = (providerReport.discardedOffers + repositoryDiscarded)
+                    .distinctBy { "${it.provider}|${it.title}|${it.priceLabel}|${it.reason}" }
+                onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = discarded
                 val savedObservations = if (results.isNotEmpty()) {
                     repository.recordOnlineSearchResults(results, provider.name, query)
                 } else 0
                 // Cache only filtered offers so a suspicious cached price cannot return later.
                 if (results.isNotEmpty()) onlineSearchCache.write(provider.name, query, results)
-                val base = if (results.isEmpty() && googleReport != null) {
-                    googleReport.emptyResultMessage(query)
+                val base = if (results.isEmpty() && providerReport.rawResultCount > 0) {
+                    providerReport.emptyResultMessage(query)
                 } else {
                     onlineSearchResultMessage(results, provider)
                 }
                 // The account endpoint is free; refresh the displayed balance after a live request.
                 val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
                 val quotaNote = quotaAfter?.let { " ${it.quotaSummary()}" }.orEmpty()
-                val filterNote = onlineFilterNotice(rawResults.size, results.size)
+                val filterNote = onlineFilterNotice(discarded)
                 val historyNote = if (results.isNotEmpty()) {
                     " " + onlineHistoryNotice(savedObservations, results.size)
                 } else ""
                 val message = base + quotaNote + filterNote + historyNote
                 _uiState.value = _uiState.value.copy(
                     onlineSearchResults = results,
+                    onlineSearchDiscardedOffers = discarded,
+                    showOnlineSearchDiscarded = false,
                     onlineSearchStatus = message
                 )
             } catch (cancelled: CancellationException) {
@@ -591,10 +622,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
-    private fun onlineFilterNotice(rawCount: Int, acceptedCount: Int): String =
-        (rawCount - acceptedCount).takeIf { it > 0 }?.let {
-            " Se han omitido $it resultados por precio sospechoso o condición no válida."
-        }.orEmpty()
+    private fun onlineFilterNotice(discarded: List<RejectedOnlineOffer>): String {
+        if (discarded.isEmpty()) return ""
+        val reasons = discarded.groupingBy { it.reason }.eachCount()
+            .entries.joinToString("; ") { "${it.value} por ${it.key.lowercase(Locale.ROOT)}" }
+        return " Se han descartado ${discarded.size} resultados: $reasons. Pulsa «Ver descartados» para revisar cada oferta."
+    }
 
     private fun onlineHistoryNotice(saved: Int, resultCount: Int): String =
         if (saved > 0) {

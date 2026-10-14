@@ -214,7 +214,13 @@ class SerpApiClient(
     internal fun parseAmazonResults(
         root: JSONObject,
         observedAt: Long = System.currentTimeMillis()
-    ): List<SerpApiShoppingResult> {
+    ): List<SerpApiShoppingResult> = parseAmazonResultsDetailed(root, null, observedAt).results
+
+    internal fun parseAmazonResultsDetailed(
+        root: JSONObject,
+        query: String?,
+        observedAt: Long = System.currentTimeMillis()
+    ): SerpApiShoppingSearchReport {
         val error = root.optString("error").takeIf { it.isNotBlank() && it != "null" }
         if (error != null) throw SerpApiException(error)
         val status = root.optJSONObject("search_metadata")?.optString("status")
@@ -223,10 +229,43 @@ class SerpApiClient(
         }
 
         val items = root.optJSONArray("organic_results")?.toObjects().orEmpty()
-        return items.mapNotNull { item ->
+        var rejectedAsIrrelevant = 0
+        var rejectedForPriceOrCurrency = 0
+        var rejectedForLink = 0
+        var rejectedOther = 0
+        val discardedOffers = mutableListOf<RejectedOnlineOffer>()
+        fun recordDiscard(item: JSONObject, title: String, reason: String) {
+            discardedOffers += RejectedOnlineOffer(
+                title = title.ifBlank { "Título no disponible" },
+                priceLabel = sequenceOf(item.optString("price"), item.optString("primary_price"),
+                    item.optString("extracted_price"), item.optString("extracted_primary_price"))
+                    .firstOrNull { it.isNotBlank() && it != "null" }.orEmpty(),
+                reason = reason,
+                provider = "Amazon.es"
+            )
+        }
+        val parsed = items.mapNotNull { item ->
             val title = item.optString("title").trim()
-                .takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
-            if (isClearlyNonNewListing(item, title)) return@mapNotNull null
+                .takeIf { it.isNotBlank() && it != "null" } ?: run {
+                    rejectedOther++
+                    recordDiscard(item, "", "Datos incompletos")
+                    return@mapNotNull null
+                }
+            if (isClearlyNonNewListing(item, title)) {
+                rejectedOther++
+                recordDiscard(item, title, nonNewRejectionReason(item, title))
+                return@mapNotNull null
+            }
+            if (!query.isNullOrBlank() && hasVariantMismatch(query, title)) {
+                rejectedAsIrrelevant++
+                recordDiscard(item, title, "Otro modelo o variante (capacidad, potencia o pack distinto)")
+                return@mapNotNull null
+            }
+            if (!query.isNullOrBlank() && !isPlausibleProductMatch(query, title)) {
+                rejectedAsIrrelevant++
+                recordDiscard(item, title, "Otro modelo o título no coincidente")
+                return@mapNotNull null
+            }
             // SerpApi's Amazon engine can expose the active offer as price/extracted_price,
             // or as primary_price/extracted_primary_price depending on the product layout.
             val priceText = sequenceOf(
@@ -244,7 +283,11 @@ class SerpApiClient(
             // Amazon.es is a Spanish storefront; when its structured numeric price is present,
             // it is a EUR amount even if the formatted label is omitted by a result layout.
             val price = extractedPrice ?: parsePrice(priceText)
-            if (price == null || !price.isFinite() || price <= 0.0) return@mapNotNull null
+            if (price == null || !price.isFinite() || price <= 0.0) {
+                rejectedForPriceOrCurrency++
+                recordDiscard(item, title, "Sin precio válido en euros")
+                return@mapNotNull null
+            }
             val isEuroPrice = priceText.contains("€") ||
                 priceText.contains("EUR", ignoreCase = true)
             // A structured numeric price is useful even when SerpApi omits the formatted label,
@@ -253,11 +296,23 @@ class SerpApiClient(
                 listOf('$', '£', '¥', '₹').any { priceText.contains(it) } ||
                     listOf("USD", "GBP", "CAD", "AUD", "NZD", "JPY", "INR", "CHF")
                         .any { currency -> priceText.contains(currency, ignoreCase = true) }
-            if (explicitlyForeignCurrency) return@mapNotNull null
-            if (extractedPrice == null && !isEuroPrice) return@mapNotNull null
+            if (explicitlyForeignCurrency) {
+                rejectedForPriceOrCurrency++
+                recordDiscard(item, title, "Sin precio válido: moneda extranjera")
+                return@mapNotNull null
+            }
+            if (extractedPrice == null && !isEuroPrice) {
+                rejectedForPriceOrCurrency++
+                recordDiscard(item, title, "Sin precio válido en euros")
+                return@mapNotNull null
+            }
 
             val url = sequenceOf(item.optString("link_clean"), item.optString("link"))
-                .firstOrNull { isAmazonSpainUrl(it) } ?: return@mapNotNull null
+                .firstOrNull { isAmazonSpainUrl(it) } ?: run {
+                    rejectedForLink++
+                    recordDiscard(item, title, "Datos incompletos: sin enlace válido de Amazon.es")
+                    return@mapNotNull null
+                }
             val thumbnail = item.optString("thumbnail").takeIf { isHttpsUrl(it) }.orEmpty()
             val delivery = when (val raw = item.opt("delivery")) {
                 is JSONArray -> (0 until raw.length())
@@ -288,6 +343,16 @@ class SerpApiClient(
         }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
             .sortedBy { it.price }
             .take(30)
+
+        return SerpApiShoppingSearchReport(
+            results = parsed,
+            rawResultCount = items.size,
+            rejectedAsIrrelevant = rejectedAsIrrelevant,
+            rejectedForPriceOrCurrency = rejectedForPriceOrCurrency,
+            rejectedForLink = rejectedForLink,
+            rejectedOther = rejectedOther,
+            discardedOffers = discardedOffers
+        )
     }
 
     internal fun parseShoppingResults(

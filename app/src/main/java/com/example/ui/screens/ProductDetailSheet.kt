@@ -63,9 +63,9 @@ fun ProductDetailSheet(
     product: Product,
     onDismiss: () -> Unit,
     onOpenSetAlert: () -> Unit,
-    onCompareStores: () -> Unit,
-    serpApiActionStatus: String?,
-    isComparingStores: Boolean
+    onCompareStores: () -> Unit = {},
+    serpApiActionStatus: String? = null,
+    isComparingStores: Boolean = false
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current

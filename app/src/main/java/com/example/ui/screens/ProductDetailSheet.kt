@@ -368,7 +368,6 @@ fun ProductDetailSheet(
             // an explicit empty state; no generated or simulated points are ever plotted.
             PriceHistoryChart(
                 priceHistory = if (product.isPriceVerified) product.priceHistory else emptyList(),
-                athMinPrice = product.athMinPrice,
                 avg90dPrice = product.avg90dPrice
             )
 

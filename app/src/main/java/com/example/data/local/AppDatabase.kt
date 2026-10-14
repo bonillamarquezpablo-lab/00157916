@@ -145,21 +145,17 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         /**
-         * Repairs archive provenance for any rows saved by an earlier v8 build without deleting
-         * or rewriting their prices, timestamps, verification, product IDs or merchant URLs.
-         * Only unmistakable Internet Archive URLs/source names are reclassified; genuine live
-         * observations remain untouched.
+         * Reclassifies only rows whose stored source URL itself is an Internet Archive snapshot.
+         * A merchant URL plus an ambiguous source label is not sufficient evidence: such rows
+         * must remain byte-for-byte unchanged, including evidenceType, price and timestamps.
+         * This update never deletes rows or modifies live/uncertain observations.
          */
         val MIGRATION_8_9: Migration = object : Migration(8, 9) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL(
                     "UPDATE price_observations SET evidenceType = 'archive' WHERE " +
-                        "lower(sourceUrl) LIKE 'https://web.archive.org/%' OR " +
-                        "lower(sourceUrl) LIKE 'http://web.archive.org/%' OR " +
-                        "lower(sourceType) LIKE '%internet archive%' OR " +
-                        "lower(sourceType) LIKE '%wayback%' OR " +
-                        "lower(sourceName) LIKE '%internet archive%' OR " +
-                        "lower(sourceName) LIKE '%wayback%'"
+                        "lower(sourceUrl) LIKE 'https://web.archive.org/web/%' OR " +
+                        "lower(sourceUrl) LIKE 'http://web.archive.org/web/%'"
                 )
             }
         }

@@ -1094,7 +1094,7 @@ class ExampleRobolectricTest {
         )
         assertEquals(4, fourWheelSet.wheelSetCount)
         assertEquals(4, wheelSetCountForTitle("4 Autec Zenit Felgen 5.5x14 5x100"))
-        assertEquals(null, wheelSetCountForTitle("4x100 5.5x14 5x100"))
+        assertEquals(null, wheelSetCountForTitle("4x100 Felgen 5.5x14 5x100"))
         assertEquals(null, singleWheel.wheelSetCount)
         val groups = groupOnlineShoppingResults(listOf(singleWheel, fourWheelSet))
         assertEquals("A set and a single wheel must be separate cards", 2, groups.size)

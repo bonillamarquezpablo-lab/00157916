@@ -173,7 +173,7 @@ class OnlineSearchCache(context: Context) {
         val bytes = MessageDigest.getInstance("SHA-256")
             .digest("${provider.trim().uppercase(Locale.ROOT)}|$normalized".toByteArray(Charsets.UTF_8))
         val digest = bytes.joinToString("") { byte -> "%02x".format(byte) }
-        return "search_$digest"
+        return "search_raw_v2_$digest"
     }
 
     companion object {

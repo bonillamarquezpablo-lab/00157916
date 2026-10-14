@@ -888,6 +888,24 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     fun searchAmazonShopping() = startOnlineSearch(OnlineSearchProvider.AMAZON)
 
+    /**
+     * Explicitly refresh the current provider/query. Unlike a normal search, this bypasses
+     * the 24-hour snapshot and may consume one provider search credit.
+     */
+    fun refreshOnlineSearch() {
+        val current = _uiState.value
+        if (current.isOnlineSearching || current.isRefreshingPrices) return
+        val query = current.onlineSearchQuery.trim()
+        if (query.length < 2) {
+            val message = "Escribe al menos 2 caracteres para actualizar la búsqueda."
+            _uiState.value = current.copy(onlineSearchStatus = message)
+            showSnackbar(message)
+            return
+        }
+        onlineSearchCache.invalidate(current.onlineSearchProvider.name, query)
+        startOnlineSearch(current.onlineSearchProvider)
+    }
+
     /** Search Google Shopping or Amazon.es, reusing fresh local results whenever possible. */
     private fun startOnlineSearch(provider: OnlineSearchProvider) {
         val current = _uiState.value

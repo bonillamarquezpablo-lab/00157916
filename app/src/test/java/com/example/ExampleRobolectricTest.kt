@@ -1048,6 +1048,8 @@ class ExampleRobolectricTest {
 
         val monthly = parse("Samsung Galaxy S26 Ultra 512 GB",
             item("Samsung Galaxy S26 Ultra 512 GB 49,99 €/mes", price = "49,99 €/mes", extractedPrice = 49.99))
+        assertEquals("A monthly installment must never become a product offer", 0, monthly.results.size)
+        assertEquals("The excluded installment must be visible in diagnostics", 1, monthly.discardedOffers.size)
         assertTrue(monthly.discardedOffers.single().reason.contains("Alquiler o cuota"))
 
         val pack = parse("Detergente líquido 300 ml",

@@ -328,7 +328,9 @@ class SerpApiClient(
                     rejectedOther++
                     return@mapNotNull null
                 }
-            if (isClearlyNonNewListing(item, title)) {
+            val condition = item.optString("second_hand_condition")
+                .takeIf { it.isNotBlank() && it != "null" }.orEmpty()
+            if (isRentalOrMonthlyListing(item, title)) {
                 rejectedOther++
                 return@mapNotNull null
             }
@@ -390,7 +392,8 @@ class SerpApiClient(
                 delivery = delivery,
                 rating = rating,
                 reviewCount = reviewCount,
-                observedAt = observedAt
+                observedAt = observedAt,
+                condition = condition
             )
         }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
             .sortedBy { it.price }
@@ -657,6 +660,15 @@ class SerpApiClient(
         (uri.scheme.equals("http", ignoreCase = true) ||
             uri.scheme.equals("https", ignoreCase = true)) && !uri.host.isNullOrBlank()
     }.getOrDefault(false)
+
+    private fun isRentalOrMonthlyListing(item: JSONObject, title: String): Boolean {
+        val excludedTerms = Regex(
+            """(?i)\\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\\s+a\\s+plazos|por\\s+mes|per\\s+month|mes\\s+a\\s+mes)\\b"""
+        )
+        if (excludedTerms.containsMatchIn(title)) return true
+        val condition = item.optString("second_hand_condition").takeIf { it.isNotBlank() && it != "null" }.orEmpty()
+        return excludedTerms.containsMatchIn(condition)
+    }
 
     private fun isClearlyNonNewListing(item: JSONObject, title: String): Boolean {
         val excludedTerms = Regex(

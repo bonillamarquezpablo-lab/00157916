@@ -59,7 +59,7 @@ jobs:
       - name: Ejecutar pruebas unitarias
         run: gradle :app:testDebugUnitTest --stacktrace
 
-      - name: Compilar pruebas de interfaz Compose
+      - name: Compilar pruebas instrumentadas Android
         run: gradle :app:compileDebugAndroidTestKotlin --stacktrace
 
       - name: Restaurar clave de firma estable

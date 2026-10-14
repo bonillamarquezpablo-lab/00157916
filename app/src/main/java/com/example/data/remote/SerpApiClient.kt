@@ -1024,13 +1024,16 @@ class SerpApiClient(
     }
 
     private fun wheelBoltPattern(value: String): String? {
+        // A PCD is the complete bolt pattern (bolt count x pitch-circle diameter).
+        // Comparing only "100" would incorrectly treat 4x100 wheels as compatible with 5x100.
         val pattern = Regex(
-            """(?i)\b[3456]\s*[x×]\s*(100|108|110|112|114(?:[.,]3)?|115|120|127|130|139(?:[.,]7)?)(?=\b|(?:et)?[0-9]{2,3}\b)"""
+            """(?i)\b([3456])\s*[x×]\s*(100|108|110|112|114(?:[.,]3)?|115|120|127|130|139(?:[.,]7)?)(?=\b|(?:et)?[0-9]{2,3}\b)"""
         )
-        val raw = pattern.find(value)?.groupValues?.getOrNull(1) ?: return null
-        return raw.replace(',', '.').toDoubleOrNull()?.let { number ->
-            if (number % 1.0 == 0.0) number.toInt().toString() else number.toString()
-        }
+        val match = pattern.find(value) ?: return null
+        val boltCount = match.groupValues[1].toIntOrNull() ?: return null
+        val rawPcd = match.groupValues[2].replace(',', '.').toDoubleOrNull() ?: return null
+        val normalizedPcd = if (rawPcd % 1.0 == 0.0) rawPcd.toInt().toString() else rawPcd.toString()
+        return "${boltCount}x${normalizedPcd}"
     }
 
     private fun hasVariantMismatch(query: String, title: String): Boolean {

@@ -14,7 +14,6 @@ import com.example.data.model.ProductCategory
 import com.example.data.model.StoreOffer
 import com.example.data.remote.SerpApiQuote
 import com.example.data.remote.SerpApiShoppingResult
-import com.example.data.remote.isAccessoryOffer
 import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.groupOnlineShoppingResults

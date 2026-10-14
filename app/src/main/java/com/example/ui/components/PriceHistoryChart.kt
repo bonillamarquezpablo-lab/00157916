@@ -48,6 +48,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.PricePoint
+import com.example.data.model.sanitizePriceHistory
+import com.example.data.model.summarizePriceHistory
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -66,30 +68,30 @@ enum class ChartRange(val label: String, val days: Int?) {
 @Composable
 fun PriceHistoryChart(
     priceHistory: List<PricePoint>,
-    athMinPrice: Double,
     avg90dPrice: Double,
     modifier: Modifier = Modifier
 ) {
     var selectedRange by remember { mutableStateOf(ChartRange.ALL) }
     var selectedPointIndex by remember { mutableIntStateOf(-1) }
 
-    val filteredPoints = remember(priceHistory, selectedRange) {
-        val sorted = priceHistory.sortedBy { it.timestamp }
+    val validHistory = remember(priceHistory) { sanitizePriceHistory(priceHistory) }
+    val filteredPoints = remember(validHistory, selectedRange) {
         val days = selectedRange.days
-        if (days == null) sorted
+        if (days == null) validHistory
         else {
             val cutoff = System.currentTimeMillis() - days.toLong() * 24L * 60L * 60L * 1000L
-            sorted.filter { it.timestamp >= cutoff }
+            validHistory.filter { it.timestamp >= cutoff }
         }
     }
+    val historySummary = remember(filteredPoints) { summarizePriceHistory(filteredPoints) }
+    val valid90dAverage = avg90dPrice.takeIf { it.isFinite() && it > 0.0 }
 
-    // The header must agree with the selected range instead of showing a global date when
-    // that range has no observations.
-    val firstObservationLabel = remember(priceHistory, filteredPoints) {
+    // All labels and historical claims follow the currently selected range.
+    val firstObservationLabel = remember(validHistory, historySummary, filteredPoints) {
         when {
-            filteredPoints.isEmpty() && priceHistory.isEmpty() -> "Sin datos todavía"
+            filteredPoints.isEmpty() && validHistory.isEmpty() -> "Sin datos todavía"
             filteredPoints.isEmpty() -> "Sin datos en este rango"
-            else -> priceHistory.minOfOrNull { it.timestamp }?.let { timestamp ->
+            else -> historySummary.firstObservedAt?.let { timestamp ->
                 "Historial desde " + SimpleDateFormat("dd MMM yyyy", Locale("es", "ES"))
                     .format(Date(timestamp))
             } ?: "Sin datos todavía"
@@ -97,15 +99,14 @@ fun PriceHistoryChart(
     }
 
     val minPriceInView = remember(filteredPoints) {
-        val min = filteredPoints.minOfOrNull { it.price } ?: athMinPrice
-        val max = filteredPoints.maxOfOrNull { it.price } ?: (athMinPrice * 1.3)
-        // With only one observation (or identical prices), give the point vertical breathing
-        // room instead of pinning it to the bottom edge of the chart.
+        val min = filteredPoints.minOfOrNull { it.price } ?: 1.0
+        val max = filteredPoints.maxOfOrNull { it.price } ?: (min * 1.3)
+        // With one observation (or identical prices), give the point vertical breathing room.
         if (filteredPoints.isNotEmpty() && min == max) (min * 0.9).coerceAtLeast(0.0) else min
     }
     val maxPriceInView = remember(filteredPoints) {
-        val min = filteredPoints.minOfOrNull { it.price } ?: athMinPrice
-        val max = filteredPoints.maxOfOrNull { it.price } ?: (athMinPrice * 1.3)
+        val min = filteredPoints.minOfOrNull { it.price } ?: 1.0
+        val max = filteredPoints.maxOfOrNull { it.price } ?: (min * 1.3)
         if (filteredPoints.isNotEmpty() && min == max) max * 1.1 else max
     }
 
@@ -144,19 +145,27 @@ fun PriceHistoryChart(
                 )
             }
 
-            // Never show summary statistics based on demo/default product values.
+            // A single quote is shown as a count, never dressed up as a historical minimum.
             if (filteredPoints.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFF10B981).copy(alpha = 0.15f))
+                        .background(
+                            (if (historySummary.minimumObservedPoint != null) Color(0xFF10B981)
+                            else MaterialTheme.colorScheme.outline).copy(alpha = 0.15f)
+                        )
                         .padding(horizontal = 6.dp, vertical = 3.dp)
                 ) {
+                    val observedMinimum = historySummary.minimumObservedPoint
                     Text(
-                        text = "Mín. observado: ${String.format("%.0f", athMinPrice)}€",
+                        text = observedMinimum?.let {
+                            "Mín. del rango: ${String.format("%.2f", it.price)} €"
+                        } ?: "${historySummary.observationCount} observación" +
+                            if (historySummary.observationCount == 1) "" else "es",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF059669)
+                        color = if (observedMinimum != null) Color(0xFF059669)
+                            else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 Spacer(modifier = Modifier.width(6.dp))
@@ -167,7 +176,7 @@ fun PriceHistoryChart(
                         .padding(horizontal = 6.dp, vertical = 3.dp)
                 ) {
                     Text(
-                        text = "Media 90 d: ${if (avg90dPrice > 0.0) String.format("%.0f", avg90dPrice) + "€" else "—"}",
+                        text = "Media 90 d: ${valid90dAverage?.let { String.format("%.2f", it) + " €" } ?: "—"}",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -231,22 +240,22 @@ fun PriceHistoryChart(
                 val paddingTop = 16.dp.toPx()
                 val usableHeight = height - paddingBottom - paddingTop
 
-                val priceRange = (maxPriceInView - minPriceInView).coerceAtLeast(1.0)
+                val priceRange = (maxPriceInView - minPriceInView).coerceAtLeast(0.01)
                 // A single real observation is plotted in the center until later days
                 // extend it into a time series.
-                val pointSpacing = if (filteredPoints.size > 1) width / (filteredPoints.size - 1) else width / 2f
+                val pointSpacing = if (filteredPoints.size > 1) width / (filteredPoints.size - 1) else 0f
 
-                // Calculate point coordinates
+                // A single observation is centered instead of being glued to the left edge.
                 val coords = filteredPoints.mapIndexed { index, pt ->
-                    val x = index * pointSpacing
+                    val x = if (filteredPoints.size == 1) width / 2f else index * pointSpacing
                     val normalizedPrice = (pt.price - minPriceInView) / priceRange
                     val y = paddingTop + usableHeight - (normalizedPrice.toFloat() * usableHeight)
                     Offset(x, y)
                 }
 
                 // Draw an average guide only when an actual 90-day average exists.
-                if (avg90dPrice > 0.0) {
-                    val avgNormalized = ((avg90dPrice - minPriceInView) / priceRange).coerceIn(0.0, 1.0)
+                if (valid90dAverage != null) {
+                    val avgNormalized = ((valid90dAverage - minPriceInView) / priceRange).coerceIn(0.0, 1.0)
                     val avgY = paddingTop + usableHeight - (avgNormalized.toFloat() * usableHeight)
                     drawLine(
                         color = Color.Gray.copy(alpha = 0.5f),
@@ -299,7 +308,7 @@ fun PriceHistoryChart(
                 // Draw node points
                 coords.forEachIndexed { index, coord ->
                     val pt = filteredPoints[index]
-                    val isAth = pt.price <= (athMinPrice + 0.05)
+                    val isAth = historySummary.minimumObservedPoint?.let { pt.price <= it.price + 0.005 } == true
                     val isSelected = index == selectedPointIndex
 
                     when {
@@ -369,12 +378,12 @@ fun PriceHistoryChart(
                                 text = "${String.format("%.2f", selectedPoint.price)} €",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
-                                color = if (selectedPoint.price <= athMinPrice + 0.05) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
+                                color = if (historySummary.minimumObservedPoint?.let { selectedPoint.price <= it.price + 0.005 } == true) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
                             )
-                            if (selectedPoint.price <= athMinPrice + 0.05) {
+                            if (historySummary.minimumObservedPoint?.let { selectedPoint.price <= it.price + 0.005 } == true) {
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "★ MÍNIMO HISTÓRICO",
+                                    text = "★ MÍNIMO DEL RANGO",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = Color(0xFF059669)

@@ -62,7 +62,10 @@ import com.example.ui.components.StoreComparisonView
 fun ProductDetailSheet(
     product: Product,
     onDismiss: () -> Unit,
-    onOpenSetAlert: () -> Unit
+    onOpenSetAlert: () -> Unit,
+    onCompareStores: () -> Unit,
+    serpApiActionStatus: String?,
+    isComparingStores: Boolean
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
@@ -405,6 +408,26 @@ fun ProductDetailSheet(
             }
 
             }
+            }
+
+            // Manual, quota-confirmed store comparison.
+            OutlinedButton(
+                onClick = onCompareStores,
+                enabled = !isComparingStores,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .testTag("compare_stores_button"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(if (isComparingStores) "Consultando tiendas…" else "Comparar tiendas · 1 búsqueda")
+            }
+            serpApiActionStatus?.let { status ->
+                Text(
+                    text = status,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             // Primary Actions: Alert setting and Open store

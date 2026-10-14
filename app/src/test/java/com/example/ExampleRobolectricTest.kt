@@ -335,6 +335,54 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun \`wheel prices compare one-rim listings with one another, not four-rim sets\`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val timestamp = System.currentTimeMillis()
+            val offers = listOf(
+                "RIAL Milano" to 111.00,
+                "RIAL Milano" to 142.80,
+                "4x Llantas RIAL MILANO Titanio" to 464.10,
+                "4x Llantas RIAL MILANO Titanio" to 516.53,
+                "4x Llantas RIAL MILANO Titanio" to 540.00,
+                "4x Llantas RIAL MILANO Titanio" to 550.00
+            ).mapIndexed { index, (title, price) ->
+                SerpApiShoppingResult(
+                    title = title,
+                    price = price,
+                    storeName = "Tienda $index",
+                    sourceUrl = "https://www.google.com/shopping/product/wheel-$index",
+                    observedAt = timestamp,
+                    condition = "new"
+                )
+            }
+
+            val filtered = repository.filterOnlineSearchResults(offers, "RIAL Milano 14")
+
+            assertEquals("All valid wheel candidates remain visible", offers.size, filtered.size)
+            assertTrue(
+                "Single-rim offers at 111 and 142.80 EUR should be compared with each other",
+                filtered.filter { it.title == "RIAL Milano" }.none { it.isSuspiciousPrice }
+            )
+            assertTrue(
+                "Four-rim set prices must not make a single rim look suspicious",
+                filtered.filter { it.title.startsWith("4x Llantas") }.none { it.isSuspiciousPrice }
+            )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun brandSearchesTolerateAMinorMilwaukeeTypo() {
         val client = SerpApiClient()
         val payload = JSONObject(

@@ -22,7 +22,7 @@ interface StoreDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(stores: List<StoreEntity>)
- 
+
     @Query("DELETE FROM spanish_stores")
     suspend fun deleteAll(): Int
 }

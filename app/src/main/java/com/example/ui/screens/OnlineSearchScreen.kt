@@ -188,6 +188,8 @@ fun OnlineSearchScreen(
                                 onClick = { onAmazonOnlyChange(true) },
                                 label = { Text("Solo Amazon (${amazonGroups.size})") }
                             )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilterChip(
                                 selected = state.onlineSearchShowSecondHand,
                                 onClick = { onShowSecondHandChange(!state.onlineSearchShowSecondHand) },

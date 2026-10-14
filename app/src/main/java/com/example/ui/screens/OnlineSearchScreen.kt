@@ -383,7 +383,7 @@ private fun buildRetailerSearchUrl(result: SerpApiShoppingResult): String {
     return "https://www.google.com/search?q=${Uri.encode(query)}"
 }
 
-private const val AMAZON_SHOPPING_PACKAGE = "com.amazon.mShop.android.shopping"private const val AMAZON_SHOPPING_PACKAGE = "com.amazon.mShop.android.shopping"
+private const val AMAZON_SHOPPING_PACKAGE = "com.amazon.mShop.android.shopping"
 
 /**
  * Prefer the official Amazon Shopping app so the user's existing sign-in can be used.

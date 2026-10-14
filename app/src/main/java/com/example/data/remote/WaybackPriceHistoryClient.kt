@@ -2,6 +2,11 @@ package com.example.data.remote
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
@@ -45,8 +50,8 @@ class WaybackPriceHistoryClient(
     context: Context,
     private val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(6, TimeUnit.SECONDS)
-        .readTimeout(8, TimeUnit.SECONDS)
-        .callTimeout(18, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .callTimeout(7, TimeUnit.SECONDS)
         .build()
 ) {
     private val preferences = context.applicationContext.getSharedPreferences(
@@ -83,29 +88,36 @@ class WaybackPriceHistoryClient(
         }
 
         val sampled = sampleCaptures(captures, MAX_SNAPSHOTS_PER_URL)
-        val quotes = mutableListOf<ArchivedPriceQuote>()
-        var checked = 0
-        for (capture in sampled) {
-            val snapshotUrl = buildSnapshotUrl(capture) ?: continue
-            val request = Request.Builder().url(snapshotUrl).header("User-Agent", USER_AGENT).get().build()
-            val html = try {
-                http.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) response.body?.string() else null
+        val semaphore = Semaphore(MAX_CONCURRENT_SNAPSHOT_REQUESTS)
+        val fetched = coroutineScope {
+            sampled.map { capture ->
+                async {
+                    semaphore.withPermit {
+                        val snapshotUrl = buildSnapshotUrl(capture) ?: return@withPermit SnapshotFetch(false, null)
+                        val request = Request.Builder().url(snapshotUrl).header("User-Agent", USER_AGENT).get().build()
+                        val html = try {
+                            http.newCall(request).execute().use { response ->
+                                if (response.isSuccessful) response.body?.string() else null
+                            }
+                        } catch (_: Exception) {
+                            null
+                        } ?: return@withPermit SnapshotFetch(false, null)
+                        SnapshotFetch(
+                            fetched = true,
+                            quote = parseArchivedPrice(html, expectedTitle, originalUrl, snapshotUrl, capture.timestamp)
+                        )
+                    }
                 }
-            } catch (_: Exception) {
-                null
-            } ?: continue
-            checked++
-            parseArchivedPrice(html, expectedTitle, originalUrl, snapshotUrl, capture.timestamp)
-                ?.let(quotes::add)
+            }.awaitAll()
         }
 
         // Negative results are cached too, avoiding repeated load on the public archive.
         preferences.edit().putLong(attemptKey, now).apply()
         WaybackBackfillResult(
-            quotes = quotes.sortedBy { it.observedAt }.distinctBy { it.observedAt to it.price },
+            quotes = fetched.mapNotNull { it.quote }.sortedBy { it.observedAt }
+                .distinctBy { it.observedAt to it.price },
             capturesFound = captures.size,
-            capturesChecked = checked,
+            capturesChecked = fetched.count { it.fetched },
             available = true
         )
     }
@@ -351,6 +363,11 @@ class WaybackPriceHistoryClient(
             timeZone = TimeZone.getTimeZone("UTC")
         }.format(Date(timestamp))
 
+    private data class SnapshotFetch(
+        val fetched: Boolean,
+        val quote: ArchivedPriceQuote?
+    )
+
     internal data class WaybackCapture(
         val rawTimestamp: String,
         val timestamp: Long,
@@ -359,7 +376,8 @@ class WaybackPriceHistoryClient(
 
     companion object {
         const val DEFAULT_LOOKBACK_DAYS = 1600
-        const val MAX_SNAPSHOTS_PER_URL = 18
+        const val MAX_SNAPSHOTS_PER_URL = 12
+        private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L
         const val DAY_MS = 24L * 60L * 60L * 1000L
         const val MIN_HISTORICAL_PRICE = 0.50

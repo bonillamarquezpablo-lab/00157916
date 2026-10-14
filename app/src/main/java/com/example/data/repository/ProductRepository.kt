@@ -196,18 +196,53 @@ class ProductRepository(
         }
         if (eligible.isEmpty()) return emptyList()
 
-        // Do not discard unusually low prices: surface them with an explicit warning. They are
-        // excluded from best-price selection and Room history unless they reach 30% of the median.
-        val prices = eligible.filterNot {
-            it.isSecondHand || it.isAccessoryOffer || it.isFitmentUnverified
-        }.map { it.price }.sorted()
-            .ifEmpty { eligible.filterNot { it.isFitmentUnverified }.map { it.price }.sorted() }
-        val median = if (prices.size % 2 == 1) prices[prices.size / 2]
-            else (prices[prices.size / 2 - 1] + prices[prices.size / 2]) / 2.0
+        // Compare outliers only with the same product identity, not every result returned by
+        // a broad search. This is especially important for wheels: one 14-inch rim at 111 EUR
+        // must not be treated as suspicious merely because a different listing is a four-rim set.
+        val wheelTitlePattern = Regex("""(?i)\b(llantas?|ruedas?|wheels?|rims?|felgen)\b""")
+        val queryHasWheelSize = Regex("""(?i)\b(1[0-9]|2[0-4])\b""").containsMatchIn(searchQuery)
+        val wheelTitleCount = eligible.count { wheelTitlePattern.containsMatchIn(it.title) }
+        val isWheelSearch = Regex("""(?i)\b(llantas?|ruedas?|wheels?|rims?)\b""")
+            .containsMatchIn(searchQuery) ||
+            (queryHasWheelSize && wheelTitleCount >= 2)
+
+        fun wheelBundleCount(title: String): String {
+            if (!wheelTitlePattern.containsMatchIn(title)) return "unspecified"
+            val count = Regex(
+                """(?i)\b(?:kit|juego|set)\s*(?:de\s*)?(\d+)\s*(?:[x×]\s*)?(?:llantas?|ruedas?|wheels?|rims?|felgen)\b"""
+            ).find(title)?.groupValues?.getOrNull(1)
+                ?: Regex(
+                    """(?i)\b(\d+)\s*(?:[x×]\s*)?(?:[a-z0-9]+\s+){0,2}(?:llantas?|ruedas?|wheels?|rims?|felgen)\b"""
+                ).find(title)?.groupValues?.getOrNull(1)
+            return count?.toIntOrNull()?.takeIf { it in 1..20 }?.toString() ?: "unspecified"
+        }
+
+        fun comparisonKey(result: SerpApiShoppingResult): String {
+            val identity = onlineProductIdentityKey(result.title)
+            return if (isWheelSearch) identity + "|wheel-set:" + wheelBundleCount(result.title) else identity
+        }
+
+        val suspiciousByGroup = eligible.groupBy(::comparisonKey).mapValues { (_, comparableOffers) ->
+            val trustedPrices = comparableOffers.filterNot {
+                it.isSecondHand || it.isAccessoryOffer || it.isFitmentUnverified
+            }.map { it.price }.sorted()
+            val fallbackPrices = comparableOffers.filterNot { it.isFitmentUnverified }
+                .map { it.price }.sorted()
+            val prices = trustedPrices.ifEmpty { fallbackPrices }
+            if (prices.size < 2) {
+                // One listing alone provides no same-product reference for a statistical outlier.
+                false to (prices.singleOrNull() ?: 0.0)
+            } else {
+                val median = if (prices.size % 2 == 1) prices[prices.size / 2]
+                    else (prices[prices.size / 2 - 1] + prices[prices.size / 2]) / 2.0
+                true to median
+            }
+        }
         return eligible.map { result ->
+            val (hasComparableReference, median) = suspiciousByGroup[comparisonKey(result)] ?: (false to 0.0)
             result.copy(
                 isSuspiciousPrice = !result.isFitmentUnverified &&
-                    median > 0.0 && result.price < median * 0.30
+                    hasComparableReference && median > 0.0 && result.price < median * 0.30
             )
         }
     }

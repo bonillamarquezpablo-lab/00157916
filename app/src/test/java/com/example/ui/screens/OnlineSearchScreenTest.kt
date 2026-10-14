@@ -263,6 +263,47 @@ class OnlineSearchScreenTest {
     }
 
     @Test
+    fun wheelSetsDisplayPerWheelPriceAndExplicitSetBadge() {
+        val query = "autec zenit 14 5x100"
+        val rows = listOf(
+            SerpApiShoppingResult(
+                title = "4 Autec Zenit Felgen 5.5x14 5x100",
+                price = 432.19,
+                storeName = "Tienda juego",
+                sourceUrl = "https://shop.example/four-wheel-set",
+                observedAt = 123L
+            )
+        )
+        composeRule.setContent {
+            MaterialTheme {
+                OnlineSearchScreen(
+                    state = TrackerUiState(
+                        onlineSearchQuery = query,
+                        onlineSearchResults = rows,
+                        onlineSearchProvider = OnlineSearchProvider.GOOGLE_SHOPPING
+                    ),
+                    onQueryChange = {},
+                    onSearch = {},
+                    onAmazonSearch = {},
+                    onAmazonOnlyChange = {},
+                    onToggleDiscarded = {},
+                    onShowSecondHandChange = {},
+                    onOpenSettings = {},
+                    onOpenProduct = {},
+                    modifier = Modifier.testTag("online-search-list")
+                )
+            }
+        }
+        val searchList = composeRule.onNodeWithTag("online-search-list")
+        searchList.performScrollToNode(hasText("Juego de 4"))
+        composeRule.onNodeWithText("Juego de 4").assertIsDisplayed()
+        searchList.performScrollToNode(hasText(" / llanta", substring = true))
+        assertTrue(composeRule.onAllNodesWithText(" / llanta", substring = true).fetchSemanticsNodes().isNotEmpty())
+        searchList.performScrollToNode(hasText("Precio total del juego de 4", substring = true))
+        assertTrue(composeRule.onAllNodesWithText("Precio total del juego de 4", substring = true).fetchSemanticsNodes().isNotEmpty())
+    }
+
+    @Test
     fun discardedToggleIsNotShownWhenThereAreNoRejectedOffers() {
         composeRule.setContent {
             MaterialTheme {

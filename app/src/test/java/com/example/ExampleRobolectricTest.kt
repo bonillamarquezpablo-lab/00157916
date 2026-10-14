@@ -960,6 +960,101 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun wheelSearchKeepsMatchingModelWithoutCategoryWordsAndReportsExactFitmentMismatch() {
+        val client = SerpApiClient()
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {"title":"Autec Zenit","price":"123,15 €","extracted_price":123.15,"link":"https://shop.example/zenit","source":"Tienda Uno","condition":"new"},
+                {"title":"Autec Zenit 5.5x14 Llanta","price":"133,12 €","extracted_price":133.12,"link":"https://shop.example/zenit-55x14","source":"Tienda Dos","condition":"new"},
+                {"title":"Autec Xenos","price":"132,81 €","extracted_price":132.81,"link":"https://shop.example/xenos","source":"Tienda Tres","condition":"new"},
+                {"title":"Llantas Autec Xenos","price":"540,00 €","extracted_price":540.00,"link":"https://shop.example/xenos-set","source":"Tienda Cuatro","condition":"new"},
+                {"title":"4 Autec Zenit Felgen 5,5x14 4x100 SIL für Opel Corsa Aluräder","price":"432,19 €","extracted_price":432.19,"link":"https://shop.example/zenit-4x100","source":"Tienda Cinco","condition":"new"}
+              ]
+            }
+            """.trimIndent()
+        )
+        val report = client.parseShoppingResultsDetailed(
+            root = payload,
+            query = "autec zenit 14 5x100",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals(setOf("Autec Zenit", "Autec Zenit 5.5x14 Llanta"),
+            report.results.map { it.title }.toSet())
+        val bareModel = report.results.single { it.title == "Autec Zenit" }
+        assertTrue(bareModel.isFitmentUnverified)
+        assertTrue(bareModel.isCategoryUnverified)
+        val partialMeasures = report.results.single { it.title == "Autec Zenit 5.5x14 Llanta" }
+        assertTrue(partialMeasures.isFitmentUnverified)
+        assertFalse(partialMeasures.isCategoryUnverified)
+
+        assertTrue(report.discardedOffers.any {
+            it.title == "Autec Xenos" && it.reason.contains("Otro modelo", ignoreCase = true)
+        })
+        assertTrue(report.discardedOffers.any {
+            it.title == "Llantas Autec Xenos" && it.reason.contains("Otro modelo", ignoreCase = true)
+        })
+        assertTrue(report.discardedOffers.any {
+            it.title.startsWith("4 Autec Zenit Felgen") &&
+                it.reason == "Anclaje distinto: 4x100 (buscaste 5x100)"
+        })
+        assertFalse(report.discardedOffers.any {
+            it.title.startsWith("4 Autec Zenit Felgen") && it.reason == "No parece una llanta o rueda"
+        })
+    }
+
+    @Test
+    fun wheelSearchRecognizesMultilingualCategoryTermsAndSeparatesSetsFromSingleWheels() {
+        val client = SerpApiClient()
+        val terms = listOf("llanta", "rueda", "aro", "Felgen", "Aluräder", "Alu", "jante", "cerchi", "wheel", "rim", "alloy")
+        val items = org.json.JSONArray()
+        terms.forEachIndexed { index, term ->
+            items.put(
+                JSONObject()
+                    .put("title", "Autec Zenit 5.5x14 5x100 " + term)
+                    .put("price", "145,00 €")
+                    .put("extracted_price", 145.00)
+                    .put("link", "https://shop.example/wheel-" + index)
+                    .put("source", "Tienda " + index)
+                    .put("condition", "new")
+            )
+        }
+        val multilingual = client.parseShoppingResultsDetailed(
+            root = JSONObject()
+                .put("search_metadata", JSONObject().put("status", "Success"))
+                .put("shopping_results", items),
+            query = "autec zenit 14 5x100",
+            observedAt = 1_800_000_000_000L
+        )
+        assertEquals("Every requested language term must be recognized", terms.size, multilingual.results.size)
+        assertTrue(multilingual.results.none { it.isCategoryUnverified || it.isFitmentUnverified })
+
+        val singleWheel = SerpApiShoppingResult(
+            title = "Autec Zenit 5.5x14 5x100 alloy wheel",
+            price = 133.12,
+            storeName = "Tienda individual",
+            sourceUrl = "https://shop.example/single-wheel",
+            observedAt = 1_800_000_000_000L
+        )
+        val fourWheelSet = SerpApiShoppingResult(
+            title = "4 Autec Zenit Felgen 5.5x14 5x100",
+            price = 432.19,
+            storeName = "Tienda juego",
+            sourceUrl = "https://shop.example/four-wheel-set",
+            observedAt = 1_800_000_000_000L
+        )
+        assertEquals(4, fourWheelSet.wheelSetCount)
+        assertEquals(null, singleWheel.wheelSetCount)
+        val groups = groupOnlineShoppingResults(listOf(singleWheel, fourWheelSet))
+        assertEquals("A set and a single wheel must be separate cards", 2, groups.size)
+        val setGroup = groups.single { it.wheelSetCount == 4 }
+        assertEquals(108.0475, setGroup.minPrice, 0.0001)
+    }
+
+    @Test
     fun germanWheelListingsAreRecognizedAndWrongPcdIsReportedAsFitmentMismatch() {
         val client = SerpApiClient()
         val payload = JSONObject(

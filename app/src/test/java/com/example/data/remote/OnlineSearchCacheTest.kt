@@ -3,6 +3,7 @@ package com.example.data.remote
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -43,6 +44,37 @@ class OnlineSearchCacheTest {
         assertEquals("Entrega GRATIS con Prime", cached.results[0].delivery)
         assertTrue(cached.results[0].primeEligible)
         assertEquals(4.7, cached.results[0].rating!!, 0.001)
+    }
+
+    @Test
+    fun cachesUnfilteredProviderResponseFor24HoursWithoutCredentials() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val cache = OnlineSearchCache(context)
+        val now = 1_800_200_000_000L
+        val response = JSONObject(
+            """
+            {
+              "api_key": "MUST_NOT_BE_STORED",
+              "search_metadata": {"status": "Success", "token": "ALSO_SECRET"},
+              "shopping_results": [
+                {"title":"Autec Zenit","price":"123,15 €","extracted_price":123.15,"link":"https://shop.example/zenit","source":"Tienda"}
+              ]
+            }
+            """.trimIndent()
+        )
+
+        cache.writeRaw("GOOGLE_SHOPPING", "autec zenit 14 5x100", response.toString(), now)
+        val cached = cache.read("google_shopping", "autec zenit 14 5x100", now + OnlineSearchCache.CACHE_TTL_MS - 1L)
+
+        assertNotNull(cached)
+        assertTrue(cached!!.results.isEmpty())
+        assertNotNull(cached.rawResponse)
+        assertTrue(cached.rawResponse!!.contains("Autec Zenit"))
+        assertFalse(cached.rawResponse!!.contains("MUST_NOT_BE_STORED"))
+        assertFalse(cached.rawResponse!!.contains("ALSO_SECRET"))
+        assertFalse(cached.rawResponse!!.contains("api_key"))
+        assertEquals(24L * 60L * 60L * 1000L, OnlineSearchCache.CACHE_TTL_MS)
+        assertNull(cache.read("google_shopping", "autec zenit 14 5x100", now + OnlineSearchCache.CACHE_TTL_MS))
     }
 
     @Test

@@ -1,0 +1,67 @@
+# Plan de datos para un historial de precios de hasta cuatro años
+
+**Objetivo:** recuperar precios antiguos cuando exista una fuente trazable y combinar esos datos con observaciones propias, sin inventar puntos ni presentar una cobertura incompleta como si fueran cuatro años completos.
+
+## Hallazgo prioritario: ya existe una fuente que conviene probar
+
+### 1. SerpApi — Google Product API / `price_insights`
+
+- Documentación: https://serpapi.com/google-product-api
+- La respuesta puede incluir `product_results.price_insights`, con moneda y series `stores[].prices[]` que contienen fecha y precio por comercio.
+- Es la primera prueba a realizar porque Mínimo ya usa SerpApi y la misma clave se puede usar para consultar `engine=google_product` mediante el `product_id` que devuelve Google Shopping.
+- **Límite importante:** el proveedor documenta que el historial puede aparecer cuando Google lo muestra, pero no garantiza públicamente cuatro años de cobertura para cada producto o tienda. La disponibilidad y la profundidad se deben medir por producto; no se debe asumir que toda la respuesta contiene cuatro años.
+- Cada punto importado debe conservar el comercio y la fecha indicados por el proveedor, junto con la fecha de importación y la referencia del producto Google. El punto no debe registrarse como si Mínimo lo hubiera observado ese día.
+
+## Fuentes complementarias
+
+### 2. Keepa API — historial de Amazon.es
+
+- Documentación: https://keepa.com/api-docs/
+- Keepa entrega historial de precios de mercados Amazon, incluyendo datos por producto/ASIN. Su documentación describe una API con consumo de tokens y planes de pago: https://keepa.com/api-docs/plans-tokens.html
+- La documentación de ofertas identifica el mercado español como `domainId=9`: https://keepa.com/api-docs/deals.html
+- **Uso recomendado:** fuente especializada para Amazon.es y principal alternativa cuando Google no ofrezca un historial suficientemente profundo.
+- **Límites:** requiere una cuenta y clave de API con saldo; el precio, disponibilidad y profundidad deben validarse por ASIN. No cubre de forma general todas las tiendas españolas. Antes de integrar, revisar coste por volumen y condiciones de uso, y mantener la clave fuera del APK en una versión pública.
+
+### 3. Internet Archive / Wayback Machine — capturas de páginas
+
+- Documentación del índice CDX: https://github.com/internetarchive/wayback-cdx-server
+- Permite buscar capturas históricas de URL en intervalos de fechas, pero una captura no equivale a una base de precios estructurada.
+- **Uso recomendado:** fuente auxiliar para auditar un precio de una página concreta cuando exista una captura antigua y se pueda verificar claramente producto, moneda y condición.
+- **No usar como fuente primaria masiva:** las fichas de tiendas pueden depender de JavaScript, variar sus URL, no estar archivadas o mostrar precios personalizados/agotados. No debe inventarse un precio cuando la captura no lo expone con claridad.
+
+### 4. Feeds y acuerdos directos con tiendas
+
+La opción de mayor calidad a largo plazo son feeds, APIs de afiliación o acuerdos de datos que permitan explícitamente registrar y conservar precios históricos. Deben evaluarse tienda por tienda; disponer de una URL pública no implica permiso para crear una base de datos histórica comercial.
+
+## Arquitectura requerida antes de importar historia antigua
+
+La tabla `price_observations` ya guarda fecha de observación, comercio, moneda, origen, URL y estado de validación. Para un backfill fiable, la próxima migración debe separar explícitamente:
+
+- **Fecha del precio** (`observedAt`): fecha que afirma la fuente que tenía ese precio.
+- **Fecha de adquisición** (`collectedAt`): cuándo Mínimo recuperó/importó el dato.
+- **Tipo de evidencia:** observación propia en directo, historial de proveedor o captura de archivo.
+- **Identidad externa:** ASIN, ID de producto Google o identificador del feed, vinculada al producto exacto de Mínimo.
+- **Procedencia y validación:** proveedor, tienda, moneda, URL/referencia, tipo de artículo, coincidencia de modelo/variante y nota de validación.
+
+El filtro temporal actual impide que fechas anteriores al 13 de octubre de 2026 entren en el historial validado. No basta con quitar ese filtro global: hay que permitir fechas antiguas únicamente para importaciones identificadas y verificadas, y seguir excluyendo filas heredadas/sintéticas que no tengan procedencia fiable.
+
+## Reglas de calidad del historial
+
+1. Separar siempre producto, modelo, variante, capacidad, color, región, moneda, nuevo/usado y vendedor cuando esos atributos cambien la comparabilidad.
+2. No mezclar precios usados, reacondicionados, alquiler, financiación, cupones exclusivos ni precios sin envío/IVA conocido con el precio normal nuevo.
+3. No extrapolar ni interpolar fechas ausentes. Los gráficos deben unir solo puntos documentados y mostrar huecos/cobertura de forma honesta.
+4. La etiqueta «mínimo de cuatro años» solo se habilita si los datos válidos abarcan al menos cuatro años reales y tienen suficientes observaciones. Si la cobertura empieza hace tres meses, decir «mínimo observado desde [fecha]».
+5. Calcular mínimos y medias por periodo con la serie real seleccionada; nunca confiar en campos precargados o valores cacheados para etiquetar un gráfico.
+6. Comparar los datos retrorecuperados con una búsqueda actual del mismo comercio antes de aceptar una coincidencia. Conservar las divergencias para revisión, no forzar coincidencias por título genérico.
+
+## Secuencia de implementación recomendada
+
+- **Fase A — integridad del gráfico:** calcular todos los resúmenes con los puntos reales del rango visible; no llamar «mínimo» a una única observación; probar vacíos, duplicados, precios inválidos y periodos.
+- **Fase B — prueba de cobertura sin coste accidental:** con una sola consulta manual de SerpApi, evaluar una muestra pequeña de productos populares en España y medir antigüedad de la primera/última fecha, número de puntos, comercios y moneda. No lanzar barridos automáticos.
+- **Fase C — importación de proveedor:** crear un identificador externo persistente, parser probado y migración con `collectedAt` y tipo de evidencia. Importar solo precios históricos realmente devueltos por la fuente.
+- **Fase D — Amazon.es:** contrastar Keepa y calcular coste por ASIN/mes antes de habilitarlo.
+- **Fase E — cobertura colectiva:** para productos sin historia externa, comenzar observación diaria desde el primer registro. Un historial multiusuario de cuatro años requerirá un backend central y política de conservación; una base local nueva no puede recuperar por sí sola precios que nunca guardó.
+
+## Criterio de éxito
+
+Mínimo no debe prometer que todo producto dispone de cuatro años. Debe intentar recuperar ese historial cuando exista una fuente verificable, decir qué cobertura consiguió en cada producto y mantener visible la diferencia entre **historial externo recuperado** y **precio observado por Mínimo**.

@@ -307,6 +307,48 @@ class OnlineSearchScreenTest {
     }
 
     @Test
+    fun explicitRefreshIsAvailableForExistingResultsAndExplainsQuotaCost() {
+        val result = SerpApiShoppingResult(
+            title = "Autec Zenit",
+            price = 133.12,
+            storeName = "Tienda",
+            sourceUrl = "https://shop.example/autec-zenit",
+            observedAt = 123L,
+            isFitmentUnverified = true
+        )
+        var refreshInvocations = 0
+        composeRule.setContent {
+            MaterialTheme {
+                OnlineSearchScreen(
+                    state = TrackerUiState(
+                        onlineSearchQuery = "Autec Zenit 5.5x14 5x100",
+                        onlineSearchResults = listOf(result),
+                        onlineSearchProvider = OnlineSearchProvider.GOOGLE_SHOPPING
+                    ),
+                    onQueryChange = {},
+                    onSearch = {},
+                    onAmazonSearch = {},
+                    onForceRefresh = { refreshInvocations++ },
+                    onAmazonOnlyChange = {},
+                    onShowSecondHandChange = {},
+                    onToggleDiscarded = {},
+                    onOpenSettings = {},
+                    onOpenProduct = {},
+                    modifier = Modifier.testTag("online-search-list")
+                )
+            }
+        }
+
+        val searchList = composeRule.onNodeWithTag("online-search-list")
+        searchList.performScrollToNode(hasText("Actualizar resultados ahora (puede consumir cuota)"))
+        composeRule.onNodeWithText("Actualizar resultados ahora (puede consumir cuota)").assertIsDisplayed()
+        composeRule.onNodeWithText("Actualizar resultados ahora (puede consumir cuota)").performClick()
+        assertEquals(1, refreshInvocations)
+        searchList.performScrollToNode(hasText("Comprueba diámetro, anclaje, ancho y ET", substring = true))
+        assertTrue(composeRule.onAllNodesWithText("Comprueba diámetro, anclaje, ancho y ET", substring = true).fetchSemanticsNodes().isNotEmpty())
+    }
+
+    @Test
     fun discardedToggleIsNotShownWhenThereAreNoRejectedOffers() {
         composeRule.setContent {
             MaterialTheme {

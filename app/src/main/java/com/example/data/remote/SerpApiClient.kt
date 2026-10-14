@@ -455,7 +455,7 @@ class SerpApiClient(
                 // accept obvious non-wheel accessories such as hubcaps as uncertain wheel results.
                 // A named/model-specific match may still lack category words and remains explicitly
                 // unverified, rather than being silently discarded.
-                if (modelQuery.isBlank() && !isWheelListing(title)) {
+                if (modelQuery.isBlank() && !isWheelListing(title) && !hasGenericWheelEvidence(title)) {
                     rejectedAsIrrelevant++
                     recordDiscard(item, title, "No parece una llanta o rueda")
                     return@mapNotNull null
@@ -1028,6 +1028,23 @@ class SerpApiClient(
 
     private fun isWheelListing(value: String): Boolean =
         containsWheelCategoryTerm(value)
+
+    /**
+     * Generic fitment searches can return real alloy-wheel models without a category word.
+     * Retain those only as unverified candidates when their title contains wheel specifications
+     * or a recognized wheel maker; obvious hubcaps are rejected earlier.
+     */
+    private fun hasGenericWheelEvidence(value: String): Boolean {
+        val hasTechnicalSpec = wheelDiameterInches(value) != null ||
+            wheelBoltPattern(value) != null ||
+            Regex("""(?i)\bET\s*-?\s*\d{2,3}\b""").containsMatchIn(value) ||
+            Regex("""(?i)\b(?:CB|DIA|center\s*bore|nabenbohrung)\s*\d{2,3}(?:[.,]\d)?\b""")
+                .containsMatchIn(value)
+        val knownWheelMaker = Regex(
+            """(?i)\b(oxxo|mak|dezent|alutec|autec|rial|borbet|ronal|aez|oz|bbs|enkei|ats|dotz|keskin|alcar|mwd?|magnetto|platin|rc[\s-]?design|cms|msw|tomason|fondmetal|momo|sparco)\b"""
+        ).containsMatchIn(value)
+        return hasTechnicalSpec || knownWheelMaker
+    }
 
     private fun wheelDiameterInches(value: String): Int? {
         val patterns = listOf(

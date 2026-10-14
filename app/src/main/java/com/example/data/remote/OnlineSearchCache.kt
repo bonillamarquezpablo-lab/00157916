@@ -85,6 +85,12 @@ class OnlineSearchCache(context: Context) {
         }
     }
 
+    /** Removes one provider/query entry so an explicit refresh can bypass the 24-hour cache. */
+    fun invalidate(provider: String, query: String) {
+        val key = cacheKey(provider, query)
+        preferences.edit().remove(key).remove(key + "_saved_at").apply()
+    }
+
     /** Stores an unfiltered provider response for 24 hours without credentials. */
     fun writeRaw(
         provider: String,

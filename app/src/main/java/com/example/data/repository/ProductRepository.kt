@@ -169,7 +169,6 @@ class ProductRepository(
         searchQuery: String = ""
     ): List<SerpApiShoppingResult> {
         val queryModelMarkers = explicitModelMarkers(searchQuery)
-        val deviceSearch = isDeviceSearchQuery(searchQuery)
         val eligible = results.filter { result ->
             result.title.isNotBlank() &&
                 result.storeName.isNotBlank() &&
@@ -178,15 +177,13 @@ class ProductRepository(
                 result.price <= MAX_HISTORY_PRICE_EUR &&
                 result.observedAt >= HISTORY_START_TIMESTAMP &&
                 !result.isRentalOrMonthly &&
-                !hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title) &&
-                // A model-specific device search must not present a case, mop kit or filter as the device.
-                !(deviceSearch && !isAccessorySearchQuery(searchQuery) && isAccessoryListing(result.title))
+                !hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title)
         }
         if (eligible.isEmpty()) return emptyList()
 
         // Do not discard unusually low prices: surface them with an explicit warning. They are
         // excluded from best-price selection and Room history unless they reach 30% of the median.
-        val prices = eligible.filterNot { it.isSecondHand }.map { it.price }.sorted()
+        val prices = eligible.filterNot { it.isSecondHand || it.isAccessoryOffer }.map { it.price }.sorted()
             .ifEmpty { eligible.map { it.price }.sorted() }
         val median = if (prices.size % 2 == 1) prices[prices.size / 2]
             else (prices[prices.size / 2 - 1] + prices[prices.size / 2]) / 2.0
@@ -216,6 +213,12 @@ class ProductRepository(
 
         return results.mapNotNull { result ->
             val filtered = acceptedByKey[key(result)]
+            val visibleButNotHistory = filtered != null && (
+                result.isSecondHand ||
+                    (isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
+                        isAccessoryListing(result.title))
+            )
+            if (visibleButNotHistory) return@mapNotNull null
             val reason = when {
                 result.title.isBlank() || result.storeName.isBlank() ->
                     "Datos incompletos"
@@ -225,9 +228,7 @@ class ProductRepository(
                     "Alquiler o cuota mensual"
                 result.isSecondHand ->
                     "Segunda mano o reacondicionado"
-                hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title) ||
-                    (isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
-                        isAccessoryListing(result.title)) ->
+                hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title) ->
                     "Otro modelo o variante"
                 !isEligibleSeller(result.storeName) ->
                     "Otro modelo o vendedor no elegible"
@@ -276,6 +277,11 @@ class ProductRepository(
         // only second-hand/refurbished offers are excluded from the new-product history.
         val eligible = filterOnlineSearchResults(results, searchQuery)
             .filterNot { it.isSecondHand }
+            // Accessories remain visible in online search, but are not saved as the main device.
+            .filterNot {
+                isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
+                    isAccessoryListing(it.title)
+            }
         if (eligible.isEmpty()) return 0
 
         var inserted = 0

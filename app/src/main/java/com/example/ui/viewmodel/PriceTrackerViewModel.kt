@@ -919,25 +919,53 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 // Cache lookup comes first: saved results remain usable even if the quota is empty
                 // or the API key was removed after the previous search.
                 val cached = onlineSearchCache.read(provider.name, query)
-                if (cached != null && cached.results.isNotEmpty()) {
-                    val safeCachedResults = repository.filterOnlineSearchResults(cached.results, query)
-                    if (safeCachedResults.isNotEmpty()) {
-                        val ageMinutes = ((System.currentTimeMillis() - cached.savedAt) / 60_000L).coerceAtLeast(1L)
-                        val base = onlineSearchResultMessage(safeCachedResults, provider)
-                        val cacheNotice = "Resultados guardados hace $ageMinutes min; no se ha consumido otra búsqueda."
-                        val savedObservations = repository.recordOnlineSearchResults(safeCachedResults, provider.name, query)
-                        val historyNotice = onlineHistoryNotice(savedObservations, safeCachedResults.size)
-                        val cachedDiscarded = onlineDiscardedCache[onlineSearchCacheKey(provider, query)]
-                            ?: repository.diagnoseOnlineSearchRejections(cached.results, query)
-                        val filterNotice = onlineFilterNotice(cachedDiscarded)
-                        _uiState.value = _uiState.value.copy(
-                            onlineSearchResults = safeCachedResults,
-                            onlineSearchDiscardedOffers = cachedDiscarded,
-                            showOnlineSearchDiscarded = false,
-                            onlineSearchStatus = "$base $cacheNotice$filterNotice $historyNotice"
+                if (cached != null && (cached.rawResponse != null || cached.results.isNotEmpty())) {
+                    // Re-run current parser/filters over the saved unfiltered response; no new API call.
+                    val cachedReport = if (cached.rawResponse != null) {
+                        val cachedRoot = org.json.JSONObject(cached.rawResponse)
+                        if (provider == OnlineSearchProvider.GOOGLE_SHOPPING) {
+                            serpApiClient.parseShoppingResultsDetailed(cachedRoot, query, cached.savedAt)
+                        } else {
+                            serpApiClient.parseAmazonResultsDetailed(cachedRoot, query, cached.savedAt)
+                        }
+                    } else {
+                        com.example.data.remote.SerpApiShoppingSearchReport(
+                            results = cached.results,
+                            rawResultCount = cached.results.size,
+                            rejectedAsIrrelevant = 0,
+                            rejectedForPriceOrCurrency = 0,
+                            rejectedForLink = 0,
+                            rejectedOther = 0,
+                            providerName = if (provider == OnlineSearchProvider.AMAZON) "Amazon.es" else "Google Shopping"
                         )
-                        return@launch
                     }
+                    val cachedResults = cachedReport.results
+                    val safeCachedResults = repository.filterOnlineSearchResults(cachedResults, query)
+                    val cachedDiscarded = (cachedReport.discardedOffers +
+                        repository.diagnoseOnlineSearchRejections(cachedResults, query))
+                        .distinctBy { it.provider + "|" + it.title + "|" + it.priceLabel + "|" + it.reason }
+                    onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = cachedDiscarded
+                    val ageMinutes = ((System.currentTimeMillis() - cached.savedAt) / 60_000L).coerceAtLeast(1L)
+                    val base = if (safeCachedResults.isEmpty()) {
+                        cachedReport.emptyResultMessage(query)
+                    } else {
+                        onlineSearchResultMessage(safeCachedResults, provider)
+                    }
+                    val cacheNotice = "Resultados guardados hace $ageMinutes min; no se ha consumido otra búsqueda."
+                    val savedObservations = if (safeCachedResults.isNotEmpty()) {
+                        repository.recordOnlineSearchResults(safeCachedResults, provider.name, query)
+                    } else 0
+                    val historyNotice = if (safeCachedResults.isNotEmpty()) {
+                        " " + onlineHistoryNotice(savedObservations, safeCachedResults.size)
+                    } else ""
+                    val filterNotice = onlineFilterNotice(cachedDiscarded)
+                    _uiState.value = _uiState.value.copy(
+                        onlineSearchResults = safeCachedResults,
+                        onlineSearchDiscardedOffers = cachedDiscarded,
+                        showOnlineSearchDiscarded = false,
+                        onlineSearchStatus = "$base $cacheNotice$filterNotice$historyNotice"
+                    )
+                    return@launch
                 }
 
                 val token = serpApiTokenStore.read()
@@ -984,8 +1012,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 val savedObservations = if (results.isNotEmpty()) {
                     repository.recordOnlineSearchResults(results, provider.name, query)
                 } else 0
-                // Cache only filtered offers so a suspicious cached price cannot return later.
-                if (results.isNotEmpty()) onlineSearchCache.write(provider.name, query, results)
+                // Cache the raw provider response for 24 hours so future filters can reclassify it.
+                providerReport.rawResponse?.let { onlineSearchCache.writeRaw(provider.name, query, it) }
                 val base = if (results.isEmpty() && providerReport.rawResultCount > 0) {
                     providerReport.emptyResultMessage(query)
                 } else {

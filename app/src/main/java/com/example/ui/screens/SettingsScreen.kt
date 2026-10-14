@@ -38,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -87,6 +88,12 @@ fun SettingsScreen(
     var serpApiKeyInput by remember { mutableStateOf("") }
     var serpApiKeyConfigured by remember { mutableStateOf(serpApiTokenStore.isConfigured()) }
     var serpApiKeyMessage by remember { mutableStateOf<String?>(null) }
+    val waybackPreferences = remember(context) {
+        context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+    }
+    var waybackEnabled by remember {
+        mutableStateOf(waybackPreferences.getBoolean("enabled", true))
+    }
 
     // A failed decrypt can clear only a confirmed-invalid token. Keep the Settings badge in sync
     // with storage once the ViewModel surfaces that read error.
@@ -251,6 +258,30 @@ fun SettingsScreen(
         }
 
         SectionTitle("Fuentes de precios", "Conexiones auténticas, sin datos inventados")
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text("Historial gratuito de Wayback", fontWeight = FontWeight.Bold)
+                Text(
+                    "Consulta capturas antiguas en segundo plano. No consume búsquedas de SerpApi.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = waybackEnabled,
+                onCheckedChange = { enabled ->
+                    waybackEnabled = enabled
+                    waybackPreferences.edit().putBoolean("enabled", enabled).apply()
+                }
+            )
+        }
         ElevatedCard(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(22.dp),

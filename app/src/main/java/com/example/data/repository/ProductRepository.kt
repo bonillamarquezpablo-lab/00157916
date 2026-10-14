@@ -175,6 +175,7 @@ class ProductRepository(
                 result.price > 0.0 &&
                 result.price <= MAX_HISTORY_PRICE_EUR &&
                 result.observedAt >= HISTORY_START_TIMESTAMP &&
+                !result.isRentalOrMonthly &&
                 !hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title)
         }
         if (eligible.isEmpty()) return emptyList()

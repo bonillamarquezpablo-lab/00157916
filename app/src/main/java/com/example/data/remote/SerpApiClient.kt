@@ -58,7 +58,9 @@ data class SerpApiShoppingSearchReport(
     val rejectedOther: Int,
     val firstResultFields: String = "",
     val discardedOffers: List<RejectedOnlineOffer> = emptyList(),
-    val providerName: String = "Google Shopping"
+    val providerName: String = "Google Shopping",
+    /** Unfiltered provider response; stored locally without credentials for later reclassification. */
+    val rawResponse: String? = null
 ) {
     fun emptyResultMessage(query: String): String {
         if (rawResultCount == 0) {
@@ -201,7 +203,8 @@ class SerpApiClient(
         require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
         val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
         require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
-        parseShoppingResultsDetailed(executeSearch(apiKey, normalizedQuery), normalizedQuery)
+        val response = executeSearch(apiKey, normalizedQuery)
+        parseShoppingResultsDetailed(response, normalizedQuery).copy(rawResponse = response.toString())
     }
 
     /**
@@ -219,7 +222,8 @@ class SerpApiClient(
         require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
         val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
         require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
-        parseAmazonResultsDetailed(executeAmazonSearch(apiKey, normalizedQuery), normalizedQuery)
+        val response = executeAmazonSearch(apiKey, normalizedQuery)
+        parseAmazonResultsDetailed(response, normalizedQuery).copy(rawResponse = response.toString())
     }
 
     internal fun parseAmazonResults(
@@ -429,38 +433,34 @@ class SerpApiClient(
                 return@mapNotNull null
             }
             var fitmentUnverified = false
+            var categoryUnverified = false
             val wheelFitmentQuery = query?.let(::parseWheelFitmentQuery)
             if (wheelFitmentQuery != null) {
-                if (!isWheelListing(title)) {
-                    rejectedAsIrrelevant++
-                    recordDiscard(item, title, "No parece una llanta o rueda")
-                    return@mapNotNull null
-                }
                 val modelQuery = query?.let(::wheelModelQuery).orEmpty()
-                if (modelQuery.isNotBlank() && !isPlausibleProductMatch(modelQuery, title)) {
+                val modelMatches = modelQuery.isBlank() || isPlausibleProductMatch(modelQuery, title)
+                if (!modelMatches) {
                     rejectedAsIrrelevant++
                     recordDiscard(item, title, "Otro modelo o título no coincidente")
                     return@mapNotNull null
                 }
+                categoryUnverified = !isWheelListing(title)
                 val resultDiameter = wheelDiameterInches(title)
                 val resultPcd = wheelBoltPattern(title)
                 if (resultDiameter != null && resultDiameter != wheelFitmentQuery.diameterInches) {
                     rejectedAsIrrelevant++
-                    recordDiscard(item, title, "Diámetro incompatible: se busca ${wheelFitmentQuery.diameterInches} pulgadas")
+                    recordDiscard(item, title, "Diámetro distinto: " + resultDiameter +
+                        " pulgadas (buscaste " + wheelFitmentQuery.diameterInches + " pulgadas)")
                     return@mapNotNull null
                 }
                 if (resultPcd != null && resultPcd != wheelFitmentQuery.boltPattern) {
                     rejectedAsIrrelevant++
-                    recordDiscard(item, title, "Anclaje incompatible: se busca ${wheelFitmentQuery.boltPattern}")
+                    recordDiscard(item, title, "Anclaje distinto: " + resultPcd +
+                        " (buscaste " + wheelFitmentQuery.boltPattern + ")")
                     return@mapNotNull null
                 }
-                // Some Shopping titles omit one or both fitment dimensions. Show those candidates,
-                // but label them clearly and never add their prices to Mercado/history until the
-                // exact size and bolt pattern can be confirmed from the listing.
                 fitmentUnverified =
                     resultDiameter != wheelFitmentQuery.diameterInches ||
-                    resultPcd != wheelFitmentQuery.boltPattern
-            } else {
+                    resultPcd != wheelFitmentQuery.boltPattern            } else {
                 if (!query.isNullOrBlank() && hasVariantMismatch(query, title)) {
                     rejectedAsIrrelevant++
                     recordDiscard(item, title, "Otro modelo o variante (capacidad, potencia o pack distinto)")
@@ -534,7 +534,8 @@ class SerpApiClient(
                 observedAt = observedAt,
                 condition = condition,
                 googleProductId = googleProductId,
-                isFitmentUnverified = fitmentUnverified
+                isFitmentUnverified = fitmentUnverified,
+                isCategoryUnverified = categoryUnverified
             )
         }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
             .sortedBy { it.price }
@@ -997,20 +998,19 @@ class SerpApiClient(
         return WheelFitmentQuery(diameter, boltPattern)
     }
 
-    private fun wheelModelQuery(query: String): String = normalizeWheelFitmentQuery(query)
-        .replace(Regex("""(?i)\b[3456]\s*[x×]\s*(?:100|108|110|112|114(?:[.,]3)?|115|120|127|130|139(?:[.,]7)?)(?=\b|(?:et)?[0-9]{2,3}\b)"""), " ")
-        .replace(Regex("""(?i)\b(?:R\s*)?(?:1[0-9]|2[0-4])\s*(?:["”″]|pulg(?:adas?)?|inch(?:es)?)?\b"""), " ")
-        .replace(Regex("""(?i)\b(?:ET)\s*\d{2,3}\b"""), " ")
-        .replace(Regex("""(?i)\b(llantas?|ruedas?|wheels?|rims?|felgen|PCD)\b"""), " ")
-        .replace(Regex("""[^a-zA-Z0-9]+"""), " ")
-        .trim()
-        .replace(Regex("""\s+"""), " ")
+    private fun wheelModelQuery(query: String): String =
+        Normalizer.normalize(normalizeWheelFitmentQuery(query).lowercase(Locale.ROOT), Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "")
+            .replace(Regex("""(?i)\b[3456]\s*[x×]\s*(?:100|108|110|112|114(?:[.,]3)?|115|120|127|130|139(?:[.,]7)?)(?=\b|(?:et)?[0-9]{2,3}\b)"""), " ")
+            .replace(Regex("""(?i)\b(?:R\s*)?(?:1[0-9]|2[0-4])\s*(?:["”″]|pulg(?:adas?)?|inch(?:es)?)?\b"""), " ")
+            .replace(Regex("""(?i)\b(?:ET)\s*\d{2,3}\b"""), " ")
+            .replace(Regex("""(?i)\b(llantas?|ruedas?|aros?|wheels?|rims?|felgen?|alufelgen?|alurader|alu|jantes?|cerchi|alloy|PCD)\b"""), " ")
+            .replace(Regex("""[^a-zA-Z0-9]+"""), " ")
+            .trim()
+            .replace(Regex("""\s+"""), " ")
 
     private fun isWheelListing(value: String): Boolean =
-        // Google Shopping may return German wheel listings. Recognize alloy wheels/rims in
-        // German so they are evaluated for size and PCD instead of being called irrelevant.
-        Regex("""(?i)\b(llantas?|ruedas?|wheels?|rims?|felgen|felge|alufelgen|alufelge|aluräder|alurader)\b""")
-            .containsMatchIn(value)
+        containsWheelCategoryTerm(value)
 
     private fun wheelDiameterInches(value: String): Int? {
         val patterns = listOf(

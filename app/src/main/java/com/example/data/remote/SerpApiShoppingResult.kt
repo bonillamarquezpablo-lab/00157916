@@ -1,6 +1,7 @@
 package com.example.data.remote
 
 import java.net.URI
+import java.text.Normalizer
 import java.util.Locale
 
 /** Rejected/hidden offers are transient diagnostics and are never persisted to Room. */
@@ -34,7 +35,9 @@ data class SerpApiShoppingResult(
     /** Google Shopping catalog identity used to fetch the full list of retailer offers. */
     val googleProductId: String? = null,
     /** A wheel result whose title omits one or more requested fitment dimensions. */
-    val isFitmentUnverified: Boolean = false
+    val isFitmentUnverified: Boolean = false,
+    /** The title may match the requested model, but does not clearly identify a wheel. */
+    val isCategoryUnverified: Boolean = false
 ) {
     /**
      * True when the accepted URL stays on a Google domain rather than opening the seller directly.
@@ -76,6 +79,11 @@ data class SerpApiShoppingResult(
                 host.startsWith("amazon.") ||
                 host.contains(".amazon.")
         }
+}
+
+    /** Number of individual wheels represented by this offer, if it is explicitly a set. */
+    val wheelSetCount: Int?
+        get() = wheelSetCountForTitle(title)
 }
 
 /**
@@ -154,6 +162,31 @@ private val ACCESSORY_LISTING_PATTERN = Regex(
 fun isAccessorySearchQuery(query: String): Boolean =
     ACCESSORY_LISTING_PATTERN.containsMatchIn(query)
 
+private fun normalizedWheelCategoryText(value: String): String =
+    Normalizer.normalize(value.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+        .replace(Regex("\\p{M}+"), "")
+
+private val WHEEL_CATEGORY_PATTERN = Regex(
+    """(?<![\p{L}\p{N}])(?:llantas?|ruedas?|aros?|wheel(?:s)?|rims?|felgen?|alufelgen?|alurader|alu|jantes?|cerchi|alloy)(?![\p{L}\p{N}])"""
+)
+
+/** Recognizes common Spanish, German, French, Italian and English wheel/rim vocabulary. */
+fun containsWheelCategoryTerm(value: String): Boolean =
+    WHEEL_CATEGORY_PATTERN.containsMatchIn(normalizedWheelCategoryText(value))
+
+/** Detects explicit wheel-set counts, including leading titles such as "4 Autec ... Felgen". */
+fun wheelSetCountForTitle(title: String): Int? {
+    val normalized = normalizedWheelCategoryText(title)
+    if (!WHEEL_CATEGORY_PATTERN.containsMatchIn(normalized)) return null
+    val leadingCount = Regex("""^\s*(\d{1,2})\s+""")
+        .find(normalized)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        ?.takeIf { it in 2..20 }
+    if (leadingCount != null) return leadingCount
+    return Regex("""\b(?:juego|set|kit|pack)\s+(?:(?:de|of)\s+)?(\d{1,2})\b""")
+        .find(normalized)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        ?.takeIf { it in 2..20 }
+}
+
 /**
  * One exact product/model grouping in the online results. Individual retailer listings remain
  * separate offers so the detail sheet can show their prices and Room history.
@@ -167,8 +200,16 @@ data class OnlineProductGroup(
         get() = offers.filterNot { it.isSuspiciousPrice }.minByOrNull { it.price }
             ?: offers.minBy { it.price }
 
+    val wheelSetCount: Int?
+        get() = cheapestOffer.wheelSetCount
+
+    /** For a set, the comparable displayed price is the per-wheel price, not the whole set. */
     val minPrice: Double
-        get() = cheapestOffer.price
+        get() {
+            val offer = cheapestOffer
+            val count = offer.wheelSetCount
+            return if (count != null) offer.price / count else offer.price
+        }
 
     val storeCount: Int
         get() = offers.map { it.storeName.trim().lowercase(Locale.ROOT) }.distinct().size
@@ -310,17 +351,21 @@ fun onlineProductIdentityKey(title: String): String {
         technicalSpecs.takeIf { it.isNotBlank() }?.let { "specs:$it" }
     ).filterNotNull().joinToString("|")
 
-    if (model != null) return (listOf(brand, model).filter { it.isNotBlank() } + suffix)
-        .joinToString("|")
+    val wheelSetSuffix = wheelSetCountForTitle(title)?.let { "wheel-set:$it" }
+    if (model != null) {
+        val identity = (listOf(brand, model).filter { it.isNotBlank() } + suffix).joinToString("|")
+        return wheelSetSuffix?.let { "$identity|$it" } ?: identity
+    }
 
     val ignored = setOf("the", "and", "for", "with", "de", "del", "la", "las", "el", "los", "un", "una", "con", "para", "by", "from")
     val coreTokens = normalized.split(' ')
         .filter { it.isNotBlank() && it !in ignored }
         .distinct()
         .sorted()
-    return ((if (brand.isNotBlank()) listOf(brand) + coreTokens.filterNot { it == brand } else coreTokens) + suffix)
+    val identity = ((if (brand.isNotBlank()) listOf(brand) + coreTokens.filterNot { it == brand } else coreTokens) + suffix)
         .joinToString(" ")
         .ifBlank { normalized }
+    return wheelSetSuffix?.let { "$identity|$it" } ?: identity
 }
 
 /** Groups repeated seller listings into one product card, retaining all separate offers. */

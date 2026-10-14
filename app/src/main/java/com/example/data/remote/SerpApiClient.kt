@@ -623,7 +623,7 @@ class SerpApiClient(
                 googleProductId = productId
             )
         }.distinctBy {
-            "\${it.storeName.trim().lowercase(Locale.ROOT)}|\${it.sourceUrl.trim().lowercase(Locale.ROOT)}|\${it.price}"
+            "${it.storeName.trim().lowercase(Locale.ROOT)}|${it.sourceUrl.trim().lowercase(Locale.ROOT)}|${it.price}"
         }.sortedBy { it.price }
     }
 

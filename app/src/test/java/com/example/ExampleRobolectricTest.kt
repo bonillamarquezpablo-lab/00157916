@@ -68,6 +68,10 @@ class ExampleRobolectricTest {
                     isPriceVerified = false
                 )
             )
+            // An unverified product survives startup cleanup only when it is on the user's watchlist.
+            database.trackedProductDao().insertOrUpdate(
+                TrackedProductEntity(productId = "sony_wh1000xm5")
+            )
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
             val repository = ProductRepository(
                 storeDao = database.storeDao(),
@@ -328,6 +332,10 @@ class ExampleRobolectricTest {
                     ean = "",
                     isPriceVerified = false
                 )
+            )
+            // Keep this unverified product as an explicit user-tracked item until the provider refreshes it.
+            database.trackedProductDao().insertOrUpdate(
+                TrackedProductEntity(productId = "live-test-product")
             )
             val repository = ProductRepository(
                 storeDao = database.storeDao(),
@@ -1104,7 +1112,12 @@ class ExampleRobolectricTest {
             )
 
             val products: List<Product> = withTimeout<List<Product>>(10_000) {
-                repository.allProductsStream.first { rows -> rows.any { it.id == "online_product_redmi17" } }
+                repository.allProductsStream.first { rows ->
+                    // Wait for cleanup and verification reconciliation, not the first transient Room emission.
+                    rows.size == 1 &&
+                        rows.singleOrNull()?.id == "online_product_redmi17" &&
+                        rows.singleOrNull()?.isPriceVerified == true
+                }
             }
             assertEquals("Only the user-searched product with a real observation may remain", 1, products.size)
             assertEquals("online_product_redmi17", products.single().id)

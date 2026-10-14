@@ -1044,7 +1044,7 @@ class ExampleRobolectricTest {
         assertTrue(rental.discardedOffers.single().reason.contains("Alquiler o cuota"))
 
         val monthly = parse("Samsung Galaxy S26 Ultra 512 GB",
-            item("Samsung Galaxy S26 Ultra 512 GB cuota 49,99 €/mes", price = "49,99 €/mes", extractedPrice = 49.99))
+            item("Samsung Galaxy S26 Ultra 512 GB 49,99 €/mes", price = "49,99 €/mes", extractedPrice = 49.99))
         assertTrue(monthly.discardedOffers.single().reason.contains("Alquiler o cuota"))
 
         val pack = parse("Detergente líquido 300 ml",
@@ -1063,6 +1063,10 @@ class ExampleRobolectricTest {
         val dollars = parse("Samsung Galaxy S26 Ultra 512 GB",
             item("Samsung Galaxy S26 Ultra 512 GB", price = "$999.99", extractedPrice = 999.99))
         assertTrue(dollars.discardedOffers.single().reason.contains("moneda extranjera"))
+
+        val missingPrice = parse("Samsung Galaxy S26 Ultra 512 GB",
+            item("Samsung Galaxy S26 Ultra 512 GB", price = "", extractedPrice = null))
+        assertTrue(missingPrice.discardedOffers.single().reason.contains("Sin precio válido"))
 
         val wrongTitle = parse("Samsung Galaxy S26 Ultra 512 GB",
             item("Tostadora de cocina", price = "19,99 €", extractedPrice = 19.99))

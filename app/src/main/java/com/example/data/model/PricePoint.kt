@@ -6,5 +6,7 @@ data class PricePoint(
     val price: Double,
     val storeName: String,
     val eventLabel: String? = null,
-    val linkType: String = "directo"
+    val linkType: String = "directo",
+    /** Direct archived snapshot URL for provenance; never a current offer URL. */
+    val sourceUrl: String? = null
 )

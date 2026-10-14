@@ -241,6 +241,38 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `positive sub-five-euro offer is kept but flagged below thirty percent of median`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val timestamp = System.currentTimeMillis()
+            val results = listOf(
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 1.99, "Tienda barata", "https://www.google.com/shopping/product/cheap", observedAt = timestamp),
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 39.99, "Tienda 2", "https://www.google.com/shopping/product/p2", observedAt = timestamp),
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 42.99, "Tienda 3", "https://www.google.com/shopping/product/p3", observedAt = timestamp),
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 44.99, "Tienda 4", "https://www.google.com/shopping/product/p4", observedAt = timestamp),
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 49.99, "Tienda 5", "https://www.google.com/shopping/product/p5", observedAt = timestamp)
+            )
+            val filtered = repository.filterOnlineSearchResults(results, "Anker Power Bank 20000mAh")
+            assertEquals("Suspicious offers remain visible instead of being discarded", 5, filtered.size)
+            assertTrue(filtered.single { it.price == 1.99 }.isSuspiciousPrice)
+            assertTrue(filtered.filter { it.price > 1.99 }.none { it.isSuspiciousPrice })
+            assertEquals("The cheapest trusted offer is used for group best-price calculations", 39.99,
+                groupOnlineShoppingResults(filtered).single().cheapestOffer.price, 0.001)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun brandSearchesTolerateAMinorMilwaukeeTypo() {
         val client = SerpApiClient()
         val payload = JSONObject(

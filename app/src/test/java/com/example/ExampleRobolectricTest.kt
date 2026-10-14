@@ -698,7 +698,7 @@ class ExampleRobolectricTest {
         // the explicitly incompatible 7x16 5x112 RIAL Kodiak.
         val escapedQuoteReport = client.parseShoppingResultsDetailed(
             root = payload,
-            query = """llantas 14\\\" 5x100""",
+            query = """llantas 14\" 5x100""",
             observedAt = System.currentTimeMillis()
         )
         assertTrue(escapedQuoteReport.results.any { it.title == "RIAL Milano llanta" && it.isFitmentUnverified })

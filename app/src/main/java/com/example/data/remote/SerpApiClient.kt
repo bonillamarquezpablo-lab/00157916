@@ -55,7 +55,8 @@ data class SerpApiShoppingSearchReport(
     val rejectedForPriceOrCurrency: Int,
     val rejectedForLink: Int,
     val rejectedOther: Int,
-    val firstResultFields: String = ""
+    val firstResultFields: String = "",
+    val discardedOffers: List<RejectedOnlineOffer> = emptyList()
 ) {
     fun emptyResultMessage(query: String): String {
         if (rawResultCount == 0) {

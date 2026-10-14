@@ -677,7 +677,7 @@ class ExampleRobolectricTest {
               "search_metadata": {"status": "Success"},
               "shopping_results": [
                 {
-                  "title": "Magnetto Wheels MW R1-1672 Llantas de acero 14\\" 5x100 negras",
+                  "title": "Magnetto Wheels MW R1-1672 Llantas de acero 14\" 5x100 negras",
                   "price": "59,00 €",
                   "extracted_price": 59.00,
                   "link": "https://shop.example.test/magnetto",
@@ -701,7 +701,7 @@ class ExampleRobolectricTest {
                   "condition": "new"
                 },
                 {
-                  "title": "Tapacubos 14\\" 5x100",
+                  "title": "Tapacubos 14\" 5x100",
                   "price": "19,99 €",
                   "extracted_price": 19.99,
                   "link": "https://shop.example.test/hubcap",

@@ -164,8 +164,12 @@ class OnlineSearchScreenTest {
         assertVisibleText("Solo Amazon (2)")
         assertVisibleText("3 tiendas · precio más bajo en Amazon.es")
         assertVisibleText("7 tiendas · precio más bajo en Wallapop")
-        assertEquals(4, composeRule.onAllNodesWithText("Accesorio").fetchSemanticsNodes().size)
+        assertEquals(4, results.count { it.isAccessoryOffer })
         assertVisibleText("Póster Samsung Galaxy S26 Ultra 512 GB")
+        assertTrue(
+            "The accessory badge is visible on the poster card",
+            composeRule.onAllNodesWithText("Accesorio").fetchSemanticsNodes().isNotEmpty()
+        )
         assertEquals("Changing either filter must not start another SerpApi search", 0, searchInvocations)
     }
 

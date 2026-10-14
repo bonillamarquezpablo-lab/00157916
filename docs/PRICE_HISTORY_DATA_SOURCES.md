@@ -80,3 +80,16 @@ El filtro temporal actual impide que fechas anteriores al 13 de octubre de 2026 
 ## Criterio de éxito
 
 Mínimo no debe prometer que todo producto dispone de cuatro años. Debe intentar recuperar ese historial cuando exista una fuente verificable, decir qué cobertura consiguió en cada producto y mantener visible la diferencia entre **historial externo recuperado** y **precio observado por Mínimo**.
+
+## Observación periódica local de productos seguidos
+
+La aplicación programa un trabajo periódico de WorkManager cada 24 horas (ejecución aproximada, condicionada a que Android tenga conexión). El trabajo recorre la lista de productos seguidos y consulta primero los que llevan más tiempo sin actualizarse.
+
+- **Límite de fondo:** máximo 3 consultas de producto por día local; también se respeta la cuota restante y el límite horario que devuelve SerpApi.
+- **Rotación:** la selección prioriza los productos con la consulta más antigua para que una lista grande avance gradualmente, sin favorecer siempre a los primeros.
+- **Ámbito:** solo productos que el usuario ha añadido a Seguidos. No se barre el catálogo completo ni se lanzan búsquedas masivas.
+- **Historial independiente de las alertas:** no se necesita permiso de notificaciones ni un precio objetivo para guardar observaciones válidas. Esas preferencias solo determinan si se muestra una notificación de bajada.
+- **Requisitos:** conexión, clave SerpApi válida, saldo/límite horario disponible y que Android ejecute la tarea de WorkManager. El primer inicio de la aplicación debe registrar el trabajo.
+- **Datos honestos:** se conserva una observación solo cuando SerpApi devuelve un precio válido y el repositorio acepta el producto, la tienda, la moneda y la fecha. Una ejecución sin oferta válida no crea un punto inventado.
+
+El límite de tres por día es intencionadamente conservador; por tanto, una lista de muchos productos puede tardar varios días en completar una rotación. WorkManager no garantiza una ejecución exacta a una hora concreta. La cuota diaria local limita el uso de fondo, mientras que el límite real de SerpApi sigue siendo la autoridad final.

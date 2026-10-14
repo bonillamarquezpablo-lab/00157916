@@ -18,7 +18,11 @@ data class SerpApiShoppingResult(
     val reviewCount: Int? = null,
     val observedAt: Long,
     /** Whether Amazon reports Prime delivery eligibility; not a personalized account price. */
-    val primeEligible: Boolean = false
+    val primeEligible: Boolean = false,
+    /** Provider condition, retained so the UI can reveal used/refurbished offers on request. */
+    val condition: String = "new",
+    /** True for offers far below the result-set median; visible but excluded from best-price/history calculations. */
+    val isSuspiciousPrice: Boolean = false
 ) {
     /**
      * True when the accepted URL stays on a Google domain rather than opening the seller directly.
@@ -26,6 +30,11 @@ data class SerpApiShoppingResult(
      */
     val isGoogleShoppingProductLink: Boolean
         get() = isGoogleShoppingUrl(sourceUrl)
+
+    val isSecondHand: Boolean
+        get() = isSecondHandCondition(condition) || Regex(
+            """(?i)\b(segunda[\s_-]+mano|second[\s_-]*hand|pre[\s_-]*owned|used|usad[oa]s?|seminuev[oa]s?|reacondicionad[oa]s?|refurbished|renewed|open[\s_-]*box)\b"""
+        ).containsMatchIn(title)
 
     /** Stored label describing where tapping this offer opens. */
     val linkType: String
@@ -55,6 +64,10 @@ fun isGoogleShoppingUrl(sourceUrl: String): Boolean {
 fun linkTypeForUrl(sourceUrl: String): String =
     if (isGoogleShoppingUrl(sourceUrl)) "Google Shopping" else "directo"
 
+fun isSecondHandCondition(condition: String): Boolean = Regex(
+    """(?i)\b(used|second[\s_-]*hand|pre[\s_-]*owned|usad[oa]s?|seminuev[oa]s?|refurbished|reacondicionad[oa]s?|renewed|open[\s_-]*box)\b"""
+).containsMatchIn(condition)
+
 /**
  * One exact product/model grouping in the online results. Individual retailer listings remain
  * separate offers so the detail sheet can show their prices and Room history.
@@ -65,7 +78,8 @@ data class OnlineProductGroup(
     val offers: List<SerpApiShoppingResult>
 ) {
     val cheapestOffer: SerpApiShoppingResult
-        get() = offers.minBy { it.price }
+        get() = offers.filterNot { it.isSuspiciousPrice }.minByOrNull { it.price }
+            ?: offers.minBy { it.price }
 
     val minPrice: Double
         get() = cheapestOffer.price

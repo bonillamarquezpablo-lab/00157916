@@ -373,6 +373,8 @@ private fun ShoppingResultCard(
 ) {
     val best = group.cheapestOffer
     val fitmentUnverified = group.offers.all { it.isFitmentUnverified }
+    val categoryUnverified = group.offers.all { it.isCategoryUnverified }
+    val wheelSetCount = group.wheelSetCount
     Card(
         modifier = Modifier.fillMaxWidth().then(
             if (onOpenProduct == null) Modifier else Modifier.clickable(onClick = onOpenProduct)
@@ -382,7 +384,8 @@ private fun ShoppingResultCard(
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (group.offers.all { it.isSecondHand } ||
-                group.offers.all { it.isAccessoryOffer } || fitmentUnverified
+                group.offers.all { it.isAccessoryOffer } || fitmentUnverified ||
+                categoryUnverified || wheelSetCount != null
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (group.offers.all { it.isSecondHand }) {
@@ -391,8 +394,14 @@ private fun ShoppingResultCard(
                     if (group.offers.all { it.isAccessoryOffer }) {
                         ResultKindBadge("Accesorio", accessory = true)
                     }
+                    if (wheelSetCount != null) {
+                        ResultKindBadge("Juego de $wheelSetCount", accessory = false)
+                    }
                     if (fitmentUnverified) {
                         ResultKindBadge("Medidas por confirmar", accessory = false)
+                    }
+                    if (categoryUnverified) {
+                        ResultKindBadge("Por confirmar", accessory = false)
                     }
                 }
             }
@@ -422,16 +431,32 @@ private fun ShoppingResultCard(
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(group.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     Text(
-                        "Desde " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(group.minPrice),
+                        if (wheelSetCount != null) {
+                            "Desde " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(group.minPrice) + " / llanta"
+                        } else {
+                            "Desde " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(group.minPrice)
+                        },
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        "${group.storeCount} tiendas · precio más bajo en ${best.storeName}",
+                        if (wheelSetCount != null) {
+                            "${group.storeCount} tiendas · precio por llanta más bajo en ${best.storeName}"
+                        } else {
+                            "${group.storeCount} tiendas · precio más bajo en ${best.storeName}"
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium
                     )
+                    if (wheelSetCount != null) {
+                        Text(
+                            "Precio total del juego de $wheelSetCount: " +
+                                NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(best.price),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Text(
                         "${group.offers.size} ofertas · toca para ver tiendas e historial",
                         style = MaterialTheme.typography.bodySmall,

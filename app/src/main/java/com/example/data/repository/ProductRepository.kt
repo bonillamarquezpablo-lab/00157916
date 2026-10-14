@@ -220,7 +220,7 @@ class ProductRepository(
 
         val suspiciousByGroup = eligible.groupBy(::comparisonKey).mapValues { (_, comparableOffers) ->
             val trustedPrices = comparableOffers.filterNot {
-                it.isSecondHand || it.isAccessoryOffer || it.isFitmentUnverified
+                it.isSecondHand || it.isAccessoryOffer || it.isFitmentUnverified || it.isCategoryUnverified
             }.map { it.price }.sorted()
             val fallbackPrices = comparableOffers.filterNot { it.isFitmentUnverified }
                 .map { it.price }.sorted()
@@ -267,6 +267,7 @@ class ProductRepository(
             val visibleButNotHistory = filtered != null && (
                 result.isSecondHand ||
                     result.isFitmentUnverified ||
+                    result.isCategoryUnverified ||
                     (isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
                         isAccessoryListing(result.title))
             )
@@ -329,7 +330,7 @@ class ProductRepository(
         // and wheel listings missing requested fitment dimensions stay visible in the search UI,
         // but are not added to Mercado or its price history.
         val eligible = filterOnlineSearchResults(results, searchQuery)
-            .filterNot { it.isSecondHand || it.isFitmentUnverified }
+            .filterNot { it.isSecondHand || it.isFitmentUnverified || it.isCategoryUnverified }
             // Accessories remain visible in online search, but are not saved as the main device.
             .filterNot {
                 isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
@@ -351,7 +352,9 @@ class ProductRepository(
             val displayTitle = existingProduct?.title?.takeIf { it.isNotBlank() } ?: group.title
             val hasTrustedOffer = group.offers.any { !it.isSuspiciousPrice }
             val currentMinimum = if (hasTrustedOffer) group.minPrice else existingProduct?.currentPrice ?: 0.0
-            val highestToday = group.offers.maxOfOrNull { it.price } ?: currentMinimum
+            val highestToday = group.offers.maxOfOrNull { offer ->
+                offer.price / (offer.wheelSetCount ?: 1)
+            } ?: currentMinimum
             val productEntity = if (existingProduct != null) {
                 existingProduct.copy(
                     title = displayTitle,
@@ -414,7 +417,7 @@ class ProductRepository(
                 val observation = PriceObservationEntity(
                     productId = productId,
                     storeId = offerStoreId,
-                    price = result.price,
+                    price = result.price / (result.wheelSetCount ?: 1),
                     currency = "EUR",
                     observedAt = result.observedAt,
                     sourceUrl = result.sourceUrl,
@@ -467,7 +470,7 @@ class ProductRepository(
             val observation = PriceObservationEntity(
                 productId = productId,
                 storeId = storeId,
-                price = offer.price,
+                price = offer.price / (offer.wheelSetCount ?: 1),
                 currency = "EUR",
                 observedAt = offer.observedAt,
                 sourceUrl = offer.sourceUrl,

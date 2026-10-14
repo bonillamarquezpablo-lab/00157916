@@ -475,9 +475,36 @@ class SerpApiClient(
                         " (buscaste " + wheelFitmentQuery.boltPattern + ")")
                     return@mapNotNull null
                 }
+                val resultWidth = wheelWidthInches(title)
+                if (wheelFitmentQuery.widthInches != null && resultWidth != null &&
+                    kotlin.math.abs(resultWidth - wheelFitmentQuery.widthInches) > 0.01
+                ) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(
+                        item,
+                        title,
+                        "Ancho distinto: " + formatWheelNumber(resultWidth) +
+                            " pulgadas (buscaste " + formatWheelNumber(wheelFitmentQuery.widthInches) + " pulgadas)"
+                    )
+                    return@mapNotNull null
+                }
+                val resultOffset = wheelOffsetMm(title)
+                if (wheelFitmentQuery.offsetMm != null && resultOffset != null &&
+                    resultOffset != wheelFitmentQuery.offsetMm
+                ) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(
+                        item,
+                        title,
+                        "ET distinto: " + resultOffset + " (buscaste ET" + wheelFitmentQuery.offsetMm + ")"
+                    )
+                    return@mapNotNull null
+                }
                 fitmentUnverified =
                     resultDiameter != wheelFitmentQuery.diameterInches ||
-                    resultPcd != wheelFitmentQuery.boltPattern            } else {
+                    resultPcd != wheelFitmentQuery.boltPattern ||
+                    (wheelFitmentQuery.widthInches != null && resultWidth != wheelFitmentQuery.widthInches) ||
+                    (wheelFitmentQuery.offsetMm != null && resultOffset != wheelFitmentQuery.offsetMm)            } else {
                 if (!query.isNullOrBlank() && hasVariantMismatch(query, title)) {
                     rejectedAsIrrelevant++
                     recordDiscard(item, title, "Otro modelo o variante (capacidad, potencia o pack distinto)")
@@ -999,7 +1026,9 @@ class SerpApiClient(
 
     private data class WheelFitmentQuery(
         val diameterInches: Int,
-        val boltPattern: String
+        val boltPattern: String,
+        val widthInches: Double?,
+        val offsetMm: Int?
     )
 
     private fun parseWheelFitmentQuery(query: String): WheelFitmentQuery? {
@@ -1012,16 +1041,25 @@ class SerpApiClient(
             ?: Regex("""\b(1[0-9]|2[0-4])\b""").find(normalizedQuery)?.groupValues?.getOrNull(1)?.toIntOrNull()
             ?: return null
         val boltPattern = wheelBoltPattern(normalizedQuery) ?: return null
-        return WheelFitmentQuery(diameter, boltPattern)
+        return WheelFitmentQuery(
+            diameterInches = diameter,
+            boltPattern = boltPattern,
+            widthInches = wheelWidthInches(normalizedQuery),
+            offsetMm = wheelOffsetMm(normalizedQuery)
+        )
     }
 
     private fun wheelModelQuery(query: String): String =
         Normalizer.normalize(normalizeWheelFitmentQuery(query).lowercase(Locale.ROOT), Normalizer.Form.NFD)
             .replace(Regex("\\p{M}+"), "")
+            // Remove full width/diameter expressions first so "5.5x14" does not leave a
+            // stray width token that can interfere with matching the actual wheel model.
+            .replace(Regex("""(?i)\b(?:[3-9](?:[.,]\d)?|1[0-2](?:[.,]\d)?)\s*J?\s*[x×]\s*(?:1[0-9]|2[0-4])\b"""), " ")
+            .replace(Regex("""(?i)\b(?:1[0-9]|2[0-4])\s*[x×]\s*(?:[3-9](?:[.,]\d)?|1[0-2](?:[.,]\d)?)\s*J?\b"""), " ")
             .replace(Regex("""(?i)\b[3456]\s*[x×]\s*(?:100|108|110|112|114(?:[.,]3)?|115|120|127|130|139(?:[.,]7)?)(?=\b|(?:et)?[0-9]{2,3}\b)"""), " ")
             .replace(Regex("""(?i)\b(?:R\s*)?(?:1[0-9]|2[0-4])\s*(?:["”″]|pulg(?:adas?)?|inch(?:es)?)?\b"""), " ")
-            .replace(Regex("""(?i)\b(?:ET)\s*\d{2,3}\b"""), " ")
-            .replace(Regex("""(?i)\b(llantas?|ruedas?|aros?|wheels?|rims?|felgen?|alufelgen?|alurader|alu|jantes?|cerchi|alloy|PCD)\b"""), " ")
+            .replace(Regex("""(?i)\bET\s*[+-]?\s*\d{1,3}\b"""), " ")
+            .replace(Regex("""(?i)\b(llantas?|ruedas?|aros?|wheels?|rims?|felgen?|stahlfelge|stahlfelgen|felgi|felga|alufelgen?|alurader|alu|jantes?|cerchi|alloy|PCD)\b"""), " ")
             .replace(Regex("""[^a-zA-Z0-9]+"""), " ")
             .trim()
             .replace(Regex("""\s+"""), " ")
@@ -1050,10 +1088,10 @@ class SerpApiClient(
         val patterns = listOf(
             Regex("""(?i)\bR\s*(1[0-9]|2[0-4])\b"""),
             Regex("""(?i)\b(1[0-9]|2[0-4])\s*(?:["”″]|pulg(?:adas?)?|inch(?:es)?)"""),
-            // Standard width x diameter notation: 5.5x14 or 6x15.
-            Regex("""(?i)\b(?:\d{1,2}(?:[.,]\d)?)\s*[x×]\s*(1[0-9]|2[0-4])\b"""),
+            // Standard width x diameter notation: 5.5x14, 5.5Jx14 or 6x15.
+            Regex("""(?i)\b(?:[3-9](?:[.,]\d)?|1[0-2](?:[.,]\d)?)\s*J?\s*[x×]\s*(1[0-9]|2[0-4])\b"""),
             // Some international listings reverse the order: diameter x width, e.g. 14x6.
-            Regex("""(?i)\b(1[0-9]|2[0-4])\s*[x×]\s*\d{1,2}(?:[.,]\d)?\b"""),
+            Regex("""(?i)\b(1[0-9]|2[0-4])\s*[x×]\s*(?:[3-9](?:[.,]\d)?|1[0-2](?:[.,]\d)?)\s*J?\b"""),
             Regex("""(?i)\b\d{3}/\d{2}/(1[0-9]|2[0-4])\b""")
         )
         for (pattern in patterns) {
@@ -1063,6 +1101,32 @@ class SerpApiClient(
         }
         return null
     }
+
+    /** Extracts rim width in inches from both 5.5Jx14 and 14x5.5 notation. */
+    private fun wheelWidthInches(value: String): Double? {
+        val standard = Regex(
+            """(?i)\b([3-9](?:[.,]\d)?|1[0-2](?:[.,]\d)?)\s*J?\s*[x×]\s*(?:1[0-9]|2[0-4])\b"""
+        ).find(value)?.groupValues?.getOrNull(1)
+        val reversed = if (standard == null) {
+            Regex(
+                """(?i)\b(?:1[0-9]|2[0-4])\s*[x×]\s*([3-9](?:[.,]\d)?|1[0-2](?:[.,]\d)?)\s*J?\b"""
+            ).find(value)?.groupValues?.getOrNull(1)
+        } else null
+        return (standard ?: reversed)?.replace(',', '.')?.toDoubleOrNull()
+    }
+
+    /** Extracts ET/offset values only when explicitly labelled, never from arbitrary numbers. */
+    private fun wheelOffsetMm(value: String): Int? =
+        Regex("""(?i)\bET\s*([+-]?\s*\d{1,3})\b""")
+            .find(value)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.replace(Regex("""\s+"""), "")
+            ?.toIntOrNull()
+            ?.takeIf { it in -100..100 }
+
+    private fun formatWheelNumber(value: Double): String =
+        if (value % 1.0 == 0.0) value.toInt().toString() else value.toString()
 
     private fun wheelBoltPattern(value: String): String? {
         // A PCD is the complete bolt pattern (bolt count x pitch-circle diameter).

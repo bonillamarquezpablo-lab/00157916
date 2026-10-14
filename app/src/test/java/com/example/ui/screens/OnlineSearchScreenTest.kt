@@ -129,16 +129,21 @@ class OnlineSearchScreenTest {
         // OFF + Todos: new shops and Amazon remain; Wallapop and Warehouse are hidden.
         assertVisibleText("Todos (5)")
         assertVisibleText("Solo Amazon (1)")
-        assertEquals(9, results.size)
+        assertEquals(14, results.size)
         assertTrue(results.any { it.storeName == "Wallapop" && it.isSecondHand })
         assertTrue(results.any { it.storeName == "Amazon Warehouse" && it.isSecondHand })
+        assertTrue(results.any { it.storeName == "Milanuncios" && it.isSecondHand })
+        assertTrue(results.any { it.storeName == "eBay" && it.isSecondHand })
+        assertTrue(results.any { it.storeName == "Vinted" && it.isSecondHand })
+        assertTrue(results.any { it.storeName == "Vendedor particular" && it.isSecondHand })
+        assertTrue(results.any { it.condition == "refurbished" && it.isSecondHand })
 
         // OFF + Solo Amazon.
         clickFilter("Solo Amazon (1)")
         assertVisibleText("Todos (5)")
         assertVisibleText("Solo Amazon (1)")
         assertTrue(
-            composeRule.onAllNodesWithText("2 tiendas · precio más bajo en Wallapop")
+            composeRule.onAllNodesWithText("7 tiendas · precio más bajo en Wallapop")
                 .fetchSemanticsNodes().isEmpty()
         )
 
@@ -149,7 +154,7 @@ class OnlineSearchScreenTest {
         assertVisibleText("Segunda mano")
         assertVisibleText("1 tiendas · precio más bajo en Amazon Warehouse")
         assertTrue(
-            composeRule.onAllNodesWithText("2 tiendas · precio más bajo en Wallapop")
+            composeRule.onAllNodesWithText("7 tiendas · precio más bajo en Wallapop")
                 .fetchSemanticsNodes().isEmpty()
         )
 
@@ -157,7 +162,7 @@ class OnlineSearchScreenTest {
         clickFilter("Todos (6)")
         assertVisibleText("Todos (6)")
         assertVisibleText("Solo Amazon (2)")
-        assertVisibleText("2 tiendas · precio más bajo en Wallapop")
+        assertVisibleText("7 tiendas · precio más bajo en Wallapop")
         assertVisibleText("Accesorio")
         assertVisibleText("Póster Samsung Galaxy S26 Ultra 512 GB")
         assertEquals("Changing either filter must not start another SerpApi search", 0, searchInvocations)
@@ -173,6 +178,11 @@ class OnlineSearchScreenTest {
                 {"title":"Samsung Galaxy S26 Ultra 512 GB","price":"1.279,99 €","extracted_price":1279.99,"product_link":"https://tienda-dos.example/s26","source":"Tienda Dos","second_hand_condition":"new"},
                 {"title":"Samsung Galaxy S26 Ultra 512 GB","price":"1.249,99 €","extracted_price":1249.99,"product_link":"https://www.amazon.es/dp/B0NEW","source":"Amazon.es","second_hand_condition":"new"},
                 {"title":"Samsung Galaxy S26 Ultra 512 GB","price":"899,99 €","extracted_price":899.99,"product_link":"https://es.wallapop.com/item/s26","source":"Wallapop","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512 GB","price":"929,99 €","extracted_price":929.99,"product_link":"https://www.milanuncios.com/moviles/s26.htm","source":"Milanuncios","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512 GB","price":"949,99 €","extracted_price":949.99,"product_link":"https://www.ebay.es/itm/s26","source":"eBay","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512 GB","price":"969,99 €","extracted_price":969.99,"product_link":"https://www.vinted.es/items/s26","source":"Vinted","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512 GB","price":"979,99 €","extracted_price":979.99,"product_link":"https://particular.example/s26","source":"Vendedor particular","second_hand_condition":"new"},
+                {"title":"Samsung Galaxy S26 Ultra 512 GB","price":"989,99 €","extracted_price":989.99,"product_link":"https://reacondicionados.example/s26","source":"Tienda reacondicionados","second_hand_condition":"refurbished"},
                 {"title":"Samsung Galaxy S26 Ultra 512 GB","price":"999,99 €","extracted_price":999.99,"product_link":"https://www.amazon.es/dp/B0WAREHOUSE","source":"Amazon Warehouse","second_hand_condition":"new"},
                 {"title":"Póster Samsung Galaxy S26 Ultra 512 GB","price":"19,99 €","extracted_price":19.99,"product_link":"https://posterstore.example/s26","source":"Poster Store","second_hand_condition":"new"},
                 {"title":"Funda Samsung Galaxy S26 Ultra 512 GB","price":"14,99 €","extracted_price":14.99,"product_link":"https://fundas.example/s26","source":"Tienda de fundas","second_hand_condition":"new"},

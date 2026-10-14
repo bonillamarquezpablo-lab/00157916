@@ -47,7 +47,7 @@ interface PriceObservationDao {
 
     @Query(
         "SELECT * FROM price_observations " +
-            "WHERE productId = :productId AND storeId = :storeId AND isVerified = 1 " +
+            "WHERE productId = :productId AND storeId = :storeId " +
             "AND observedAt >= :dayStart AND observedAt < :dayEnd " +
             "LIMIT 1"
     )

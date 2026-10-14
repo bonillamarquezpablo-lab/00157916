@@ -621,6 +621,119 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun wheelFitmentSearchKeepsPlausibleUnknownsLabeledAndRejectsExplicitMismatches() {
+        val client = SerpApiClient()
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {
+                  "title": "Magnetto Wheels MW R1-1672 Llantas de acero 14\\" 5x100 negras",
+                  "price": "59,00 €",
+                  "extracted_price": 59.00,
+                  "link": "https://shop.example.test/magnetto",
+                  "source": "Tienda nueva",
+                  "condition": "new"
+                },
+                {
+                  "title": "RIAL Milano llanta",
+                  "price": "94,99 €",
+                  "extracted_price": 94.99,
+                  "link": "https://shop.example.test/rial-milano",
+                  "source": "Tienda de llantas",
+                  "condition": "new"
+                },
+                {
+                  "title": "RIAL Kodiak llanta 7x16 5x112",
+                  "price": "94,99 €",
+                  "extracted_price": 94.99,
+                  "link": "https://shop.example.test/rial-kodiak",
+                  "source": "Tienda de llantas",
+                  "condition": "new"
+                },
+                {
+                  "title": "Tapacubos 14\\" 5x100",
+                  "price": "19,99 €",
+                  "extracted_price": 19.99,
+                  "link": "https://shop.example.test/hubcap",
+                  "source": "Tienda de accesorios",
+                  "condition": "new"
+                },
+                {
+                  "title": "Llantas Seat Ibiza 165/70/14 81T neumáticos 5x100",
+                  "price": "25,00 €",
+                  "extracted_price": 25.00,
+                  "link": "https://es.wallapop.com/item/seat-ibiza",
+                  "source": "Wallapop",
+                  "second_hand_condition": "used"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val report = client.parseShoppingResultsDetailed(
+            root = payload,
+            query = "llantas 14\\" 5x100",
+            observedAt = System.currentTimeMillis()
+        )
+
+        assertEquals(3, report.results.size)
+        val confirmed = report.results.first { it.title.startsWith("Magnetto") }
+        assertFalse(confirmed.isFitmentUnverified)
+        val candidate = report.results.first { it.title == "RIAL Milano llanta" }
+        assertTrue(candidate.isFitmentUnverified)
+        val used = report.results.first { it.storeName == "Wallapop" }
+        assertTrue(used.isSecondHand)
+        assertTrue(
+            report.discardedOffers.any {
+                it.title.contains("RIAL Kodiak") && it.reason.contains("incompatible", ignoreCase = true)
+            }
+        )
+        assertTrue(report.discardedOffers.any { it.title.startsWith("Tapacubos") })
+    }
+
+    @Test
+    fun fitmentUnconfirmedWheelCandidatesAreNotSavedToMercadoOrHistory() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val result = SerpApiShoppingResult(
+                title = "RIAL Milano llanta",
+                price = 94.99,
+                storeName = "Tienda de llantas",
+                sourceUrl = "https://shop.example.test/rial-milano",
+                observedAt = System.currentTimeMillis(),
+                condition = "new",
+                isFitmentUnverified = true
+            )
+
+            val saved = repository.recordOnlineSearchResults(
+                results = listOf(result),
+                sourceType = "GOOGLE_SHOPPING",
+                searchQuery = "llantas 14\\" 5x100"
+            )
+
+            assertEquals(0, saved)
+            assertTrue(database.productDao().getAllProductsSnapshot().isEmpty())
+            assertEquals(0, database.priceObservationDao().getVerifiedObservationCount())
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun googleProductOffersKeepValidStoresAndRejectUsedForeignAndMonthlyFixtures() {
         val client = SerpApiClient()
         val payload = JSONObject(

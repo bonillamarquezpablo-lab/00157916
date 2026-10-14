@@ -468,7 +468,7 @@ fun MarketScreen(
                     )
                 }
                 Text(
-                    "Manual · máximo 10 productos por pulsación · no repite consultas antes de 24 h",
+                    "Solo fichas seguidas (marcador verde «Siguiendo») · manual · máximo 10 por pulsación · no repite consultas antes de 24 h",
                     modifier = Modifier.padding(horizontal = 4.dp),
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

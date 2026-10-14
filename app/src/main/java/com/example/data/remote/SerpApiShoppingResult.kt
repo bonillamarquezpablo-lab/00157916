@@ -40,9 +40,16 @@ data class SerpApiShoppingResult(
         get() = isGoogleShoppingUrl(sourceUrl)
 
     val isSecondHand: Boolean
-        get() = isSecondHandCondition(condition) || Regex(
-            """(?i)\b(segunda[\s_-]+mano|second[\s_-]*hand|pre[\s_-]*owned|used|usad[oa]s?|seminuev[oa]s?|reacondicionad[oa]s?|refurbished|renewed|open[\s_-]*box)\b"""
-        ).containsMatchIn(title)
+        get() {
+            val listingText = "$title $storeName $sourceUrl $condition"
+            return isSecondHandCondition(condition) ||
+                SECOND_HAND_LISTING_PATTERN.containsMatchIn(listingText) ||
+                SECOND_HAND_CONDITION_PATTERN.containsMatchIn(title)
+        }
+
+    /** True for accessory listings that belong at the end of a main-product search. */
+    val isAccessoryOffer: Boolean
+        get() = ACCESSORY_LISTING_PATTERN.containsMatchIn(title)
 
     val isRentalOrMonthly: Boolean
         get() = Regex(
@@ -82,6 +89,22 @@ fun linkTypeForUrl(sourceUrl: String): String =
 fun isSecondHandCondition(condition: String): Boolean = Regex(
     """(?i)\b(used|second[\s_-]*hand|pre[\s_-]*owned|usad[oa]s?|seminuev[oa]s?|refurbished|reacondicionad[oa]s?|renewed|open[\s_-]*box)\b"""
 ).containsMatchIn(condition)
+
+private val SECOND_HAND_CONDITION_PATTERN = Regex(
+    """(?i)\b(segunda[\s_-]+mano|second[\s_-]*hand|pre[\s_-]*owned|used|usad[oa]s?|seminuev[oa]s?|reacondicionad[oa]s?|refurbished|renewed|open[\s_-]*box)\b"""
+)
+
+private val SECOND_HAND_LISTING_PATTERN = Regex(
+    """(?i)\b(wallapop|milanuncios|ebay|vinted|particular(?:es)?|amazon[\s_-]*warehouse)\b"""
+)
+
+private val ACCESSORY_LISTING_PATTERN = Regex(
+    """(?i)\b(p[oó]ster(?:es)?|poster(?:s)?|funda(?:s)?|carcasa(?:s)?|cases?|covers?|cargador(?:es)?|chargers?|charging|protectores?|protector(?:es)?|screen\s+protector|protector\s+de\s+pantalla|cristal(?:es)?\s+templado|cables?|adaptadores?|hubs?|filtros?|recambios?|repuestos?|soportes?)\b"""
+)
+
+/** Accessory queries are intentional accessory searches and should not be re-labelled as accessories. */
+fun isAccessorySearchQuery(query: String): Boolean =
+    ACCESSORY_LISTING_PATTERN.containsMatchIn(query)
 
 /**
  * One exact product/model grouping in the online results. Individual retailer listings remain
@@ -158,7 +181,7 @@ fun onlineProductIdentityKey(title: String): String {
         .sorted()
         .joinToString("+")
     val accessoryType = listOf(
-        "cristal templado", "screen protector", "mop kit", "funda",
+        "cristal templado", "screen protector", "mop kit", "poster", "funda",
         "carcasa", "case", "cover", "protector", "cable", "cargador", "adaptador", "hub",
         "filtro", "recambio", "repuesto", "soporte"
     ).firstOrNull { type ->

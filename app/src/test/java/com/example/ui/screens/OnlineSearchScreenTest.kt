@@ -1,13 +1,18 @@
 package com.example.ui.screens
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Modifier
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.platform.testTag
 import com.example.data.remote.RejectedOnlineOffer
 import com.example.ui.viewmodel.TrackerUiState
 import org.junit.Rule
@@ -47,20 +52,25 @@ class OnlineSearchScreenTest {
                     onAmazonOnlyChange = {},
                     onToggleDiscarded = { expanded.value = !expanded.value },
                     onOpenSettings = {},
-                    onOpenProduct = {}
+                    onOpenProduct = {},
+                    modifier = Modifier.testTag("online-search-list")
                 )
             }
         }
 
+        val searchList = composeRule.onNodeWithTag("online-search-list")
+        searchList.performScrollToNode(hasText("Ver descartados (1)"))
         composeRule.onNodeWithText("Ver descartados (1)").assertIsDisplayed()
         composeRule.onNodeWithText(rejectedOffer.title).assertDoesNotExist()
 
         composeRule.onNodeWithText("Ver descartados (1)").performClick()
+        searchList.performScrollToNode(hasText(rejectedOffer.title))
         composeRule.onNodeWithText(rejectedOffer.title).assertIsDisplayed()
         composeRule.onNodeWithText(rejectedOffer.priceLabel).assertIsDisplayed()
         composeRule.onNodeWithText(rejectedOffer.reason).assertIsDisplayed()
         composeRule.onNodeWithText(rejectedOffer.provider).assertIsDisplayed()
 
+        searchList.performScrollToNode(hasText("Ocultar descartados"))
         composeRule.onNodeWithText("Ocultar descartados").performClick()
         composeRule.onNodeWithText(rejectedOffer.title).assertDoesNotExist()
         composeRule.onNodeWithText("Ver descartados (1)").assertIsDisplayed()
@@ -78,7 +88,8 @@ class OnlineSearchScreenTest {
                     onAmazonOnlyChange = {},
                     onToggleDiscarded = {},
                     onOpenSettings = {},
-                    onOpenProduct = {}
+                    onOpenProduct = {},
+                    modifier = Modifier.testTag("online-search-list")
                 )
             }
         }

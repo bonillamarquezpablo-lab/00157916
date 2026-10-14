@@ -166,7 +166,7 @@ internal fun normalizedWheelCategoryText(value: String): String =
         .replace(Regex("\\p{M}+"), "")
 
 private val WHEEL_CATEGORY_PATTERN = Regex(
-    """(?<![\p{L}\p{N}])(?:llantas?|ruedas?|aros?|wheel(?:s)?|rims?|felgen?|alufelgen?|alurader|alu|jantes?|cerchi|alloy)(?![\p{L}\p{N}])"""
+    """(?<![\p{L}\p{N}])(?:llantas?|ruedas?|aros?|wheel(?:s)?|rims?|(?:stahl|alu)?felg(?:e|en|a|i)|alufelgen?|alurader|alu|jantes?|cerchi|alloy)(?![\p{L}\p{N}])"""
 )
 
 /** Recognizes common Spanish, German, French, Italian and English wheel/rim vocabulary. */

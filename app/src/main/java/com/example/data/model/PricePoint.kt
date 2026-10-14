@@ -14,6 +14,6 @@ data class PricePoint(
 ) {
     val isArchiveEvidence: Boolean
         get() = evidenceType.equals("archive", ignoreCase = true) ||
-            eventLabel?.contains("Internet Archive", ignoreCase = true) == true ||
-            eventLabel?.contains("Wayback", ignoreCase = true) == true
+            sourceUrl?.startsWith("https://web.archive.org/web/", ignoreCase = true) == true ||
+            sourceUrl?.startsWith("http://web.archive.org/web/", ignoreCase = true) == true
 }

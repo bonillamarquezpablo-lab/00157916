@@ -794,14 +794,14 @@ class SerpApiClient(
         val t = title.lowercase(Locale.ROOT).replace(',', '.')
         val units = listOf("mah", "wh", "w", "gb", "tb", "ml", "kg", "g", "l", "inch", "pulgadas")
         for (unit in units) {
-            val qMatch = Regex("""(\d+(?:\.\d+)?)\s*\${Regex.escape(unit)}\b""").find(q) ?: continue
-            val tMatch = Regex("""(\d+(?:\.\d+)?)\s*\${Regex.escape(unit)}\b""").find(t) ?: continue
+            val qMatch = Regex("""(\d+(?:\.\d+)?)\s*${Regex.escape(unit)}\b""").find(q) ?: continue
+            val tMatch = Regex("""(\d+(?:\.\d+)?)\s*${Regex.escape(unit)}\b""").find(t) ?: continue
             if (qMatch.groupValues[1].toDoubleOrNull() != tMatch.groupValues[1].toDoubleOrNull()) return true
         }
         val pack = Regex("""\b(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(ml|g|kg|l)\b""").find(t)
         if (pack != null) {
-            val queryHasSamePack = Regex("""\b\${pack.groupValues[1]}\s*[x×]\s*\${Regex.escape(pack.groupValues[2])}\s*\${Regex.escape(pack.groupValues[3])}\b""").containsMatchIn(q)
-            val queryHasSingleUnit = Regex("""\b\${Regex.escape(pack.groupValues[2])}\s*\${Regex.escape(pack.groupValues[3])}\b""").containsMatchIn(q)
+            val queryHasSamePack = Regex("""\b${pack.groupValues[1]}\s*[x×]\s*${Regex.escape(pack.groupValues[2])}\s*${Regex.escape(pack.groupValues[3])}\b""").containsMatchIn(q)
+            val queryHasSingleUnit = Regex("""\b${Regex.escape(pack.groupValues[2])}\s*${Regex.escape(pack.groupValues[3])}\b""").containsMatchIn(q)
             if (!queryHasSamePack && queryHasSingleUnit) return true
         }
         return false

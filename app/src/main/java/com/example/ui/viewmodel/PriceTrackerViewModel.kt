@@ -83,6 +83,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     private val serpApiTokenStore = SerpApiTokenStore(application)
     private val serpApiClient = SerpApiClient()
     private val onlineSearchCache = OnlineSearchCache(application)
+    private val onlineDiscardedCache = mutableMapOf<String, List<RejectedOnlineOffer>>()
+
+    private fun onlineSearchCacheKey(provider: OnlineSearchProvider, query: String): String =
+        "${provider.name}|${query.trim().lowercase(Locale.ROOT)}"
     private val priceRefreshPreferences = application.getSharedPreferences(
         "minimo_serpapi_refresh_state",
         Context.MODE_PRIVATE
@@ -520,7 +524,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         val savedObservations = repository.recordOnlineSearchResults(safeCachedResults, provider.name, query)
                         val historyNotice = onlineHistoryNotice(savedObservations, safeCachedResults.size)
                         val filterNotice = onlineFilterNotice(cached.results.size, safeCachedResults.size)
-                        val cachedDiscarded = repository.diagnoseOnlineSearchRejections(cached.results, query)
+                        val cachedDiscarded = onlineDiscardedCache[onlineSearchCacheKey(provider, query)]
+                            ?: repository.diagnoseOnlineSearchRejections(cached.results, query)
                         _uiState.value = _uiState.value.copy(
                             onlineSearchResults = safeCachedResults,
                             onlineSearchDiscardedOffers = cachedDiscarded,
@@ -571,6 +576,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 val results = repository.filterOnlineSearchResults(rawResults, query)
                 val discarded = (providerReport.discardedOffers + repositoryDiscarded)
                     .distinctBy { "${it.provider}|${it.title}|${it.priceLabel}|${it.reason}" }
+                onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = discarded
                 val savedObservations = if (results.isNotEmpty()) {
                     repository.recordOnlineSearchResults(results, provider.name, query)
                 } else 0

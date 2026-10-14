@@ -19,6 +19,7 @@ import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.linkTypeForUrl
+import com.example.data.remote.isWheelFitmentQuery
 import com.example.data.model.Store
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -202,8 +203,8 @@ class ProductRepository(
         val wheelTitlePattern = Regex("""(?i)\b(llantas?|ruedas?|wheels?|rims?|felgen)\b""")
         val queryHasWheelSize = Regex("""(?i)\b(1[0-9]|2[0-4])\b""").containsMatchIn(searchQuery)
         val wheelTitleCount = eligible.count { wheelTitlePattern.containsMatchIn(it.title) }
-        val isWheelSearch = Regex("""(?i)\b(llantas?|ruedas?|wheels?|rims?)\b""")
-            .containsMatchIn(searchQuery) ||
+        val isWheelSearch = isWheelFitmentQuery(searchQuery) ||
+            Regex("""(?i)\b(llantas?|ruedas?|wheels?|rims?)\b""").containsMatchIn(searchQuery) ||
             (queryHasWheelSize && wheelTitleCount >= 2)
 
         fun wheelBundleCount(title: String): String {

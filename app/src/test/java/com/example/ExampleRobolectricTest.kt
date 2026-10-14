@@ -1262,13 +1262,16 @@ class ExampleRobolectricTest {
             assertTrue(repository.recordOnlineSearchResults(listOf(liveOffer), "GOOGLE_SHOPPING", title) > 0)
 
             val archivedAt = now - 1_550L * 24L * 60L * 60L * 1000L
+            val archiveTimestamp = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.format(java.util.Date(archivedAt))
             val archiveQuote = ArchivedPriceQuote(
                 observedAt = archivedAt,
                 price = 79.99,
                 currency = "EUR",
                 productTitle = title,
                 originalUrl = originalUrl,
-                snapshotUrl = "https://web.archive.org/web/20220501000000id_/" + originalUrl
+                snapshotUrl = "https://web.archive.org/web/" + archiveTimestamp + "id_/" + originalUrl
             )
             assertEquals(1, repository.recordArchivedPriceHistory(
                 expectedTitle = title,

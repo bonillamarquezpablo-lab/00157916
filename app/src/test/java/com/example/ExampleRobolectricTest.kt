@@ -960,6 +960,74 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun germanWheelListingsAreRecognizedAndWrongPcdIsReportedAsFitmentMismatch() {
+        val client = SerpApiClient()
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {
+                  "title": "4 Autec Zenit Felgen 5,5x14 4x100 ANTM für Dacia Logan Sandero",
+                  "price": "432,19 €",
+                  "extracted_price": 432.19,
+                  "link": "https://shop.example.test/autec-4x100-set",
+                  "source": "Tienda europea",
+                  "condition": "new"
+                },
+                {
+                  "title": "Autec Zenit Felgen 5,5x14 ANTM",
+                  "price": "133,12 €",
+                  "extracted_price": 133.12,
+                  "link": "https://shop.example.test/autec-unknown-pcd",
+                  "source": "Tienda europea",
+                  "condition": "new"
+                },
+                {
+                  "title": "Autec Zenit Aluräder 5,5x14 5x100",
+                  "price": "145,00 €",
+                  "extracted_price": 145.00,
+                  "link": "https://shop.example.test/autec-5x100",
+                  "source": "Tienda europea",
+                  "condition": "new"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val report = client.parseShoppingResultsDetailed(
+            root = payload,
+            query = """autec zenit 14" 5x100""",
+            observedAt = System.currentTimeMillis()
+        )
+
+        // A real rim with omitted PCD remains visible but is explicitly marked unconfirmed.
+        val unconfirmed = report.results.first { it.title.contains("Felgen") }
+        assertTrue(unconfirmed.isFitmentUnverified)
+
+        // The 4x100 set must be rejected for the actual reason (PCD mismatch), not because its
+        // German title failed the generic wheel/rim classifier.
+        assertTrue(report.results.none { it.title.contains("4x100") })
+        assertTrue(
+            report.discardedOffers.any {
+                it.title.contains("4x100") &&
+                    it.reason.contains("Anclaje incompatible", ignoreCase = true)
+            }
+        )
+        assertFalse(
+            report.discardedOffers.any {
+                it.title.contains("4x100") &&
+                    it.reason.contains("No parece una llanta o rueda", ignoreCase = true)
+            }
+        )
+
+        // German "alloy wheels" (Aluräder) with a matching PCD are accepted as confirmed.
+        val matching = report.results.first { it.title.contains("Aluräder") }
+        assertFalse(matching.isFitmentUnverified)
+    }
+
+    @Test
     fun fitmentUnconfirmedWheelCandidatesAreNotSavedToMercadoOrHistory() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(

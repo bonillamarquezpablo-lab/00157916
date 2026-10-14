@@ -1007,7 +1007,10 @@ class SerpApiClient(
         .replace(Regex("""\s+"""), " ")
 
     private fun isWheelListing(value: String): Boolean =
-        Regex("""(?i)\b(llantas?|ruedas?|wheels?|rims?)\b""").containsMatchIn(value)
+        // Google Shopping may return German wheel listings. Recognize alloy wheels/rims in
+        // German so they are evaluated for size and PCD instead of being called irrelevant.
+        Regex("""(?i)\b(llantas?|ruedas?|wheels?|rims?|felgen|felge|alufelgen|alufelge|aluräder|alurader)\b""")
+            .containsMatchIn(value)
 
     private fun wheelDiameterInches(value: String): Int? {
         val patterns = listOf(

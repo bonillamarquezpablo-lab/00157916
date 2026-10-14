@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.Storefront
@@ -420,7 +421,7 @@ private fun ShoppingResultCard(
             }
             if (fitmentUnverified) {
                 Text(
-                    "El título no confirma todas las medidas solicitadas. Abre la oferta y verifica diámetro y anclaje. No se añade a Mercado ni al historial hasta confirmarlos.",
+                    "El título no confirma todas las medidas solicitadas. Comprueba diámetro, anclaje, ancho y ET cuando se hayan solicitado. No se añade a Mercado ni al historial hasta confirmar la compatibilidad.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

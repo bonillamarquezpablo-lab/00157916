@@ -275,7 +275,7 @@ private fun ShoppingResultCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    if (best.isSuspiciousPrice) {
+                    if (group.offers.any { it.isSuspiciousPrice }) {
                         Text(
                             "Precio sospechoso · no cuenta como mejor precio",
                             style = MaterialTheme.typography.labelMedium,

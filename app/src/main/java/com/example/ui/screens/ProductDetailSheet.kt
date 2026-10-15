@@ -107,7 +107,7 @@ fun ProductDetailSheet(
     val latestLivePricePoint = product.priceHistory
         .filterNot {
             it.eventLabel.equals("Internet Archive", ignoreCase = true) ||
-                it.eventLabel.contains("price_insights", ignoreCase = true)
+                it.eventLabel?.contains("price_insights", ignoreCase = true) == true
         }
         .maxByOrNull { it.timestamp }
     val currentSourceLabel = if (!product.isPriceVerified) {

@@ -978,7 +978,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             try {
                 // Cache lookup comes first: saved results remain usable even if the quota is empty
                 // or the API key was removed after the previous search.
-                val cached = onlineSearchCache.read(provider.name, query)
+                val cached = withContext(Dispatchers.IO) {
+                    onlineSearchCache.read(provider.name, query)
+                }
                 if (cached != null && (cached.rawResponse != null || cached.results.isNotEmpty())) {
                     // Parsing stored JSON and classifying offers can be CPU-heavy. Keep it off
                     // Android's main thread so the search screen continues drawing smoothly.
@@ -1093,7 +1095,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }
                 } else 0
                 // Cache the raw provider response for 24 hours so future filters can reclassify it.
-                providerReport.rawResponse?.let { onlineSearchCache.writeRaw(provider.name, query, it) }
+                providerReport.rawResponse?.let { rawResponse ->
+                    withContext(Dispatchers.IO) {
+                        onlineSearchCache.writeRaw(provider.name, query, rawResponse)
+                    }
+                }
                 val base = if (results.isEmpty() && providerReport.rawResultCount > 0) {
                     providerReport.emptyResultMessage(query)
                 } else {

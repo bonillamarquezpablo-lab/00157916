@@ -174,8 +174,9 @@ class WaybackPriceHistoryClientTest {
         assertEquals("domain", url!!.queryParameter("matchType"))
         assertEquals("80", url.queryParameter("limit"))
         assertNull("Domain scans must preserve repeated captures over time", url.queryParameter("collapse"))
-        assertTrue(url.queryParameterValues("filter").orEmpty().any {
-            it.startsWith("original:") && it.contains("academie") && it.contains("scientifique")
+        assertTrue(url.queryParameterValues("filter").orEmpty().any { raw ->
+            val filter = raw.orEmpty()
+            filter.startsWith("original:") && filter.contains("academie") && filter.contains("scientifique")
         })
         assertNull(
             "A generic category is too ambiguous for a domain-wide archive search",
@@ -188,8 +189,8 @@ class WaybackPriceHistoryClientTest {
             now = 1_800_000_000_000L
         )
         assertNotNull("Short model codes should be included in the archive URL filter", shortModelUrl)
-        assertTrue(shortModelUrl!!.queryParameterValues("filter").orEmpty().any {
-            it.startsWith("original:") && it.contains("9n3")
+        assertTrue(shortModelUrl!!.queryParameterValues("filter").orEmpty().any { raw ->
+            raw.orEmpty().startsWith("original:") && raw.orEmpty().contains("9n3")
         })
     }
 

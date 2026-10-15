@@ -26,6 +26,8 @@ import okhttp3.Response
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
@@ -2226,6 +2228,52 @@ class ExampleRobolectricTest {
             val followedIds = database.trackedProductDao().getAllTracked().first().map { it.productId }.toSet()
             assertEquals(setOf("demo_followed_product", "followed_pending_product"), followedIds)
             assertEquals("Stored shops are retained too", 1, database.storeDao().getStoreCount())
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun concurrentDailyObservationWritesAreAtomicAndPreferLowerSameTimestampPrice() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val observedAt = System.currentTimeMillis()
+            val productId = "concurrent-daily-observation-test"
+            val dayStart = observedAt - 24L * 60L * 60L * 1000L
+            val dayEnd = observedAt + 24L * 60L * 60L * 1000L
+
+            fun observation(price: Double) = PriceObservationEntity(
+                productId = productId,
+                storeId = "same-store",
+                price = price,
+                currency = "EUR",
+                observedAt = observedAt,
+                sourceUrl = "https://shop.example/item?price=$price",
+                sourceName = "Google Shopping",
+                isVerified = true,
+                productTitle = "Test product",
+                storeName = "Tienda de prueba",
+                evidenceType = "live"
+            )
+
+            coroutineScope {
+                listOf(49.99, 39.99).map { price ->
+                    async(Dispatchers.IO) {
+                        database.priceObservationDao().saveDailyObservationIfNewer(
+                            observation = observation(price),
+                            dayStart = dayStart,
+                            dayEnd = dayEnd
+                        )
+                    }
+                }.forEach { it.await() }
+            }
+
+            val rows = database.priceObservationDao().observeVerifiedHistory(productId).first()
+            assertEquals("Concurrent refreshes must leave one observation for the store/day", 1, rows.size)
+            assertEquals("The lower price wins when both quotes share a timestamp", 39.99, rows.single().price, 0.001)
         } finally {
             database.close()
         }

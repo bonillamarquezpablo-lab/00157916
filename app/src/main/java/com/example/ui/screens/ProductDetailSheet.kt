@@ -256,6 +256,14 @@ fun ProductDetailSheet(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                            if (product.isPriceVerified && !product.isPriceFresh) {
+                                Text(
+                                    text = product.priceFreshnessLabel,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.tertiary
+                                )
+                            }
                             Text(
                                 text = "$currentSourceLabel · confirma precio final y stock en la tienda.",
                                 fontSize = 10.sp,

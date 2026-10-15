@@ -1430,8 +1430,8 @@ class ExampleRobolectricTest {
 
         assertEquals(
             listOf(
-                "MonsGeek M1 V5 TMR Magnetic Keyboard Black",
                 "DarkBeacon Flux87 HE Teclado Gaming TKL Rapid Trigger Interruptores Magnéticos",
+                "MonsGeek M1 V5 TMR Magnetic Keyboard Black",
                 "Keychron Q1 HE Teclado Inalámbrico"
             ),
             report.results.map { it.title }

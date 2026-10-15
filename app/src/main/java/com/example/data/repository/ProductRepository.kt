@@ -440,17 +440,44 @@ class ProductRepository(
      * This is intentionally non-destructive: invalid legacy rows stay in the database for audit,
      * but cannot set current prices, minima, maxima, averages or deal badges.
      */
-    private fun isEligibleObservationForHistory(observation: PriceObservationEntity): Boolean =
-        observation.isVerified &&
+    private fun isEligibleObservationForHistory(observation: PriceObservationEntity): Boolean {
+        val archiveBacked = observation.evidenceType.equals("archive", ignoreCase = true) ||
+            parseHttpUri(observation.sourceUrl)?.host.equals("web.archive.org", ignoreCase = true)
+        val merchantUrl = if (archiveBacked) {
+            // Validate the seller against the original retailer page, not web.archive.org.
+            // Older rows may lack sourcePageUrl, so recover the HTTPS target from a standard
+            // Wayback snapshot URL when possible; if neither is trustworthy, reject the row.
+            observation.sourcePageUrl.takeIf { candidate ->
+                parseHttpUri(candidate)?.let { uri ->
+                    uri.scheme.equals("https", ignoreCase = true) &&
+                        !uri.host.equals("web.archive.org", ignoreCase = true)
+                } == true
+            } ?: run {
+                val archiveUri = parseHttpUri(observation.sourceUrl) ?: return false
+                if (!archiveUri.host.equals("web.archive.org", ignoreCase = true) ||
+                    !archiveUri.scheme.equals("https", ignoreCase = true)
+                ) return false
+                Regex("""^/web/\\d{14}id_/(https://[^?]+)""")
+                    .find(archiveUri.rawPath.orEmpty())
+                    ?.groupValues
+                    ?.getOrNull(1)
+            } ?: return false
+        } else {
+            observation.sourceUrl
+        }
+
+        return observation.isVerified &&
             observation.productId.isNotBlank() &&
             observation.currency == "EUR" &&
             observation.price.isFinite() &&
             observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
             parseHttpUri(observation.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
+            (!archiveBacked || parseHttpUri(observation.sourceUrl)?.host.equals("web.archive.org", ignoreCase = true)) &&
             isEligibleHistoryTitle(observation.productTitle) &&
             !isPromotionalBulkListing(observation.productTitle, "") &&
-            isEligibleSeller(observation.storeName, observation.sourceUrl) &&
+            isEligibleSeller(observation.storeName, merchantUrl) &&
             isPlausibleHistoryPrice(observation.productTitle, observation.price)
+    }
 
     /**
      * Conservative absolute floors catch a lone impossible-looking device price even when there

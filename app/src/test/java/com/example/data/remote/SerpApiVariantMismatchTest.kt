@@ -80,6 +80,15 @@ class SerpApiVariantMismatchTest {
     }
 
     @Test
+    fun googleShoppingUrlDetectionRejectsLookalikeDomains() {
+        assertTrue(isGoogleShoppingUrl("https://www.google.com/shopping/product/123456"))
+        assertTrue(isGoogleShoppingUrl("https://www.google.es/search?tbm=shop"))
+        assertTrue(isGoogleShoppingUrl("https://shopping.google.co.uk/"))
+        assertFalse(isGoogleShoppingUrl("https://google.com.attacker.example/search"))
+        assertFalse(isGoogleShoppingUrl("https://google.attacker.example/search"))
+    }
+
+    @Test
     fun knownRetailersSearchOnTheirOwnSiteInsteadOfGoogle() {
         val url = Store.LA_MANZANITA.searchUrlFor("Apple iPhone 16")
         assertTrue(url.startsWith("https://lamanzanita.es/"))

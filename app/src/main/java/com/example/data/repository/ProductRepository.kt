@@ -25,6 +25,8 @@ import com.example.data.remote.isWheelFitmentQuery
 import com.example.data.remote.containsWheelCategoryTerm
 import com.example.data.remote.wheelSetCountForTitle
 import com.example.data.model.Store
+import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -68,14 +70,20 @@ class ProductRepository(
     init {
         // Conservative cleanup: only discard product rows with no observation and no user tracking.
         // Never delete observation history, tracked products/watchlist entries, or persisted stores.
+        // A non-fatal cleanup error must not crash the main thread during the first screen launch.
         externalScope.launch {
             try {
                 productDao.deleteProductsWithoutObservations()
                 productDao.markProductsWithVerifiedObservations()
                 startupCleanupCompleted.complete(Unit)
-            } catch (failure: Throwable) {
-                startupCleanupCompleted.completeExceptionally(failure)
-                throw failure
+            } catch (cancelled: CancellationException) {
+                startupCleanupCompleted.completeExceptionally(cancelled)
+                throw cancelled
+            } catch (failure: Exception) {
+                Log.e("ProductRepository", "Room startup cleanup failed; continuing startup for diagnostics.", failure)
+                // Cleanup has stopped. Allow later operations to report any underlying database
+                // problem through the crash-report handler instead of crashing from this job.
+                startupCleanupCompleted.complete(Unit)
             }
         }
     }

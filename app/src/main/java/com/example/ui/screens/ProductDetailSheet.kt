@@ -77,7 +77,7 @@ fun ProductDetailSheet(
         SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(it.timestamp))
     }
     val googleInsightPoints = product.priceHistory.filter {
-        it.eventLabel.contains("price_insights", ignoreCase = true)
+        it.eventLabel?.contains("price_insights", ignoreCase = true) == true
     }
     val oldestGoogleInsightDate = googleInsightPoints.minByOrNull { it.timestamp }?.let {
         SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(it.timestamp))

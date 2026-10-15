@@ -820,32 +820,62 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             .putLong("compare_stores_attempt_${product.id}", now)
             .commit()
         _uiState.value = _uiState.value.copy(serpApiActionStatus = "Consultando las tiendas de ${product.title}…")
-        val offers = serpApiClient.searchGoogleProductOffers(
+        val details = serpApiClient.searchGoogleProductDetails(
             token = token,
             productId = productId,
             expectedTitle = product.title,
             observedAt = now
         )
-        val safeOffers = repository.filterOnlineSearchResults(offers, product.title)
+        val safeOffers = repository.filterOnlineSearchResults(details.offers, product.title)
             .filterNot { it.isSecondHand || it.isRentalOrMonthly }
-        if (safeOffers.isEmpty()) {
-            val message = "SerpApi no devolvió ofertas con coincidencia segura, nuevas y en euros. No se ha cambiado el precio ni el historial. La consulta queda en caché local durante 24 horas."
-            _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
-            showSnackbar(message)
-        } else {
-            val saved = repository.recordProductComparisonOffers(product.id, product.title, safeOffers)
-            if (safeOffers.any { !it.isSuspiciousPrice }) {
-                val updated = withTimeout(8_000L) {
+        val savedHistory = repository.recordGooglePriceInsightsHistory(
+            productId = product.id,
+            expectedTitle = product.title,
+            googleCatalogId = productId,
+            insights = details.priceInsights
+        )
+        val savedOffers = if (safeOffers.isNotEmpty()) {
+            repository.recordProductComparisonOffers(product.id, product.title, safeOffers)
+        } else 0
+
+        // Refresh the open detail sheet whenever current offers or Google historical points
+        // exist. Historical source rows remain separate and never replace the current live price.
+        if (details.priceInsights.isNotEmpty() || safeOffers.any { !it.isSuspiciousPrice }) {
+            val updated = runCatching {
+                withTimeout(8_000L) {
                     repository.allProductsStream.first { products ->
-                        products.any { it.id == product.id && (it.priceObservedAt ?: 0L) >= now }
+                        products.any { candidate ->
+                            candidate.id == product.id && (
+                                (safeOffers.any { !it.isSuspiciousPrice } &&
+                                    (candidate.priceObservedAt ?: 0L) >= now) ||
+                                (details.priceInsights.isNotEmpty() &&
+                                    candidate.priceHistory.any {
+                                        it.eventLabel.contains("price_insights", ignoreCase = true)
+                                    })
+                            )
+                        }
                     }.first { it.id == product.id }
                 }
+            }.getOrNull()
+            if (updated != null) {
                 _uiState.value = _uiState.value.copy(selectedProduct = updated)
             }
-            val message = "Comparar tiendas completado: ${safeOffers.size} oferta(s) válidas encontradas y $saved observación(es) nuevas o actualizadas. Enlaces directos y de Google Shopping distinguidos. No se repetirá antes de 24 horas."
-            _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
-            showSnackbar(message)
         }
+
+        val offerNote = if (safeOffers.isNotEmpty()) {
+            "${safeOffers.size} oferta(s) actuales válidas; $savedOffers observación(es) nuevas o actualizadas."
+        } else {
+            "Google no devolvió ofertas actuales utilizables."
+        }
+        val historyNote = when {
+            savedHistory > 0 -> "Se han guardado $savedHistory puntos históricos reales devueltos por Google."
+            details.priceInsights.isNotEmpty() -> "Google devolvió historial, pero esos puntos ya estaban guardados o no superaron la validación."
+            details.priceHistoryAvailable -> "Google indica que hay una serie histórica, pero no se pudieron interpretar puntos fechados en euros."
+            else -> "Google no publica una serie histórica para este producto."
+        }
+        val message = "Comparación completada: $offerNote $historyNote No se repetirá antes de 24 horas."
+        _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
+        showSnackbar(message)
         val after = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
         if (after != null) _uiState.value = _uiState.value.copy(serpApiAccountStatus = quotaMessage(after))
     }
@@ -981,14 +1011,18 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         repository.recordOnlineSearchResults(safeCachedResults, provider.name, query)
                     } else 0
                     val historyNotice = if (safeCachedResults.isNotEmpty()) {
-                        " " + onlineHistoryNotice(savedObservations, safeCachedResults.size)
+                        onlineHistoryNotice(savedObservations, safeCachedResults.size)
                     } else ""
                     val filterNotice = onlineFilterNotice(cachedDiscarded)
+                    val status = listOf(base, cacheNotice, filterNotice, historyNotice)
+                        .map { it.trim() }
+                        .filter { it.isNotBlank() }
+                        .joinToString("\n\n")
                     _uiState.value = _uiState.value.copy(
                         onlineSearchResults = safeCachedResults,
                         onlineSearchDiscardedOffers = cachedDiscarded,
                         showOnlineSearchDiscarded = false,
-                        onlineSearchStatus = "$base $cacheNotice$filterNotice$historyNotice"
+                        onlineSearchStatus = status
                     )
                     startFreeArchiveBackfill(safeCachedResults, query, provider)
                     return@launch
@@ -1047,12 +1081,15 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
                 // The account endpoint is free; refresh the displayed balance after a live request.
                 val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
-                val quotaNote = quotaAfter?.let { " ${it.quotaSummary()}" }.orEmpty()
+                val quotaNote = quotaAfter?.let { "Cuota SerpApi: ${it.quotaSummary()}" }.orEmpty()
                 val filterNote = onlineFilterNotice(discarded)
                 val historyNote = if (results.isNotEmpty()) {
-                    " " + onlineHistoryNotice(savedObservations, results.size)
+                    onlineHistoryNotice(savedObservations, results.size)
                 } else ""
-                val message = base + quotaNote + filterNote + historyNote
+                val message = listOf(base, quotaNote, filterNote, historyNote)
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                    .joinToString("\n\n")
                 _uiState.value = _uiState.value.copy(
                     onlineSearchResults = results,
                     onlineSearchDiscardedOffers = discarded,
@@ -1191,7 +1228,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             current.onlineSearchStatus?.contains("Histórico gratuito recuperado de Internet Archive") != true
         ) {
             _uiState.value = current.copy(
-                onlineSearchStatus = (current.onlineSearchStatus.orEmpty() + " " + notice).trim()
+                onlineSearchStatus = listOf(current.onlineSearchStatus.orEmpty().trim(), notice.trim())
+                    .filter { it.isNotBlank() }
+                    .joinToString("\n\n")
             )
         }
     }
@@ -1200,7 +1239,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         if (discarded.isEmpty()) return ""
         val reasons = discarded.groupingBy { it.reason }.eachCount()
             .entries.joinToString("; ") { "${it.value} por ${it.key.lowercase(Locale.ROOT)}" }
-        return " Se han descartado ${discarded.size} resultados: $reasons. Pulsa «Ver descartados» para revisar cada oferta."
+        return "Se han descartado ${discarded.size} resultados: $reasons. Pulsa «Ver descartados» para revisar cada oferta."
     }
 
     private fun onlineHistoryNotice(saved: Int, resultCount: Int): String =

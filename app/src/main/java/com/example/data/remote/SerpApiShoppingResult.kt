@@ -138,6 +138,23 @@ fun isGoogleShoppingUrl(sourceUrl: String): Boolean {
         host.endsWith(".google.es")
 }
 
+/**
+ * Filters custom promotional merchandise out of consumer-price comparisons.
+ * These listings often show bulk-printing prices that are not comparable to the
+ * actual retail product (for example, power banks printed with a company logo).
+ */
+fun isNonRetailPromotionalListing(title: String): Boolean {
+    if (title.isBlank()) return false
+    val normalized = Normalizer.normalize(title.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+        .replace(Regex("\\p{M}+"), "")
+        .replace(Regex("[^a-z0-9]+"), " ")
+        .trim()
+        .replace(Regex("\\s+"), " ")
+    return Regex(
+        """\\b(impreso con (su|el|tu) logotipo|con (su|el|tu) logo(?:tipo)?|logo impreso|regalo promocional|articulo(?:s)? publicitario(?:s)?|merchandising(?: personalizado)?|personalizad[oa]s? con (?:su|el|tu )?(?:logo|logotipo)|para publicidad|precio por mayor|lote promocional|impresion (?:de )?(?:logo|logotipo))\\b"""
+    ).containsMatchIn(normalized)
+}
+
 fun linkTypeForUrl(sourceUrl: String): String =
     if (isGoogleShoppingUrl(sourceUrl)) "Google Shopping" else "directo"
 

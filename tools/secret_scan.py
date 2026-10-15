@@ -16,6 +16,7 @@ from pathlib import PurePosixPath
 MAX_TEXT_BYTES = 2 * 1024 * 1024
 MAX_ARCHIVE_MEMBER_BYTES = 2 * 1024 * 1024
 MAX_ARCHIVE_TOTAL_BYTES = 20 * 1024 * 1024
+ARCHIVE_SUFFIXES = (".zip", ".apk", ".aar", ".jar")
 HISTORY_TEXT_SUFFIXES = (".kt", ".java", ".kts", ".gradle", ".xml", ".json", ".properties", ".yml", ".yaml", ".toml", ".md", ".sh", ".py", ".txt", ".conf", ".ini", ".env")
 
 PATTERNS: tuple[tuple[str, re.Pattern[bytes]], ...] = (
@@ -129,7 +130,7 @@ def scan_git_history(findings: list[tuple[str, str]]) -> None:
             findings.append((f"git-history:{path}", "Sensitive credential/configuration filename exists in history"))
             continue
 
-        if not (lowered.endswith(".zip") or lowered.endswith(HISTORY_TEXT_SUFFIXES)):
+        if not (lowered.endswith(ARCHIVE_SUFFIXES) or lowered.endswith(HISTORY_TEXT_SUFFIXES)):
             continue
         if object_id in seen_blobs:
             continue
@@ -139,17 +140,22 @@ def scan_git_history(findings: list[tuple[str, str]]) -> None:
             kind = subprocess.check_output(["git", "cat-file", "-t", object_id], text=True, stderr=subprocess.DEVNULL).strip()
             if kind != "blob":
                 continue
+            object_size = int(subprocess.check_output(["git", "cat-file", "-s", object_id], text=True, stderr=subprocess.DEVNULL).strip())
+            if lowered.endswith(ARCHIVE_SUFFIXES) and object_size > MAX_ARCHIVE_TOTAL_BYTES:
+                findings.append((f"git-history:{path}", "Large historical archive requires manual review"))
+                continue
+            if not lowered.endswith(ARCHIVE_SUFFIXES) and object_size > MAX_TEXT_BYTES:
+                findings.append((f"git-history:{path}", "Large historical text file requires manual review"))
+                continue
             data = subprocess.check_output(["git", "cat-file", "blob", object_id], stderr=subprocess.DEVNULL)
         except (OSError, subprocess.CalledProcessError):
             findings.append((f"git-history:{path}", "Unable to inspect historical file"))
             continue
 
         historical_label = f"git-history:{path}@{object_id[:12]}"
-        if lowered.endswith(".zip"):
+        if lowered.endswith(ARCHIVE_SUFFIXES):
             scan_zip(historical_label, data, findings)
-        elif len(data) > MAX_TEXT_BYTES:
-            findings.append((historical_label, "Large historical text file requires manual review"))
-        elif b"\\x00" not in data:
+        else:
             scan_bytes(historical_label, data, findings)
 
 
@@ -175,9 +181,12 @@ def main() -> int:
             findings.append((path, "Unable to read tracked file"))
             continue
 
-        if path.lower().endswith(".zip"):
+        if path.lower().endswith(ARCHIVE_SUFFIXES):
+            if len(data) > MAX_ARCHIVE_TOTAL_BYTES:
+                findings.append((path, "Large archive requires manual review"))
+                continue
             if len(data) > MAX_TEXT_BYTES:
-                # Avoid loading a large repository archive through the text path.
+                # Read only bounded-size archives as binary data for ZIP member inspection.
                 with open(path, "rb") as handle:
                     data = handle.read()
             scan_zip(path, data, findings)

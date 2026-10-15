@@ -261,4 +261,67 @@ class ProductRepositoryArchiveIsolationTest {
             database.close()
         }
     }
+
+    @Test
+    fun dailyLiveLookupSkipsArchiveUrlEvenWhenLegacyEvidenceMarkerSaysLive() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val now = System.currentTimeMillis()
+            val dayStart = Calendar.getInstance().apply {
+                timeInMillis = now
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            val dayEnd = Calendar.getInstance().apply {
+                timeInMillis = dayStart
+                add(Calendar.DAY_OF_MONTH, 1)
+            }.timeInMillis
+
+            database.priceObservationDao().insertAll(
+                listOf(
+                    PriceObservationEntity(
+                        productId = "same-day-product",
+                        storeId = "same-store",
+                        price = 4.99,
+                        observedAt = now - 1_000L,
+                        sourceUrl = "https://web.archive.org/web/20261015000000id_/https://shop.example/item",
+                        sourceName = "Legacy archive row",
+                        isVerified = true,
+                        storeName = "Tienda de prueba",
+                        evidenceType = "live"
+                    ),
+                    PriceObservationEntity(
+                        productId = "same-day-product",
+                        storeId = "same-store",
+                        price = 49.99,
+                        observedAt = now,
+                        sourceUrl = "https://shop.example/item",
+                        sourceName = "Google Shopping",
+                        isVerified = true,
+                        storeName = "Tienda de prueba",
+                        evidenceType = "live"
+                    )
+                )
+            )
+
+            val selected = database.priceObservationDao().getObservationForStoreProductDay(
+                productId = "same-day-product",
+                storeId = "same-store",
+                dayStart = dayStart,
+                dayEnd = dayEnd
+            )
+
+            assertEquals("The live seller URL must be selected instead of a Wayback snapshot",
+                "https://shop.example/item", selected?.sourceUrl)
+            assertEquals(49.99, selected?.price ?: 0.0, 0.001)
+        } finally {
+            database.close()
+        }
+    }
+
 }

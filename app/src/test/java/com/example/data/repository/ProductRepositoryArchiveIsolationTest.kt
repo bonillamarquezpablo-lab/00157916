@@ -195,6 +195,44 @@ class ProductRepositoryArchiveIsolationTest {
                 0,
                 wrongSnapshotTargetInserted
             )
+
+            // Re-running a backfill must not duplicate a capture already in Room.
+            val validSnapshotUrl =
+                "https://web.archive.org/web/20260901000000id_/https://shop.example/product/anker-prime"
+            val validQuote = ArchivedPriceQuote(
+                observedAt = mismatchedCaptureTime,
+                price = 19.99,
+                currency = "EUR",
+                productTitle = title,
+                originalUrl = "https://shop.example/product/anker-prime",
+                snapshotUrl = validSnapshotUrl
+            )
+            assertEquals(
+                "the first valid archived capture should be persisted",
+                1,
+                repository.recordArchivedPriceHistory(
+                    expectedTitle = title,
+                    originalUrl = "https://shop.example/product/anker-prime",
+                    storeName = "Tienda de prueba",
+                    quotes = listOf(validQuote)
+                )
+            )
+            assertEquals(
+                "importing the same archived capture again must be a no-op",
+                0,
+                repository.recordArchivedPriceHistory(
+                    expectedTitle = title,
+                    originalUrl = "https://shop.example/product/anker-prime",
+                    storeName = "Tienda de prueba",
+                    quotes = listOf(validQuote)
+                )
+            )
+            assertEquals(
+                "only one row should exist for this Wayback snapshot",
+                1,
+                database.priceObservationDao().observeVerifiedHistory(productId).first()
+                    .count { it.sourceUrl == validSnapshotUrl }
+            )
         } finally {
             database.close()
         }

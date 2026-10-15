@@ -649,8 +649,11 @@ class ProductRepository(
 
         val products = productDao.getAllProductsSnapshot()
         val identity = onlineProductIdentityKey(expectedTitle)
+        // Archive metadata has its own provenance checks below. Requiring a verified *current*
+        // quote here hid valid old prices for products whose live offer was absent or suspicious.
+        // This still requires an existing matching product row and never changes its live price.
         val product = products.firstOrNull {
-            onlineProductIdentityKey(it.title) == identity && it.isPriceVerified
+            onlineProductIdentityKey(it.title) == identity
         } ?: return 0
         val now = System.currentTimeMillis()
         val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)
@@ -698,7 +701,13 @@ class ProductRepository(
                 evidenceType = "archive",
                 sourcePageUrl = originalUrl
             )
-            if (saveDailyObservation(observation)) inserted++
+            val (dayStart, dayEnd) = localDayBounds(observation.observedAt)
+            if (priceObservationDao.saveArchivedObservationIfLower(
+                    observation = observation,
+                    dayStart = dayStart,
+                    dayEnd = dayEnd
+                )
+            ) inserted++
         }
         return inserted
     }
@@ -1371,7 +1380,9 @@ class ProductRepository(
         }
         val dateFormatter = SimpleDateFormat("dd MMM yyyy", Locale("es", "ES"))
         // Plot just one genuine point per local date: the cheapest valid offer observed that day.
-        val historyPoints = if (priceIsVerified) snapshotHistory.map { observation ->
+        // Verified historical evidence remains visible even when today's live price is not
+        // verified. The current-price fields and deal verdict still depend exclusively on live rows.
+        val historyPoints = snapshotHistory.map { observation ->
             PricePoint(
                 timestamp = observation.observedAt,
                 dateLabel = dateFormatter.format(Date(observation.observedAt)),
@@ -1380,8 +1391,6 @@ class ProductRepository(
                 eventLabel = observation.sourceType.ifBlank { observation.sourceName },
                 linkType = observation.linkType
             )
-        } else {
-            emptyList()
         }
         return Product(
             id = id,

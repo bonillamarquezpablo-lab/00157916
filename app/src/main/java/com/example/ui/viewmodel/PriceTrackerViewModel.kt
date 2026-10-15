@@ -1096,7 +1096,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
         val candidates = results
             .filterNot { it.isSecondHand || it.isRentalOrMonthly || it.isFitmentUnverified || it.isCategoryUnverified }
-            .filter { waybackPriceHistoryClient.isEligibleDirectUrl(it.sourceUrl) && !isGoogleShoppingUrl(it.sourceUrl) }
+            .filter {
+                (waybackPriceHistoryClient.isEligibleDirectUrl(it.sourceUrl) && !isGoogleShoppingUrl(it.sourceUrl)) ||
+                    (isGoogleShoppingUrl(it.sourceUrl) && it.storeName.isNotBlank())
+            }
             .sortedBy { it.price }
             .distinctBy { it.title.trim().lowercase(Locale.ROOT) + "|" + it.sourceUrl }
             .take(MAX_ARCHIVE_PAGES_PER_SEARCH)
@@ -1119,6 +1122,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 var checkedCount = 0
                 var foundCount = 0
                 var skippedCount = 0
+                var unresolvedStoreLinkCount = 0
                 val archiveDates = mutableListOf<Long>()
 
                 for (candidate in candidates) {
@@ -1127,12 +1131,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }
                     val archive = waybackPriceHistoryClient.fetchHistory(
                         originalUrl = candidate.sourceUrl,
-                        expectedTitle = candidate.title
+                        expectedTitle = candidate.title,
+                        storeName = candidate.storeName
                     )
                     if (archive.skippedRecently) {
                         skippedCount++
                         continue
                     }
+                    if (archive.storeLinkUnresolved) unresolvedStoreLinkCount++
                     if (!archive.available) continue
                     checkedCount += archive.capturesChecked
                     foundCount += archive.quotes.size
@@ -1140,7 +1146,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
                     val newlySaved = repository.recordArchivedPriceHistory(
                         expectedTitle = candidate.title,
-                        originalUrl = candidate.sourceUrl,
+                        originalUrl = archive.quotes.firstOrNull()?.originalUrl ?: candidate.sourceUrl,
                         storeName = candidate.storeName,
                         quotes = archive.quotes
                     )
@@ -1188,6 +1194,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }
                     checkedCount > 0 -> {
                         " Se consultaron $checkedCount capturas gratuitas, pero ninguna expuso un precio EUR verificable para el producto exacto. No se han rellenado datos ausentes."
+                    }
+                    unresolvedStoreLinkCount > 0 && checkedCount == 0 -> {
+                        " No se pudo extraer un enlace directo de vendedor desde Google Shopping para consultar Wayback en " + unresolvedStoreLinkCount + " resultado(s). No se han inventado precios previos."
                     }
                     else -> {
                         " No se recuperó histórico gratuito de las páginas consultadas: puede que no estén archivadas o que su precio no aparezca en metadatos verificables."

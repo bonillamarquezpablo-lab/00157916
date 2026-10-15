@@ -82,6 +82,12 @@ class ProductRepositoryArchiveIsolationTest {
 
             val archiveUrl1 = "https://web.archive.org/web/20251001000000id_/https://shop.example/product/anker-prime"
             val archiveUrl2 = "https://web.archive.org/web/20260201000000id_/https://shop.example/product/anker-prime"
+            val archiveTimestamp1 = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT)
+                .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                .parse("20251001000000")!!.time
+            val archiveTimestamp2 = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT)
+                .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                .parse("20260201000000")!!.time
             val observations = listOf(
                 live(220.0, todayStart - 36L * 60L * 60L * 1000L, "old"),
                 live(190.0, todayStart - 12L * 60L * 60L * 1000L, "middle"),
@@ -92,7 +98,7 @@ class ProductRepositoryArchiveIsolationTest {
                     storeId = "sample-store-archive",
                     price = 5.0,
                     currency = "EUR",
-                    observedAt = now - 400L * 24L * 60L * 60L * 1000L,
+                    observedAt = archiveTimestamp1,
                     sourceUrl = archiveUrl1,
                     sourceName = "Internet Archive (Wayback Machine)",
                     isVerified = true,
@@ -109,7 +115,7 @@ class ProductRepositoryArchiveIsolationTest {
                     storeId = "sample-store-archive-2",
                     price = 7.0,
                     currency = "EUR",
-                    observedAt = now - 150L * 24L * 60L * 60L * 1000L,
+                    observedAt = archiveTimestamp2,
                     sourceUrl = archiveUrl2,
                     sourceName = "Internet Archive (Wayback Machine)",
                     isVerified = true,

@@ -127,6 +127,7 @@ class ProductRepository(
                 quote.currency == "EUR" &&
                 quote.observedAt >= HISTORY_START_TIMESTAMP &&
                 isEligibleHistoryTitle(title) &&
+                !isPromotionalBulkListing(title, "") &&
                 isEligibleSeller(quote.storeName, quote.sourceUrl) &&
                 isPlausibleHistoryPrice(title, quote.price)
         }
@@ -187,6 +188,7 @@ class ProductRepository(
                 result.price <= MAX_HISTORY_PRICE_EUR &&
                 result.observedAt >= HISTORY_START_TIMESTAMP &&
                 !result.isRentalOrMonthly &&
+                !isPromotionalBulkListing(result.title, searchQuery) &&
                 !hasStrictModelMismatch(
                     searchQuery,
                     queryModelMarkers,
@@ -275,6 +277,10 @@ class ProductRepository(
                     "Sin precio válido"
                 result.isRentalOrMonthly ->
                     "Alquiler o cuota mensual"
+                isPromotionalBulkListing(result.title, searchQuery) ->
+                    "Merchandising promocional o lote no solicitado"
+                !isMerchantDestinationConsistent(result.storeName, result.sourceUrl) ->
+                    "El dominio del enlace no coincide con el vendedor"
                 result.isSecondHand ->
                     "Segunda mano o reacondicionado"
                 hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title) ->
@@ -302,6 +308,23 @@ class ProductRepository(
             )
         }.distinctBy { "${it.provider}|${it.title}|${it.priceLabel}|${it.reason}" }
     }
+
+    /**
+     * Revalidates rows already stored in Room before they can affect visible history.
+     * This is intentionally non-destructive: invalid legacy rows stay in the database for audit,
+     * but cannot set current prices, minima, maxima, averages or deal badges.
+     */
+    private fun isEligibleObservationForHistory(observation: PriceObservationEntity): Boolean =
+        observation.isVerified &&
+            observation.productId.isNotBlank() &&
+            observation.currency == "EUR" &&
+            observation.price.isFinite() &&
+            observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
+            parseHttpUri(observation.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
+            isEligibleHistoryTitle(observation.productTitle) &&
+            !isPromotionalBulkListing(observation.productTitle, "") &&
+            isEligibleSeller(observation.storeName, observation.sourceUrl) &&
+            isPlausibleHistoryPrice(observation.productTitle, observation.price)
 
     private fun isPlausibleHistoryPrice(title: String, price: Double): Boolean =
         price.isFinite() && price > 0.0 && price <= MAX_HISTORY_PRICE_EUR
@@ -638,6 +661,22 @@ class ProductRepository(
         )
         return !excludedListing.containsMatchIn(normalized) &&
             !Regex("""(?i)/\s*mes\b""").containsMatchIn(title)
+    }
+
+    private fun isPromotionalBulkListing(title: String, searchQuery: String): Boolean {
+        val titleNormalized = normalizedProductTitle(title)
+        val queryNormalized = normalizedProductTitle(searchQuery)
+        val explicitlyRequested = Regex(
+            """\b(personalizado|personalizada|logotipo|logo|publicitario|promocional|por mayor|lote)\b"""
+        ).containsMatchIn(queryNormalized)
+        if (explicitlyRequested) return false
+        val logoOrPromo = Regex(
+            """\b(impreso con (su|el|tu) logotipo|con (su|tu) logo|regalo promocional|articulo publicitario|merchandising personalizado|personalizado con logo|para publicidad)\b"""
+        )
+        val bulk = Regex(
+            """\b(\d+\s*x\s*(?:bateria|baterias|powerbank|power bank|cargador|auriculares)|pack\s+promocional|lote\s+promocional|por\s+mayor)\b"""
+        )
+        return logoOrPromo.containsMatchIn(titleNormalized) || bulk.containsMatchIn(titleNormalized)
     }
 
     private fun isEligibleSeller(storeName: String, sourceUrl: String): Boolean {
@@ -1009,11 +1048,7 @@ class ProductRepository(
         val sortedHistory = verifiedObservations.filter { observation ->
             val eligibleDate = observation.evidenceType == "archive" ||
                 observation.observedAt >= HISTORY_START_TIMESTAMP
-            eligibleDate &&
-                observation.currency == "EUR" &&
-                observation.price.isFinite() &&
-                observation.price > 0.0 &&
-                observation.price <= MAX_HISTORY_PRICE_EUR
+            eligibleDate && isEligibleObservationForHistory(observation)
         }.sortedBy { it.observedAt }
         val liveHistory = sortedHistory.filter { it.evidenceType != "archive" }
         // Current price/store must always come from a live provider observation, never a Wayback

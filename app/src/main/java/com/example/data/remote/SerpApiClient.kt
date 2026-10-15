@@ -1372,8 +1372,8 @@ class SerpApiClient(
         }
         val requestedModelCodes = modelCodes(requested)
         val returnedModelCodes = modelCodes(returned)
-        if (requestedModelCodes.isNotEmpty() && returnedModelCodes.isNotEmpty() &&
-            requestedModelCodes.none { it in returnedModelCodes }
+        if (requestedModelCodes.isNotEmpty() &&
+            returnedModelCodes.none { it in requestedModelCodes }
         ) return false
 
         val containsModelCode = wanted.any { token -> token.length >= 4 && token.any(Char::isDigit) && token.any(Char::isLetter) }

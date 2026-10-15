@@ -246,10 +246,10 @@ private val SECOND_HAND_LISTING_PATTERN = Regex(
 )
 
 private val BICYCLE_TIRE_LISTING_PATTERN = Regex(
-    """(?i)\\b(cubiertas?|neum[aá]tic[oa]s?|tyres?|tires?)\\b"""
+    """(?i)\b(cubiertas?|neum[aá]tic[oa]s?|tyres?|tires?)\b"""
 )
 
-private val BICYCLE_TIRE_DIAMETER_PATTERN = Regex("""(?<!\\d)(26|27[.,]?5|29)(?!\\d)""")
+private val BICYCLE_TIRE_DIAMETER_PATTERN = Regex("""(?<!\d)(26|27[.,]?5|29)(?!\d)""")
 
 /** True when a title explicitly identifies a bicycle tyre/cover, even if its text also mentions cables. */
 internal fun isBicycleTireListing(title: String): Boolean =
@@ -258,7 +258,7 @@ internal fun isBicycleTireListing(title: String): Boolean =
 /** Requested wheel diameter, only for searches that clearly concern bicycle tyres. */
 internal fun requestedBicycleTireDiameter(query: String): String? {
     val normalized = normalizedWheelCategoryText(query)
-    val tireIntent = Regex("""\\b(maxxis|cubiertas?|neumaticos?|tyres?|tires?)\\b""")
+    val tireIntent = Regex("""\b(maxxis|cubiertas?|neumaticos?|tyres?|tires?)\b""")
         .containsMatchIn(normalized)
     if (!tireIntent) return null
     return BICYCLE_TIRE_DIAMETER_PATTERN.find(normalized)?.value
@@ -289,11 +289,11 @@ internal fun hasAmbiguousBicycleTireDiameter(query: String, title: String): Bool
 /** A 7–12 speed mountain-bike groupset query should not return wheels and unrelated parts. */
 internal fun isBicycleDrivetrainSearch(query: String): Boolean {
     val normalized = normalizedWheelCategoryText(query)
-    val bicycle = Regex("""\\b(mtb|bicicleta|bicicletas|bici|bike|bicycle)\\b""")
+    val bicycle = Regex("""\b(mtb|bicicleta|bicicletas|bici|bike|bicycle)\b""")
         .containsMatchIn(normalized)
-    val drivetrainBrand = Regex("""\\b(shimano|sram|microshift|sunrace)\\b""")
+    val drivetrainBrand = Regex("""\b(shimano|sram|microshift|sunrace)\b""")
         .containsMatchIn(normalized)
-    val speed = Regex("""\\b(?:7|8|9|10|11|12)\\s*(?:v|velocidades|speed)\\b""")
+    val speed = Regex("""\b(?:7|8|9|10|11|12)\s*(?:v|velocidades|speed)\b""")
         .containsMatchIn(normalized)
     val explicitTireSearch = requestedBicycleTireDiameter(query) != null
     return bicycle && drivetrainBrand && speed && !explicitTireSearch
@@ -302,7 +302,7 @@ internal fun isBicycleDrivetrainSearch(query: String): Boolean {
 internal fun isBicycleDrivetrainComponentTitle(title: String): Boolean {
     if (isBicycleTireListing(title) || containsWheelCategoryTerm(title)) return false
     return Regex(
-        """(?i)\\b(cassette|casete|pi[nñ]ones?|sprockets?|cambio|desviador|derailleur|shifter|manetas?|pulsadores?|cadena|chain|platos?|bielas?|pedalier|transmisi[oó]n|groupset|grupo)\\b"""
+        """(?i)\b(cassette|casete|pi[nñ]ones?|sprockets?|cambio|desviador|derailleur|shifter|manetas?|pulsadores?|cadena|chain|platos?|bielas?|pedalier|transmisi[oó]n|groupset|grupo)\b"""
     ).containsMatchIn(title)
 }
 

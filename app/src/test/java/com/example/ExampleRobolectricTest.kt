@@ -2279,4 +2279,82 @@ class ExampleRobolectricTest {
         }
     }
 
+    @Test
+    fun googleShoppingRejectsUnrequestedMultiProductBundleForExactModelSearch() {
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {
+                  "title": "Logitech G203 Lightsync Gaming Mouse",
+                  "price": "29,99 €",
+                  "extracted_price": 29.99,
+                  "link": "https://shop.example.com/logitech-g203",
+                  "source": "Tienda de ratones"
+                },
+                {
+                  "title": "Teclados Logitech Pack G213 Prodigy Teclado Gaming + Logitech G203 Lightsync 2nd Gen Ratón Gaming",
+                  "price": "88,98 €",
+                  "extracted_price": 88.98,
+                  "link": "https://shop.example.com/g213-g203-pack",
+                  "source": "Tienda de packs"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = payload,
+            query = "Logitech G203",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals("Only the standalone requested mouse should remain", 1, report.results.size)
+        assertEquals("Logitech G203 Lightsync Gaming Mouse", report.results.single().title)
+        assertTrue(
+            "The diagnostic should explain why the pack was excluded",
+            report.discardedOffers.any { it.reason == "Pack con varios productos no solicitado" }
+        )
+    }
+
+    @Test
+    fun amazonRejectsUnrequestedMultiProductBundleForExactModelSearch() {
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "organic_results": [
+                {
+                  "title": "Logitech G203 Lightsync Gaming Mouse",
+                  "price": "29,99 €",
+                  "extracted_price": 29.99,
+                  "link": "https://www.amazon.es/dp/G203-MOUSE"
+                },
+                {
+                  "title": "Teclados Logitech Pack G213 Prodigy Teclado Gaming + Logitech G203 Lightsync 2nd Gen Ratón Gaming",
+                  "price": "88,98 €",
+                  "extracted_price": 88.98,
+                  "link": "https://www.amazon.es/dp/G213-G203-PACK"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val report = SerpApiClient().parseAmazonResultsDetailed(
+            root = payload,
+            query = "Logitech G203",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals("Only the standalone requested mouse should remain", 1, report.results.size)
+        assertEquals("Logitech G203 Lightsync Gaming Mouse", report.results.single().title)
+        assertTrue(
+            "Amazon bundle rejections should be visible in diagnostics",
+            report.discardedOffers.any { it.reason == "Pack con varios productos no solicitado" }
+        )
+    }
+
 }

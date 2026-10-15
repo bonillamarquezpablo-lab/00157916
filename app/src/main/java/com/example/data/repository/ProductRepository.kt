@@ -110,7 +110,15 @@ class ProductRepository(
     ) { productEntities, storeEntities, trackedEntities, observations ->
         val stores = storeEntities.map { it.toDomainStore() }.ifEmpty { Store.ALL_STORES }
         val trackingMap = trackedEntities.associateBy { it.productId }
-        val observationsByProduct = observations.groupBy { it.productId }
+        val productTitleById = productEntities.associate { it.id to it.title }
+        // Validate legacy verified rows on read as well as at ingestion. Invalid rows remain
+        // in Room for diagnosis/recovery, but cannot influence prices, badges or the chart.
+        val observationsByProduct = observations
+            .filter { observation ->
+                val catalogTitle = productTitleById[observation.productId] ?: return@filter false
+                isEligibleObservationForDisplay(observation, catalogTitle)
+            }
+            .groupBy { it.productId }
 
         productEntities.map { entity ->
             val product = entity.toDomainProduct(
@@ -793,6 +801,61 @@ class ProductRepository(
         return expectedTokens.any { it in actualTokens } ||
             (actualCompact.length >= 4 && expectedCompact.contains(actualCompact)) ||
             (expectedCompact.length >= 4 && actualCompact.contains(expectedCompact))
+    }
+
+    private fun isEligibleObservationForDisplay(
+        observation: PriceObservationEntity,
+        catalogTitle: String
+    ): Boolean {
+        if (!observation.isVerified ||
+            observation.productId.isBlank() ||
+            observation.currency != "EUR" ||
+            !observation.price.isFinite() ||
+            observation.price <= 0.0 ||
+            observation.price > MAX_HISTORY_PRICE_EUR
+        ) return false
+
+        val storedTitle = observation.productTitle.ifBlank { catalogTitle }
+        if (!isEligibleHistoryTitle(storedTitle) ||
+            !isPlausibleHistoryPrice(storedTitle, observation.price) ||
+            !isSafeCatalogTitleMatch(storedTitle, catalogTitle) ||
+            hasStrictModelMismatch(catalogTitle, explicitModelMarkers(catalogTitle), storedTitle)
+        ) return false
+
+        val seller = observation.storeName.ifBlank { observation.storeId }
+        if (observation.isArchiveEvidence()) {
+            val snapshotUri = parseHttpUri(observation.sourceUrl) ?: return false
+            if (!snapshotUri.scheme.equals("https", ignoreCase = true) ||
+                !snapshotUri.host.equals("web.archive.org", ignoreCase = true) ||
+                snapshotUri.port != -1
+            ) return false
+            val rawTimestamp = Regex("""^/web/(\\d{14})id_/""")
+                .find(snapshotUri.path.orEmpty())?.groupValues?.getOrNull(1) ?: return false
+            val captureTime = runCatching {
+                SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+                    isLenient = false
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }.parse(rawTimestamp)?.time
+            }.getOrNull() ?: return false
+            val now = System.currentTimeMillis()
+            if (kotlin.math.abs(captureTime - observation.observedAt) > 1_000L ||
+                observation.observedAt < now - (1605L * 24L * 60L * 60L * 1000L) ||
+                observation.observedAt >= now
+            ) return false
+
+            val snapshotPrefix = "/web/" + rawTimestamp + "id_/"
+            val archivedOriginalUrl = observation.sourceUrl.substringAfter(
+                snapshotPrefix,
+                missingDelimiterValue = ""
+            )
+            if (archivedOriginalUrl.isBlank()) return false
+            val merchantUrl = observation.sourcePageUrl.ifBlank { archivedOriginalUrl }
+            if (!sameHttpResource(archivedOriginalUrl, merchantUrl)) return false
+            return isEligibleSeller(seller, merchantUrl)
+        }
+
+        if (observation.observedAt < HISTORY_START_TIMESTAMP) return false
+        return isEligibleSeller(seller, observation.sourceUrl)
     }
 
     private fun isAccessoryListing(title: String): Boolean =

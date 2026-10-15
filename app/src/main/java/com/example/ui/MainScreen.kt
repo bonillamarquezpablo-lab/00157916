@@ -347,6 +347,12 @@ fun MainScreen(
                 viewModel.onOpenAlertSetting(product)
             },
             onCompareStores = { viewModel.prepareCompareStores(product) },
+            onSearchFreeHistory = { viewModel.searchFreeHistoricalPrices(product) },
+            freeHistoryStatus = uiState.freeHistoryStatus.takeIf {
+                uiState.freeHistoryProductId == product.id
+            },
+            isSearchingFreeHistory = uiState.isSearchingFreeHistory &&
+                uiState.freeHistoryProductId == product.id,
             serpApiActionStatus = uiState.serpApiActionStatus,
             isComparingStores = uiState.isPreparingSerpApiAction ||
                 (uiState.isExecutingSerpApiAction && uiState.activeSerpApiAction == com.example.ui.viewmodel.SerpApiActionType.COMPARE_STORES)

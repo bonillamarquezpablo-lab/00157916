@@ -49,6 +49,12 @@ class SerpApiAmazonSearchTest {
                   "second_hand_condition": "used"
                 },
                 {
+                  "title": "Anker Power Bank 20000mAh impreso con su logotipo",
+                  "price": "3,99 €",
+                  "extracted_price": 3.99,
+                  "link": "https://www.amazon.es/dp/B0ANKERPROMO/"
+                },
+                {
                   "title": "External unsafe result",
                   "price": "1,99 €",
                   "extracted_price": 1.99,
@@ -92,6 +98,13 @@ class SerpApiAmazonSearchTest {
                   "extracted_price": 39.99,
                   "source": "Amazon.es",
                   "link": "https://www.amazon.es/dp/B0ANKER123"
+                },
+                {
+                  "title": "Anker Power Bank 20000mAh impreso con su logotipo",
+                  "price": "1,99 €",
+                  "extracted_price": 1.99,
+                  "source": "Tienda de publicidad",
+                  "link": "https://shop.example/power-bank-promotional"
                 },
                 {
                   "title": "Anker Power Bank 20000mAh",

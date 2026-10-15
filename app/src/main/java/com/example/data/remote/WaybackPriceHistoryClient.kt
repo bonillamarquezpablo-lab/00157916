@@ -183,6 +183,18 @@ class WaybackPriceHistoryClient(
         val normalized = normalizeTitle(storeName)
         val aliases = linkedMapOf(
             "pccomponentes" to "pccomponentes.com",
+            "la manzanita" to "lamanzanita.es",
+            "nike" to "nike.com",
+            "adidas" to "adidas.com",
+            "puma" to "eu.puma.com",
+            "asics" to "asics.com",
+            "new balance" to "newbalance.es",
+            "reebok" to "reebok.eu",
+            "vans" to "vans.com",
+            "converse" to "converse.com",
+            "jdsports" to "jdsports.es",
+            "foot locker" to "footlocker.es",
+            "zalando" to "zalando.es",
             "mediamarkt" to "mediamarkt.es",
             "media markt" to "mediamarkt.es",
             "el corte ingles" to "elcorteingles.es",

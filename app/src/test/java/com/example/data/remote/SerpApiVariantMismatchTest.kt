@@ -106,6 +106,22 @@ class SerpApiVariantMismatchTest {
     }
 
     @Test
+    fun unknownSellerMustNotBeSilentlyLabeledAsAmazon() {
+        val unknown = Store.findByName("retailer_local-shop_xyz")
+
+        assertFalse(unknown.id == Store.AMAZON_ES.id)
+        assertFalse(unknown.name.contains("Amazon", ignoreCase = true))
+        assertEquals("Tienda sin verificar", unknown.category)
+        assertFalse(unknown.hasOfficialSite)
+        assertEquals("unknown.invalid", unknown.domain)
+    }
+
+    @Test
+    fun generatedKnownRetailerIdStillResolvesToKnownSeller() {
+        assertEquals(Store.ANKER_STORE, Store.findByName("retailer_anker_com"))
+    }
+
+    @Test
     fun rejectsStorageVariantWhenRamAndStorageUseTheSameUnit() {
         val client = SerpApiClient()
         val report = client.parseShoppingResultsDetailed(

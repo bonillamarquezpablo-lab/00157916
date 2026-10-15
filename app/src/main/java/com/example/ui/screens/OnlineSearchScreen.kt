@@ -41,6 +41,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,6 +59,8 @@ import com.example.data.remote.isAccessorySearchQuery
 import com.example.data.remote.isWheelFitmentQuery
 import com.example.ui.viewmodel.OnlineSearchProvider
 import com.example.ui.viewmodel.TrackerUiState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -151,18 +154,32 @@ fun OnlineSearchScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val allGroups = buildOnlineSearchDisplayGroups(
-        results = state.onlineSearchResults,
-        query = state.onlineSearchQuery,
-        showSecondHand = state.onlineSearchShowSecondHand,
-        amazonOnly = false
-    )
-    val amazonGroups = buildOnlineSearchDisplayGroups(
-        results = state.onlineSearchResults,
-        query = state.onlineSearchQuery,
-        showSecondHand = state.onlineSearchShowSecondHand,
-        amazonOnly = true
-    )
+    // Grouping and ranking offers can be CPU-heavy. Compute it away from the UI thread,
+    // and only redo it when the actual query, offers, or condition filter changes.
+    val groupedResults = produceState(
+        initialValue = emptyList<OnlineSearchDisplayGroup>() to emptyList<OnlineSearchDisplayGroup>(),
+        state.onlineSearchResults,
+        state.onlineSearchQuery,
+        state.onlineSearchShowSecondHand
+    ) {
+        value = withContext(Dispatchers.Default) {
+            val all = buildOnlineSearchDisplayGroups(
+                results = state.onlineSearchResults,
+                query = state.onlineSearchQuery,
+                showSecondHand = state.onlineSearchShowSecondHand,
+                amazonOnly = false
+            )
+            val amazon = buildOnlineSearchDisplayGroups(
+                results = state.onlineSearchResults,
+                query = state.onlineSearchQuery,
+                showSecondHand = state.onlineSearchShowSecondHand,
+                amazonOnly = true
+            )
+            all to amazon
+        }
+    }
+    val allGroups = groupedResults.value.first
+    val amazonGroups = groupedResults.value.second
     val visibleGroups = if (state.onlineSearchAmazonOnly) amazonGroups else allGroups
 
     LazyColumn(

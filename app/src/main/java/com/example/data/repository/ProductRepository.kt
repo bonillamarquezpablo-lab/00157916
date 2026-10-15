@@ -803,6 +803,17 @@ class ProductRepository(
             (expectedCompact.length >= 4 && actualCompact.contains(expectedCompact))
     }
 
+    private fun hasSpecificCatalogIdentity(title: String): Boolean {
+        if (modelCodes(title).isNotEmpty()) return true
+        val genericWords = setOf(
+            "producto", "articulo", "preservado", "usuario", "demo", "demostracion",
+            "ejemplo", "prueba", "sin", "datos", "catalogo", "guardado"
+        )
+        val tokens = normalizedProductTitle(title).split(' ')
+            .filter { it.length > 2 && it !in TITLE_STOP_WORDS && it !in genericWords }
+        return tokens.size >= 2
+    }
+
     private fun isEligibleObservationForDisplay(
         observation: PriceObservationEntity,
         catalogTitle: String
@@ -817,9 +828,16 @@ class ProductRepository(
 
         val storedTitle = observation.productTitle.ifBlank { catalogTitle }
         if (!isEligibleHistoryTitle(storedTitle) ||
-            !isPlausibleHistoryPrice(storedTitle, observation.price) ||
-            !isSafeCatalogTitleMatch(storedTitle, catalogTitle) ||
-            hasStrictModelMismatch(catalogTitle, explicitModelMarkers(catalogTitle), storedTitle)
+            !isPlausibleHistoryPrice(storedTitle, observation.price)
+        ) return false
+
+        // Some pre-existing user rows carry a generic placeholder title. In that case the
+        // observation itself may contain the only reliable model identity; don't discard it
+        // solely because a legacy catalogue label cannot be matched. Specific catalogue names
+        // still require strict identity/variant agreement before their history is displayed.
+        if (hasSpecificCatalogIdentity(catalogTitle) &&
+            (!isSafeCatalogTitleMatch(storedTitle, catalogTitle) ||
+                hasStrictModelMismatch(catalogTitle, explicitModelMarkers(catalogTitle), storedTitle))
         ) return false
 
         val seller = observation.storeName.ifBlank { observation.storeId }

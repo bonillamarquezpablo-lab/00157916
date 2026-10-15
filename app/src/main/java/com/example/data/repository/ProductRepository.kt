@@ -53,9 +53,11 @@ private fun PriceObservationEntity.isArchiveEvidence(): Boolean =
 private fun sameHttpResource(left: String, right: String): Boolean {
     val leftUri = runCatching { URI(left) }.getOrNull() ?: return false
     val rightUri = runCatching { URI(right) }.getOrNull() ?: return false
+    val leftScheme = leftUri.scheme ?: return false
+    val rightScheme = rightUri.scheme ?: return false
     val leftHost = leftUri.host ?: return false
     val rightHost = rightUri.host ?: return false
-    return leftUri.scheme.equals(rightUri.scheme, ignoreCase = true) &&
+    return leftScheme.equals(rightScheme, ignoreCase = true) &&
         leftHost.equals(rightHost, ignoreCase = true) &&
         leftUri.port == rightUri.port &&
         leftUri.rawUserInfo == rightUri.rawUserInfo &&

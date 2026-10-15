@@ -409,6 +409,7 @@ private fun ShoppingResultCard(
     val fitmentUnverified = group.offers.all { it.isFitmentUnverified }
     val categoryUnverified = group.offers.all { it.isCategoryUnverified }
     val wheelSetCount = group.wheelSetCount
+    val hasTrustedPrice = group.offers.any { !it.isSuspiciousPrice }
     Card(
         modifier = Modifier.fillMaxWidth().then(
             if (onOpenProduct == null) Modifier else Modifier.clickable(onClick = onOpenProduct)
@@ -439,9 +440,12 @@ private fun ShoppingResultCard(
                     }
                 }
             }
-            if (fitmentUnverified) {
+            if (fitmentUnverified || categoryUnverified) {
                 Text(
-                    "El título no confirma todas las medidas solicitadas. Comprueba diámetro, anclaje, ancho y ET cuando se hayan solicitado. No se añade a Mercado ni al historial hasta confirmar la compatibilidad.",
+                    when {
+                        fitmentUnverified -> "El título no confirma todas las medidas solicitadas. Comprueba diámetro, anclaje, ancho y ET. No se añade a Mercado ni al historial hasta confirmar la compatibilidad."
+                        else -> "El anuncio mezcla varias medidas o variantes. Se muestra para revisión, pero no se guarda en Mercado ni se usa para el historial hasta confirmar la variante exacta."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -465,7 +469,9 @@ private fun ShoppingResultCard(
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(group.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     Text(
-                        if (wheelSetCount != null) {
+                        if (!hasTrustedPrice) {
+                            "Precio no verificado · " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(best.price)
+                        } else if (wheelSetCount != null) {
                             "Desde " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(group.minPrice) + " / llanta"
                         } else {
                             "Desde " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(group.minPrice)
@@ -533,8 +539,12 @@ private fun ShoppingResultCard(
             }
             OutlinedButton(onClick = onOpenBestOffer, modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    if (purchaseOffer.isGoogleShoppingProductLink) "Abrir precio más bajo en Google Shopping"
-                    else "Abrir oferta directa · ${purchaseOffer.storeName}"
+                    when {
+                        !hasTrustedPrice && purchaseOffer.isGoogleShoppingProductLink -> "Revisar oferta sin verificar en Google Shopping"
+                        !hasTrustedPrice -> "Revisar oferta sin verificar · ${purchaseOffer.storeName}"
+                        purchaseOffer.isGoogleShoppingProductLink -> "Abrir precio más bajo en Google Shopping"
+                        else -> "Abrir oferta directa · ${purchaseOffer.storeName}"
+                    }
                 )
                 Spacer(Modifier.width(8.dp))
                 Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))

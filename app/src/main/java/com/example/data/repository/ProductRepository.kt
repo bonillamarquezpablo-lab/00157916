@@ -290,7 +290,7 @@ class ProductRepository(
                 !result.price.isFinite() || result.price <= 0.0 || result.price > MAX_HISTORY_PRICE_EUR ->
                     "Sin precio válido"
                 !isPlausibleHistoryPrice(result.title, result.price) ->
-                    "Precio sospechosamente bajo para esta categoría"
+                    "Precio sospechoso: sospechosamente bajo para esta categoría"
                 result.isRentalOrMonthly ->
                     "Alquiler o cuota mensual"
                 isPromotionalBulkListing(result.title, searchQuery) ->

@@ -2875,4 +2875,68 @@ class ExampleRobolectricTest {
         }
     }
 
+
+    @Test
+    fun `bicycle tyres are not accessories even when titles mention cables`() {
+        val result = SerpApiShoppingResult(
+            title = "MAXXIS CROSSMARK 2 cables MTB neumáticos de bicicleta 26 27,5 29",
+            price = 31.61,
+            storeName = "Tienda de ejemplo",
+            sourceUrl = "https://shop.example.test/maxxis-crossmark",
+            observedAt = 123L
+        )
+
+        assertFalse(result.isAccessoryOffer)
+        assertEquals("26", com.example.data.remote.requestedBicycleTireDiameter("cubiertas Maxxis MTB 26 pulgadas"))
+        assertTrue(com.example.data.remote.hasAmbiguousBicycleTireDiameter("cubiertas Maxxis MTB 26 pulgadas", result.title))
+        assertFalse(com.example.data.remote.isWrongBicycleTireDiameter("cubiertas Maxxis MTB 26 pulgadas", result.title))
+        assertTrue(com.example.data.remote.isWrongBicycleTireDiameter(
+            "cubiertas Maxxis MTB 26 pulgadas",
+            "Cubierta Maxxis DTH 29x2.30"
+        ))
+    }
+
+    @Test
+    fun `nine speed mountain bike drivetrain search excludes wheels`() {
+        assertTrue(com.example.data.remote.isBicycleDrivetrainSearch("Shimano MTB componentes 9V"))
+        assertTrue(com.example.data.remote.isBicycleDrivetrainComponentTitle("Cassette Shimano Sora 9V"))
+        assertTrue(com.example.data.remote.isBicycleDrivetrainComponentTitle("Cambio trasero Shimano Altus M2000 9V"))
+        assertFalse(com.example.data.remote.isBicycleDrivetrainComponentTitle(
+            "Rueda trasera Shimano M475 11-10-9V"
+        ))
+    }
+
+
+    @Test
+    fun `implausible drivetrain prices are visibly marked unverified`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val offer = SerpApiShoppingResult(
+                title = "Cambio trasero Shimano Altus M2000 9V",
+                price = 1400.0,
+                storeName = "Tienda de ejemplo",
+                sourceUrl = "https://www.google.com/shopping/product/123456",
+                observedAt = System.currentTimeMillis()
+            )
+
+            val accepted = repository.filterOnlineSearchResults(
+                listOf(offer),
+                "Shimano MTB componentes 9V"
+            )
+            assertEquals(1, accepted.size)
+            assertTrue(accepted.single().isSuspiciousPrice)
+        } finally {
+            database.close()
+        }
+    }
+
 }

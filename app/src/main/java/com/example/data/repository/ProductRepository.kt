@@ -22,6 +22,11 @@ import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.isIrrelevantMultiProductBundle
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.linkTypeForUrl
+import com.example.data.remote.hasAmbiguousBicycleTireDiameter
+import com.example.data.remote.isBicycleDrivetrainComponentTitle
+import com.example.data.remote.isBicycleDrivetrainSearch
+import com.example.data.remote.isBicycleTireListing
+import com.example.data.remote.isWrongBicycleTireDiameter
 import com.example.data.remote.isWheelFitmentQuery
 import com.example.data.remote.containsWheelCategoryTerm
 import com.example.data.remote.wheelSetCountForTitle
@@ -210,6 +215,8 @@ class ProductRepository(
                 !isPromotionalBulkListing(result.title, searchQuery) &&
                 !isIrrelevantMultiProductBundle(searchQuery, result.title) &&
                 (!isHallEffectKeyboardSearch(searchQuery) || isHallEffectKeyboardResult(result.title)) &&
+                (!isBicycleDrivetrainSearch(searchQuery) || isBicycleDrivetrainComponentTitle(result.title)) &&
+                !isWrongBicycleTireDiameter(searchQuery, result.title) &&
                 !hasStrictModelMismatch(
                     searchQuery,
                     queryModelMarkers,
@@ -256,8 +263,11 @@ class ProductRepository(
         return eligible.map { result ->
             val (hasComparableReference, median) = suspiciousByGroup[comparisonKey(result)] ?: (false to 0.0)
             result.copy(
+                // Multi-size tyre listings stay visible for review, but their price cannot be
+                // assigned to one exact diameter and therefore must not enter Mercado/history.
+                isCategoryUnverified = result.isCategoryUnverified ||
+                    hasAmbiguousBicycleTireDiameter(searchQuery, result.title),
                 // Keep suspicious offers visible for diagnosis, but never count them as trusted prices.
-                // Absolute device-price floors complement median checks when only one offer exists.
                 isSuspiciousPrice = result.isSuspiciousPrice ||
                     (!result.isFitmentUnverified && !isPlausibleHistoryPrice(result.title, result.price)) ||
                     (!result.isFitmentUnverified &&
@@ -300,8 +310,12 @@ class ProductRepository(
                     "Datos incompletos"
                 !result.price.isFinite() || result.price <= 0.0 || result.price > MAX_HISTORY_PRICE_EUR ->
                     "Sin precio válido"
+                isWrongBicycleTireDiameter(searchQuery, result.title) ->
+                    "Diámetro de cubierta distinto del solicitado"
+                isBicycleDrivetrainSearch(searchQuery) && !isBicycleDrivetrainComponentTitle(result.title) ->
+                    "No es un componente de la transmisión de bicicleta solicitado"
                 !isPlausibleHistoryPrice(result.title, result.price) ->
-                    "Precio sospechoso: sospechosamente bajo para esta categoría"
+                    "Precio sospechoso: fuera del rango plausible para esta categoría"
                 result.isRentalOrMonthly ->
                     "Alquiler o cuota mensual"
                 isPromotionalBulkListing(result.title, searchQuery) ->
@@ -363,10 +377,18 @@ class ProductRepository(
     private fun isPlausibleHistoryPrice(title: String, price: Double): Boolean {
         if (!price.isFinite() || price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR) return false
         val normalized = normalizedProductTitle(title)
-        val accessory = Regex(
+        val accessory = !isBicycleTireListing(title) && Regex(
             """\b(funda|case|carcasa|protector|cristal|cable|cargador|adaptador|repuesto|replacement|cover|bumper|pantalla|bateria|solo caja|dummy|mando|controller|gamepad|videojuego|juego)\b"""
         ).containsMatchIn(normalized)
         if (accessory) return true
+
+        val drivetrainPart = Regex(
+            """\b(cassette|casete|pi[nñ]ones?|sprockets?|cambio trasero|rear derailleur|derailleur|desviador|shifter|manetas?|pulsadores?|cadena|chain)\b"""
+        ).containsMatchIn(normalized)
+        val completeDrivetrain = Regex("""\b(grupo|groupset|kit completo|complete group|pack|juego|set)\b""")
+            .containsMatchIn(normalized)
+        if (drivetrainPart && !completeDrivetrain && price > 600.0) return false
+        if (isBicycleTireListing(title) && price > 350.0) return false
 
         val smartphone = Regex(
             """\b(iphone|redmi|poco|pixel|oneplus|realme|oppo|vivo|honor|smartphone|galaxy\s+(s|a|z|m)\s?\d{1,2})\b"""

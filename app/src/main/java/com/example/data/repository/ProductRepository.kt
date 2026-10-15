@@ -209,6 +209,7 @@ class ProductRepository(
                 !result.isRentalOrMonthly &&
                 !isPromotionalBulkListing(result.title, searchQuery) &&
                 !isIrrelevantMultiProductBundle(searchQuery, result.title) &&
+                (!isHallEffectKeyboardSearch(searchQuery) || isHallEffectKeyboardResult(result.title)) &&
                 !hasStrictModelMismatch(
                     searchQuery,
                     queryModelMarkers,
@@ -922,6 +923,30 @@ class ProductRepository(
             .map { it.value.replace(" ", "") }.toSet()
         return !allowAccessoryMemoryMismatch &&
             requestedMemory.isNotEmpty() && !availableMemory.containsAll(requestedMemory)
+    }
+
+    /**
+     * Hall/HE keyboard searches describe a switch technology, not the literal word "Hall".
+     * Keep unrelated titles such as "Hall of Fame" out of visible results and price history.
+     */
+    private fun isHallEffectKeyboardSearch(query: String): Boolean {
+        val normalized = normalizedProductTitle(query)
+        val namesKeyboard = Regex("""\\b(teclado|teclados|keyboard|keyboards)\\b""")
+            .containsMatchIn(normalized)
+        val namesTechnology = Regex("""\\b(hall|hal|efecto|effect|he|tmr|magnetic|magnetico|magnetica)\\b""")
+            .containsMatchIn(normalized)
+        return namesKeyboard && namesTechnology
+    }
+
+    private fun isHallEffectKeyboardResult(title: String): Boolean {
+        val normalized = normalizedProductTitle(title)
+        val namesKeyboard = Regex("""\\b(teclado|teclados|keyboard|keyboards)\\b""")
+            .containsMatchIn(normalized)
+        if (!namesKeyboard) return false
+        return Regex(
+            """\\b(hall\\s*effect|effect\\s*hall|efecto\\s*hall|hall\\s*sensor|sensor\\s*hall|magnetic[oa]s?|tmr|rapid\\s+trigger)\\b"""
+        ).containsMatchIn(normalized) ||
+            Regex("""\\bhe\\b""").containsMatchIn(normalized)
     }
 
     private fun isAccessorySearchQuery(query: String): Boolean =

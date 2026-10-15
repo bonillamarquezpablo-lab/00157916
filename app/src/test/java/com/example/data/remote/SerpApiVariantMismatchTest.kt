@@ -107,7 +107,7 @@ class SerpApiVariantMismatchTest {
 
     @Test
     fun unknownSellerMustNotBeSilentlyLabeledAsAmazon() {
-        val unknown = Store.findByName("retailer_local-shop_xyz")
+        val unknown = Store.findByName("Tienda local")
 
         assertFalse(unknown.id == Store.AMAZON_ES.id)
         assertFalse(unknown.name.contains("Amazon", ignoreCase = true))

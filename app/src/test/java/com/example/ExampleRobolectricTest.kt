@@ -1749,6 +1749,53 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `specific product search rejects other brands and different seasonal years`() {
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "search_metadata": {"status": "Success"},
+                  "shopping_results": [
+                    {
+                      "title": "Calendario de Adviento Académie Scientifique de Beauté 2024",
+                      "price": "55,50 €",
+                      "extracted_price": 55.50,
+                      "link": "https://www.notino.es/example",
+                      "source": "Notino.es"
+                    },
+                    {
+                      "title": "Douglas Skin Focus Adventskalender 2026 Frauen Beauty Damen Advent Kalender",
+                      "price": "119,99 €",
+                      "extracted_price": 119.99,
+                      "link": "https://www.douglas.es/example",
+                      "source": "Douglas"
+                    },
+                    {
+                      "title": "Galaxy Calendario de Adviento chocolate 110g",
+                      "price": "2,80 €",
+                      "extracted_price": 2.80,
+                      "link": "https://www.example.es/galaxy",
+                      "source": "Tienda de chocolate"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "Académie Scientifique de Beauté Calendario de Adviento 2024",
+            observedAt = 123L
+        )
+
+        assertEquals(
+            "Only the matching brand/product edition should survive a specific query",
+            listOf("Calendario de Adviento Académie Scientifique de Beauté 2024"),
+            report.results.map { it.title }
+        )
+        assertEquals(2, report.rejectedAsIrrelevant)
+        assertTrue(report.discardedOffers.any { it.title.contains("Douglas") })
+        assertTrue(report.discardedOffers.any { it.title.contains("Galaxy") })
+    }
+
+    @Test
     fun `condition metadata marks used and refurbished offers for the opt-in filter`() {
         val report = SerpApiClient().parseShoppingResultsDetailed(
             root = JSONObject(

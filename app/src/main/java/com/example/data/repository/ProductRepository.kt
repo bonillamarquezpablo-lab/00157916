@@ -673,6 +673,12 @@ class ProductRepository(
         if (expectedTitle.isBlank() || originalUrl.isBlank() || quotes.isEmpty()) return 0
         val originalUri = parseHttpUri(originalUrl) ?: return 0
         if (!originalUri.scheme.equals("https", ignoreCase = true)) return 0
+        val originalHost = normalizeHost(originalUri.host.orEmpty())
+        if (originalHost == "web.archive.org" || originalHost == "archive.org" ||
+            originalHost == "google.com" || originalHost == "google.es" ||
+            originalHost.endsWith(".google.com") || originalHost.endsWith(".google.es") ||
+            originalHost == "bing.com" || originalHost.endsWith(".bing.com")
+        ) return 0
 
         val products = productDao.getAllProductsSnapshot()
         val identity = onlineProductIdentityKey(expectedTitle)
@@ -685,6 +691,10 @@ class ProductRepository(
         val now = System.currentTimeMillis()
         val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)
         val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
+        if (!isEligibleHistoryTitle(expectedTitle) ||
+            isPromotionalBulkListing(expectedTitle, "") ||
+            !isEligibleSeller(merchantName, originalUrl)
+        ) return 0
         val storeId = canonicalStoreId(merchantName, originalUrl)
         var inserted = 0
 
@@ -708,7 +718,10 @@ class ProductRepository(
                 quote.observedAt < earliestAllowed ||
                 quote.observedAt >= now ||
                 quote.productTitle.isBlank() ||
-                onlineProductIdentityKey(quote.productTitle) != identity
+                onlineProductIdentityKey(quote.productTitle) != identity ||
+                !isEligibleHistoryTitle(quote.productTitle) ||
+                isPromotionalBulkListing(quote.productTitle, "") ||
+                !isPlausibleHistoryPrice(quote.productTitle, quote.price)
             ) continue
 
             val observation = PriceObservationEntity(

@@ -1370,6 +1370,8 @@ class ExampleRobolectricTest {
             assertFalse("Archive history must not verify the current price", product.isPriceVerified)
             assertEquals("Archive history must not fabricate a current quote", 0.0, product.currentPrice, 0.001)
             assertTrue("Verified archive points should be visible before a live search", product.priceHistory.any { it.timestamp == archivedAt })
+            val storesWithPrices = repository.storesWithSavedPricesStream.first()
+            assertFalse("An archived historical point must not masquerade as a current store price", storesWithPrices.any { it.name == "Tienda directa" })
         } finally {
             database.close()
         }

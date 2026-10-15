@@ -1688,7 +1688,14 @@ class ExampleRobolectricTest {
                     rentalPhoneWithNormalPrice,
                     normalNewPhone,
                     cheapLegitimateAccessory,
-                    suspiciousPowerBank
+                    suspiciousPowerBank,
+                    com.example.data.remote.SerpApiShoppingResult(
+                        title = "Anker Power Bank 20000mAh impreso con su logotipo",
+                        price = 3.99,
+                        storeName = "Amazon.es",
+                        sourceUrl = "https://www.amazon.es/dp/PROMOTIONALPOWERBANK",
+                        observedAt = now
+                    )
                 )
             )
             val prePolicySnapshot = normalNewPhone.copy(observedAt = 1_780_000_000_000L)
@@ -1715,6 +1722,25 @@ class ExampleRobolectricTest {
             assertTrue(
                 "A sub-€5 positive price is retained; the relative median rule decides suspicion",
                 filteredResults.any { it.title.contains("Power Bank", ignoreCase = true) && it.price == 2.99 }
+            )
+
+            val promotionalOffer = com.example.data.remote.SerpApiShoppingResult(
+                title = "Anker Power Bank 20000mAh impreso con su logotipo",
+                price = 3.99,
+                storeName = "Amazon.es",
+                sourceUrl = "https://www.amazon.es/dp/PROMOTIONALPOWERBANK",
+                observedAt = now
+            )
+            assertFalse(
+                "Custom logo merchandise is not a comparable consumer retail offer",
+                repository.filterOnlineSearchResults(listOf(promotionalOffer), "Anker Power Bank 20000mAh").isNotEmpty()
+            )
+            assertEquals(
+                "Promotional merchandise must have an explicit rejection reason",
+                "Artículo promocional o merchandising personalizado",
+                repository.diagnoseOnlineSearchRejections(
+                    listOf(promotionalOffer), "Anker Power Bank 20000mAh"
+                ).single().reason
             )
 
             val excludedSellerResults = listOf(
@@ -2007,6 +2033,7 @@ class ExampleRobolectricTest {
         val query = "Anker Power Bank 20.000 mAh"
         val report = parse(query, JSONArray()
             .put(item("Anker Power Bank 20.000 mAh", price = "39.99", extractedPrice = 39.99))
+            .put(item("Anker Power Bank 20.000 mAh impreso con su logotipo", price = "3.99", extractedPrice = 3.99))
             .put(item("Anker Power Bank 20.000 mAh", condition = "used"))
             .put(item("Anker Power Bank 20.000 mAh alquiler mensual"))
             .put(item("Anker Power Bank 20.000 mAh cuota 4,99 €/mes", price = "4,99 €/mes", extractedPrice = 4.99))
@@ -2017,7 +2044,8 @@ class ExampleRobolectricTest {
             .put(item("Anker Power Bank 20.000 mAh", price = "39.99", extractedPrice = null)))
 
         assertEquals("Amazon.es numeric structured prices are accepted without the € glyph", 1, report.results.size)
-        assertEquals(8, report.discardedOffers.size)
+        assertEquals(9, report.discardedOffers.size)
+        assertTrue(report.discardedOffers.any { it.reason.contains("promocional") })
         assertTrue(report.discardedOffers.any { it.reason.contains("Segunda mano") })
         assertTrue(report.discardedOffers.any { it.reason.contains("Alquiler o cuota") })
         assertTrue(report.discardedOffers.any { it.reason.contains("variante") })

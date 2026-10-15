@@ -83,6 +83,7 @@ data class TrackerUiState(
     val isOnlineSearching: Boolean = false,
     val isSearchingFreeHistory: Boolean = false,
     val freeHistoryStatus: String? = null,
+    val freeHistoryProductId: String? = null,
     val onlineSearchStatus: String? = null,
     val onlineSearchAmazonOnly: Boolean = false,
     val onlineSearchShowSecondHand: Boolean = false,
@@ -982,7 +983,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
         _uiState.value = current.copy(
             isSearchingFreeHistory = true,
-            freeHistoryStatus = "Buscando páginas históricas gratuitas; esta consulta no consume cuota de SerpApi."
+            freeHistoryStatus = "Buscando páginas históricas gratuitas; esta consulta no consume cuota de SerpApi.",
+            freeHistoryProductId = product.id
         )
         startFreeArchiveBackfill(
             results = candidates,
@@ -1369,7 +1371,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         if (targetProductId != null) {
             _uiState.value = current.copy(
                 isSearchingFreeHistory = false,
-                freeHistoryStatus = notice.trim()
+                freeHistoryStatus = notice.trim(),
+                freeHistoryProductId = targetProductId
             )
             return
         }

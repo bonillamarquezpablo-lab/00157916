@@ -26,6 +26,7 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Store
 import androidx.compose.material.icons.filled.Verified
@@ -34,8 +35,13 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,6 +60,15 @@ fun StoresScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    var searchQuery by remember { mutableStateOf("") }
+    val filteredStores = remember(stores, searchQuery) {
+        val query = searchQuery.trim().lowercase()
+        if (query.isBlank()) stores else stores.filter { store ->
+            store.name.lowercase().contains(query) ||
+                store.domain.lowercase().contains(query) ||
+                store.category.lowercase().contains(query)
+        }
+    }
 
     LazyColumn(
         modifier = modifier
@@ -94,13 +109,13 @@ fun StoresScreen(
 
                         Column {
                             Text(
-                                text = "Grandes Tiendas Españolas",
+                                text = "Tiendas con precios guardados",
                                 fontWeight = FontWeight.Black,
                                 fontSize = 16.sp,
                                 color = Color.White
                             )
                             Text(
-                                text = "${stores.size} cadenas registradas en la base de datos",
+                                text = "${stores.size} comercios con precios válidos",
                                 fontSize = 11.sp,
                                 color = Color(0xFF94A3B8)
                             )
@@ -110,7 +125,7 @@ fun StoresScreen(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Text(
-                        text = "Directorio de webs oficiales para buscar productos. Las fichas del catálogo siguen siendo de demostración: todavía no hay consultas automáticas de precios para estas tiendas.",
+                        text = "Solo aparecen comercios con al menos un precio válido guardado en Mínimo. Busca por nombre o dominio y filtra el Mercado para ver los productos con ofertas de esa tienda.",
                         fontSize = 12.sp,
                         lineHeight = 16.sp,
                         color = Color(0xFFE2E8F0)
@@ -119,18 +134,51 @@ fun StoresScreen(
             }
         }
 
-        // Section Title
+        item {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.fillMaxWidth().testTag("stores_search_field"),
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+                label = { Text("Buscar tienda o dominio") },
+                leadingIcon = {
+                    Icon(imageVector = Icons.Default.Search, contentDescription = "Buscar tienda")
+                }
+            )
+        }
+
         item {
             Text(
-                text = "Webs oficiales registradas (${stores.size})",
+                text = "${filteredStores.size} de ${stores.size} tiendas con precios",
                 fontWeight = FontWeight.Bold,
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
-        // List of Stores
-        items(stores, key = { it.id }) { store ->
+        if (filteredStores.isEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+                ) {
+                    Text(
+                        text = if (stores.isEmpty()) {
+                            "Todavía no hay tiendas con precios válidos guardados. Cuando Mínimo registre un precio confirmado, la tienda aparecerá aquí."
+                        } else {
+                            "No hay tiendas que coincidan con «$searchQuery»."
+                        },
+                        modifier = Modifier.padding(18.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+        }
+
+        // Only merchants backed by saved prices are shown in this list.
+        items(filteredStores, key = { it.id }) { store ->
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -163,9 +211,15 @@ fun StoresScreen(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = store.domain,
+                                    text = if (store.hasOfficialSite) store.domain else "Enlace mediante Google Shopping",
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "${store.savedPriceCount} precios guardados",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                             }
                         }
@@ -216,7 +270,7 @@ fun StoresScreen(
                             )
                             Spacer(modifier = Modifier.width(3.dp))
                             Text(
-                                text = if (store.hasLivePriceIntegration) "Precios conectados" else "Web oficial · sin precios en directo",
+                                text = if (store.hasLivePriceIntegration) "Precios conectados" else "Precios guardados en Mínimo",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -246,24 +300,26 @@ fun StoresScreen(
                             Text("Ver Productos", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
 
-                        OutlinedButton(
-                            onClick = {
-                                val url = store.officialUrl
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                context.startActivity(intent)
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(38.dp),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Web oficial", fontSize = 11.sp)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                                contentDescription = null,
-                                modifier = Modifier.size(13.dp)
-                            )
+                        if (store.hasOfficialSite) {
+                            OutlinedButton(
+                                onClick = {
+                                    val url = store.officialUrl
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                    context.startActivity(intent)
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(38.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("Web oficial", fontSize = 11.sp)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            }
                         }
                     }
                 }

@@ -274,7 +274,7 @@ class WaybackPriceHistoryClient(
         val from = formatUtc(start, "yyyyMMdd")
         val to = formatUtc(now, "yyyyMMdd")
         val alternatives = tokens.joinToString("|") { Regex.escape(it) }
-        val urlPattern = ".*(?:$alternatives).*"
+        val urlPattern = "(?i).*(?:$alternatives).*"
         return HttpUrl.Builder()
             .scheme("https")
             .host("web.archive.org")
@@ -302,16 +302,21 @@ class WaybackPriceHistoryClient(
             "hombre", "hombres", "mujer", "mujeres", "men", "damen", "frauen", "ultra", "pro",
             "plus", "max", "mini", "lite", "gb", "tb", "mb"
         )
-        val tokens = normalizeTitle(expectedTitle).split(' ')
-            .filter { it.length >= 4 && it !in ignored }
+        val rawTokens = normalizeTitle(expectedTitle).split(' ')
+            .filter { it.isNotBlank() && it !in ignored }
             .distinct()
-        val modelTokens = tokens.filter { token ->
+        // Keep short model codes such as Polo 9N3 / Galaxy S26; the descriptive text tokens
+        // alone can be too generic to locate an archived product path.
+        val modelTokens = rawTokens.filter { token ->
             token.length >= 2 && token.any(Char::isDigit) && token.any(Char::isLetter)
         }
-        val textTokens = tokens.filter { token ->
-            token.any(Char::isLetter) && token.length >= 4
+        val textTokens = rawTokens.filter { token ->
+            token.any(Char::isLetter) && token.length >= 4 && !token.any(Char::isDigit)
         }
-        return (textTokens + modelTokens + tokens.filter { it.all(Char::isDigit) })
+        val yearTokens = rawTokens.filter {
+            Regex("""(?:19|20)\d{2}""").matches(it)
+        }
+        return (modelTokens + textTokens + yearTokens)
             .distinct()
             .take(4)
     }

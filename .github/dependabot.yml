@@ -9,9 +9,12 @@ updates:
       timezone: Europe/Madrid
     open-pull-requests-limit: 5
     groups:
-      android-dependencies:
+      android-minor-and-patch:
         patterns:
           - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: github-actions
     directory: /

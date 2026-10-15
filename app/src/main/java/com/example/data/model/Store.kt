@@ -2,6 +2,7 @@ package com.example.data.model
 
 import androidx.compose.ui.graphics.Color
 import java.net.URLEncoder
+import java.net.URI
 import java.nio.charset.StandardCharsets
 
 /**
@@ -43,6 +44,8 @@ data class Store(
             "lidl" -> "https://www.lidl.es/"
             "aliexpress_plaza" -> "https://es.aliexpress.com/"
             "sprinter" -> "https://www.sprinter.es/"
+            "la_manzanita" -> "https://lamanzanita.es/"
+            "nike_store" -> "https://www.nike.com/es/"
             "powerplanet" -> "https://www.powerplanetonline.com/"
             "apple_store" -> "https://www.apple.com/es/store"
             "samsung_store" -> "https://www.samsung.com/es/"
@@ -63,12 +66,44 @@ data class Store(
             }
         }
 
-    /** Opens search results restricted to the retailer's domain; it does not fetch prices. */
+    /** Whether this retailer has a known first-party product-search URL. */
+    val supportsProductSearch: Boolean
+        get() = searchHost in setOf(
+            "amazon.es", "pccomponentes.com", "mediamarkt.es", "elcorteingles.es",
+            "fnac.es", "decathlon.es", "sprinter.es", "lamanzanita.es", "nike.com",
+            "ikea.com", "backmarket.es", "samsung.com", "store.google.com",
+            "lenovo.com", "hp.com", "coolmod.com"
+        )
+
+    /**
+     * Opens the retailer's own search page when its URL pattern is known. Never sends a
+     * "web oficial" action to Google. Unknown stores fall back to their official homepage.
+     */
     fun searchUrlFor(query: String): String {
-        val host = domain.substringBefore("/").removePrefix("www.")
-        val encoded = URLEncoder.encode("site:$host $query", StandardCharsets.UTF_8.name())
-        return "https://www.google.com/search?q=$encoded"
+        val encoded = URLEncoder.encode(query.trim(), StandardCharsets.UTF_8.name())
+        return when (searchHost) {
+            "amazon.es" -> "https://www.amazon.es/s?k=$encoded"
+            "pccomponentes.com" -> "https://www.pccomponentes.com/search/?query=$encoded"
+            "mediamarkt.es" -> "https://www.mediamarkt.es/es/search.html?query=$encoded"
+            "elcorteingles.es" -> "https://www.elcorteingles.es/search/?s=$encoded"
+            "fnac.es" -> "https://www.fnac.es/SearchResult/ResultList.aspx?Search=$encoded"
+            "decathlon.es" -> "https://www.decathlon.es/search?Ntt=$encoded"
+            "sprinter.es" -> "https://www.sprinter.es/search?q=$encoded"
+            "lamanzanita.es" -> "https://lamanzanita.es/?s=$encoded&post_type=product"
+            "nike.com" -> "https://www.nike.com/es/w?q=$encoded"
+            "ikea.com" -> "https://www.ikea.com/es/es/search/?q=$encoded"
+            "backmarket.es" -> "https://www.backmarket.es/es-es/search?q=$encoded"
+            "samsung.com" -> "https://www.samsung.com/es/search/?searchvalue=$encoded"
+            "store.google.com" -> "https://store.google.com/es/search?q=$encoded"
+            "lenovo.com" -> "https://www.lenovo.com/es/es/search?text=$encoded"
+            "hp.com" -> "https://www.hp.com/es-es/shop/Search.aspx?keyword=$encoded"
+            "coolmod.com" -> "https://www.coolmod.com/?s=$encoded"
+            else -> officialUrl
+        }
     }
+
+    private val searchHost: String
+        get() = domain.substringBefore("/").removePrefix("www.").lowercase()
 
     companion object {
         val AMAZON_ES = Store("amazon_es", "Amazon España", "amazon.es", Color(0xFFFF9900), category = "Marketplace", physicalStores = false)
@@ -90,6 +125,8 @@ data class Store(
         val LIDL = Store("lidl", "Lidl España", "lidl.es", Color(0xFF0050AA), category = "Bazar & Herramientas")
         val ALIEXPRESS_PLAZA = Store("aliexpress_plaza", "AliExpress España", "es.aliexpress.com", Color(0xFFFF4747), category = "Marketplace", physicalStores = false)
         val SPRINTER = Store("sprinter", "Sprinter Deportes", "sprinter.es", Color(0xFF059669), category = "Deportes & Calzado")
+        val LA_MANZANITA = Store("la_manzanita", "La Manzanita", "lamanzanita.es", Color(0xFF475569), category = "Telefonía & Móviles", physicalStores = true)
+        val NIKE_STORE = Store("nike_store", "Nike", "nike.com/es", Color(0xFF111111), category = "Deportes & Calzado", physicalStores = true)
         val POWERPLANET = Store("powerplanet", "Powerplanetonline", "powerplanetonline.com", Color(0xFF0284C7), category = "Telefonía & Electrónica", physicalStores = false)
 
         val APPLE_STORE = Store("apple_store", "Apple Store España", "apple.com/es/store", Color(0xFF3A3A3C), category = "Móviles & Informática")
@@ -109,15 +146,40 @@ data class Store(
         val ALL_STORES = listOf(
             AMAZON_ES, PC_COMPONENTES, MEDIA_MARKT, EL_CORTE_INGLES, CARREFOUR, FNAC,
             ALCAMPO, LEROY_MERLIN, DECATHLON, WORTEN, MIRAVIA, GAME, EROSKI,
-            CONFORAMA, BAUHAUS, IKEA, LIDL, ALIEXPRESS_PLAZA, SPRINTER, POWERPLANET,
+            CONFORAMA, BAUHAUS, IKEA, LIDL, ALIEXPRESS_PLAZA, SPRINTER, LA_MANZANITA, NIKE_STORE, POWERPLANET,
             APPLE_STORE, SAMSUNG_STORE, GOOGLE_STORE, XIAOMI_STORE, LENOVO_STORE,
             DELL_STORE, HP_STORE, NEOBYTE, COOLMOD, ALTERNATE, TRADEINN, BACKMARKET, LDLC
         )
 
-        fun findByName(name: String): Store = ALL_STORES.firstOrNull {
-            it.name.contains(name, ignoreCase = true) ||
+        /**
+         * Nullable lookup for result navigation. Unlike findByName(), this never mistakes an
+         * unknown seller for Amazon, which could send a user to the wrong shop.
+         */
+        fun findKnownByName(name: String, sourceUrl: String = ""): Store? {
+            val normalizedName = name.trim().lowercase()
+            val sourceHost = runCatching { URI(sourceUrl).host?.lowercase()?.removePrefix("www.") }
+                .getOrNull()
+                .orEmpty()
+            return ALL_STORES.firstOrNull { store ->
+                val storeName = store.name.lowercase()
+                val storeId = store.id.replace('_', ' ').lowercase()
+                val storeHost = store.domain.substringBefore("/").removePrefix("www.").lowercase()
+                (normalizedName.isNotBlank() &&
+                    (normalizedName == storeName ||
+                        normalizedName.contains(storeName) ||
+                        storeName.contains(normalizedName) ||
+                        normalizedName == storeId ||
+                        normalizedName.contains(storeId))) ||
+                    (sourceHost.isNotBlank() &&
+                        (sourceHost == storeHost || sourceHost.endsWith(".$storeHost")))
+            }
+        }
+
+        fun findByName(name: String): Store = findKnownByName(name)
+            ?: ALL_STORES.firstOrNull {
                 it.id.equals(name, ignoreCase = true) ||
-                it.domain.contains(name, ignoreCase = true)
-        } ?: AMAZON_ES
+                    it.domain.contains(name, ignoreCase = true)
+            }
+            ?: AMAZON_ES
     }
 }

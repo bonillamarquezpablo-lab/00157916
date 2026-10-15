@@ -1351,6 +1351,23 @@ class SerpApiClient(
             requestedYears.intersect(returnedYears).isEmpty()
         ) return false
 
+        // Exact model identifiers are not interchangeable, even if the difference is one digit.
+        // Keep model codes compact across retailer punctuation: WH-1000XM5 -> 1000xm5, Galaxy S26 -> s26.
+        fun modelCodes(value: String): Set<String> {
+            val normalized = normalize(value).replace(Regex("""\b(\d+)\s+(gb|tb|mb)\b"""), "$1$2")
+            val capacityCodes = setOf("4gb", "8gb", "16gb", "32gb", "64gb", "128gb", "256gb", "512gb", "1tb", "2tb")
+            return Regex("""\b(?:[a-z]{1,8}\d[a-z0-9]{1,12}|\d{2,}[a-z]{1,}[a-z0-9]*)\b""")
+                .findAll(normalized)
+                .map { it.value }
+                .filterNot { it in capacityCodes }
+                .toSet()
+        }
+        val requestedModelCodes = modelCodes(requested)
+        val returnedModelCodes = modelCodes(returned)
+        if (requestedModelCodes.isNotEmpty() && returnedModelCodes.isNotEmpty() &&
+            requestedModelCodes.none { it in returnedModelCodes }
+        ) return false
+
         val containsModelCode = wanted.any { token -> token.length >= 4 && token.any(Char::isDigit) && token.any(Char::isLetter) }
 
         // Permit a small number of spelling mistakes in longer brand/product tokens, without

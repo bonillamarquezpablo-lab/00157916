@@ -1414,7 +1414,10 @@ class SerpApiClient(
             // S26" could accidentally match "Samsung Galaxy S25" because the first two tokens
             // identify only the brand/family.
             val modelAnchors = orderedWanted.filter { token ->
-                token.any(Char::isDigit) && token.length >= 2 && token !in genericAnchorTerms
+                token.length >= 2 &&
+                    token !in genericAnchorTerms &&
+                    (token.any(Char::isLetter) && token.any(Char::isDigit) ||
+                        Regex("""(?:19|20)\d{2}""").matches(token))
             }
             val textAnchors = orderedWanted.filter { token ->
                 token.length >= 4 && token !in genericAnchorTerms && !token.any(Char::isDigit)

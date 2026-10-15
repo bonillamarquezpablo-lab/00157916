@@ -168,13 +168,17 @@ class WaybackPriceHistoryClient(
     }
 
     /** Resolve recognisable merchant labels; never guess a site from generic labels. */
-    internal fun resolveMerchantDomain(storeName: String): String? {
+    internal fun resolveMerchantDomain(storeName: String, sourceUrl: String = ""): String? {
         if (storeName.isBlank()) return null
         val hostPattern = Regex(
             """(?i)(?:https?://)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:es|com|net|org|eu|de|fr|it|nl|co\.uk))(?:[:/]|$)"""
         )
         val explicitHost = hostPattern.find(storeName.trim())?.groupValues?.getOrNull(1)
         if (explicitHost != null) return normalizeMerchantDomain(explicitHost)
+        if (sourceUrl.isNotBlank()) {
+            val sourceHost = runCatching { URI(sourceUrl).host }.getOrNull()
+            sourceHost?.let(::normalizeMerchantDomain)?.let { return it }
+        }
 
         val normalized = normalizeTitle(storeName)
         val aliases = linkedMapOf(

@@ -301,12 +301,12 @@ class ProductRepository(
                     "Sin precio válido"
                 result.isRentalOrMonthly ->
                     "Alquiler o cuota mensual"
-                isNonRetailPromotionalListing(result.title) ->
-                    "Artículo promocional o merchandising personalizado"
                 result.isSecondHand ->
                     "Segunda mano o reacondicionado"
                 hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title) ->
                     "Otro modelo o variante"
+                isNonRetailPromotionalListing(result.title) ->
+                    "Artículo promocional o merchandising personalizado"
                 !isEligibleSeller(result.storeName) ->
                     "Otro modelo o vendedor no elegible"
                 !isEligibleHistoryTitle(result.title) ->

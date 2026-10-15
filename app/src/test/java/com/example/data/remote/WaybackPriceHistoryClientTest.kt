@@ -180,6 +180,16 @@ class WaybackPriceHistoryClientTest {
             "A generic category is too ambiguous for a domain-wide archive search",
             client.buildDomainCdxUrl("notino.es", "Calendario de Adviento", now = 1_800_000_000_000L)
         )
+
+        val shortModelUrl = client.buildDomainCdxUrl(
+            domain = "example.es",
+            expectedTitle = "Volkswagen Polo 9N3 1.9 SDI",
+            now = 1_800_000_000_000L
+        )
+        assertNotNull("Short model codes should be included in the archive URL filter", shortModelUrl)
+        assertTrue(shortModelUrl!!.queryParameterValues("filter").orEmpty().any {
+            it.startsWith("original:") && it.contains("9n3")
+        })
     }
 
     @Test

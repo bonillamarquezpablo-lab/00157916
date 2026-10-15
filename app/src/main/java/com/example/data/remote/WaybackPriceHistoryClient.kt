@@ -71,7 +71,9 @@ class WaybackPriceHistoryClient(
 
         val attemptKey = attemptKey(originalUrl + "|" + expectedTitle)
         val lastAttempt = preferences.getLong(attemptKey, 0L)
-        if (lastAttempt > 0L && now >= lastAttempt && now - lastAttempt < RETRY_INTERVAL_MS) {
+        val previousHadQuotes = preferences.getBoolean("${attemptKey}_has_quotes", false)
+        val retryInterval = if (previousHadQuotes) RETRY_INTERVAL_MS else NEGATIVE_RETRY_INTERVAL_MS
+        if (lastAttempt > 0L && now >= lastAttempt && now - lastAttempt < retryInterval) {
             return@withContext WaybackBackfillResult(skippedRecently = true)
         }
 
@@ -111,11 +113,16 @@ class WaybackPriceHistoryClient(
             }.awaitAll()
         }
 
-        // Negative results are cached too, avoiding repeated load on the public archive.
-        preferences.edit().putLong(attemptKey, now).apply()
+        // Cache useful histories for a month, but retry empty results after a week so a
+        // temporary lack of price metadata does not hide free historical data for 30 days.
+        val quotes = fetched.mapNotNull { it.quote }.sortedBy { it.observedAt }
+            .distinctBy { it.observedAt to it.price }
+        preferences.edit()
+            .putLong(attemptKey, now)
+            .putBoolean("${attemptKey}_has_quotes", quotes.isNotEmpty())
+            .apply()
         WaybackBackfillResult(
-            quotes = fetched.mapNotNull { it.quote }.sortedBy { it.observedAt }
-                .distinctBy { it.observedAt to it.price },
+            quotes = quotes,
             capturesFound = captures.size,
             capturesChecked = fetched.count { it.fetched },
             available = true
@@ -379,6 +386,7 @@ class WaybackPriceHistoryClient(
         const val MAX_SNAPSHOTS_PER_URL = 12
         private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L
+        const val NEGATIVE_RETRY_INTERVAL_MS = 7L * 24L * 60L * 60L * 1000L
         const val DAY_MS = 24L * 60L * 60L * 1000L
         const val MIN_HISTORICAL_PRICE = 0.50
         const val MAX_HISTORICAL_PRICE = 10_000.0

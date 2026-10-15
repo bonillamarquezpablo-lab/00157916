@@ -1351,6 +1351,31 @@ class SerpApiClient(
             requestedYears.intersect(returnedYears).isEmpty()
         ) return false
 
+        // Reject adjacent model generations even when brand/category tokens overlap.
+        fun modelCodes(value: String): Set<String> {
+            val normalized = normalize(value)
+                .replace(Regex("""\b(\d+)\s+(gb|tb|mb)\b"""), "$1$2")
+            val capacities = setOf("4gb", "8gb", "16gb", "32gb", "64gb", "128gb", "256gb", "512gb", "1tb", "2tb")
+            val codes = Regex(
+                """\b(?:[a-z]{1,8}\d[a-z0-9]{0,12}|\d{2,}[a-z]{1,}[a-z0-9]*)\b"""
+            ).findAll(normalized).map { it.value }.filterNot { it in capacities }.toMutableSet()
+            val tokens = normalized.split(' ').filter { it.isNotBlank() }
+            val modelFamilies = setOf("iphone", "pixel", "redmi", "poco", "wh", "dyson", "roborock")
+            for (index in tokens.indices) {
+                val family = tokens[index]
+                val next = tokens.getOrNull(index + 1) ?: continue
+                if (family in modelFamilies && next.matches(Regex("""\d{1,4}[a-z0-9]*"""))) {
+                    codes += family + next
+                }
+            }
+            return codes
+        }
+        val requestedModelCodes = modelCodes(requested)
+        val returnedModelCodes = modelCodes(returned)
+        if (requestedModelCodes.isNotEmpty() && returnedModelCodes.isNotEmpty() &&
+            requestedModelCodes.none { it in returnedModelCodes }
+        ) return false
+
         val containsModelCode = wanted.any { token -> token.length >= 4 && token.any(Char::isDigit) && token.any(Char::isLetter) }
 
         // Permit a small number of spelling mistakes in longer brand/product tokens, without

@@ -68,23 +68,57 @@ class WaybackPriceHistoryClient(
         if (!isEligibleDirectUrl(originalUrl) || expectedTitle.isBlank()) {
             return@withContext WaybackBackfillResult()
         }
-
-        val attemptKey = attemptKey(originalUrl + "|" + expectedTitle)
-        val lastAttempt = preferences.getLong(attemptKey, 0L)
-        if (lastAttempt > 0L && now >= lastAttempt && now - lastAttempt < RETRY_INTERVAL_MS) {
+        val attempt = attemptKey("url|$originalUrl|$expectedTitle")
+        if (wasAttemptedRecently(attempt, now)) {
             return@withContext WaybackBackfillResult(skippedRecently = true)
         }
-
         val cdxUrl = buildCdxUrl(originalUrl, now, lookbackDays)
             ?: return@withContext WaybackBackfillResult()
-        val cdxRequest = Request.Builder().url(cdxUrl).header("User-Agent", USER_AGENT).get().build()
+        queryCdxAndFetchPrices(cdxUrl, expectedTitle, attempt, now)
+    }
+
+    /**
+     * Free fallback for Google Shopping results that expose only an intermediate Google link.
+     * It scans archived URL paths on a known merchant domain for product-specific terms, then
+     * accepts a point only when the archived page title and EUR metadata match the product.
+     */
+    suspend fun fetchHistoryByMerchantDomain(
+        domain: String,
+        expectedTitle: String,
+        now: Long = System.currentTimeMillis(),
+        lookbackDays: Int = DEFAULT_LOOKBACK_DAYS
+    ): WaybackBackfillResult = withContext(Dispatchers.IO) {
+        val normalizedDomain = normalizeMerchantDomain(domain)
+            ?: return@withContext WaybackBackfillResult()
+        if (expectedTitle.isBlank()) return@withContext WaybackBackfillResult()
+        val cdxUrl = buildDomainCdxUrl(normalizedDomain, expectedTitle, now, lookbackDays)
+            ?: return@withContext WaybackBackfillResult()
+        val attempt = attemptKey("domain|$normalizedDomain|$expectedTitle")
+        if (wasAttemptedRecently(attempt, now)) {
+            return@withContext WaybackBackfillResult(skippedRecently = true)
+        }
+        queryCdxAndFetchPrices(cdxUrl, expectedTitle, attempt, now)
+    }
+
+    private fun wasAttemptedRecently(key: String, now: Long): Boolean {
+        val lastAttempt = preferences.getLong(key, 0L)
+        return lastAttempt > 0L && now >= lastAttempt && now - lastAttempt < RETRY_INTERVAL_MS
+    }
+
+    private suspend fun queryCdxAndFetchPrices(
+        cdxUrl: HttpUrl,
+        expectedTitle: String,
+        cacheKey: String,
+        now: Long
+    ): WaybackBackfillResult {
+        val request = Request.Builder().url(cdxUrl).header("User-Agent", USER_AGENT).get().build()
         val captures = try {
-            http.newCall(cdxRequest).execute().use { response ->
-                if (!response.isSuccessful) return@withContext WaybackBackfillResult()
+            http.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return WaybackBackfillResult()
                 parseCaptureIndex(response.body?.string().orEmpty())
             }
         } catch (_: Exception) {
-            return@withContext WaybackBackfillResult()
+            return WaybackBackfillResult()
         }
 
         val sampled = sampleCaptures(captures, MAX_SNAPSHOTS_PER_URL)
@@ -94,9 +128,13 @@ class WaybackPriceHistoryClient(
                 async {
                     semaphore.withPermit {
                         val snapshotUrl = buildSnapshotUrl(capture) ?: return@withPermit SnapshotFetch(false, null)
-                        val request = Request.Builder().url(snapshotUrl).header("User-Agent", USER_AGENT).get().build()
+                        val snapshotRequest = Request.Builder()
+                            .url(snapshotUrl)
+                            .header("User-Agent", USER_AGENT)
+                            .get()
+                            .build()
                         val html = try {
-                            http.newCall(request).execute().use { response ->
+                            http.newCall(snapshotRequest).execute().use { response ->
                                 if (response.isSuccessful) response.body?.string() else null
                             }
                         } catch (_: Exception) {
@@ -104,22 +142,94 @@ class WaybackPriceHistoryClient(
                         } ?: return@withPermit SnapshotFetch(false, null)
                         SnapshotFetch(
                             fetched = true,
-                            quote = parseArchivedPrice(html, expectedTitle, originalUrl, snapshotUrl, capture.timestamp)
+                            quote = parseArchivedPrice(
+                                html = html,
+                                expectedTitle = expectedTitle,
+                                originalUrl = capture.originalUrl,
+                                snapshotUrl = snapshotUrl,
+                                observedAt = capture.timestamp
+                            )
                         )
                     }
                 }
             }.awaitAll()
         }
 
-        // Negative results are cached too, avoiding repeated load on the public archive.
-        preferences.edit().putLong(attemptKey, now).apply()
-        WaybackBackfillResult(
-            quotes = fetched.mapNotNull { it.quote }.sortedBy { it.observedAt }
-                .distinctBy { it.observedAt to it.price },
+        // Cache negative results too; explicit user retries must not hammer the public archive.
+        preferences.edit().putLong(cacheKey, now).apply()
+        return WaybackBackfillResult(
+            quotes = fetched.mapNotNull { it.quote }
+                .sortedBy { it.observedAt }
+                .distinctBy { Triple(it.originalUrl, it.observedAt, it.price) },
             capturesFound = captures.size,
             capturesChecked = fetched.count { it.fetched },
             available = true
         )
+    }
+
+    /** Resolve recognisable merchant labels; never guess a site from generic labels. */
+    internal fun resolveMerchantDomain(storeName: String): String? {
+        if (storeName.isBlank()) return null
+        val hostPattern = Regex(
+            """(?i)(?:https?://)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:es|com|net|org|eu|de|fr|it|nl|co\.uk))(?:[:/]|$)"""
+        )
+        val explicitHost = hostPattern.find(storeName.trim())?.groupValues?.getOrNull(1)
+        if (explicitHost != null) return normalizeMerchantDomain(explicitHost)
+
+        val normalized = normalizeTitle(storeName)
+        val aliases = linkedMapOf(
+            "pccomponentes" to "pccomponentes.com",
+            "mediamarkt" to "mediamarkt.es",
+            "media markt" to "mediamarkt.es",
+            "el corte ingles" to "elcorteingles.es",
+            "carrefour" to "carrefour.es",
+            "fnac" to "fnac.es",
+            "amazon" to "amazon.es",
+            "notino" to "notino.es",
+            "douglas" to "douglas.es",
+            "alcampo" to "alcampo.es",
+            "leroy merlin" to "leroymerlin.es",
+            "decathlon" to "decathlon.es",
+            "worten" to "worten.es",
+            "miravia" to "miravia.es",
+            "conforama" to "conforama.es",
+            "bauhaus" to "bauhaus.es",
+            "ikea" to "ikea.com",
+            "lidl" to "lidl.es",
+            "aliexpress" to "aliexpress.com",
+            "sprinter" to "sprinter.es",
+            "powerplanet" to "powerplanetonline.com",
+            "tradeinn" to "tradeinn.com",
+            "backmarket" to "backmarket.es",
+            "neobyte" to "neobyte.es",
+            "coolmod" to "coolmod.com",
+            "alternate" to "alternate.es",
+            "ldlc" to "ldlc.com",
+            "apple" to "apple.com",
+            "samsung" to "samsung.com",
+            "xiaomi" to "mi.com",
+            "lenovo" to "lenovo.com",
+            "dell" to "dell.com",
+            "hp" to "hp.com"
+        )
+        val match = aliases.entries.firstOrNull { (label, _) ->
+            normalized == label || normalized.contains(label)
+        } ?: return null
+        return normalizeMerchantDomain(match.value)
+    }
+
+    private fun normalizeMerchantDomain(value: String): String? {
+        val raw = value.trim().removePrefix("https://").removePrefix("http://")
+        val uri = runCatching { URI("https://$raw") }.getOrNull() ?: return null
+        val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+        if (!host.matches(Regex("""(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}(?:\.[a-z]{2,})?"""))) {
+            return null
+        }
+        if (host == "google.com" || host.endsWith(".google.com") || host.endsWith(".google.es") ||
+            host == "bing.com" || host.endsWith(".bing.com") || host == "web.archive.org" ||
+            host == "archive.org"
+        ) return null
+        return host
     }
 
     private fun buildCdxUrl(originalUrl: String, now: Long, lookbackDays: Int): HttpUrl? {
@@ -141,6 +251,65 @@ class WaybackPriceHistoryClient(
             .addQueryParameter("collapse", "timestamp:6")
             .addQueryParameter("limit", "100")
             .build()
+    }
+
+    /**
+     * Search only URLs whose paths contain distinctive product terms on a known retailer domain.
+     * The archive CDX API supports domain matching and URL-field regular-expression filters.
+     */
+    internal fun buildDomainCdxUrl(
+        domain: String,
+        expectedTitle: String,
+        now: Long = System.currentTimeMillis(),
+        lookbackDays: Int = DEFAULT_LOOKBACK_DAYS
+    ): HttpUrl? {
+        val normalizedDomain = normalizeMerchantDomain(domain) ?: return null
+        val tokens = historicalUrlSearchTokens(expectedTitle)
+        if (tokens.size < 2) return null
+        val start = (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
+        val from = formatUtc(start, "yyyyMMdd")
+        val to = formatUtc(now, "yyyyMMdd")
+        val alternatives = tokens.joinToString("|") { Regex.escape(it) }
+        val urlPattern = ".*(?:$alternatives).*"
+        return HttpUrl.Builder()
+            .scheme("https")
+            .host("web.archive.org")
+            .addPathSegments("cdx/search/cdx")
+            .addQueryParameter("url", "$normalizedDomain/")
+            .addQueryParameter("matchType", "domain")
+            .addQueryParameter("output", "json")
+            .addQueryParameter("fl", "timestamp,original,statuscode,mimetype")
+            .addQueryParameter("filter", "statuscode:200")
+            .addQueryParameter("filter", "mimetype:text/html")
+            .addQueryParameter("filter", "original:$urlPattern")
+            .addQueryParameter("from", from)
+            .addQueryParameter("to", to)
+            .addQueryParameter("collapse", "timestamp:6")
+            .addQueryParameter("limit", MAX_DOMAIN_INDEX_ROWS.toString())
+            .build()
+    }
+
+    private fun historicalUrlSearchTokens(expectedTitle: String): List<String> {
+        val ignored = setOf(
+            "the", "and", "for", "with", "from", "new", "used", "de", "del", "la", "las", "el",
+            "los", "un", "una", "para", "con", "en", "of", "by", "sale", "buy", "official",
+            "original", "product", "producto", "neu", "calendario", "calendarios", "calendar",
+            "calendars", "advent", "adviento", "adventskalender", "beauty", "women", "woman",
+            "hombre", "hombres", "mujer", "mujeres", "men", "damen", "frauen", "ultra", "pro",
+            "plus", "max", "mini", "lite", "gb", "tb", "mb"
+        )
+        val tokens = normalizeTitle(expectedTitle).split(' ')
+            .filter { it.length >= 4 && it !in ignored }
+            .distinct()
+        val modelTokens = tokens.filter { token ->
+            token.length >= 2 && token.any(Char::isDigit) && token.any(Char::isLetter)
+        }
+        val textTokens = tokens.filter { token ->
+            token.any(Char::isLetter) && token.length >= 4
+        }
+        return (textTokens + modelTokens + tokens.filter { it.all(Char::isDigit) })
+            .distinct()
+            .take(4)
     }
 
     private fun buildSnapshotUrl(capture: WaybackCapture): String? {
@@ -329,8 +498,22 @@ class WaybackPriceHistoryClient(
 
     private fun parsePositivePrice(raw: String?): Double? {
         if (raw.isNullOrBlank()) return null
-        val normalized = raw.trim().replace(",", ".").replace(Regex("""[^\d.]"""), "")
-        val price = normalized.toDoubleOrNull() ?: return null
+        var numeric = raw.trim().replace(Regex("""[^\d,.-]"""), "")
+        if (numeric.isBlank()) return null
+        val comma = numeric.lastIndexOf(',')
+        val dot = numeric.lastIndexOf('.')
+        numeric = when {
+            comma >= 0 && dot >= 0 && comma > dot ->
+                numeric.replace(".", "").replace(',', '.')
+            comma >= 0 && dot >= 0 && dot > comma ->
+                numeric.replace(",", "")
+            comma >= 0 && dot < 0 -> {
+                val decimalDigits = numeric.length - comma - 1
+                if (decimalDigits in 1..2) numeric.replace(',', '.') else numeric.replace(",", "")
+            }
+            else -> numeric
+        }
+        val price = numeric.toDoubleOrNull() ?: return null
         return price.takeIf { it.isFinite() && it > 0.0 }
     }
 
@@ -377,6 +560,7 @@ class WaybackPriceHistoryClient(
     companion object {
         const val DEFAULT_LOOKBACK_DAYS = 1600
         const val MAX_SNAPSHOTS_PER_URL = 12
+        private const val MAX_DOMAIN_INDEX_ROWS = 80
         private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L
         const val DAY_MS = 24L * 60L * 60L * 1000L

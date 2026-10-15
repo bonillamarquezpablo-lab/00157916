@@ -78,7 +78,9 @@ fun isIrrelevantMultiProductBundle(searchQuery: String, resultTitle: String): Bo
     val titleTypes = onlineProductTypes(title)
     val hasBundleTerm = BUNDLE_TERMS.containsMatchIn(title)
 
-    if (hasBundleTerm && (queryModels.isNotEmpty() || queryTypes.isNotEmpty())) return true
+    // Accessory kits such as vacuum mop kits are separate products, not unrelated bundles.
+    val isKnownAccessory = ACCESSORY_LISTING_PATTERN.containsMatchIn(title)
+    if (hasBundleTerm && !isKnownAccessory && (queryModels.isNotEmpty() || queryTypes.isNotEmpty())) return true
 
     val extraModelCode = queryModels.isNotEmpty() && titleModels.any { it !in queryModels }
     val extraProductType = titleTypes.size >= 2 &&
@@ -86,7 +88,7 @@ fun isIrrelevantMultiProductBundle(searchQuery: String, resultTitle: String): Bo
     // Inspect the original title: normalization strips '+', so using the normalized title
     // silently missed mixed-product listings joined by plus signs.
     val hasMultiItemSeparator = Regex(
-        """(?:\\s+\\+\\s+|\\b(with|and|incluye|incluido|acompañado de)\\b)""",
+        """(?:\s+\+\s+|\b(with|and|incluye|incluido|acompañado de)\b)""",
         RegexOption.IGNORE_CASE
     ).containsMatchIn(resultTitle)
 

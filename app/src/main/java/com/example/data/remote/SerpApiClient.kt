@@ -1376,6 +1376,9 @@ class SerpApiClient(
         fun tokenMatches(token: String): Boolean = found.any { candidate ->
             when {
                 token == candidate -> true
+                // Never use typo-tolerance for model codes, storage numbers or edition years.
+                // WH-1000XM4 and WH-1000XM5 differ by one character but are different products.
+                token.any(Char::isDigit) -> candidate.contains(token)
                 token.length >= 7 && candidate.length >= 7 &&
                     editDistance(token, candidate) <= minOf(2, token.length / 4) -> true
                 containsModelCode && token.length in 2..3 &&

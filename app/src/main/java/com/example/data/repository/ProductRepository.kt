@@ -588,28 +588,13 @@ class ProductRepository(
      */
     private suspend fun saveDailyObservation(observation: PriceObservationEntity): Boolean {
         val (dayStart, dayEnd) = localDayBounds(observation.observedAt)
-        val existing = priceObservationDao.getObservationForStoreProductDay(
-            observation.productId, observation.storeId, dayStart, dayEnd
+        // Room wraps lookup + insert/update in one transaction so simultaneous refreshes
+        // cannot both see an empty day and create duplicate observations.
+        return priceObservationDao.saveDailyObservationIfNewer(
+            observation = observation,
+            dayStart = dayStart,
+            dayEnd = dayEnd
         )
-        if (existing == null) {
-            priceObservationDao.insert(observation)
-            return true
-        }
-        // Never let a suspicious, unverified observation replace a verified same-day quote.
-        if (!observation.isVerified && existing.isVerified) return false
-        // A newly validated offer supersedes a previously unverified suspicious row.
-        if (observation.isVerified && !existing.isVerified) {
-            priceObservationDao.update(observation.copy(id = existing.id))
-            return true
-        }
-
-        val isNewer = observation.observedAt > existing.observedAt
-        val sameTimeAndBetterPrice =
-            observation.observedAt == existing.observedAt && observation.price < existing.price
-        if (!isNewer && !sameTimeAndBetterPrice) return false
-
-        priceObservationDao.update(observation.copy(id = existing.id))
-        return true
     }
 
     private fun inferProductBrand(title: String): String {

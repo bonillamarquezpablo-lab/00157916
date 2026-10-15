@@ -421,7 +421,8 @@ class ProductRepository(
             }
             val productId = existingProduct?.id
                 ?: stableOnlineId("online_product_", group.identityKey)
-            val displayTitle = existingProduct?.title?.takeIf { it.isNotBlank() } ?: group.title
+            // Keep the persisted title and representative image from the same provider listing.
+            val displayTitle = group.title
             val hasTrustedOffer = group.offers.any { !it.isSuspiciousPrice }
             val currentMinimum = if (hasTrustedOffer) group.minPrice else existingProduct?.currentPrice ?: 0.0
             val highestToday = group.offers.maxOfOrNull { offer ->

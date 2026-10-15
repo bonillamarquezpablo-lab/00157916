@@ -33,7 +33,7 @@ private fun normalizeOnlineSearchText(value: String): String =
         .replace(Regex("\\p{Mn}+"), "")
         .replace(Regex("""[^a-z0-9]+"""), " ")
         .trim()
-        .replace(Regex("""\\s+"""), " ")
+        .replace(Regex("""\s+"""), " ")
 
 private fun explicitOnlineModelCodes(value: String): Set<String> =
     ONLINE_MODEL_CODE.findAll(normalizeOnlineSearchText(value))

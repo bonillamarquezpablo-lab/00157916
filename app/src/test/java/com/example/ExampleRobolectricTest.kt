@@ -1516,6 +1516,100 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `Google historical insights are saved separately and never replace current price`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val now = System.currentTimeMillis()
+            val productId = "sony-dualsense-insight-test"
+            val title = "Sony DualSense Wireless Controller PS5"
+            database.productDao().insert(
+                ProductEntity(
+                    id = productId,
+                    title = title,
+                    brand = "Sony",
+                    category = "GAMING",
+                    currentPrice = 74.99,
+                    athMinPrice = 74.99,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "Amazon España",
+                    athMaxPrice = 74.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "amazon_es",
+                    storeUrl = "https://www.google.com/shopping/product/123456789",
+                    ean = "",
+                    isPriceVerified = true,
+                    googleProductId = "123456789"
+                )
+            )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = productId,
+                    storeId = "amazon_es",
+                    price = 74.99,
+                    currency = "EUR",
+                    observedAt = now,
+                    sourceUrl = "https://www.amazon.es/dp/DUALSENSETEST",
+                    sourceName = "Google Shopping",
+                    isVerified = true,
+                    verificationNote = "Precio actual usado como control del test.",
+                    productTitle = title,
+                    storeName = "Amazon España",
+                    sourceType = "Google Shopping",
+                    linkType = "directo",
+                    collectedAt = now,
+                    evidenceType = "live"
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val historicalAt = now - 3L * 24L * 60L * 60L * 1000L
+            val saved = repository.recordGooglePriceInsightsHistory(
+                productId = productId,
+                expectedTitle = title,
+                googleCatalogId = "123456789",
+                insights = listOf(
+                    com.example.data.remote.SerpApiPriceInsight(
+                        productTitle = title,
+                        storeName = "PcComponentes",
+                        price = 69.99,
+                        currency = "EUR",
+                        observedAt = historicalAt
+                    )
+                )
+            )
+
+            assertEquals(1, saved)
+            val product = withTimeout<List<Product>>(10_000) {
+                repository.allProductsStream.first { products ->
+                    products.any { candidate ->
+                        candidate.id == productId &&
+                            candidate.priceHistory.any { it.eventLabel.contains("price_insights", ignoreCase = true) }
+                    }
+                }
+            }.first { it.id == productId }
+
+            assertEquals("Historical provider data must never replace the live current price", 74.99, product.currentPrice, 0.001)
+            assertTrue(product.priceHistory.any {
+                it.eventLabel.contains("price_insights", ignoreCase = true) &&
+                    it.timestamp == historicalAt && it.price == 69.99
+            })
+            assertTrue(product.priceHistory.any { it.eventLabel == "Google Shopping" && it.price == 74.99 })
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun onlineShoppingSearchKeepsSafeEuroOffersAndSortsByPrice() {
         val client = SerpApiClient()
         val payload = JSONObject(

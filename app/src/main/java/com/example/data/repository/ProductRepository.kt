@@ -68,21 +68,19 @@ class ProductRepository(
     private val startupCleanupCompleted = CompletableDeferred<Unit>()
 
     init {
-        // Conservative cleanup: only discard product rows with no observation and no user tracking.
-        // Never delete observation history, tracked products/watchlist entries, or persisted stores.
-        // A non-fatal cleanup error must not crash the main thread during the first screen launch.
+        // Startup reconciliation is non-destructive: never delete catalogue rows automatically.
+        // A product without a verified quote or watchlist entry may still be user-owned data.
+        // Preserve all rows and only reconcile the cached verification flag from source-backed
+        // observations. Any failure is logged and the crash-report handler remains available.
         externalScope.launch {
             try {
-                productDao.deleteProductsWithoutObservations()
                 productDao.markProductsWithVerifiedObservations()
                 startupCleanupCompleted.complete(Unit)
             } catch (cancelled: CancellationException) {
                 startupCleanupCompleted.completeExceptionally(cancelled)
                 throw cancelled
             } catch (failure: Exception) {
-                Log.e("ProductRepository", "Room startup cleanup failed; continuing startup for diagnostics.", failure)
-                // Cleanup has stopped. Allow later operations to report any underlying database
-                // problem through the crash-report handler instead of crashing from this job.
+                Log.e("ProductRepository", "Room startup reconciliation failed; preserving stored products.", failure)
                 startupCleanupCompleted.complete(Unit)
             }
         }

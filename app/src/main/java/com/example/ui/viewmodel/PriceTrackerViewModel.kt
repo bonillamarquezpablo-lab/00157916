@@ -851,7 +851,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                     (candidate.priceObservedAt ?: 0L) >= now) ||
                                 (details.priceInsights.isNotEmpty() &&
                                     candidate.priceHistory.any {
-                                        it.eventLabel.contains("price_insights", ignoreCase = true)
+                                        it.eventLabel?.contains("price_insights", ignoreCase = true) == true
                                     })
                             )
                         }

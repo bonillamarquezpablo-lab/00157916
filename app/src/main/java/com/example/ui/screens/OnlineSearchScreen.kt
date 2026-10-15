@@ -363,8 +363,8 @@ fun OnlineSearchScreen(
                         { onOpenProduct(group.identityKey) }
                     },
                     onOpenBestOffer = {
-                        val best = group.cheapestOffer
-                        openStoreUrl(context, best.sourceUrl, preferAmazonApp = best.isAmazonOffer)
+                        val purchaseOffer = group.bestPurchaseOffer
+                        openStoreUrl(context, purchaseOffer.sourceUrl, preferAmazonApp = purchaseOffer.isAmazonOffer)
                     }
                 )
             }
@@ -427,9 +427,9 @@ private fun ShoppingResultCard(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
-                if (best.thumbnailUrl.isNotBlank()) {
+                if (group.representativeImageUrl.isNotBlank()) {
                     AsyncImage(
-                        model = best.thumbnailUrl,
+                        model = group.representativeImageUrl,
                         contentDescription = "Imagen de ${group.title}",
                         modifier = Modifier.size(94.dp).clip(RoundedCornerShape(14.dp)),
                         contentScale = ContentScale.Crop
@@ -471,6 +471,15 @@ private fun ShoppingResultCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    val purchaseOffer = group.bestPurchaseOffer
+                    if (!purchaseOffer.isGoogleShoppingProductLink && purchaseOffer.sourceUrl != best.sourceUrl) {
+                        Text(
+                            "El precio más bajo está en Google Shopping; enlace directo: ${purchaseOffer.storeName} · " +
+                                NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(purchaseOffer.price),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Text(
                         "${group.offers.size} ofertas · toca para ver tiendas e historial",
                         style = MaterialTheme.typography.bodySmall,
@@ -503,8 +512,8 @@ private fun ShoppingResultCard(
             }
             OutlinedButton(onClick = onOpenBestOffer, modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    if (best.isGoogleShoppingProductLink) "Abrir oferta más barata en Google Shopping"
-                    else "Abrir oferta más barata · ${best.storeName}"
+                    if (purchaseOffer.isGoogleShoppingProductLink) "Abrir precio más bajo en Google Shopping"
+                    else "Abrir oferta directa · ${purchaseOffer.storeName}"
                 )
                 Spacer(Modifier.width(8.dp))
                 Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))

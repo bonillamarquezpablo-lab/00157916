@@ -508,10 +508,10 @@ class WaybackPriceHistoryClient(
      * Generic words still use the looser overlap rule above.
      */
     private fun requiredVariantTokens(normalizedTitle: String): Set<String> {
-        val canonical = normalizedTitle.replace(
-            Regex("""\\b(\\d+)\\s+(gb|tb|mb|mah|wh|w|hz|mm|cm|inch|inches)\\b"""),
-            "$1$2"
-        )
+        val unitRegex = Regex("""\b(\d+)\s+(gb|tb|mb|mah|wh|w|hz|mm|cm|inch|inches)\b""")
+        val canonical = unitRegex.replace(normalizedTitle) { match ->
+            match.groupValues[1] + match.groupValues[2]
+        }
         return canonical.split(' ').filter { token ->
             token.length >= 2 && token.any(Char::isDigit) &&
                 (token.any(Char::isLetter) || token.all(Char::isDigit))

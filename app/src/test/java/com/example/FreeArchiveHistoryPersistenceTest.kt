@@ -113,4 +113,82 @@ class FreeArchiveHistoryPersistenceTest {
             database.close()
         }
     }
+ 
+    @Test
+    fun archivedSnapshotMustValidateMerchantAgainstOriginalRetailerUrl() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        val title = "Anker Prime 27K Power Bank"
+        val originalUrl = "https://www.pccomponentes.com/anker-prime-27k"
+        val timestampFormat = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val rawTimestamp = timestampFormat.format(Date(System.currentTimeMillis() - 60L * 24L * 60L * 60L * 1000L))
+        val archivedAt = timestampFormat.parse(rawTimestamp)!!.time
+        val snapshotUrl = "https://web.archive.org/web/${rawTimestamp}id_/${originalUrl}"
+
+        try {
+            database.productDao().insert(
+                ProductEntity(
+                    id = "anker-prime-27k-seller-mismatch",
+                    title = title,
+                    brand = "Anker",
+                    category = "HOME_APPLIANCES",
+                    currentPrice = 499.99,
+                    athMinPrice = 499.99,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "PcComponentes",
+                    athMaxPrice = 499.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "pccomponentes",
+                    storeUrl = originalUrl,
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val quote = ArchivedPriceQuote(
+                observedAt = archivedAt,
+                price = 89.99,
+                currency = "EUR",
+                productTitle = title,
+                originalUrl = originalUrl,
+                snapshotUrl = snapshotUrl
+            )
+
+            // The archived row may be retained for audit, but a contradictory merchant label
+            // must prevent it from becoming visible, trusted historical evidence.
+            assertEquals(
+                1,
+                repository.recordArchivedPriceHistory(title, originalUrl, "Amazon.es", listOf(quote))
+            )
+            assertEquals(1, database.priceObservationDao().getObservationCount("anker-prime-27k-seller-mismatch"))
+
+            val product = withTimeout(10_000L) {
+                repository.allProductsStream.first { rows ->
+                    rows.any { it.id == "anker-prime-27k-seller-mismatch" }
+                }.first { it.id == "anker-prime-27k-seller-mismatch" }
+            }
+            assertFalse(product.isPriceVerified)
+            assertEquals(499.99, product.currentPrice, 0.001)
+            assertTrue(
+                "A snapshot labelled Amazon must not be trusted for a PcComponentes URL",
+                product.priceHistory.isEmpty()
+            )
+        } finally {
+            database.close()
+        }
+    }
+
 }

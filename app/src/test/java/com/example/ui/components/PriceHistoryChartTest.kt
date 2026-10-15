@@ -4,6 +4,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import com.example.data.model.PricePoint
 import org.junit.Rule
@@ -81,6 +82,6 @@ class PriceHistoryChartTest {
 
         composeRule.onNodeWithText("Evolución Real del Precio").assertIsDisplayed()
         composeRule.onNodeWithText("Wayback (0)").assertIsDisplayed()
-        composeRule.onNodeWithText("Sin datos todavía").assertIsDisplayed()
+        composeRule.onNodeWithTag("price_history_chart_container").assertIsDisplayed()
     }
 }

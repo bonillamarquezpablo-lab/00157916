@@ -286,7 +286,7 @@ class RoomMigrationPreservationTest {
         if (version >= 8) {
             db.execSQL(
                 "INSERT INTO price_observations ($regularColumns, collectedAt, evidenceType, sourcePageUrl) VALUES (${List(17) { "?" }.joinToString(", ")})",
-                baseRegular + arrayOf<Any?>(1_791_234_568_000L, "live", "")
+                (baseRegular.toList() + listOf<Any?>(1_791_234_568_000L, "live", "")).toTypedArray()
             )
             db.execSQL(
                 "INSERT INTO price_observations ($regularColumns, collectedAt, evidenceType, sourcePageUrl) VALUES (${List(17) { "?" }.joinToString(", ")})",

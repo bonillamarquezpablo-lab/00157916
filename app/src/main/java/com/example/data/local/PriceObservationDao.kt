@@ -53,6 +53,14 @@ interface PriceObservationDao {
         originalUrl: String
     ): List<PriceObservationEntity>
 
+    /** Prevent importing the same Wayback capture more than once. */
+    @Query(
+        "SELECT * FROM price_observations " +
+            "WHERE productId = :productId AND sourceUrl = :snapshotUrl " +
+            "LIMIT 1"
+    )
+    suspend fun getObservationForSnapshot(productId: String, snapshotUrl: String): PriceObservationEntity?
+
     @Query("SELECT COUNT(*) FROM price_observations WHERE isVerified = 1")
     suspend fun getVerifiedObservationCount(): Int
 

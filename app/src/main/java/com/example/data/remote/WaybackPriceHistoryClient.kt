@@ -86,7 +86,7 @@ class WaybackPriceHistoryClient(
             return@withContext WaybackBackfillResult(skippedRecently = true)
         }
 
-        val resolvedOriginalUrl = resolveStoreUrl(originalUrl, storeName) ?: run {
+        val resolvedOriginalUrl = resolveStoreUrl(originalUrl, storeName, expectedTitle) ?: run {
             // Cache an unsuccessful extraction too, so repeated searches do not repeatedly
             // fetch a Google Shopping page that does not expose the seller destination.
             preferences.edit().putLong(attemptKey, now).apply()
@@ -152,13 +152,17 @@ class WaybackPriceHistoryClient(
      * This method is intentionally independent of the Wayback enabled preference: retailer links
      * should still work when the user disables historical archive lookups.
      */
-    suspend fun resolveStoreUrl(originalUrl: String, storeName: String): String? = withContext(Dispatchers.IO) {
+    suspend fun resolveStoreUrl(
+        originalUrl: String,
+        storeName: String,
+        expectedTitle: String = ""
+    ): String? = withContext(Dispatchers.IO) {
         if (isEligibleDirectUrl(originalUrl) && !isGoogleShoppingUrl(originalUrl)) {
             return@withContext originalUrl
         }
         if (!isGoogleShoppingUrl(originalUrl) || storeName.isBlank()) return@withContext null
 
-        val cacheKey = attemptKey("store-link|" + originalUrl + "|" + normalizeTitle(storeName))
+        val cacheKey = attemptKey("store-link|" + originalUrl + "|" + normalizeTitle(storeName) + "|" + normalizeTitle(expectedTitle))
         preferences.getString("resolved_link_$cacheKey", null)
             ?.takeIf { isEligibleDirectUrl(it) && !isGoogleShoppingUrl(it) }
             ?.let { return@withContext it }
@@ -169,7 +173,7 @@ class WaybackPriceHistoryClient(
             return@withContext null
         }
 
-        val resolved = resolveDirectMerchantUrl(originalUrl, storeName)
+        val resolved = resolveDirectMerchantUrl(originalUrl, storeName, expectedTitle)
             ?.takeIf { isEligibleDirectUrl(it) && !isGoogleShoppingUrl(it) }
         val editor = preferences.edit().putLong("resolve_time_$cacheKey", now)
         if (resolved != null) editor.putString("resolved_link_$cacheKey", resolved)
@@ -177,7 +181,7 @@ class WaybackPriceHistoryClient(
         resolved
     }
 
-    private fun resolveDirectMerchantUrl(googleUrl: String, storeName: String): String? {
+    private fun resolveDirectMerchantUrl(googleUrl: String, storeName: String, expectedTitle: String): String? {
         val request = Request.Builder()
             .url(googleUrl)
             .header("User-Agent", USER_AGENT)
@@ -198,14 +202,18 @@ class WaybackPriceHistoryClient(
         if (isEligibleDirectUrl(finalUrl) && !isGoogleShoppingUrl(finalUrl) &&
             matchesMerchantHost(finalUrl, storeName)
         ) return finalUrl
-        return extractDirectMerchantUrl(page.second, storeName)
+        return extractDirectMerchantUrl(page.second, storeName, expectedTitle)
     }
 
     /**
      * Extract only outbound URLs whose host matches the seller name shown by Shopping.
      * Google redirect parameters are unwrapped, but generic links and other sellers are rejected.
      */
-    internal fun extractDirectMerchantUrl(html: String, storeName: String): String? {
+    internal fun extractDirectMerchantUrl(
+        html: String,
+        storeName: String,
+        expectedTitle: String = ""
+    ): String? {
         if (html.isBlank() || storeName.isBlank()) return null
         val decodedHtml = html
             .replace("\\u0026", "&", ignoreCase = true)
@@ -249,7 +257,28 @@ class WaybackPriceHistoryClient(
             .findAll(decodedHtml)
             .forEach { collectUrl(it.value) }
 
-        return candidates.firstOrNull { isEligibleDirectUrl(it) && matchesMerchantHost(it, storeName) }
+        val merchantCandidates = candidates
+            .filter { isEligibleDirectUrl(it) && matchesMerchantHost(it, storeName) }
+            .distinct()
+        if (merchantCandidates.isEmpty()) return null
+        if (expectedTitle.isBlank()) return merchantCandidates.first()
+
+        val productTokens = meaningfulTokens(normalizeTitle(expectedTitle))
+        if (productTokens.isEmpty()) return null
+        val minimumOverlap = if (productTokens.size <= 3) 1 else 2
+        return merchantCandidates
+            .map { url ->
+                val uri = runCatching { URI(url) }.getOrNull()
+                val pageTokens = meaningfulTokens(normalizeTitle(uri?.path.orEmpty()))
+                val overlap = productTokens.intersect(pageTokens).size
+                url to overlap
+            }
+            .filter { (_, overlap) -> overlap >= minimumOverlap }
+            .maxWithOrNull(
+                compareBy<Pair<String, Int>> { it.second }
+                    .thenBy { runCatching { URI(it.first).path.orEmpty().length }.getOrDefault(0) }
+            )
+            ?.first
     }
 
     private fun matchesMerchantHost(url: String, storeName: String): Boolean {

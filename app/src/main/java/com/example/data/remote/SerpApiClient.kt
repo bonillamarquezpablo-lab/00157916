@@ -1611,6 +1611,8 @@ class SerpApiClient(
                 "lenovo" in merchant -> "lenovo_store"
                 "dell" in merchant -> "dell_store"
                 "hp store" in merchant -> "hp_store"
+                "anker" in merchant -> "anker_store"
+                "ugreen" in merchant -> "ugreen_store"
                 else -> null
             }
             if (knownStoreId != null) return knownStoreId

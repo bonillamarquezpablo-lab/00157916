@@ -1378,6 +1378,144 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `Hall-effect keyboard searches accept HE TMR and magnetic keyboards but reject unrelated Hall titles`() {
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "search_metadata": {"status": "Success"},
+                  "shopping_results": [
+                    {
+                      "title": "Keychron Q1 HE Teclado Inalámbrico",
+                      "price": "189,99 €",
+                      "extracted_price": 189.99,
+                      "link": "https://keychron.com/q1-he",
+                      "source": "Keychron"
+                    },
+                    {
+                      "title": "DarkBeacon Flux87 HE Teclado Gaming TKL Rapid Trigger Interruptores Magnéticos",
+                      "price": "129,99 €",
+                      "extracted_price": 129.99,
+                      "link": "https://shop.example.test/flux87",
+                      "source": "Tienda gaming"
+                    },
+                    {
+                      "title": "MonsGeek M1 V5 TMR Magnetic Keyboard Black",
+                      "price": "159,99 €",
+                      "extracted_price": 159.99,
+                      "link": "https://monsgeek.com/m1-v5",
+                      "source": "MonsGeek"
+                    },
+                    {
+                      "title": "Hall Of Fame - Piano y teclados - Green Musicians",
+                      "price": "4,91 €",
+                      "extracted_price": 4.91,
+                      "link": "https://shop.example.test/hall-of-fame",
+                      "source": "Green Musicians"
+                    },
+                    {
+                      "title": "GEON Raw HE Magnetic Linear Switches 50.0gf",
+                      "price": "4,27 €",
+                      "extracted_price": 4.27,
+                      "link": "https://shop.example.test/geon-switches",
+                      "source": "Tienda de teclados"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "teclado HAL",
+            observedAt = System.currentTimeMillis()
+        )
+
+        assertEquals(
+            listOf(
+                "MonsGeek M1 V5 TMR Magnetic Keyboard Black",
+                "DarkBeacon Flux87 HE Teclado Gaming TKL Rapid Trigger Interruptores Magnéticos",
+                "Keychron Q1 HE Teclado Inalámbrico"
+            ),
+            report.results.map { it.title }
+        )
+        assertTrue(report.discardedOffers.any { it.title.contains("Hall Of Fame") })
+        assertTrue(report.discardedOffers.any { it.title.contains("GEON Raw") })
+    }
+
+    @Test
+    fun `Google Product API parses only dated EUR price insights for a matching catalog item`() {
+        val client = SerpApiClient()
+        val observedAt = java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.US).apply {
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }.parse("Oct 15, 2026")!!.time + 12L * 60L * 60L * 1000L
+        val payload = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "product_results": {
+                "title": "Sony DualSense Wireless Controller PS5",
+                "stores": [
+                  {
+                    "name": "Amazon España",
+                    "title": "Sony DualSense Wireless Controller PS5",
+                    "price": "74,99 €",
+                    "extracted_price": 74.99,
+                    "link": "https://www.amazon.es/dp/DUALSENSETEST"
+                  }
+                ],
+                "price_insights": {
+                  "price_history": true,
+                  "currency": "EUR",
+                  "stores": [
+                    {
+                      "name": "Amazon España",
+                      "prices": [
+                        {"date": "Sep 10, 2026", "price": 79.99},
+                        {"date": "Oct 14, 2026", "price": 74.99}
+                      ]
+                    },
+                    {
+                      "name": "PcComponentes",
+                      "prices": [
+                        {"date": "Oct 13, 2026", "price": 76.50},
+                        {"date": "Oct 16, 2026", "price": 1.00}
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+            """.trimIndent()
+        )
+
+        val parsed = client.parseGoogleProductDetails(
+            root = payload,
+            expectedTitle = "Sony DualSense Wireless Controller PS5",
+            productId = "123456789",
+            observedAt = observedAt
+        )
+
+        assertEquals(1, parsed.offers.size)
+        assertTrue(parsed.priceHistoryAvailable)
+        assertEquals(3, parsed.priceInsights.size)
+        assertTrue(parsed.priceInsights.all { it.currency == "EUR" && it.observedAt < observedAt })
+        assertEquals(
+            listOf("Amazon España", "PcComponentes", "Amazon España"),
+            parsed.priceInsights.map { it.storeName }
+        )
+        assertEquals(79.99, parsed.priceInsights.first().price, 0.001)
+
+        val foreignCurrency = JSONObject(payload.toString()).apply {
+            getJSONObject("product_results").getJSONObject("price_insights").put("currency", "USD")
+        }
+        val rejected = client.parseGoogleProductDetails(
+            root = foreignCurrency,
+            expectedTitle = "Sony DualSense Wireless Controller PS5",
+            productId = "123456789",
+            observedAt = observedAt
+        )
+        assertTrue(rejected.priceInsights.isEmpty())
+    }
+
+    @Test
     fun onlineShoppingSearchKeepsSafeEuroOffersAndSortsByPrice() {
         val client = SerpApiClient()
         val payload = JSONObject(

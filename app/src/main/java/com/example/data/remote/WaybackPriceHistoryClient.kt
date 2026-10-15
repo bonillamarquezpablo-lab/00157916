@@ -515,6 +515,8 @@ class WaybackPriceHistoryClient(
                 val decimalDigits = numeric.length - comma - 1
                 if (decimalDigits in 1..2) numeric.replace(',', '.') else numeric.replace(",", "")
             }
+            comma < 0 && dot >= 0 && numeric.substringAfterLast('.').length == 3 ->
+                numeric.replace(".", "")
             else -> numeric
         }
         val price = numeric.toDoubleOrNull() ?: return null

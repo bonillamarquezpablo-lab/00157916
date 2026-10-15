@@ -1349,7 +1349,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             ". Son precios anunciados en páginas archivadas; puede haber huecos y no garantizan envío, stock ni precio final."
                     }
                     foundCount > 0 ->
-                        "Se encontraron capturas con precios previos, pero no se añadieron porque no se pudieron vincular a una ficha verificada o ya existían esos registros diarios."
+                        "Se encontraron capturas con precios previos, pero no se pudieron vincular a la ficha del producto o ya existían esos registros diarios."
                     checkedCount > 0 ->
                         "Se consultaron $checkedCount capturas gratuitas, pero ninguna expuso un precio EUR verificable para el producto exacto. No se han rellenado datos ausentes."
                     else ->

@@ -127,7 +127,7 @@ class ProductRepository(
                 quote.currency == "EUR" &&
                 quote.observedAt >= HISTORY_START_TIMESTAMP &&
                 isEligibleHistoryTitle(title) &&
-                isEligibleSeller(quote.storeName) &&
+                isEligibleSeller(quote.storeName, quote.sourceUrl) &&
                 isPlausibleHistoryPrice(title, quote.price)
         }
         if (validQuotes.isEmpty()) return 0
@@ -181,6 +181,7 @@ class ProductRepository(
                     isAccessoryListing(result.title)
             result.title.isNotBlank() &&
                 result.storeName.isNotBlank() &&
+                isMerchantDestinationConsistent(result.storeName, result.sourceUrl) &&
                 result.price.isFinite() &&
                 result.price > 0.0 &&
                 result.price <= MAX_HISTORY_PRICE_EUR &&
@@ -278,7 +279,7 @@ class ProductRepository(
                     "Segunda mano o reacondicionado"
                 hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title) ->
                     "Otro modelo o variante"
-                !isEligibleSeller(result.storeName) ->
+                !isEligibleSeller(result.storeName, result.sourceUrl) ->
                     "Otro modelo o vendedor no elegible"
                 !isEligibleHistoryTitle(result.title) ->
                     "Título no elegible para historial"
@@ -522,7 +523,7 @@ class ProductRepository(
         }
         val valid = filterOnlineSearchResults(offers, expectedTitle)
             .filterNot { it.isSecondHand || it.isRentalOrMonthly }
-            .filter { isEligibleSeller(it.storeName) && isEligibleHistoryTitle(it.title) }
+            .filter { isEligibleSeller(it.storeName, it.sourceUrl) && isEligibleHistoryTitle(it.title) }
             .groupBy { canonicalStoreId(it.storeName, it.sourceUrl) }
             .values
             .mapNotNull { rows ->
@@ -639,11 +640,41 @@ class ProductRepository(
             !Regex("""(?i)/\s*mes\b""").containsMatchIn(title)
     }
 
-    private fun isEligibleSeller(storeName: String): Boolean {
+    private fun isEligibleSeller(storeName: String, sourceUrl: String): Boolean {
         if (storeName.isBlank() || !isEligibleHistoryTitle(storeName)) return false
         val normalized = " " + normalizedProductTitle(storeName) + " "
         val excludedSellers = listOf("rentik", "wallapop", "cash converters", "vinted", "cex")
-        return excludedSellers.none { seller -> (" " + seller + " ") in normalized }
+        return excludedSellers.none { seller -> (" " + seller + " ") in normalized } &&
+            isMerchantDestinationConsistent(storeName, sourceUrl)
+    }
+
+    /**
+     * If the URL belongs to a known listed retailer, reject a contradictory provider label.
+     * Google Shopping redirect links are allowed as indirect destinations. Unknown hosts are
+     * retained because valid sellers may not yet be listed in the local store directory.
+     */
+    private fun isMerchantDestinationConsistent(storeName: String, sourceUrl: String): Boolean {
+        val host = parseHttpUri(sourceUrl)?.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+        if (host.isBlank()) return false
+        if (host.startsWith("google.") || host.endsWith(".google.com") || host.endsWith(".google.es")) {
+            return true
+        }
+
+        val knownStore = Store.ALL_STORES.firstOrNull { store ->
+            val domain = store.domain.substringBefore('/').removePrefix("www.").lowercase(Locale.ROOT)
+            domain.isNotBlank() && (host == domain || host.endsWith(".$domain"))
+        } ?: return true
+
+        val stop = setOf("espana", "españa", "online", "tienda", "store", "shop", "seller", "es", "de", "el", "la")
+        val expectedTokens = normalizedProductTitle(knownStore.name).split(' ')
+            .filter { it.length > 2 && it !in stop }
+        val actualTokens = normalizedProductTitle(storeName).split(' ')
+            .filter { it.length > 2 && it !in stop }
+        val expectedCompact = normalizedProductTitle(knownStore.name).replace(" ", "")
+        val actualCompact = normalizedProductTitle(storeName).replace(" ", "")
+        return expectedTokens.any { it in actualTokens } ||
+            (actualCompact.length >= 4 && expectedCompact.contains(actualCompact)) ||
+            (expectedCompact.length >= 4 && actualCompact.contains(expectedCompact))
     }
 
     private fun isAccessoryListing(title: String): Boolean =

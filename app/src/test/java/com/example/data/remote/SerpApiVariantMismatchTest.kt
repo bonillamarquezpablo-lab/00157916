@@ -123,7 +123,7 @@ class SerpApiVariantMismatchTest {
         val ankerUrl = anker.searchUrlFor("Anker Prime Power Bank 27,650 mAh")
         val ugreenUrl = ugreen.searchUrlFor("UGREEN Nexode 20000mAh 100W")
         assertTrue(ankerUrl.startsWith("https://www.anker.com/eu-en/search?q="))
-        assertTrue(ugreenUrl.startsWith("https://www.ugreen.com/es-es/search?q="))
+        assertTrue(ugreenUrl.startsWith("https://eu.ugreen.com/es-es/search?q="))
         assertFalse(ankerUrl.contains("google.", ignoreCase = true))
         assertFalse(ugreenUrl.contains("google.", ignoreCase = true))
     }

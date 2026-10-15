@@ -680,7 +680,8 @@ class ProductRepository(
                 quote.price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR ||
                 quote.observedAt < earliestAllowed ||
                 quote.observedAt >= now ||
-                quote.productTitle.isBlank()
+                quote.productTitle.isBlank() ||
+                onlineProductIdentityKey(quote.productTitle) != identity
             ) continue
 
             val observation = PriceObservationEntity(

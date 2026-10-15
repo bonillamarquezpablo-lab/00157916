@@ -16,6 +16,7 @@ from pathlib import PurePosixPath
 MAX_TEXT_BYTES = 2 * 1024 * 1024
 MAX_ARCHIVE_MEMBER_BYTES = 2 * 1024 * 1024
 MAX_ARCHIVE_TOTAL_BYTES = 20 * 1024 * 1024
+HISTORY_TEXT_SUFFIXES = (".kt", ".java", ".kts", ".gradle", ".xml", ".json", ".properties", ".yml", ".yaml", ".toml", ".md", ".sh", ".py", ".txt", ".conf", ".ini", ".env")
 
 PATTERNS: tuple[tuple[str, re.Pattern[bytes]], ...] = (
     ("GitHub token", re.compile(rb"\b(?:gh[pousr]_[A-Za-z0-9_]{30,}|github_pat_[A-Za-z0-9_]{30,})\b")),
@@ -49,8 +50,14 @@ SENSITIVE_BASENAMES = {
     "key.properties",
     "secrets.properties",
     "credentials.json",
+    "service-account.json",
+    "firebase-adminsdk.json",
+    ".npmrc",
+    ".pypirc",
+    "id_rsa",
+    "id_ed25519",
 }
-SENSITIVE_SUFFIXES = (".jks", ".keystore", ".p12", ".pfx", ".pem", ".pkey")
+SENSITIVE_SUFFIXES = (".jks", ".keystore", ".p12", ".pfx", ".pem", ".pkey", ".key", ".p8", ".mobileprovision", ".asc")
 
 
 def is_sensitive_name(name: str) -> bool:
@@ -100,6 +107,52 @@ def scan_zip(path: str, data: bytes, findings: list[tuple[str, str]]) -> None:
                 scan_bytes(f"{path}!/{member}", member_bytes, findings)
 
 
+
+def scan_git_history(findings: list[tuple[str, str]]) -> None:
+    """Inspect historical text blobs and archives so deleting a leaked file is not enough to pass."""
+    try:
+        listing = subprocess.check_output(["git", "rev-list", "--objects", "--all"], stderr=subprocess.STDOUT)
+    except (OSError, subprocess.CalledProcessError):
+        findings.append(("git-history", "Unable to enumerate repository history"))
+        return
+
+    seen_blobs: set[str] = set()
+    for raw_line in listing.splitlines():
+        parts = raw_line.split(b" ", 1)
+        if len(parts) != 2:
+            continue
+        object_id = parts[0].decode("ascii", errors="ignore")
+        path = parts[1].decode("utf-8", errors="replace")
+        lowered = path.lower()
+
+        if is_sensitive_name(path):
+            findings.append((f"git-history:{path}", "Sensitive credential/configuration filename exists in history"))
+            continue
+
+        if not (lowered.endswith(".zip") or lowered.endswith(HISTORY_TEXT_SUFFIXES)):
+            continue
+        if object_id in seen_blobs:
+            continue
+        seen_blobs.add(object_id)
+
+        try:
+            kind = subprocess.check_output(["git", "cat-file", "-t", object_id], text=True, stderr=subprocess.DEVNULL).strip()
+            if kind != "blob":
+                continue
+            data = subprocess.check_output(["git", "cat-file", "blob", object_id], stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.CalledProcessError):
+            findings.append((f"git-history:{path}", "Unable to inspect historical file"))
+            continue
+
+        historical_label = f"git-history:{path}@{object_id[:12]}"
+        if lowered.endswith(".zip"):
+            scan_zip(historical_label, data, findings)
+        elif len(data) > MAX_TEXT_BYTES:
+            findings.append((historical_label, "Large historical text file requires manual review"))
+        elif b"\\x00" not in data:
+            scan_bytes(historical_label, data, findings)
+
+
 def main() -> int:
     try:
         raw = subprocess.check_output(["git", "ls-files", "-z"], stderr=subprocess.STDOUT)
@@ -130,6 +183,8 @@ def main() -> int:
             scan_zip(path, data, findings)
         elif len(data) <= MAX_TEXT_BYTES and b"\x00" not in data:
             scan_bytes(path, data, findings)
+
+    scan_git_history(findings)
 
     if findings:
         print("FALLO: se han encontrado posibles credenciales o archivos locales sensibles.")

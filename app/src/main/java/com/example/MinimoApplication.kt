@@ -1,26 +1,21 @@
 package com.example
 
 import android.app.Application
-import android.content.ContentValues
 import android.os.Build
-import android.os.Environment
 import android.os.Process
-import android.provider.MediaStore
 import android.util.Log
 import java.io.File
 import java.io.IOException
-import java.io.PrintWriter
-import java.io.StringWriter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.system.exitProcess
 
 /**
- * Captures fatal runtime exceptions before Android's default handler terminates the process.
+ * Captures fatal runtime exceptions into app-private storage.
  *
- * On Android 10+, the report is written to the public Downloads collection without requesting
- * broad storage permissions. If that fails, a private app-specific fallback is used.
+ * Reports deliberately omit exception messages because third-party networking errors can include
+ * request details. Reports are bounded in size and count and are never written to public Downloads.
  */
 class MinimoApplication : Application() {
     override fun onCreate() {
@@ -41,69 +36,66 @@ class MinimoApplication : Application() {
 
         override fun uncaughtException(thread: Thread, error: Throwable) {
             try {
-                val path = writeReport(thread, error)
-                Log.e(TAG, "Fatal exception captured. Report: $path", error)
+                writeReport(thread, error)
+                // Do not attach the Throwable to Log.e: its message may contain sensitive request data.
+                Log.e(TAG, "Fatal exception captured; a redacted report was saved privately (${error.javaClass.name}).")
             } catch (reportError: Throwable) {
-                // Never let diagnostic I/O prevent Android's normal fatal-exception handling.
-                Log.e(TAG, "Could not persist the fatal exception report.", reportError)
-                Log.e(TAG, "Original fatal exception.", error)
+                Log.e(TAG, "Could not persist private crash report (${reportError.javaClass.name}).")
+                Log.e(TAG, "Fatal exception type: ${error.javaClass.name}.")
             }
 
             try {
                 previous?.uncaughtException(thread, error) ?: terminateProcess()
             } catch (handlerError: Throwable) {
-                Log.e(TAG, "The previous uncaught-exception handler failed.", handlerError)
+                Log.e(TAG, "Default exception handler failed (${handlerError.javaClass.name}); terminating process.")
                 terminateProcess()
             }
         }
 
         private fun writeReport(thread: Thread, error: Throwable): String {
-            val stack = StringWriter().also { writer ->
-                PrintWriter(writer).use { error.printStackTrace(it) }
-            }.toString()
+            val stamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())
             val report = buildString {
-                appendLine("Mínimo — informe de error fatal")
+                appendLine("Mínimo — informe de error fatal (redactado)")
                 appendLine("Fecha: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.ROOT).format(Date())}")
                 appendLine("Versión: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
                 appendLine("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
                 appendLine("Dispositivo: ${Build.MANUFACTURER} ${Build.MODEL}")
                 appendLine("Hilo: ${thread.name}")
                 appendLine()
-                append(stack)
-            }
-            val stamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())
-            val fileName = "Minimo-crash-$stamp.txt"
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                var insertedUri: android.net.Uri? = null
-                try {
-                    val values = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                        put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                appendLine("Se omiten mensajes de excepción y valores de datos para reducir el riesgo de filtrar información sensible.")
+                var current: Throwable? = error
+                var depth = 0
+                while (current != null && depth < MAX_CAUSE_DEPTH) {
+                    appendLine()
+                    appendLine("Tipo de excepción ${depth + 1}: ${current.javaClass.name}")
+                    current.stackTrace.take(MAX_STACK_FRAMES_PER_CAUSE).forEach { frame ->
+                        append("  at ${frame.className}.${frame.methodName}(")
+                        append(frame.fileName ?: "Unknown Source")
+                        if (frame.lineNumber >= 0) append(":${frame.lineNumber}")
+                        appendLine(")")
                     }
-                    val outputUri = app.contentResolver.insert(
-                        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                        values
-                    ) ?: throw IOException("Android no creó el archivo en Descargas.")
-                    insertedUri = outputUri
-                    val output = app.contentResolver.openOutputStream(outputUri, "w")
-                        ?: throw IOException("Android no abrió el archivo de diagnóstico.")
-                    output.use { it.write(report.toByteArray(Charsets.UTF_8)) }
-                    return "Descargas/$fileName"
-                } catch (failure: Exception) {
-                    insertedUri?.let { orphan ->
-                        runCatching { app.contentResolver.delete(orphan, null, null) }
-                    }
-                    Log.e(TAG, "Writing to public Downloads failed; using app-specific storage.", failure)
+                    current = current.cause
+                    depth++
                 }
             }
 
-            val directory = app.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
-                ?: app.filesDir
-            val fallback = File(directory, fileName)
-            fallback.writeText(report, Charsets.UTF_8)
-            return fallback.absolutePath
+            val directory = File(app.filesDir, CRASH_REPORT_DIRECTORY)
+            if (!directory.exists() && !directory.mkdirs()) {
+                throw IOException("Could not create private crash-report directory.")
+            }
+
+            val fileName = "Minimo-crash-$stamp.txt"
+            val file = File(directory, fileName)
+            file.writeText(report.take(MAX_REPORT_CHARS), Charsets.UTF_8)
+
+            // Retain at most three recent diagnostics to limit stored device information.
+            directory.listFiles()
+                ?.filter { it.isFile && it.name.startsWith("Minimo-crash-") && it != file }
+                ?.sortedByDescending { it.lastModified() }
+                ?.drop(MAX_REPORT_FILES - 1)
+                ?.forEach { old -> runCatching { old.delete() } }
+
+            return "private files/$CRASH_REPORT_DIRECTORY/$fileName"
         }
 
         private fun terminateProcess(): Nothing {
@@ -114,5 +106,10 @@ class MinimoApplication : Application() {
 
     private companion object {
         const val TAG = "MinimoCrashReport"
+        const val CRASH_REPORT_DIRECTORY = "crash-reports"
+        const val MAX_CAUSE_DEPTH = 8
+        const val MAX_STACK_FRAMES_PER_CAUSE = 24
+        const val MAX_REPORT_CHARS = 48 * 1024
+        const val MAX_REPORT_FILES = 3
     }
 }

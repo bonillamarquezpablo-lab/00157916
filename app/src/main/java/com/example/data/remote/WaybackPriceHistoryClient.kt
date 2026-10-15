@@ -169,7 +169,9 @@ class WaybackPriceHistoryClient(
 
         val lastAttempt = preferences.getLong("resolve_time_$cacheKey", 0L)
         val now = System.currentTimeMillis()
-        if (lastAttempt > 0L && now >= lastAttempt && now - lastAttempt < RETRY_INTERVAL_MS) {
+        if (lastAttempt > 0L && now >= lastAttempt &&
+            now - lastAttempt < STORE_LINK_RETRY_INTERVAL_MS
+        ) {
             return@withContext null
         }
 
@@ -551,6 +553,7 @@ class WaybackPriceHistoryClient(
         const val MAX_SNAPSHOTS_PER_URL = 12
         private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L
+        const val STORE_LINK_RETRY_INTERVAL_MS = 24L * 60L * 60L * 1000L
         const val DAY_MS = 24L * 60L * 60L * 1000L
         const val MIN_HISTORICAL_PRICE = 0.50
         const val MAX_HISTORICAL_PRICE = 10_000.0

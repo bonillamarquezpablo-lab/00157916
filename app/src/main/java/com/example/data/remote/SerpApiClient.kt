@@ -1282,6 +1282,54 @@ class SerpApiClient(
      * A size is compared only when both query and listing look like footwear and the listing
      * actually exposes a size; generic model numbers on listings are not enough.
      */
+    private fun isGeneralFootwearSizeSearch(query: String): Boolean {
+        val normalized = normalize(query)
+        if (!Regex("""\b(zapatillas?|zapatos?|calzado|sneakers?|shoes?)\b""").containsMatchIn(normalized)) {
+            return false
+        }
+        val labelled = Regex(
+            """\b(?:talla|size|eu|eur|numero|n[º°o])\s*[:#-]?\s*((?:3[5-9]|4[0-9]|5[0-2])(?:[.,]5)?)\b"""
+        )
+        val numeric = Regex("""(?<!\d)(?:3[5-9]|4[0-9]|5[0-2])(?:[.,]5)?(?!\d)""")
+        val hasSize = labelled.containsMatchIn(normalized) || numeric.containsMatchIn(normalized)
+        if (!hasSize) return false
+
+        val genericTerms = setOf(
+            "zapatilla", "zapatillas", "zapato", "zapatos", "calzado", "sneaker", "sneakers", "shoe", "shoes",
+            "nike", "adidas", "puma", "asics", "reebok", "converse", "vans", "hombre", "mujer",
+            "men", "women", "woman", "unisex", "running", "deportivo", "deportivas", "talla", "size",
+            "eu", "eur", "numero", "n", "y", "para"
+        )
+        val remainingTerms = normalized.split(' ').filter { token ->
+            token.isNotBlank() &&
+                token !in genericTerms &&
+                !numeric.matches(token) &&
+                !Regex("""(?:talla|size|eu|eur|numero|n[º°o])""").matches(token)
+        }
+        return remainingTerms.isEmpty()
+    }
+
+    private fun requestedFootwearBrandMatches(query: String, title: String): Boolean {
+        val brands = listOf("new balance", "nike", "adidas", "puma", "asics", "reebok", "converse", "vans")
+        val normalizedQuery = normalize(query)
+        val normalizedTitle = normalize(title)
+        val requiredBrand = brands.firstOrNull { normalizedQuery.contains(it) }
+        return requiredBrand == null || normalizedTitle.contains(requiredBrand)
+    }
+
+    private fun isLikelyFootwearTitle(title: String): Boolean {
+        val normalized = normalize(title)
+        val explicitCategory = Regex(
+            """\b(zapatillas?|zapatos?|calzado|sneakers?|shoes?|running|trail|basketball|football|futbol|tenis)\b"""
+        ).containsMatchIn(normalized)
+        if (explicitCategory) return true
+        // Many feeds omit "zapatillas" from the title but retain the unmistakable model.
+        val knownShoeModels = Regex(
+            """\b(air\s*max|air\s*force|air\s*jordan|p\s*6000|v5\s*rnr|run\s*defy|downshifter|revolution|pegasus|vomero|court\s*vision|blazer|killshot|dunk|metcon|invincible|sabrina|samba|gazelle|ultraboost|campus|superstar|stan\s*smith|forum)\b"""
+        )
+        return knownShoeModels.containsMatchIn(normalized)
+    }
+
     private fun hasFootwearSizeMismatch(query: String, title: String): Boolean {
         val footwearPattern = Regex(
             """(?i)\b(zapatillas?|sneakers?|shoes|calzado|nike|adidas|puma|asics|new\s+balance|reebok|converse|vans|air\s+force|air\s+max|jordan)\b"""
@@ -1383,6 +1431,14 @@ class SerpApiClient(
         // "Teclado Hall"/"teclado efecto Hall" is a technology search, not a literal
         // two-word product name. Match Hall/HE/TMR keyboards without accepting "Hall of Fame".
         if (isHallEffectKeyboardSearch(requested)) return isHallEffectKeyboardResult(returned)
+
+        // Broad footwear searches with a size should not throw away every listing that omits
+        // the size in its title: many retailers offer a size selector on the product page.
+        // Explicitly wrong sizes have already been rejected by hasVariantMismatch() upstream.
+        if (isGeneralFootwearSizeSearch(requested) &&
+            isLikelyFootwearTitle(returned) &&
+            requestedFootwearBrandMatches(requested, returned)
+        ) return true
 
         val orderedWanted = normalize(requested)
             .replace(Regex("(\\d+)\\s?(gb|tb|mb)\\b"), "$1 $2")

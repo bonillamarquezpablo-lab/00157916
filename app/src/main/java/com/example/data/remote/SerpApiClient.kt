@@ -579,7 +579,10 @@ class SerpApiClient(
                 item.optString("link"),
                 item.optString("product_link")
             ).filter(::isNavigableHttpUrl).toList()
-            val url = candidateUrls.firstOrNull { !isGoogleDomainUrl(it) }
+            // Google may wrap the retailer's real product URL in an /url or /aclk redirect.
+            // Prefer that destination; retain a clearly labeled Google Shopping link only when
+            // the provider supplies no direct destination at all.
+            val url = candidateUrls.firstNotNullOfOrNull(::extractDirectRetailerUrl)
                 ?: candidateUrls.firstOrNull()
                 ?: googleShoppingSearchUrl(title)
             val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
@@ -819,7 +822,8 @@ class SerpApiClient(
                     !priceText.contains("€") &&
                     !priceText.contains("EUR", ignoreCase = true))
             ) return@mapNotNull null
-            val url = store.optString("link").takeIf(::isNavigableHttpUrl) ?: return@mapNotNull null
+            val rawUrl = store.optString("link").takeIf(::isNavigableHttpUrl) ?: return@mapNotNull null
+            val url = extractDirectRetailerUrl(rawUrl) ?: rawUrl
             SerpApiShoppingResult(
                 title = catalogTitle,
                 price = price,
@@ -1272,7 +1276,43 @@ class SerpApiClient(
         return "${boltCount}x${normalizedPcd}"
     }
 
+    /**
+     * Shoe-size constraints apply even when people omit the word "talla". This prevents a
+     * query like "zapatillas nike 41" from accepting offers explicitly listed as size 44/45.
+     * A size is compared only when both query and listing look like footwear and the listing
+     * actually exposes a size; generic model numbers on listings are not enough.
+     */
+    private fun hasFootwearSizeMismatch(query: String, title: String): Boolean {
+        val footwearPattern = Regex(
+            """(?i)\b(zapatillas?|sneakers?|shoes|calzado|nike|adidas|puma|asics|new\s+balance|reebok|converse|vans|air\s+force|air\s+max|jordan)\b"""
+        )
+        if (!footwearPattern.containsMatchIn(query) || !footwearPattern.containsMatchIn(title)) return false
+
+        fun normalizeSize(value: String?): String? = value
+            ?.replace(',', '.')
+            ?.toDoubleOrNull()
+            ?.takeIf { it in 35.0..52.5 }
+            ?.let { number -> if (number % 1.0 == 0.0) number.toInt().toString() else number.toString() }
+
+        val labelledSize = Regex(
+            """(?i)\b(?:talla|size|eu|eur|numero|n[º°o])\s*[:#-]?\s*((?:3[5-9]|4[0-9]|5[0-2])(?:[.,]5)?)\b"""
+        )
+        val querySize = normalizeSize(
+            labelledSize.findAll(query).lastOrNull()?.groupValues?.getOrNull(1)
+                ?: Regex("""(?<!\d)(?:3[5-9]|4[0-9]|5[0-2])(?:[.,]5)?(?!\d)""")
+                    .findAll(query).lastOrNull()?.value
+        ) ?: return false
+
+        val titleSizeText = labelledSize.findAll(title).lastOrNull()?.groupValues?.getOrNull(1)
+            ?: Regex(
+                """(?i)(?:[-/|]\s*|\s)((?:3[5-9]|4[0-9]|5[0-2])(?:[.,]5)?)(?:\s+(?:hombre|mujer|men|women|woman|unisex))?\s*$"""
+            ).find(title)?.groupValues?.getOrNull(1)
+        val titleSize = normalizeSize(titleSizeText) ?: return false
+        return querySize != titleSize
+    }
+
     private fun hasVariantMismatch(query: String, title: String): Boolean {
+        if (hasFootwearSizeMismatch(query, title)) return true
         val q = query.lowercase(Locale.ROOT).replace(',', '.')
         val t = title.lowercase(Locale.ROOT).replace(',', '.')
         val units = listOf("mah", "wh", "w", "gb", "tb", "ml", "kg", "g", "l", "inch", "pulgadas")

@@ -207,7 +207,7 @@ data class Store(
                 .trim('_')
                 .ifBlank { "unknown_store" }
             val plausibleDomain = candidateDomain.takeIf {
-                Regex("""(?i)^(?:[a-z0-9-]+\\.)+[a-z]{2,63}$""").matches(it)
+                Regex("""(?i)^(?:[a-z0-9-]+\.)+[a-z]{2,63}$""").matches(it)
             }
             return Store(
                 id = safeId,

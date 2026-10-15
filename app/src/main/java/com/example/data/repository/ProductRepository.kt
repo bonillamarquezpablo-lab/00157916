@@ -14,6 +14,7 @@ import com.example.data.model.ProductCategory
 import com.example.data.model.StoreOffer
 import com.example.data.remote.ArchivedPriceQuote
 import com.example.data.remote.SerpApiQuote
+import com.example.data.remote.SerpApiPriceInsight
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.OnlineProductGroup
@@ -597,6 +598,67 @@ class ProductRepository(
     }
 
     /**
+     * Persists dated price_insights returned by Google Product API. These are historical
+     * observations from Google, not prices observed by Mínimo on those dates. A known,
+     * verified product and the exact Google catalog item must match before anything is saved.
+     */
+    suspend fun recordGooglePriceInsightsHistory(
+        productId: String,
+        expectedTitle: String,
+        googleCatalogId: String,
+        insights: List<SerpApiPriceInsight>
+    ): Int {
+        startupCleanupCompleted.await()
+        if (productId.isBlank() || expectedTitle.isBlank() ||
+            !googleCatalogId.matches(Regex("[0-9]{5,}")) || insights.isEmpty()
+        ) return 0
+
+        val product = productDao.getProductById(productId) ?: return 0
+        if (!product.isPriceVerified ||
+            onlineProductIdentityKey(product.title) != onlineProductIdentityKey(expectedTitle)
+        ) return 0
+
+        val now = System.currentTimeMillis()
+        val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)
+        val sourceUrl = "https://www.google.com/shopping/product/$googleCatalogId"
+        var inserted = 0
+        for (quote in insights.distinctBy { Triple(it.storeName.lowercase(Locale.ROOT), it.observedAt, it.price) }) {
+            if (quote.currency != "EUR" ||
+                !isSafeCatalogTitleMatch(quote.productTitle, product.title) ||
+                quote.observedAt < earliestAllowed ||
+                quote.observedAt >= now ||
+                !quote.price.isFinite() ||
+                quote.price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR ||
+                !isEligibleHistoryTitle(quote.productTitle) ||
+                !isEligibleSeller(quote.storeName, sourceUrl) ||
+                !isPlausibleHistoryPrice(quote.productTitle, quote.price)
+            ) continue
+
+            val storeId = canonicalStoreId(quote.storeName, sourceUrl)
+            val observation = PriceObservationEntity(
+                productId = product.id,
+                storeId = storeId,
+                price = quote.price,
+                currency = "EUR",
+                observedAt = quote.observedAt,
+                sourceUrl = sourceUrl,
+                sourceName = "Google Product API · price_insights",
+                isVerified = true,
+                verificationNote = "Precio histórico fechado devuelto por Google Product API. Es una observación del proveedor, no una consulta de Mínimo realizada ese día; puede tener huecos y no garantiza precio final, envío ni disponibilidad.",
+                productTitle = quote.productTitle,
+                storeName = quote.storeName,
+                sourceType = "Google Product API · price_insights",
+                linkType = "Historial Google Shopping",
+                collectedAt = now,
+                evidenceType = "google_insights",
+                sourcePageUrl = sourceUrl
+            )
+            if (saveDailyObservation(observation)) inserted++
+        }
+        return inserted
+    }
+
+    /**
      * Save a single Google Product API response against the already-identified product row.
      * No new catalogue product is created and no observation is saved if the product was not
      * safely identified by the API parser.
@@ -1113,11 +1175,13 @@ class ProductRepository(
         // Independently sourced historical archive points may predate that boundary, but only
         // when the row explicitly carries archive provenance from the v8 schema.
         val sortedHistory = verifiedObservations.filter { observation ->
-            val eligibleDate = observation.evidenceType == "archive" ||
+            val eligibleDate = observation.evidenceType in setOf("archive", "google_insights") ||
                 observation.observedAt >= HISTORY_START_TIMESTAMP
             eligibleDate && isEligibleObservationForHistory(observation)
         }.sortedBy { it.observedAt }
-        val liveHistory = sortedHistory.filter { it.evidenceType != "archive" }
+        // Only current search observations establish the live price. Historical-provider points
+        // remain visible on the chart but can never replace the current quote.
+        val liveHistory = sortedHistory.filter { it.evidenceType == "live" }
         // Current price/store must always come from a live provider observation, never a Wayback
         // snapshot, even when an archived snapshot was captured later in the same calendar day.
         val latestLiveDayStart = liveHistory.lastOrNull()?.let { localDayBounds(it.observedAt).first }
@@ -1130,7 +1194,7 @@ class ProductRepository(
             .groupBy { localDayBounds(it.observedAt).first }
             .values
             .mapNotNull { dayOffers ->
-                val liveOffers = dayOffers.filter { it.evidenceType != "archive" }
+                val liveOffers = dayOffers.filter { it.evidenceType == "live" }
                 (liveOffers.ifEmpty { dayOffers }).minByOrNull { it.price }
             }
             .sortedBy { localDayBounds(it.observedAt).first }

@@ -24,9 +24,9 @@ data class DealVerdict(
     companion object {
         fun unverified(): DealVerdict = DealVerdict(
             level = VerdictLevel.UNVERIFIED,
-            title = "Datos de demostración",
+            title = "Precio no verificado",
             badgeText = "PRECIO SIN VERIFICAR",
-            explanation = "Los precios, ofertas e historial de esta ficha son datos de ejemplo. Mínimo todavía no consulta la tienda en tiempo real, así que no puede confirmar una oferta ni un mínimo histórico.",
+            explanation = "Esta ficha todavía no tiene una observación online validada. Los datos precargados no se consideran un precio actual ni una oferta; Mínimo necesita una fuente y una fecha verificables para empezar el historial.",
             iconName = "Info",
             color = Color(0xFF64748B),
             confidenceScore = 0

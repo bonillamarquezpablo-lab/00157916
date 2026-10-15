@@ -50,7 +50,7 @@ fun DealVerdictBadge(
 ) {
     var expanded by remember { mutableStateOf(false) }
 
-    val isDemoData = verdict.title == "Datos de demostración"
+    val isDemoData = verdict.level == VerdictLevel.UNVERIFIED && verdict.badgeText == "PRECIO SIN VERIFICAR"
 
     val icon = when (verdict.level) {
         VerdictLevel.ATH_RECORD -> Icons.Default.CheckCircle
@@ -66,7 +66,7 @@ fun DealVerdictBadge(
         else -> "Verificado"
     }
     val statusDescription = when {
-        isDemoData -> "Datos de demostración · sin consulta en directo"
+        isDemoData -> "Precio no verificado · consulta pendiente"
         verdict.level == VerdictLevel.UNVERIFIED -> "Precio observado · historial aún insuficiente"
         else -> "Resultado basado en datos verificados"
     }
@@ -179,7 +179,7 @@ fun DealVerdictBadge(
                         )
                         Text(
                             text = if (isDemoData) {
-                                "Esta ficha pertenece al catálogo inicial. No hay una observación actual validada de una consulta online; por eso no se muestran sus precios como reales."
+                                "Todavía no hay una observación online validada. Los datos precargados no se muestran como precios reales; se necesita una fuente y una fecha verificables."
                             } else if (verdict.level == VerdictLevel.UNVERIFIED) {
                                 "Hay al menos un precio observado con fuente y fecha, pero aún no existen suficientes consultas en fechas distintas para calcular un mínimo histórico, una media de 90 días o confirmar un descuento."
                             } else {

@@ -180,79 +180,86 @@ fun OnlineSearchScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(25.dp))
                         Spacer(Modifier.width(9.dp))
-                        Text("Encuentra productos y ofertas", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                        Text("Buscador online", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
                     }
-                    Text("Busca cualquier producto. Las ofertas válidas se guardan en Mercado; toca una tarjeta para comparar tiendas y consultar el historial real.")
+                    Text("Consulta Google Shopping o Amazon.es. Las ofertas aceptadas se guardan en Mercado; los precios se verifican en la tienda.")
                     OutlinedTextField(
                         value = state.onlineSearchQuery,
                         onValueChange = onQueryChange,
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("¿Qué quieres comprar?") },
-                        placeholder = { Text("Ej. Anker Prime 20.000 mAh 200 W") },
+                        label = { Text("¿Qué producto buscas?") },
+                        placeholder = { Text("Ej. teclado Hall, Volkswagen Polo 9N3, Anker Prime") },
                         singleLine = true,
                         shape = RoundedCornerShape(14.dp),
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { onSearch() })
                     )
-                    Button(
-                        onClick = onSearch,
-                        enabled = !state.isOnlineSearching && !state.isRefreshingPrices && state.onlineSearchQuery.trim().length >= 2,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        if (state.isOnlineSearching) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                            Text(if (state.onlineSearchProvider == OnlineSearchProvider.AMAZON) "Consultando Amazon.es…" else "Buscando ofertas…")
-                        } else {
-                            Icon(Icons.Default.Search, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Buscar y comparar precios")
-                        }
-                    }
-                    OutlinedButton(
-                        onClick = onAmazonSearch,
-                        enabled = !state.isOnlineSearching && !state.isRefreshingPrices && state.onlineSearchQuery.trim().length >= 2,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        if (state.isOnlineSearching && state.onlineSearchProvider == OnlineSearchProvider.AMAZON) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Consultando Amazon.es…")
-                        } else {
-                            Icon(Icons.Default.ShoppingBag, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Buscar precios de Amazon.es en Mínimo")
-                        }
-                    }
-                    if (state.onlineSearchResults.isNotEmpty()) {
-                        OutlinedButton(
-                            onClick = onForceRefresh,
-                            enabled = !state.isOnlineSearching && !state.isRefreshingPrices &&
-                                state.onlineSearchQuery.trim().length >= 2,
-                            modifier = Modifier.fillMaxWidth()
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = onSearch,
+                            enabled = !state.isOnlineSearching && !state.isRefreshingPrices && state.onlineSearchQuery.trim().length >= 2,
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Actualizar resultados ahora (puede consumir cuota)")
+                            if (state.isOnlineSearching && state.onlineSearchProvider == OnlineSearchProvider.GOOGLE_SHOPPING) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(5.dp))
+                            } else {
+                                Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(17.dp))
+                                Spacer(Modifier.width(5.dp))
+                            }
+                            Text("Buscar ofertas", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        OutlinedButton(
+                            onClick = onAmazonSearch,
+                            enabled = !state.isOnlineSearching && !state.isRefreshingPrices && state.onlineSearchQuery.trim().length >= 2,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            if (state.isOnlineSearching && state.onlineSearchProvider == OnlineSearchProvider.AMAZON) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(5.dp))
+                            } else {
+                                Icon(Icons.Default.ShoppingBag, contentDescription = null, modifier = Modifier.size(17.dp))
+                                Spacer(Modifier.width(5.dp))
+                            }
+                            Text("Amazon.es", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (state.onlineSearchResults.isNotEmpty()) {
+                            TextButton(
+                                onClick = onForceRefresh,
+                                enabled = !state.isOnlineSearching && !state.isRefreshingPrices &&
+                                    state.onlineSearchQuery.trim().length >= 2,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(5.dp))
+                                Text("Actualizar resultados ahora (puede consumir cuota)", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        } else {
+                            Spacer(Modifier.weight(1f))
+                        }
+                        TextButton(
+                            onClick = onOpenSettings,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Configurar precios", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                     Text(
-                        "Consulta el catálogo público de Amazon.es y muestra los precios aquí. No necesita abrir la app de Amazon, pero no puede leer tus cupones o precios personalizados de la cuenta Prime.",
+                        "Se consulta el catálogo público, no tus cupones ni precios personalizados de Prime.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     TextButton(
                         onClick = { openAmazonSearch(context, state.onlineSearchQuery) },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.align(Alignment.End),
                         enabled = !state.isOnlineSearching && !state.isRefreshingPrices
                     ) {
-                        Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(4.dp))
                         Text("Abrir Amazon con mi sesión Prime")
-                    }
-                    OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
-                        Text("Configurar la fuente de precios")
                     }
                 }
             }
@@ -262,7 +269,18 @@ fun OnlineSearchScreen(
         }
         state.onlineSearchStatus?.let { status ->
             item {
-                Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+                ) {
+                    Text(
+                        status,
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
         if (state.onlineSearchDiscardedOffers.isNotEmpty()) {

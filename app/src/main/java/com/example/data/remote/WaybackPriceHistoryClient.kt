@@ -270,11 +270,27 @@ class WaybackPriceHistoryClient(
         val normalizedDomain = normalizeMerchantDomain(domain) ?: return null
         val tokens = historicalUrlSearchTokens(expectedTitle)
         if (tokens.size < 2) return null
+        val modelTokens = tokens.filter { token ->
+            token.any(Char::isDigit) && token.any(Char::isLetter)
+        }
+        val textTokens = tokens.filter { token ->
+            token.any(Char::isLetter) && !token.any(Char::isDigit)
+        }
+        // Avoid broad "OR" queries: on a large retailer domain, one generic token may match
+        // hundreds of unrelated URLs. Require the exact model code plus one distinguishing text
+        // term, or two distinctive text terms when the product has no model code.
+        val requiredLookaheads = when {
+            modelTokens.isNotEmpty() && textTokens.isNotEmpty() -> listOf(
+                "(?=.*${Regex.escape(modelTokens.first())})",
+                "(?=.*(?:${textTokens.take(2).joinToString("|") { Regex.escape(it) }}))"
+            )
+            textTokens.size >= 2 -> textTokens.take(2).map { "(?=.*${Regex.escape(it)})" }
+            else -> return null
+        }
         val start = (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
         val from = formatUtc(start, "yyyyMMdd")
         val to = formatUtc(now, "yyyyMMdd")
-        val alternatives = tokens.joinToString("|") { Regex.escape(it) }
-        val urlPattern = "(?i).*(?:$alternatives).*"
+        val urlPattern = "(?i)" + requiredLookaheads.joinToString("") + ".*"
         return HttpUrl.Builder()
             .scheme("https")
             .host("web.archive.org")

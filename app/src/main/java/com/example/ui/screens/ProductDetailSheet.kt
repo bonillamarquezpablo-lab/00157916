@@ -103,12 +103,27 @@ fun ProductDetailSheet(
             append(" Puede haber huecos; los precios históricos no garantizan stock, envío ni precio final.")
         }
     }
-    val latestPricePoint = product.priceHistory.maxByOrNull { it.timestamp }
-    val currentSourceLabel = latestPricePoint
-        ?.eventLabel
-        ?.takeIf { it.isNotBlank() }
-        ?: "Fuente no disponible"
-    val currentLinkType = latestPricePoint?.linkType ?: "directo"
+    // Historical archive/insight points must never be presented as the source for today's price.
+    val latestLivePricePoint = product.priceHistory
+        .filterNot {
+            it.eventLabel.equals("Internet Archive", ignoreCase = true) ||
+                it.eventLabel.contains("price_insights", ignoreCase = true)
+        }
+        .maxByOrNull { it.timestamp }
+    val currentSourceLabel = if (!product.isPriceVerified) {
+        "Sin precio actual verificado"
+    } else {
+        product.priceSource.takeIf { it.isNotBlank() }
+            ?: latestLivePricePoint?.eventLabel?.takeIf { it.isNotBlank() }
+            ?: "Fuente no disponible"
+    }
+    val currentLinkType = if (!product.isPriceVerified) {
+        "Sin oferta actual verificada"
+    } else {
+        product.offers.firstOrNull { it.url == product.storeUrl }?.linkType
+            ?: latestLivePricePoint?.linkType
+            ?: "directo"
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -269,15 +284,19 @@ fun ProductDetailSheet(
                         // Current price
                         Column {
                             Text(
-                                text = "Precio Actual",
+                                text = if (product.isPriceVerified) "Precio actual" else "Precio actual no confirmado",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = "${String.format("%.2f", product.currentPrice)} €",
+                                text = if (product.isPriceVerified) {
+                                    "${String.format("%.2f", product.currentPrice)} €"
+                                } else {
+                                    "No disponible"
+                                },
                                 fontWeight = FontWeight.Black,
-                                fontSize = 20.sp,
-                                color = if (product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
+                                fontSize = if (product.isPriceVerified) 20.sp else 15.sp,
+                                color = if (product.isPriceVerified && product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             product.priceObservedAt?.let { observedAt ->
                                 Text(
@@ -296,15 +315,21 @@ fun ProductDetailSheet(
                                 )
                             }
                             Text(
-                                text = "$currentSourceLabel · confirma precio final y stock en la tienda.",
+                                text = if (product.isPriceVerified) {
+                                    "$currentSourceLabel · confirma precio final y stock en la tienda."
+                                } else {
+                                    currentSourceLabel
+                                },
                                 fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            Text(
-                                text = "Enlace: $currentLinkType",
-                                fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            if (product.isPriceVerified) {
+                                Text(
+                                    text = "Enlace: $currentLinkType",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
 
                         // Do not infer a historical low from a single query.

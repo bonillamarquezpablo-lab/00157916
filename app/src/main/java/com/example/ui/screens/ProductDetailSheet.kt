@@ -95,7 +95,7 @@ fun ProductDetailSheet(
             append(".")
         }
         if (isEmpty()) {
-            append("Todavía no hay una serie histórica externa verificada para esta ficha. Pulsa «Comparar tiendas» para comprobar si Google ofrece fechas y precios históricos; esa consulta consume una búsqueda de SerpApi. Si Google no publica el historial, Mínimo lo construirá con nuevas observaciones.")
+            append("Todavía no hay un historial anterior verificado para esta ficha. Los precios de la búsqueda actual no demuestran cómo costaba antes. Pulsa «Comparar tiendas» para comprobar si Google ofrece fechas y precios históricos; esa consulta consume una búsqueda de SerpApi y puede que Google no publique datos para este producto.")
         } else {
             append(" Puede haber huecos; los precios históricos no garantizan stock, envío ni precio final.")
         }

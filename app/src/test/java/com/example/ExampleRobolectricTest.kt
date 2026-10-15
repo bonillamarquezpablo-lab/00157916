@@ -1362,6 +1362,10 @@ class ExampleRobolectricTest {
                     quotes = listOf(quote)
                 )
             )
+            // Startup reconciliation must never mistake a verified archive quote for a current price.
+            database.productDao().markProductsWithVerifiedObservations()
+            assertFalse(database.productDao().getProductById("archive_only_anker")!!.isPriceVerified)
+
             val product = withTimeout<com.example.data.model.Product>(10_000L) {
                 repository.allProductsStream.first { list ->
                     list.any { it.id == "archive_only_anker" && it.priceHistory.any { point -> point.eventLabel == "Internet Archive" } }

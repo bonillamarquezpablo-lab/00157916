@@ -269,7 +269,7 @@ class WaybackPriceHistoryClient(
             "hp" to ("HP" to "hp.com")
         )
         val match = brands.firstOrNull { (brand, _) ->
-            Regex("""\\b${Regex.escape(brand)}\\b""").containsMatchIn(normalized)
+            Regex("""\b${Regex.escape(brand)}\b""").containsMatchIn(normalized)
         } ?: return null
         val domain = normalizeMerchantDomain(match.second.second) ?: return null
         return match.second.first to domain

@@ -1332,9 +1332,24 @@ class SerpApiClient(
         // two-word product name. Match Hall/HE/TMR keyboards without accepting "Hall of Fame".
         if (isHallEffectKeyboardSearch(requested)) return isHallEffectKeyboardResult(returned)
 
-        val wanted = tokens(requested)
+        val orderedWanted = normalize(requested)
+            .replace(Regex("(\\d+)\\s?(gb|tb|mb)\\b"), "$1 $2")
+            .split(' ')
+            .filter { it.length > 1 && it !in STOP_WORDS }
+            .distinct()
+        val wanted = orderedWanted.toSet()
         val found = tokens(returned)
         if (wanted.isEmpty() || found.isEmpty()) return false
+
+        // If the query specifies a year and the listing specifies a different year, don't mix
+        // seasonal editions (e.g. an Advent calendar for 2024 with a 2026 edition).
+        val requestedYears = Regex("""\b(?:19|20)\d{2}\b""").findAll(normalize(requested))
+            .map { it.value }.toSet()
+        val returnedYears = Regex("""\b(?:19|20)\d{2}\b""").findAll(normalize(returned))
+            .map { it.value }.toSet()
+        if (requestedYears.isNotEmpty() && returnedYears.isNotEmpty() &&
+            requestedYears.intersect(returnedYears).isEmpty()
+        ) return false
 
         val containsModelCode = wanted.any { token -> token.length >= 4 && token.any(Char::isDigit) && token.any(Char::isLetter) }
 
@@ -1371,6 +1386,14 @@ class SerpApiClient(
                         maxOf(token.length, candidate.length).toDouble() >= 0.65 -> true
                 else -> false
             }
+        }
+
+        // For longer product-specific queries, at least one of the first two meaningful
+        // terms must match. This protects brand/model searches from generic category matches
+        // such as another brand's advent calendar, even if several generic words overlap.
+        if (orderedWanted.size >= 4) {
+            val leadingAnchors = orderedWanted.take(2).filter { it.length >= 4 }
+            if (leadingAnchors.isNotEmpty() && leadingAnchors.none(::tokenMatches)) return false
         }
 
         val overlap = wanted.count(::tokenMatches)

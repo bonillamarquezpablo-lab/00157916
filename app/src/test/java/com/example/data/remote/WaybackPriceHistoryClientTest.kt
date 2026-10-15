@@ -122,7 +122,7 @@ class WaybackPriceHistoryClientTest {
 
         assertEquals(
             "https://www.parfumdreams.es/Polo-Blue-100ml",
-            client.extractDirectMerchantUrl(html, "parfumdreams.ES")
+            client.extractDirectMerchantUrl(html, "parfumdreams.ES", "Polo Blue 100ml")
         )
         assertNull(client.extractDirectMerchantUrl(html, "Ralph Lauren"))
     }

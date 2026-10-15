@@ -2436,12 +2436,12 @@ class ExampleRobolectricTest {
                 listOf(suspiciousPhone, suspiciousLaptop, suspiciousConsole, legitimateCase, legitimatePhone)
             )
 
-            assertFalse("A lone implausibly cheap phone must not pass without a comparison set",
-                accepted.any { it.sourceUrl == suspiciousPhone.sourceUrl })
-            assertFalse("A very cheap MacBook must not be accepted based on one listing",
-                accepted.any { it.sourceUrl == suspiciousLaptop.sourceUrl })
-            assertFalse("An implausibly cheap PS5 listing must be rejected",
-                accepted.any { it.sourceUrl == suspiciousConsole.sourceUrl })
+            assertTrue("Keep the cheap phone visible for diagnosis, but flag it as suspicious",
+                accepted.any { it.sourceUrl == suspiciousPhone.sourceUrl && it.isSuspiciousPrice })
+            assertTrue("Keep a very cheap MacBook visible, but do not count it as a trusted price",
+                accepted.any { it.sourceUrl == suspiciousLaptop.sourceUrl && it.isSuspiciousPrice })
+            assertTrue("Keep the implausibly cheap PS5 visible for diagnosis, but flag it",
+                accepted.any { it.sourceUrl == suspiciousConsole.sourceUrl && it.isSuspiciousPrice })
             assertTrue("Legitimate low-price accessories are exempt from device floors",
                 accepted.any { it.sourceUrl == legitimateCase.sourceUrl })
             assertTrue("A plausible retail phone offer should remain eligible",

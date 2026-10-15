@@ -41,6 +41,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -151,18 +152,32 @@ fun OnlineSearchScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val allGroups = buildOnlineSearchDisplayGroups(
-        results = state.onlineSearchResults,
-        query = state.onlineSearchQuery,
-        showSecondHand = state.onlineSearchShowSecondHand,
-        amazonOnly = false
-    )
-    val amazonGroups = buildOnlineSearchDisplayGroups(
-        results = state.onlineSearchResults,
-        query = state.onlineSearchQuery,
-        showSecondHand = state.onlineSearchShowSecondHand,
-        amazonOnly = true
-    )
+    // Grouping includes matching and sorting work. Reuse it across unrelated state changes
+    // (status text, quota messages, and loading flags) instead of recalculating on every recomposition.
+    val allGroups = remember(
+        state.onlineSearchResults,
+        state.onlineSearchQuery,
+        state.onlineSearchShowSecondHand
+    ) {
+        buildOnlineSearchDisplayGroups(
+            results = state.onlineSearchResults,
+            query = state.onlineSearchQuery,
+            showSecondHand = state.onlineSearchShowSecondHand,
+            amazonOnly = false
+        )
+    }
+    val amazonGroups = remember(
+        state.onlineSearchResults,
+        state.onlineSearchQuery,
+        state.onlineSearchShowSecondHand
+    ) {
+        buildOnlineSearchDisplayGroups(
+            results = state.onlineSearchResults,
+            query = state.onlineSearchQuery,
+            showSecondHand = state.onlineSearchShowSecondHand,
+            amazonOnly = true
+        )
+    }
     val visibleGroups = if (state.onlineSearchAmazonOnly) amazonGroups else allGroups
 
     LazyColumn(

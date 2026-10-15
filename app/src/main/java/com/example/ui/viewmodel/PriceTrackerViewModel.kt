@@ -23,6 +23,9 @@ import com.example.data.model.Store
 import com.example.data.repository.ProductRepository
 import com.example.notifications.PriceAlertScheduler
 import com.example.data.repository.UrlAnalysisResult
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -100,6 +103,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         const val MAX_TRACKED_REFRESH_PER_TAP = 10
         const val MAX_ARCHIVE_PAGES_PER_SEARCH = 2
         const val MAX_ARCHIVE_BACKFILL_MS = 8_000L
+        const val MAX_STORE_LINK_RESOLUTIONS_PER_SEARCH = 8
+        const val MAX_STORE_LINK_RESOLUTION_MS = 7_000L
     }
 
     private val database = AppDatabase.getInstance(application)
@@ -1087,48 +1092,49 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
      * pages. This runs after current results are displayed, does not call SerpApi, and never
      * uses archived prices to overwrite the current offer. Archive coverage is product-dependent.
      */
+    /**
+     * Resolve Google Shopping result destinations to the seller's HTTPS product page when
+     * the seller domain can be matched safely. This is a bounded public-page lookup and does not
+     * consume SerpApi credits. Resolved URLs are persisted so the detail sheet also opens the store.
+     */
     private fun startFreeArchiveBackfill(
         results: List<SerpApiShoppingResult>,
         query: String,
         provider: OnlineSearchProvider
     ) {
-        if (!waybackPreferences.getBoolean("enabled", true)) return
-
-        val candidates = results
-            .filterNot { it.isSecondHand || it.isRentalOrMonthly || it.isFitmentUnverified || it.isCategoryUnverified }
-            .filter {
-                (waybackPriceHistoryClient.isEligibleDirectUrl(it.sourceUrl) && !isGoogleShoppingUrl(it.sourceUrl)) ||
-                    (isGoogleShoppingUrl(it.sourceUrl) && it.storeName.isNotBlank())
-            }
-            .sortedBy { it.price }
-            .distinctBy { it.title.trim().lowercase(Locale.ROOT) + "|" + it.sourceUrl }
-            .take(MAX_ARCHIVE_PAGES_PER_SEARCH)
-
-        if (candidates.isEmpty()) {
-            appendArchiveNotice(
-                query,
-                provider,
-                "Historial antiguo gratuito: estos resultados no incluyen un enlace directo de tienda archivables; no se han inventado precios previos."
-            )
-            return
-        }
-
-        // This is a detached best-effort job: the online result state is already published.
-        // A strict total deadline plus short HTTP call timeouts ensures Wayback cannot hold up
-        // search results, navigation or the next search.
         viewModelScope.launch {
+            val resolvedResults = resolveOnlineStoreLinks(results, query, provider)
+
+            // Store-link resolution remains useful even when the user disables Wayback history.
+            if (!waybackPreferences.getBoolean("enabled", true)) return@launch
+
+            val candidates = resolvedResults
+                .filterNot { it.isSecondHand || it.isRentalOrMonthly || it.isFitmentUnverified || it.isCategoryUnverified }
+                .filter { waybackPriceHistoryClient.isEligibleDirectUrl(it.sourceUrl) && !isGoogleShoppingUrl(it.sourceUrl) }
+                .sortedBy { it.price }
+                .distinctBy { it.title.trim().lowercase(Locale.ROOT) + "|" + it.sourceUrl }
+                .take(MAX_ARCHIVE_PAGES_PER_SEARCH)
+
+            if (candidates.isEmpty()) {
+                appendArchiveNotice(
+                    query,
+                    provider,
+                    "Historial antiguo gratuito: no se encontró una ficha directa de tienda con capturas verificables; no se han inventado precios previos."
+                )
+                return@launch
+            }
+
+            // Historical lookup is a separate bounded best-effort stage; live results have already
+            // been displayed and seller links persisted before this begins.
             val completed = withTimeoutOrNull(MAX_ARCHIVE_BACKFILL_MS) {
                 var savedCount = 0
                 var checkedCount = 0
                 var foundCount = 0
                 var skippedCount = 0
-                var unresolvedStoreLinkCount = 0
                 val archiveDates = mutableListOf<Long>()
 
                 for (candidate in candidates) {
-                    if (!waybackPreferences.getBoolean("enabled", true)) {
-                        return@withTimeoutOrNull true
-                    }
+                    if (!waybackPreferences.getBoolean("enabled", true)) return@withTimeoutOrNull true
                     val archive = waybackPriceHistoryClient.fetchHistory(
                         originalUrl = candidate.sourceUrl,
                         expectedTitle = candidate.title,
@@ -1138,7 +1144,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         skippedCount++
                         continue
                     }
-                    if (archive.storeLinkUnresolved) unresolvedStoreLinkCount++
                     if (!archive.available) continue
                     checkedCount += archive.capturesChecked
                     foundCount += archive.quotes.size
@@ -1195,9 +1200,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     checkedCount > 0 -> {
                         " Se consultaron $checkedCount capturas gratuitas, pero ninguna expuso un precio EUR verificable para el producto exacto. No se han rellenado datos ausentes."
                     }
-                    unresolvedStoreLinkCount > 0 && checkedCount == 0 -> {
-                        " No se pudo extraer un enlace directo de vendedor desde Google Shopping para consultar Wayback en " + unresolvedStoreLinkCount + " resultado(s). No se han inventado precios previos."
-                    }
                     else -> {
                         " No se recuperó histórico gratuito de las páginas consultadas: puede que no estén archivadas o que su precio no aparezca en metadatos verificables."
                     }
@@ -1214,6 +1216,90 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 )
             }
         }
+    }
+
+    private suspend fun resolveOnlineStoreLinks(
+        results: List<SerpApiShoppingResult>,
+        query: String,
+        provider: OnlineSearchProvider
+    ): List<SerpApiShoppingResult> {
+        if (provider != OnlineSearchProvider.GOOGLE_SHOPPING) return results
+        val candidates = results
+            .filter { isGoogleShoppingUrl(it.sourceUrl) && it.storeName.isNotBlank() }
+            .distinctBy { it.sourceUrl.trim() + "|" + it.storeName.trim().lowercase(Locale.ROOT) }
+            .take(MAX_STORE_LINK_RESOLUTIONS_PER_SEARCH)
+        if (candidates.isEmpty()) return results
+
+        val resolutions = withTimeoutOrNull(MAX_STORE_LINK_RESOLUTION_MS) {
+            coroutineScope {
+                candidates.map { candidate ->
+                    async {
+                        candidate to waybackPriceHistoryClient.resolveStoreUrl(
+                            originalUrl = candidate.sourceUrl,
+                            storeName = candidate.storeName
+                        )
+                    }
+                }.awaitAll()
+            }
+        }.orEmpty()
+
+        val resolved = resolutions.mapNotNull { (candidate, destination) ->
+            destination
+                ?.takeIf { waybackPriceHistoryClient.isEligibleDirectUrl(it) && !isGoogleShoppingUrl(it) }
+                ?.let {
+                    (candidate.sourceUrl.trim() + "|" + candidate.storeName.trim().lowercase(Locale.ROOT)) to it
+                }
+        }.toMap()
+        if (resolved.isEmpty()) return results
+
+        val updatedResults = results.map { result ->
+            val key = result.sourceUrl.trim() + "|" + result.storeName.trim().lowercase(Locale.ROOT)
+            resolved[key]?.let { result.copy(sourceUrl = it) } ?: result
+        }
+
+        for ((candidate, destination) in resolutions) {
+            val directUrl = destination?.takeIf {
+                waybackPriceHistoryClient.isEligibleDirectUrl(it) && !isGoogleShoppingUrl(it)
+            } ?: continue
+            repository.updateResolvedStoreLink(
+                expectedTitle = candidate.title,
+                storeName = candidate.storeName,
+                originalUrl = candidate.sourceUrl,
+                resolvedUrl = directUrl
+            )
+        }
+
+        val currentState = _uiState.value
+        if (currentState.onlineSearchQuery.trim().equals(query, ignoreCase = true) &&
+            currentState.onlineSearchProvider == provider
+        ) {
+            val currentResults = currentState.onlineSearchResults.map { result ->
+                val key = result.sourceUrl.trim() + "|" + result.storeName.trim().lowercase(Locale.ROOT)
+                resolved[key]?.let { result.copy(sourceUrl = it) } ?: result
+            }
+            val message = currentState.onlineSearchStatus.orEmpty() +
+                " Enlaces directos corregidos para " + resolved.size +
+                " oferta(s); no se ha consumido cuota SerpApi."
+            _uiState.value = currentState.copy(
+                onlineSearchResults = currentResults,
+                onlineSearchStatus = message.trim()
+            )
+        }
+
+        val selectedBefore = _uiState.value.selectedProduct
+        if (selectedBefore != null && candidates.any {
+                onlineProductIdentityKey(it.title) == onlineProductIdentityKey(selectedBefore.title)
+            }) {
+            val refreshed = withTimeoutOrNull(1_500L) {
+                repository.allProductsStream.first { products ->
+                    products.any { it.id == selectedBefore.id }
+                }.firstOrNull { it.id == selectedBefore.id }
+            }
+            if (refreshed != null && _uiState.value.selectedProduct?.id == refreshed.id) {
+                _uiState.value = _uiState.value.copy(selectedProduct = refreshed)
+            }
+        }
+        return updatedResults
     }
 
     private fun appendArchiveNotice(

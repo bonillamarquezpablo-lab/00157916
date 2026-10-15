@@ -322,21 +322,45 @@ class WaybackPriceHistoryClient(
     ): HttpUrl? {
         val normalizedDomain = normalizeMerchantDomain(domain) ?: return null
         val tokens = historicalUrlSearchTokens(expectedTitle)
-        if (tokens.size < 2) return null
+        if (tokens.isEmpty()) return null
         val modelTokens = tokens.filter { token ->
-            token.any(Char::isDigit) && token.any(Char::isLetter)
+            token.any(Char::isDigit) && token.any(Char::isLetter) &&
+                !Regex("""^\d+(?:[.,]\d+)?(?:gb|tb|mb|mah|wh|hz|w|mm|cm|inch|inches|pulgadas?)$""")
+                    .containsMatchIn(token)
+        }
+        val hostBrandTerms = when (normalizedDomain) {
+            "apple.com" -> setOf("apple")
+            "samsung.com" -> setOf("samsung", "galaxy")
+            "nike.com" -> setOf("nike")
+            "adidas.com" -> setOf("adidas")
+            "eu.puma.com" -> setOf("puma")
+            "newbalance.es" -> setOf("new", "balance", "newbalance")
+            "anker.com" -> setOf("anker")
+            "ugreen.com" -> setOf("ugreen")
+            "baseus.com" -> setOf("baseus")
+            "mi.com" -> setOf("xiaomi", "redmi", "mi")
+            "sony.es" -> setOf("sony")
+            "jbl.com" -> setOf("jbl")
+            "logitech.com" -> setOf("logitech")
+            "dyson.es" -> setOf("dyson")
+            "lenovo.com" -> setOf("lenovo")
+            "dell.com" -> setOf("dell")
+            "hp.com" -> setOf("hp")
+            else -> setOf(normalizedDomain.substringBefore('.'))
         }
         val textTokens = tokens.filter { token ->
-            token.any(Char::isLetter) && !token.any(Char::isDigit)
+            token.any(Char::isLetter) && !token.any(Char::isDigit) && token !in hostBrandTerms
         }
         // Avoid broad "OR" queries: on a large retailer domain, one generic token may match
-        // hundreds of unrelated URLs. Require the exact model code plus one distinguishing text
-        // term, or two distinctive text terms when the product has no model code.
+        // hundreds of unrelated URLs. Match a model code plus a distinct path term when both
+        // exist. If a title only gives a model code, use that exact code; generic brand/category
+        // words must not make a model URL impossible to discover.
         val requiredLookaheads = when {
             modelTokens.isNotEmpty() && textTokens.isNotEmpty() -> listOf(
                 "(?=.*${Regex.escape(modelTokens.first())})",
                 "(?=.*(?:${textTokens.take(2).joinToString("|") { Regex.escape(it) }}))"
             )
+            modelTokens.isNotEmpty() -> listOf("(?=.*${Regex.escape(modelTokens.first())})")
             textTokens.size >= 2 -> textTokens.take(2).map { "(?=.*${Regex.escape(it)})" }
             else -> return null
         }
@@ -365,30 +389,45 @@ class WaybackPriceHistoryClient(
 
     private fun historicalUrlSearchTokens(expectedTitle: String): List<String> {
         val ignored = setOf(
-            "the", "and", "for", "with", "from", "new", "used", "de", "del", "la", "las", "el",
+            "the", "and", "for", "with", "from", "used", "de", "del", "la", "las", "el",
             "los", "un", "una", "para", "con", "en", "of", "by", "sale", "buy", "official",
-            "original", "product", "producto", "neu", "calendario", "calendarios", "calendar",
-            "calendars", "advent", "adviento", "adventskalender", "beauty", "women", "woman",
-            "hombre", "hombres", "mujer", "mujeres", "men", "damen", "frauen", "ultra", "pro",
-            "plus", "max", "mini", "lite", "gb", "tb", "mb"
+            "original", "product", "producto", "neu", "zapatilla", "zapatillas", "calzado",
+            "zapato", "zapatos", "sneaker", "sneakers", "shoe", "shoes", "calendario",
+            "calendarios", "calendar", "calendars", "advent", "adviento", "adventskalender",
+            "beauty", "women", "woman", "hombre", "hombres", "mujer", "mujeres", "men",
+            "damen", "frauen", "gb", "tb", "mb"
         )
         val rawTokens = normalizeTitle(expectedTitle).split(' ')
-            .filter { it.isNotBlank() && it !in ignored }
+            .filter { token ->
+                token.isNotBlank() && token !in ignored &&
+                    !Regex("""^\d+(?:[.,]\d+)?(?:gb|tb|mb|mah|wh|hz|w|mm|cm|inch|inches|pulgadas?)$""")
+                        .containsMatchIn(token)
+            }
             .distinct()
-        // Keep short model codes such as Polo 9N3 / Galaxy S26; the descriptive text tokens
-        // alone can be too generic to locate an archived product path.
-        val modelTokens = rawTokens.filter { token ->
-            token.length >= 2 && token.any(Char::isDigit) && token.any(Char::isLetter)
+        // Join split model families like "iPhone 16" so a URL containing iphone-16 can be
+        // found, while excluding capacity tokens such as 256GB from path matching.
+        val modelFamilies = setOf("iphone", "redmi", "poco", "pixel", "galaxy", "wh", "dyson", "roborock")
+        val joinedModels = rawTokens.indices.mapNotNull { index ->
+            val family = rawTokens[index]
+            val next = rawTokens.getOrNull(index + 1) ?: return@mapNotNull null
+            if (family in modelFamilies && Regex("""^\d+[a-z0-9]*$""").matches(next)) {
+                family + next
+            } else null
         }
+        val modelTokens = (joinedModels + rawTokens.filter { token ->
+            token.length >= 2 && token.any(Char::isDigit) && token.any(Char::isLetter)
+        }).distinct()
+        // Preserve short path terms in product names (e.g. Air Max Plus). The parser later
+        // verifies the archived page title and price, so multiple path tokens are just discovery.
         val textTokens = rawTokens.filter { token ->
-            token.any(Char::isLetter) && token.length >= 4 && !token.any(Char::isDigit)
+            token.any(Char::isLetter) && !token.any(Char::isDigit) && token.length >= 3
         }
         val yearTokens = rawTokens.filter {
             Regex("""(?:19|20)\d{2}""").matches(it)
         }
         return (modelTokens + textTokens + yearTokens)
             .distinct()
-            .take(4)
+            .take(6)
     }
 
     private fun buildSnapshotUrl(capture: WaybackCapture): String? {

@@ -1408,7 +1408,9 @@ class SerpApiClient(
             val identityAnchors = orderedWanted
                 .filter { it.length >= 4 && it !in genericAnchorTerms }
                 .take(2)
-            if (identityAnchors.isNotEmpty() && identityAnchors.none(::tokenMatches)) return false
+            // Every selected identity anchor must match. Matching only the brand is not
+            // enough when the query also names an exact model (e.g. WH-1000XM5 vs WH-1000XM4).
+            if (identityAnchors.any { anchor -> !tokenMatches(anchor) }) return false
         }
 
         val overlap = wanted.count(::tokenMatches)

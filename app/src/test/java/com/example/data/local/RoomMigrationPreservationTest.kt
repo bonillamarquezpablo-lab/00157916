@@ -79,11 +79,7 @@ class RoomMigrationPreservationTest {
             assertEquals(349.95, product.currentPrice, 0.001)
             assertEquals("real-store-1", product.currentStoreId)
             assertEquals("https://shop.example/product/real-1", product.storeUrl)
-            if (startVersion == 7) {
-                assertEquals("real-catalog-777", product.googleProductId)
-            } else {
-                assertEquals("real-catalog-777", product.googleProductId)
-            }
+            assertEquals("real-catalog-777", product.googleProductId)
 
             val stores = migrated.storeDao().getAllStoresSnapshot()
             assertEquals(1, stores.size)
@@ -98,9 +94,8 @@ class RoomMigrationPreservationTest {
             assertEquals(trackedAt, tracked.trackedAtTimestamp)
             assertEquals("objetivo guardado por el usuario", tracked.notes)
 
-            val observed = runBlocking {
-                migrated.priceObservationDao().observeVerifiedHistory("real-product-1").first()
-            }
+            val observed = migrated.priceObservationDao()
+                .observeVerifiedHistory("real-product-1").first()
             assertEquals("No genuine observations may be dropped by migration", if (startVersion == 8) 3 else 1, observed.size)
             val expectedLive = observed.first { it.sourceUrl == "https://shop.example/product/real-1" }
             assertEquals(101L, expectedLive.id)
@@ -247,7 +242,7 @@ class RoomMigrationPreservationTest {
     ) {
         db.execSQL(
             "INSERT INTO spanish_stores VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            arrayOf("real-store-1", "Comercio Real", "shop.example", "#123456", "Electrónica", 1, 3, "España", "Comercio real guardado")
+            arrayOf<Any?>("real-store-1", "Comercio Real", "shop.example", "#123456", "Electrónica", 1, 3, "España", "Comercio real guardado")
         )
         val hasGoogleId = version >= 7
         val productColumns = "id, title, brand, category, currentPrice, athMinPrice, athMinDate, athMinStore, athMaxPrice, avg90dPrice, officialPvp, currentStoreId, storeUrl, ean, imageResName, imageUrl, rating, reviewCount, wasRecentlyInflated, fakePriorPrice, isPriceVerified" +
@@ -273,7 +268,7 @@ class RoomMigrationPreservationTest {
         )
         db.execSQL(
             "INSERT INTO tracked_products VALUES(?, ?, ?, ?, ?)",
-            arrayOf("real-product-1", 275.0, 0, trackedAt, "objetivo guardado por el usuario")
+            arrayOf<Any?>("real-product-1", 275.0, 0, trackedAt, "objetivo guardado por el usuario")
         )
 
         val regularColumns = "id, productId, storeId, price, currency, observedAt, sourceUrl, sourceName, isVerified, verificationNote, productTitle, storeName, sourceType, linkType"

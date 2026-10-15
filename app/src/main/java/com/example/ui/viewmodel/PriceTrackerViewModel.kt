@@ -1235,9 +1235,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 if (directUrl == null && domain == null) null
                 else FreeArchiveCandidate(result, directUrl, domain)
             }
+            // One candidate per merchant domain prevents spending the small archive-search
+            // budget repeatedly on multiple URL variants from the same retailer.
             .distinctBy {
                 it.result.title.trim().lowercase(Locale.ROOT) + "|" +
-                    (it.directUrl ?: "domain:${it.merchantDomain}")
+                    (it.merchantDomain ?: it.directUrl ?: "unknown")
             }
             .take(MAX_ARCHIVE_PAGES_PER_SEARCH)
 

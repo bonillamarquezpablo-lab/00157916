@@ -9,6 +9,8 @@ import com.example.data.local.ProductEntity
 import com.example.data.remote.ArchivedPriceQuote
 import com.example.data.model.ProductCategory
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
@@ -442,6 +444,64 @@ class ProductRepositoryArchiveIsolationTest {
             assertEquals("The live seller URL must be selected instead of a Wayback snapshot",
                 "https://shop.example/item", selected?.sourceUrl)
             assertEquals(49.99, selected?.price ?: 0.0, 0.001)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun concurrentDailyObservationWritesDoNotCreateDuplicateRows() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val now = System.currentTimeMillis()
+            val dayStart = Calendar.getInstance().apply {
+                timeInMillis = now
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            val dayEnd = Calendar.getInstance().apply {
+                timeInMillis = dayStart
+                add(Calendar.DAY_OF_MONTH, 1)
+            }.timeInMillis
+            val productId = "concurrent-daily-write"
+            val observationAt = dayStart + 12L * 60L * 60L * 1000L
+
+            fun observation(price: Double) = PriceObservationEntity(
+                productId = productId,
+                storeId = "same-store",
+                price = price,
+                currency = "EUR",
+                observedAt = observationAt,
+                sourceUrl = "https://shop.example/item?price=$price",
+                sourceName = "Google Shopping",
+                isVerified = true,
+                productTitle = "Test product",
+                storeName = "Tienda de prueba",
+                evidenceType = "live"
+            )
+
+            coroutineScope {
+                listOf(49.99, 39.99).map { price ->
+                    async {
+                        database.priceObservationDao().saveDailyObservationIfNewer(
+                            observation = observation(price),
+                            dayStart = dayStart,
+                            dayEnd = dayEnd
+                        )
+                    }
+                }.forEach { it.await() }
+            }
+
+            val rows = database.priceObservationDao()
+                .observeVerifiedHistory(productId)
+                .first()
+            assertEquals("Concurrent refreshes must leave one row for the day", 1, rows.size)
+            assertEquals("The lower price wins when timestamps are identical", 39.99, rows.single().price, 0.001)
         } finally {
             database.close()
         }

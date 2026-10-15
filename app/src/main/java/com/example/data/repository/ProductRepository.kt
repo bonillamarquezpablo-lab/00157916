@@ -153,7 +153,7 @@ class ProductRepository(
                 quote.currency == "EUR" &&
                 quote.observedAt >= HISTORY_START_TIMESTAMP &&
                 isEligibleHistoryTitle(title) &&
-                isEligibleSeller(quote.storeName) &&
+                isEligibleSeller(quote.storeName, quote.sourceUrl) &&
                 isPlausibleHistoryPrice(title, quote.price)
         }
         if (validQuotes.isEmpty()) return 0
@@ -207,7 +207,7 @@ class ProductRepository(
                     isAccessoryListing(result.title)
             result.title.isNotBlank() &&
                 !isNonRetailPromotionalListing(result.title) &&
-                result.storeName.isNotBlank() &&
+                isEligibleSeller(result.storeName, result.sourceUrl) &&
                 result.price.isFinite() &&
                 result.price > 0.0 &&
                 result.price <= MAX_HISTORY_PRICE_EUR &&
@@ -307,8 +307,8 @@ class ProductRepository(
                     "Otro modelo o variante"
                 isNonRetailPromotionalListing(result.title) ->
                     "Artículo promocional o merchandising personalizado"
-                !isEligibleSeller(result.storeName) ->
-                    "Otro modelo o vendedor no elegible"
+                !isEligibleSeller(result.storeName, result.sourceUrl) ->
+                    "Nombre de vendedor y dominio no coinciden o el vendedor no es elegible"
                 !isEligibleHistoryTitle(result.title) ->
                     "Título no elegible para historial"
                 filtered == null ->
@@ -478,7 +478,9 @@ class ProductRepository(
             !isGoogleShoppingUrl(originalUrl) || isGoogleShoppingUrl(resolvedUrl)
         ) return 0
         val resolvedUri = parseHttpUri(resolvedUrl) ?: return 0
-        if (!resolvedUri.scheme.equals("https", ignoreCase = true)) return 0
+        if (!resolvedUri.scheme.equals("https", ignoreCase = true) ||
+            !isEligibleSeller(storeName, resolvedUrl)
+        ) return 0
 
         val identity = onlineProductIdentityKey(expectedTitle)
         val product = productDao.getAllProductsSnapshot().firstOrNull {
@@ -534,6 +536,7 @@ class ProductRepository(
         val now = System.currentTimeMillis()
         val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)
         val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
+        if (!isEligibleSeller(merchantName, originalUrl)) return 0
         val storeId = canonicalStoreId(merchantName, originalUrl)
         var inserted = 0
 
@@ -612,7 +615,7 @@ class ProductRepository(
         }
         val valid = filterOnlineSearchResults(offers, expectedTitle)
             .filterNot { it.isSecondHand || it.isRentalOrMonthly }
-            .filter { isEligibleSeller(it.storeName) && isEligibleHistoryTitle(it.title) }
+            .filter { isEligibleSeller(it.storeName, it.sourceUrl) && isEligibleHistoryTitle(it.title) }
             .groupBy { canonicalStoreId(it.storeName, it.sourceUrl) }
             .values
             .mapNotNull { rows ->
@@ -750,6 +753,43 @@ class ProductRepository(
         val normalized = " " + normalizedProductTitle(storeName) + " "
         val excludedSellers = listOf("rentik", "wallapop", "cash converters", "vinted", "cex")
         return excludedSellers.none { seller -> (" " + seller + " ") in normalized }
+    }
+
+    /**
+     * Validate a retailer label against its actual HTTPS destination when the domain is known.
+     * Unknown small merchants remain eligible; marketplace and rental domains remain excluded.
+     */
+    private fun isEligibleSeller(storeName: String, sourceUrl: String): Boolean {
+        if (!isEligibleSeller(storeName)) return false
+        val uri = parseHttpUri(sourceUrl) ?: return false
+        val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+        if (host.isBlank() || !uri.scheme.equals("https", ignoreCase = true)) return false
+
+        val excludedHosts = listOf(
+            "wallapop.com", "vinted.es", "vinted.com", "cashconverters.es",
+            "cashconverters.co.uk", "webuy.com", "cex.es", "cex.co.uk", "rentik.com"
+        )
+        if (excludedHosts.any { domain -> host == domain || host.endsWith(".$domain") }) return false
+
+        if (host.startsWith("google.") || host.endsWith(".google.com") || host.endsWith(".google.es")) {
+            return true
+        }
+
+        val knownStore = Store.ALL_STORES.firstOrNull { store ->
+            val domain = store.domain.substringBefore('/').removePrefix("www.").lowercase(Locale.ROOT)
+            domain.isNotBlank() && (host == domain || host.endsWith(".$domain"))
+        } ?: return true
+
+        val stopWords = setOf("espana", "online", "tienda", "store", "shop", "seller", "es", "de", "el", "la")
+        val expectedTokens = normalizedProductTitle(knownStore.name).split(' ')
+            .filter { it.length > 2 && it !in stopWords }
+        val actualTokens = normalizedProductTitle(storeName).split(' ')
+            .filter { it.length > 2 && it !in stopWords }
+        val expectedCompact = normalizedProductTitle(knownStore.name).replace(" ", "")
+        val actualCompact = normalizedProductTitle(storeName).replace(" ", "")
+        return expectedTokens.any { it in actualTokens } ||
+            (actualCompact.length >= 4 && expectedCompact.contains(actualCompact)) ||
+            (expectedCompact.length >= 4 && actualCompact.contains(expectedCompact))
     }
 
     private fun isAccessoryListing(title: String): Boolean =

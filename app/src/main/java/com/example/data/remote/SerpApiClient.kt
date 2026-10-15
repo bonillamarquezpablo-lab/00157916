@@ -1392,8 +1392,23 @@ class SerpApiClient(
         // terms must match. This protects brand/model searches from generic category matches
         // such as another brand's advent calendar, even if several generic words overlap.
         if (orderedWanted.size >= 4) {
-            val leadingAnchors = orderedWanted.take(2).filter { it.length >= 4 }
-            if (leadingAnchors.isNotEmpty() && leadingAnchors.none(::tokenMatches)) return false
+            // Ignore category words when choosing identity anchors. A user may start with
+            // "calendario de adviento" before naming the brand; those generic words must not
+            // let a different brand (or even a chocolate calendar) pass as the requested item.
+            val genericAnchorTerms = setOf(
+                "calendario", "calendarios", "calendar", "calendars", "advent",
+                "adviento", "adventskalender", "adventskalenders", "beauty",
+                "auriculares", "headphones", "headphone", "wireless", "inalambricos",
+                "inalambrico", "portatil", "laptop", "smartphone", "movil", "telefono",
+                "teclado", "keyboard", "raton", "mouse", "cargador", "charger",
+                "bateria", "battery", "power", "bank", "perfume", "perfumes",
+                "crema", "cream", "skin", "hombre", "hombres", "mujer", "mujeres",
+                "men", "women", "frauen", "damen", "mann", "kosmetik", "pflege"
+            )
+            val identityAnchors = orderedWanted
+                .filter { it.length >= 4 && it !in genericAnchorTerms }
+                .take(2)
+            if (identityAnchors.isNotEmpty() && identityAnchors.none(::tokenMatches)) return false
         }
 
         val overlap = wanted.count(::tokenMatches)

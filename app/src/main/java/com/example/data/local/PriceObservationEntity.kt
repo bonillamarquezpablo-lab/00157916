@@ -46,7 +46,7 @@ data class PriceObservationEntity(
     /** When Mínimo acquired the row; differs from observedAt for imported historical evidence. */
     @ColumnInfo(defaultValue = "0")
     val collectedAt: Long = System.currentTimeMillis(),
-    /** Evidence class: live observation or verified historical archive capture. */
+    /** Evidence class: live quote, archived capture or dated third-party historical insight. */
     @ColumnInfo(defaultValue = "'live'")
     val evidenceType: String = "live",
     /** Original merchant product page for archive-backed rows; sourceUrl points to the snapshot. */

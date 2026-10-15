@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.AppDatabase
 import com.example.data.local.ProductEntity
+import com.example.data.local.PriceObservationEntity
 import com.example.data.repository.ProductRepository
 import com.example.data.remote.ArchivedPriceQuote
 import kotlinx.coroutines.CoroutineScope
@@ -37,7 +38,7 @@ class FreeArchiveHistoryPersistenceTest {
             AppDatabase::class.java
         ).allowMainThreadQueries().build()
         val title = "Anker Prime 27K Power Bank"
-        val originalUrl = "https://shop.example/product/anker-prime-27k"
+        val originalUrl = "https://www.pccomponentes.com/anker-prime-27k"
         val timestampFormat = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
             isLenient = false
             timeZone = TimeZone.getTimeZone("UTC")
@@ -60,10 +61,33 @@ class FreeArchiveHistoryPersistenceTest {
                     athMaxPrice = 499.99,
                     avg90dPrice = 0.0,
                     officialPvp = 0.0,
-                    currentStoreId = "online_store_test",
+                    currentStoreId = "pccomponentes",
                     storeUrl = originalUrl,
                     ean = "",
                     isPriceVerified = false
+                )
+            )
+
+            // A stale, unverified archive row must not block a fresh capture for the same
+            // product/store/day merely because its placeholder price happens to be lower.
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "anker-prime-27k-test",
+                    storeId = "pccomponentes",
+                    price = 1.00,
+                    currency = "EUR",
+                    observedAt = archivedAt,
+                    sourceUrl = snapshotUrl,
+                    sourceName = "Legacy unverified archive",
+                    isVerified = false,
+                    verificationNote = "Unverified fixture; must not block a validated capture.",
+                    productTitle = title,
+                    storeName = "PcComponentes",
+                    sourceType = "Internet Archive",
+                    linkType = "Archivo histórico",
+                    collectedAt = System.currentTimeMillis(),
+                    evidenceType = "archive",
+                    sourcePageUrl = originalUrl
                 )
             )
 
@@ -86,7 +110,7 @@ class FreeArchiveHistoryPersistenceTest {
             assertEquals(
                 "A trusted historical quote should save even when the current quote is unverified",
                 1,
-                repository.recordArchivedPriceHistory(title, originalUrl, "Tienda de prueba", listOf(quote))
+                repository.recordArchivedPriceHistory(title, originalUrl, "PcComponentes", listOf(quote))
             )
             assertEquals(
                 "Re-importing the same archived day must not create another archive row",

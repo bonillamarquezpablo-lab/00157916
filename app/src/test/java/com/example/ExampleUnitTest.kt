@@ -269,7 +269,26 @@ class ExampleUnitTest {
         Store.ALL_STORES.forEach { store ->
             assertTrue("Missing official HTTPS URL for ${store.name}", store.officialUrl.startsWith("https://"))
             assertFalse("No live price connector configured for ${store.name}", store.hasLivePriceIntegration)
-            assertTrue("Search should be restricted to retailer domain", store.searchUrlFor("test").contains("site%3A"))
+            val searchUrl = store.searchUrlFor("test")
+            assertTrue("Search URL must use HTTPS for ${store.name}", searchUrl.startsWith("https://"))
+            assertFalse(
+                "Retailer search must not route through a Google site: query for ${store.name}",
+                searchUrl.contains("site%3A", ignoreCase = true) ||
+                    searchUrl.contains("google.com/search?q=", ignoreCase = true)
+            )
+            if (store.supportsProductSearch) {
+                val expectedHost = store.domain.substringBefore("/").removePrefix("www.")
+                assertTrue(
+                    "Known search for ${store.name} should stay on its first-party domain",
+                    searchUrl.contains(expectedHost, ignoreCase = true)
+                )
+            } else {
+                assertEquals(
+                    "Stores without a verified search URL should fall back to their official homepage",
+                    store.officialUrl,
+                    searchUrl
+                )
+            }
         }
     }
 

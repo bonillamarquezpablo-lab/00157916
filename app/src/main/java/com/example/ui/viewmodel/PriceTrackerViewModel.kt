@@ -33,6 +33,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeout
@@ -1088,14 +1090,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     }
 
     /**
-     * Fetch optional historical prices from the free Internet Archive only for direct retailer
-     * pages. This runs after current results are displayed, does not call SerpApi, and never
-     * uses archived prices to overwrite the current offer. Archive coverage is product-dependent.
-     */
-    /**
-     * Resolve Google Shopping result destinations to the seller's HTTPS product page when
-     * the seller domain can be matched safely. This is a bounded public-page lookup and does not
-     * consume SerpApi credits. Resolved URLs are persisted so the detail sheet also opens the store.
+     * Resolve Google Shopping links to seller product URLs, persist those destinations, then try
+     * a bounded free Internet Archive lookup for direct retailer pages. The background work does
+     * not consume SerpApi credits or use archived prices to overwrite the current offer.
      */
     private fun startFreeArchiveBackfill(
         results: List<SerpApiShoppingResult>,
@@ -1231,14 +1228,17 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         if (candidates.isEmpty()) return results
 
         val resolutions = withTimeoutOrNull(MAX_STORE_LINK_RESOLUTION_MS) {
+            val semaphore = Semaphore(4)
             coroutineScope {
                 candidates.map { candidate ->
                     async {
-                        candidate to waybackPriceHistoryClient.resolveStoreUrl(
-                            originalUrl = candidate.sourceUrl,
-                            storeName = candidate.storeName,
-                            expectedTitle = candidate.title
-                        )
+                        candidate to semaphore.withPermit {
+                            waybackPriceHistoryClient.resolveStoreUrl(
+                                originalUrl = candidate.sourceUrl,
+                                storeName = candidate.storeName,
+                                expectedTitle = candidate.title
+                            )
+                        }
                     }
                 }.awaitAll()
             }

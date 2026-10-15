@@ -373,14 +373,14 @@ class ProductRepository(
         if (!price.isFinite() || price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR) return false
         val normalized = normalizedProductTitle(title)
         val accessory = !isBicycleTireListing(title) && Regex(
-            """\\b(funda|case|carcasa|protector|cristal|cable|cargador|adaptador|repuesto|replacement|cover|bumper|pantalla|bateria|solo caja|dummy|mando|controller|gamepad|videojuego|juego)\\b"""
+            """\b(funda|case|carcasa|protector|cristal|cable|cargador|adaptador|repuesto|replacement|cover|bumper|pantalla|bateria|solo caja|dummy|mando|controller|gamepad|videojuego|juego)\b"""
         ).containsMatchIn(normalized)
         if (accessory) return true
 
         val drivetrainPart = Regex(
-            """\\b(cassette|casete|pi[nñ]ones?|sprockets?|cambio trasero|rear derailleur|derailleur|desviador|shifter|manetas?|pulsadores?|cadena|chain)\\b"""
+            """\b(cassette|casete|pi[nñ]ones?|sprockets?|cambio trasero|rear derailleur|derailleur|desviador|shifter|manetas?|pulsadores?|cadena|chain)\b"""
         ).containsMatchIn(normalized)
-        val completeDrivetrain = Regex("""\\b(grupo|groupset|kit completo|complete group|pack|juego|set)\\b""")
+        val completeDrivetrain = Regex("""\b(grupo|groupset|kit completo|complete group|pack|juego|set)\b""")
             .containsMatchIn(normalized)
         if (drivetrainPart && !completeDrivetrain && price > 600.0) return false
         if (isBicycleTireListing(title) && price > 350.0) return false

@@ -64,6 +64,9 @@ fun ProductDetailSheet(
     onDismiss: () -> Unit,
     onOpenSetAlert: () -> Unit,
     onCompareStores: () -> Unit = {},
+    onFetchFreeHistory: () -> Unit = {},
+    freeHistoryStatus: String? = null,
+    isFetchingFreeHistory: Boolean = false,
     serpApiActionStatus: String? = null,
     isComparingStores: Boolean = false
 ) {
@@ -95,7 +98,7 @@ fun ProductDetailSheet(
             append(".")
         }
         if (isEmpty()) {
-            append("Todavía no hay un historial anterior verificado para esta ficha. Los precios de la búsqueda actual no demuestran cómo costaba antes. Pulsa «Comparar tiendas» para comprobar si Google ofrece fechas y precios históricos; esa consulta consume una búsqueda de SerpApi y puede que Google no publique datos para este producto.")
+            append("Todavía no hay un historial anterior verificado para esta ficha. Pulsa «Buscar historial gratuito» para consultar capturas públicas sin gastar búsquedas de SerpApi; solo aparecerán precios antiguos si una tienda fue archivada y su precio puede verificarse.")
         } else {
             append(" Puede haber huecos; los precios históricos no garantizan stock, envío ni precio final.")
         }
@@ -426,7 +429,7 @@ fun ProductDetailSheet(
             // The chart combines verified live observations with explicitly labelled archive captures.
             // Missing dates are left missing; no historical prices are extrapolated or interpolated.
             PriceHistoryChart(
-                priceHistory = if (product.isPriceVerified) product.priceHistory else emptyList(),
+                priceHistory = product.priceHistory,
                 avg90dPrice = product.avg90dPrice
             )
 
@@ -464,6 +467,25 @@ fun ProductDetailSheet(
             }
 
             }
+            }
+
+            OutlinedButton(
+                onClick = onFetchFreeHistory,
+                enabled = !isFetchingFreeHistory,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .testTag("free_history_button"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(if (isFetchingFreeHistory) "Buscando historial gratuito…" else "Buscar historial gratuito · 0 búsquedas")
+            }
+            freeHistoryStatus?.let { status ->
+                Text(
+                    text = status,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             // Manual, quota-confirmed store comparison.

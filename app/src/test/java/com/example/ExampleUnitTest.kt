@@ -307,6 +307,13 @@ class ExampleUnitTest {
             "Teclados Logitech Pack G213 Prodigy Teclado Gaming + Logitech G203 Lightsync 2nd Gen Ratón Gaming"
 
         assertTrue(isIrrelevantMultiProductBundle("Logitech G203", bundle))
+        assertTrue(
+            "Spaced models and a different product type should expose mixed-product bundles",
+            isIrrelevantMultiProductBundle(
+                "Xiaomi Redmi 17",
+                "Xiaomi Redmi 17 Smartphone + Apple MacBook Air Laptop"
+            )
+        )
         assertFalse(
             isIrrelevantMultiProductBundle(
                 "Logitech G203",

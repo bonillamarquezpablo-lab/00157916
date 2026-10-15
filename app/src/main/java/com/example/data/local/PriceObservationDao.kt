@@ -63,6 +63,55 @@ interface PriceObservationDao {
     ): PriceObservationEntity?
 
     /**
+     * Find an archived observation for this product/store/day without considering live quotes.
+     * Archived snapshots must deduplicate against other snapshots, but must never block a live
+     * observation for the same merchant and day.
+     */
+    @Query(
+        "SELECT * FROM price_observations " +
+            "WHERE productId = :productId AND storeId = :storeId " +
+            "AND observedAt >= :dayStart AND observedAt < :dayEnd " +
+            "AND (lower(evidenceType) = 'archive' " +
+            "OR lower(sourceUrl) LIKE 'https://web.archive.org/web/%' " +
+            "OR lower(sourceUrl) LIKE 'http://web.archive.org/web/%') " +
+            "ORDER BY price ASC, observedAt DESC LIMIT 1"
+    )
+    suspend fun getArchivedObservationForStoreProductDay(
+        productId: String,
+        storeId: String,
+        dayStart: Long,
+        dayEnd: Long
+    ): PriceObservationEntity?
+
+    /**
+     * Keep the lowest verified archived price per product/store/day. A repeated import does not
+     * create duplicate rows; live observations use their separate save path below.
+     */
+    @Transaction
+    suspend fun saveArchivedObservationIfLower(
+        observation: PriceObservationEntity,
+        dayStart: Long,
+        dayEnd: Long
+    ): Boolean {
+        val existing = getArchivedObservationForStoreProductDay(
+            observation.productId,
+            observation.storeId,
+            dayStart,
+            dayEnd
+        )
+        if (existing == null) {
+            insert(observation)
+            return true
+        }
+        val isLowerPrice = observation.price < existing.price
+        val samePriceWithNewerCapture =
+            observation.price == existing.price && observation.observedAt > existing.observedAt
+        if (!isLowerPrice && !samePriceWithNewerCapture) return false
+        update(observation.copy(id = existing.id))
+        return true
+    }
+
+    /**
      * Atomically save at most one live observation per product/store/local day.
      * A suspicious observation cannot replace a verified quote. Archived snapshots
      * are excluded by getObservationForStoreProductDay and never block live prices.

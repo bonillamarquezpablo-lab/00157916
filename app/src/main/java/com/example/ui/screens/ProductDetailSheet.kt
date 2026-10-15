@@ -469,7 +469,8 @@ fun ProductDetailSheet(
                 StoreComparisonView(
                     offers = product.offers,
                     athPrice = product.athMinPrice,
-                    hasSufficientHistory = product.hasSufficientHistory
+                    hasSufficientHistory = product.hasSufficientHistory,
+                    productTitle = product.title
                 )
             }
 

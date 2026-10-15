@@ -2459,4 +2459,141 @@ class ExampleRobolectricTest {
         }
     }
 
+    @Test
+    fun invalidLegacyVerifiedRowsStayStoredButCannotAffectVisiblePriceHistory() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val now = System.currentTimeMillis()
+            val ids = listOf("legacy-cheap-laptop", "legacy-promo-battery", "legacy-mismatched-seller")
+            val products = listOf(
+                ProductEntity(
+                    id = ids[0],
+                    title = "Apple MacBook Air M3 16GB 256GB SSD",
+                    brand = "Apple",
+                    category = "COMPUTERS",
+                    currentPrice = 67.50,
+                    athMinPrice = 67.50,
+                    athMinDate = "legacy",
+                    athMinStore = "Tienda de prueba",
+                    athMaxPrice = 67.50,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "legacy-store",
+                    storeUrl = "https://merchant.example/macbook",
+                    ean = "",
+                    isPriceVerified = true
+                ),
+                ProductEntity(
+                    id = ids[1],
+                    title = "3x Batería portátil 20000mAh impreso con su logotipo",
+                    brand = "Promocional",
+                    category = "HOME_APPLIANCES",
+                    currentPrice = 297.91,
+                    athMinPrice = 297.91,
+                    athMinDate = "legacy",
+                    athMinStore = "Zaprinta.es",
+                    athMaxPrice = 297.91,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "zaprinta",
+                    storeUrl = "https://www.zaprinta.es/baterias-promocionales",
+                    ean = "",
+                    isPriceVerified = true
+                ),
+                ProductEntity(
+                    id = ids[2],
+                    title = "Sony WH-1000XM5 Wireless Headphones",
+                    brand = "Sony",
+                    category = "TV_AUDIO",
+                    currentPrice = 229.99,
+                    athMinPrice = 229.99,
+                    athMinDate = "legacy",
+                    athMinStore = "Amazon.es",
+                    athMaxPrice = 229.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "amazon",
+                    storeUrl = "https://www.pccomponentes.com/sony-wh1000xm5",
+                    ean = "",
+                    isPriceVerified = true
+                )
+            )
+            database.productDao().insertAll(products)
+            database.priceObservationDao().insertAll(
+                listOf(
+                    PriceObservationEntity(
+                        productId = ids[0],
+                        storeId = "legacy-store",
+                        price = 67.50,
+                        observedAt = now,
+                        sourceUrl = "https://merchant.example/macbook",
+                        sourceName = "Google Shopping",
+                        isVerified = true,
+                        productTitle = products[0].title,
+                        storeName = "Tienda de prueba",
+                        sourceType = "Google Shopping"
+                    ),
+                    PriceObservationEntity(
+                        productId = ids[1],
+                        storeId = "zaprinta",
+                        price = 297.91,
+                        observedAt = now,
+                        sourceUrl = "https://www.zaprinta.es/baterias-promocionales",
+                        sourceName = "Google Shopping",
+                        isVerified = true,
+                        productTitle = products[1].title,
+                        storeName = "Zaprinta.es",
+                        sourceType = "Google Shopping"
+                    ),
+                    PriceObservationEntity(
+                        productId = ids[2],
+                        storeId = "amazon",
+                        price = 229.99,
+                        observedAt = now,
+                        sourceUrl = "https://www.pccomponentes.com/sony-wh1000xm5",
+                        sourceName = "Google Shopping",
+                        isVerified = true,
+                        productTitle = products[2].title,
+                        storeName = "Amazon.es",
+                        sourceType = "Google Shopping"
+                    )
+                )
+            )
+
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+
+            val visible = repository.allProductsStream.first { rows -> ids.all { id -> rows.any { it.id == id } } }
+                .filter { it.id in ids }
+            assertEquals(3, visible.size)
+            assertTrue(
+                "Invalid legacy rows must not be deleted; only their trusted-history projection is filtered",
+                ids.all { database.priceObservationDao().getObservationCount(it) == 1 }
+            )
+            assertTrue(
+                "An implausibly cheap legacy laptop must not appear as a verified price",
+                visible.filter { it.id == ids[0] }.all { !it.isPriceVerified && it.priceHistory.isEmpty() }
+            )
+            assertTrue(
+                "Promotional bulk merchandise must not appear as trusted price history",
+                visible.filter { it.id == ids[1] }.all { !it.isPriceVerified && it.priceHistory.isEmpty() }
+            )
+            assertTrue(
+                "A known retailer domain must not be attributed to a different seller label",
+                visible.filter { it.id == ids[2] }.all { !it.isPriceVerified && it.priceHistory.isEmpty() }
+            )
+        } finally {
+            database.close()
+        }
+    }
+
 }

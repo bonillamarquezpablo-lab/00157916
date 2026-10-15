@@ -72,8 +72,13 @@ data class Store(
             "backmarket" -> "https://www.backmarket.es/"
             "ldlc" -> "https://www.ldlc.com/es-es/"
             else -> {
+                // Never manufacture a clickable "official" URL for an unknown/intermediary seller.
                 val host = domain.substringBefore("/")
-                "https://${if (host.startsWith("www.")) host else "www.$host"}/"
+                if (!hasOfficialSite || host.isBlank() || host.endsWith(".invalid")) {
+                    ""
+                } else {
+                    "https://" + (if (host.startsWith("www.")) host else "www.$host") + "/"
+                }
             }
         }
 

@@ -152,4 +152,87 @@ class ProductRepositoryArchiveIsolationTest {
             database.close()
         }
     }
+
+    @Test
+    fun resolvingRetailerLinkChangesOnlyTheDestinationNotThePriceObservation() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val now = System.currentTimeMillis()
+            val productId = "retailer-link-resolution-test"
+            val title = "Anker Prime 27K Power Bank"
+            val googleUrl = "https://www.google.com/search?tbm=shop&q=anker+prime"
+            val directUrl = "https://shop.example/products/anker-prime-27k"
+            database.productDao().insert(
+                ProductEntity(
+                    id = productId,
+                    title = title,
+                    brand = "Anker",
+                    category = ProductCategory.ALL.name,
+                    currentPrice = 89.99,
+                    athMinPrice = 89.99,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "Tienda de prueba",
+                    athMaxPrice = 89.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "link-test-store",
+                    storeUrl = googleUrl,
+                    ean = "",
+                    isPriceVerified = true
+                )
+            )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = productId,
+                    storeId = "link-test-store",
+                    price = 89.99,
+                    currency = "EUR",
+                    observedAt = now,
+                    sourceUrl = googleUrl,
+                    sourceName = "SerpApi · Google Shopping",
+                    isVerified = true,
+                    productTitle = title,
+                    storeName = "Tienda de prueba",
+                    sourceType = "Google Shopping",
+                    linkType = "Google Shopping",
+                    collectedAt = now,
+                    evidenceType = "live"
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+
+            assertEquals(
+                1,
+                repository.updateResolvedStoreLink(
+                    expectedTitle = title,
+                    storeName = "Tienda de prueba",
+                    originalUrl = googleUrl,
+                    resolvedUrl = directUrl
+                )
+            )
+
+            val observation = database.priceObservationDao()
+                .observeVerifiedHistory(productId)
+                .first { rows -> rows.any { it.sourceUrl == directUrl } }
+                .first { it.sourceUrl == directUrl }
+            val updatedProduct = database.productDao().getProductById(productId)
+
+            assertEquals(89.99, observation.price, 0.001)
+            assertEquals(now, observation.observedAt)
+            assertEquals(directUrl, observation.sourceUrl)
+            assertEquals("directo", observation.linkType)
+            assertEquals(directUrl, updatedProduct?.storeUrl)
+        } finally {
+            database.close()
+        }
+    }
 }

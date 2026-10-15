@@ -900,22 +900,12 @@ class ProductRepository(
 
     /** Resolve a persisted online product when a grouped result card is tapped. */
     suspend fun awaitProductForOnlineIdentity(identityKey: String): Product {
-        // Wait until Room has emitted the saved observation as well as the product row. That way
-        // opening a result immediately after a search shows the first point instead of a transient
-        // empty-history state caused by Room flows emitting on separate table invalidations.
+        // A product may legitimately have no verified price or history yet. Resolve the saved
+        // row as soon as Room exposes it instead of waiting forever for a price point.
         return allProductsStream.first { products ->
-            products.any { product ->
-                onlineProductIdentityKey(product.title) == identityKey &&
-                    product.isPriceVerified &&
-                    product.priceHistory.isNotEmpty()
-            }
-        }.first { product ->
-            onlineProductIdentityKey(product.title) == identityKey &&
-                product.isPriceVerified &&
-                product.priceHistory.isNotEmpty()
-        }
+            products.any { product -> onlineProductIdentityKey(product.title) == identityKey }
+        }.first { product -> onlineProductIdentityKey(product.title) == identityKey }
     }
-
     /**
      * Save one verified row per product/merchant/local day. Only replace an existing row when
      * the new search is newer, or has a lower price at the exact same timestamp.

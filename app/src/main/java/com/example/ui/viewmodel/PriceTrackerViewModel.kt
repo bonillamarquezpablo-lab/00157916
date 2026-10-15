@@ -81,6 +81,8 @@ data class TrackerUiState(
     val onlineSearchDiscardedOffers: List<RejectedOnlineOffer> = emptyList(),
     val showOnlineSearchDiscarded: Boolean = false,
     val isOnlineSearching: Boolean = false,
+    val isSearchingFreeHistory: Boolean = false,
+    val freeHistoryStatus: String? = null,
     val onlineSearchStatus: String? = null,
     val onlineSearchAmazonOnly: Boolean = false,
     val onlineSearchShowSecondHand: Boolean = false,
@@ -931,6 +933,66 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     fun searchAmazonShopping() = startOnlineSearch(OnlineSearchProvider.AMAZON)
 
     /**
+     * Search public Internet Archive captures only. This path never reads the SerpApi key,
+     * checks quota, or spends a provider search credit.
+     */
+    fun searchFreeHistoricalPrices(product: Product) {
+        val current = _uiState.value
+        if (current.isSearchingFreeHistory) return
+        if (!product.isPriceVerified || !product.currentPrice.isFinite() || product.currentPrice <= 0.0) {
+            _uiState.value = current.copy(
+                freeHistoryStatus = "Necesito una oferta actual verificada para vincular con seguridad las capturas históricas."
+            )
+            return
+        }
+
+        val observedAt = product.priceObservedAt ?: System.currentTimeMillis()
+        val candidates = buildList {
+            product.offers.forEach { offer ->
+                val destination = offer.url.ifBlank {
+                    if (offer.store.id == product.currentStore.id) product.storeUrl
+                    else offer.store.officialUrl
+                }
+                if (destination.isBlank() || !offer.price.isFinite() || offer.price <= 0.0) return@forEach
+                add(
+                    SerpApiShoppingResult(
+                        title = product.title,
+                        price = offer.price,
+                        storeName = offer.store.name,
+                        sourceUrl = destination,
+                        observedAt = observedAt
+                    )
+                )
+            }
+            val currentDestination = product.storeUrl.ifBlank { product.currentStore.officialUrl }
+            if (currentDestination.isNotBlank()) {
+                add(
+                    SerpApiShoppingResult(
+                        title = product.title,
+                        price = product.currentPrice,
+                        storeName = product.currentStore.name,
+                        sourceUrl = currentDestination,
+                        observedAt = observedAt
+                    )
+                )
+            }
+        }.distinctBy {
+            "${it.storeName.trim().lowercase(Locale.ROOT)}|${it.sourceUrl.trim().lowercase(Locale.ROOT)}"
+        }
+
+        _uiState.value = current.copy(
+            isSearchingFreeHistory = true,
+            freeHistoryStatus = "Buscando páginas históricas gratuitas; esta consulta no consume cuota de SerpApi."
+        )
+        startFreeArchiveBackfill(
+            results = candidates,
+            query = product.title,
+            provider = current.onlineSearchProvider,
+            targetProductId = product.id
+        )
+    }
+
+    /**
      * Explicitly refresh the current provider/query. Unlike a normal search, this bypasses
      * the 24-hour snapshot and may consume one provider search credit.
      */
@@ -1144,111 +1206,173 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
      * pages. This runs after current results are displayed, does not call SerpApi, and never
      * uses archived prices to overwrite the current offer. Archive coverage is product-dependent.
      */
+    private data class FreeArchiveCandidate(
+        val result: SerpApiShoppingResult,
+        val directUrl: String?,
+        val merchantDomain: String?
+    )
+
     private fun startFreeArchiveBackfill(
         results: List<SerpApiShoppingResult>,
         query: String,
-        provider: OnlineSearchProvider
+        provider: OnlineSearchProvider,
+        targetProductId: String? = null
     ) {
         val candidates = results
             .filterNot { it.isSecondHand || it.isRentalOrMonthly || it.isFitmentUnverified || it.isCategoryUnverified }
-            .filter { waybackPriceHistoryClient.isEligibleDirectUrl(it.sourceUrl) && !isGoogleShoppingUrl(it.sourceUrl) }
+            .filter { it.title.isNotBlank() && it.price.isFinite() && it.price > 0.0 }
             .sortedBy { it.price }
-            .distinctBy { it.title.trim().lowercase(Locale.ROOT) + "|" + it.sourceUrl }
+            .mapNotNull { result ->
+                val directUrl = result.sourceUrl.takeIf {
+                    !isGoogleShoppingUrl(it) && waybackPriceHistoryClient.isEligibleDirectUrl(it)
+                }
+                val domain = waybackPriceHistoryClient.resolveMerchantDomain(
+                    storeName = result.storeName,
+                    sourceUrl = result.sourceUrl
+                )
+                if (directUrl == null && domain == null) null
+                else FreeArchiveCandidate(result, directUrl, domain)
+            }
+            .distinctBy {
+                it.result.title.trim().lowercase(Locale.ROOT) + "|" +
+                    (it.directUrl ?: "domain:${it.merchantDomain}")
+            }
             .take(MAX_ARCHIVE_PAGES_PER_SEARCH)
 
         if (candidates.isEmpty()) {
             appendArchiveNotice(
                 query,
                 provider,
-                "Historial antiguo gratuito: estos resultados no incluyen un enlace directo de tienda archivables; no se han inventado precios previos."
+                "No hay un enlace directo ni un dominio de comercio identificable para buscar capturas gratuitas. No se han inventado precios previos.",
+                targetProductId
             )
             return
         }
 
         viewModelScope.launch {
-            var savedCount = 0
-            var checkedCount = 0
-            var foundCount = 0
-            var skippedCount = 0
-            val archiveDates = mutableListOf<Long>()
-            for (candidate in candidates) {
-                val archive = waybackPriceHistoryClient.fetchHistory(
-                    originalUrl = candidate.sourceUrl,
-                    expectedTitle = candidate.title
-                )
-                if (archive.skippedRecently) {
-                    skippedCount++
-                    continue
-                }
-                if (!archive.available) continue
-                checkedCount += archive.capturesChecked
-                foundCount += archive.quotes.size
-                archive.quotes.minOfOrNull { it.observedAt }?.let(archiveDates::add)
-                val newlySaved = repository.recordArchivedPriceHistory(
-                    expectedTitle = candidate.title,
-                    originalUrl = candidate.sourceUrl,
-                    storeName = candidate.storeName,
-                    quotes = archive.quotes
-                )
-                savedCount += newlySaved
-                if (newlySaved > 0) {
-                    val identityKey = onlineProductIdentityKey(candidate.title)
-                    val refreshedProduct = runCatching {
-                        withTimeout(10_000L) {
-                            repository.allProductsStream.first { products ->
-                                products.any { product ->
-                                    onlineProductIdentityKey(product.title) == identityKey &&
+            try {
+                var savedCount = 0
+                var checkedCount = 0
+                var foundCount = 0
+                var skippedCount = 0
+                val archiveDates = mutableListOf<Long>()
+                for (candidate in candidates) {
+                    val attempts = mutableListOf<com.example.data.remote.WaybackBackfillResult>()
+                    if (candidate.directUrl != null) {
+                        attempts += waybackPriceHistoryClient.fetchHistory(
+                            originalUrl = candidate.directUrl,
+                            expectedTitle = candidate.result.title
+                        )
+                    }
+                    // If the exact URL has no usable old prices (or only a Google Shopping link was
+                    // provided), try a bounded, product-term-filtered lookup on the known merchant.
+                    if (candidate.merchantDomain != null && attempts.none { it.quotes.isNotEmpty() }) {
+                        attempts += waybackPriceHistoryClient.fetchHistoryByMerchantDomain(
+                            domain = candidate.merchantDomain,
+                            expectedTitle = candidate.result.title
+                        )
+                    }
+
+                    if (attempts.isNotEmpty() && attempts.all { it.skippedRecently }) {
+                        skippedCount++
+                        continue
+                    }
+                    val quotes = attempts.flatMap { it.quotes }
+                        .distinctBy { Triple(it.originalUrl, it.observedAt, it.price) }
+                    checkedCount += attempts.sumOf { it.capturesChecked }
+                    foundCount += quotes.size
+                    quotes.map { it.observedAt }.let(archiveDates::addAll)
+
+                    for ((archiveUrl, urlQuotes) in quotes.groupBy { it.originalUrl }) {
+                        val newlySaved = repository.recordArchivedPriceHistory(
+                            expectedTitle = candidate.result.title,
+                            originalUrl = archiveUrl,
+                            storeName = candidate.result.storeName,
+                            quotes = urlQuotes
+                        )
+                        savedCount += newlySaved
+                    }
+
+                    if (quotes.isNotEmpty()) {
+                        val targetIdentity = onlineProductIdentityKey(candidate.result.title)
+                        val refreshedProduct = runCatching {
+                            withTimeout(10_000L) {
+                                repository.allProductsStream.first { products ->
+                                    products.any { product ->
+                                        (targetProductId?.let { product.id == it }
+                                            ?: (onlineProductIdentityKey(product.title) == targetIdentity)) &&
+                                            product.priceHistory.any {
+                                                it.eventLabel.equals("Internet Archive", ignoreCase = true)
+                                            }
+                                    }
+                                }.first { product ->
+                                    (targetProductId?.let { product.id == it }
+                                        ?: (onlineProductIdentityKey(product.title) == targetIdentity)) &&
                                         product.priceHistory.any {
                                             it.eventLabel.equals("Internet Archive", ignoreCase = true)
                                         }
                                 }
-                            }.first { product ->
-                                onlineProductIdentityKey(product.title) == identityKey &&
-                                    product.priceHistory.any {
-                                        it.eventLabel.equals("Internet Archive", ignoreCase = true)
-                                    }
+                            }
+                        }.getOrNull()
+                        if (refreshedProduct != null) {
+                            val currentState = _uiState.value
+                            if (currentState.selectedProduct?.id == refreshedProduct.id) {
+                                _uiState.value = currentState.copy(selectedProduct = refreshedProduct)
                             }
                         }
-                    }.getOrNull()
-                    if (refreshedProduct != null) {
-                        val currentState = _uiState.value
-                        if (currentState.selectedProduct?.id == refreshedProduct.id) {
-                            _uiState.value = currentState.copy(selectedProduct = refreshedProduct)
-                        }
                     }
                 }
-            }
 
-            if (skippedCount == candidates.size) return@launch
-            val notice = when {
-                savedCount > 0 -> {
-                    val oldest = archiveDates.minOrNull()?.let { timestamp ->
-                        SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(timestamp))
+                val notice = when {
+                    skippedCount == candidates.size ->
+                        "Estas consultas gratuitas ya se comprobaron recientemente. Se evita repetirlas durante 30 días para no sobrecargar Internet Archive."
+                    savedCount > 0 -> {
+                        val oldest = archiveDates.minOrNull()?.let { timestamp ->
+                            SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(timestamp))
+                        }
+                        "Histórico gratuito recuperado de Internet Archive: $savedCount precios antiguos guardados" +
+                            (oldest?.let { ", con capturas desde $it" } ?: "") +
+                            ". Son precios anunciados en páginas archivadas; puede haber huecos y no garantizan envío, stock ni precio final."
                     }
-                    " Histórico gratuito recuperado de Internet Archive: $savedCount precios antiguos guardados" +
-                        (oldest?.let { ", con capturas desde $it" } ?: "") +
-                        ". Son precios anunciados en páginas archivadas; puede haber huecos y no garantizan envío, stock ni precio final."
+                    foundCount > 0 ->
+                        "Se encontraron capturas con precios previos, pero no se añadieron porque no se pudieron vincular a una ficha verificada o ya existían esos registros diarios."
+                    checkedCount > 0 ->
+                        "Se consultaron $checkedCount capturas gratuitas, pero ninguna expuso un precio EUR verificable para el producto exacto. No se han rellenado datos ausentes."
+                    else ->
+                        "No se recuperó histórico gratuito: puede que el comercio no esté archivado o que no publique el precio en metadatos verificables. No se ha gastado cuota de SerpApi."
                 }
-                foundCount > 0 -> {
-                    " Se encontraron capturas con precios previos, pero no se añadieron porque no se pudo vincular la ficha a un producto verificado o ya existía el registro diario."
-                }
-                checkedCount > 0 -> {
-                    " Se consultaron $checkedCount capturas gratuitas, pero ninguna expuso un precio EUR verificable para el producto exacto. No se han rellenado datos ausentes."
-                }
-                else -> {
-                    " No se recuperó histórico gratuito de las páginas consultadas: puede que no estén archivadas o que su precio no aparezca en metadatos verificables."
+                appendArchiveNotice(query, provider, notice, targetProductId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                appendArchiveNotice(
+                    query,
+                    provider,
+                    "No se pudo completar la consulta gratuita del archivo. No se ha gastado cuota de SerpApi; puedes volver a intentarlo más adelante.",
+                    targetProductId
+                )
+            } finally {
+                if (targetProductId != null) {
+                    _uiState.value = _uiState.value.copy(isSearchingFreeHistory = false)
                 }
             }
-            appendArchiveNotice(query, provider, notice)
         }
     }
 
     private fun appendArchiveNotice(
         query: String,
         provider: OnlineSearchProvider,
-        notice: String
+        notice: String,
+        targetProductId: String? = null
     ) {
         val current = _uiState.value
+        if (targetProductId != null) {
+            _uiState.value = current.copy(
+                isSearchingFreeHistory = false,
+                freeHistoryStatus = notice.trim()
+            )
+            return
+        }
         if (current.onlineSearchQuery.trim().equals(query, ignoreCase = true) &&
             current.onlineSearchProvider == provider &&
             current.onlineSearchStatus?.contains("Histórico gratuito recuperado de Internet Archive") != true

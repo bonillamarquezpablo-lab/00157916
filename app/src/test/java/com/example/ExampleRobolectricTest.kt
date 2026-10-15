@@ -1760,6 +1760,44 @@ class ExampleRobolectricTest {
                 it.title.contains("cuota", ignoreCase = true)
             })
 
+            val mislabeledAmazonOffer = normalNewPhone.copy(
+                storeName = "Amazon.es",
+                sourceUrl = "https://www.pccomponentes.com/xiaomi-redmi-17"
+            )
+            assertTrue(
+                "A search may show a provider result even while its seller attribution is being checked",
+                repository.filterOnlineSearchResults(listOf(mislabeledAmazonOffer), "Xiaomi Redmi 17").isNotEmpty()
+            )
+            val observationCountBeforeMismatch = database.priceObservationDao().getObservationCount("online_product_redmi17")
+            assertEquals(
+                "An Amazon label must not persist a URL that belongs to PcComponentes",
+                0,
+                repository.recordOnlineSearchResults(
+                    listOf(mislabeledAmazonOffer),
+                    "GOOGLE_SHOPPING",
+                    "Xiaomi Redmi 17"
+                )
+            )
+            assertEquals(
+                "Rejecting a mismatched seller must not add any observation",
+                observationCountBeforeMismatch,
+                database.priceObservationDao().getObservationCount("online_product_redmi17")
+            )
+
+            val mislabeledMarketplaceOffer = normalNewPhone.copy(
+                storeName = "Amazon.es",
+                sourceUrl = "https://es.wallapop.com/item/xiaomi-redmi-17"
+            )
+            assertEquals(
+                "A marketplace URL must not be persisted as a new Amazon retail offer",
+                0,
+                repository.recordOnlineSearchResults(
+                    listOf(mislabeledMarketplaceOffer),
+                    "GOOGLE_SHOPPING",
+                    "Xiaomi Redmi 17"
+                )
+            )
+
             val vacuumListings = listOf(
                 cheapLegitimateAccessory.copy(
                     title = "Xiaomi Vacuum Cleaner G10",

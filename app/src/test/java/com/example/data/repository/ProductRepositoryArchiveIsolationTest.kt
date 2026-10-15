@@ -217,6 +217,27 @@ class ProductRepositoryArchiveIsolationTest {
                 wrongCasePathInserted
             )
 
+            val malformedOriginalUrlInserted = repository.recordArchivedPriceHistory(
+                expectedTitle = title,
+                originalUrl = "https://shop.example/product/anker-prime",
+                storeName = "Tienda de prueba",
+                quotes = listOf(
+                    ArchivedPriceQuote(
+                        observedAt = mismatchedCaptureTime,
+                        price = 19.99,
+                        currency = "EUR",
+                        productTitle = title,
+                        originalUrl = "/relative/path",
+                        snapshotUrl = "https://web.archive.org/web/20260901000000id_/https://shop.example/product/anker-prime"
+                    )
+                )
+            )
+            assertEquals(
+                "malformed quote URLs must be rejected without crashing the import",
+                0,
+                malformedOriginalUrlInserted
+            )
+
             val insecureSnapshotInserted = repository.recordArchivedPriceHistory(
                 expectedTitle = title,
                 originalUrl = "https://shop.example/product/anker-prime",

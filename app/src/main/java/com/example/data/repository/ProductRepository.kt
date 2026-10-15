@@ -46,6 +46,23 @@ private fun PriceObservationEntity.isArchiveEvidence(): Boolean =
         sourceUrl.startsWith("https://web.archive.org/web/", ignoreCase = true) ||
         sourceUrl.startsWith("http://web.archive.org/web/", ignoreCase = true)
 
+/**
+ * Compare the actual HTTP resource, not a case-insensitive URL string.
+ * Hosts and schemes are case-insensitive; paths and query strings are not.
+ */
+private fun sameHttpResource(left: String, right: String): Boolean {
+    val leftUri = runCatching { URI(left) }.getOrNull() ?: return false
+    val rightUri = runCatching { URI(right) }.getOrNull() ?: return false
+    val leftHost = leftUri.host ?: return false
+    val rightHost = rightUri.host ?: return false
+    return leftUri.scheme.equals(rightUri.scheme, ignoreCase = true) &&
+        leftHost.equals(rightHost, ignoreCase = true) &&
+        leftUri.port == rightUri.port &&
+        leftUri.rawUserInfo == rightUri.rawUserInfo &&
+        leftUri.rawPath.orEmpty().trimEnd('/') == rightUri.rawPath.orEmpty().trimEnd('/') &&
+        leftUri.rawQuery.orEmpty() == rightUri.rawQuery.orEmpty()
+}
+
 data class UrlAnalysisResult(
     val queryOrUrl: String,
     val identifiedStore: Store?,
@@ -528,13 +545,13 @@ class ProductRepository(
                 }.parse(rawSnapshotTimestamp)?.time
             }.getOrNull() ?: continue
             if (kotlin.math.abs(snapshotTimestamp - quote.observedAt) > 1_000L) continue
-            if (!quote.originalUrl.trimEnd('/').equals(originalUrl.trimEnd('/'), ignoreCase = true)) continue
+            if (!sameHttpResource(quote.originalUrl, originalUrl)) continue
             // A valid Wayback host and timestamp are not enough: the snapshot must embed the
             // exact merchant page requested for this product, not a different archived URL.
             val snapshotPrefix = "/web/" + rawSnapshotTimestamp + "id_/"
             val snapshotOriginalUrl = quote.snapshotUrl.substringAfter(snapshotPrefix, missingDelimiterValue = "")
             if (snapshotOriginalUrl.isBlank() ||
-                !snapshotOriginalUrl.trimEnd('/').equals(originalUrl.trimEnd('/'), ignoreCase = true)
+                !sameHttpResource(snapshotOriginalUrl, originalUrl)
             ) continue
             if (quote.currency != "EUR" ||
                 !quote.price.isFinite() ||

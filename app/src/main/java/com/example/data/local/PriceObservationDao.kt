@@ -71,6 +71,7 @@ interface PriceObservationDao {
         "SELECT * FROM price_observations " +
             "WHERE productId = :productId AND storeId = :storeId " +
             "AND observedAt >= :dayStart AND observedAt < :dayEnd " +
+            "AND isVerified = 1 " +
             "AND (lower(evidenceType) = 'archive' " +
             "OR lower(sourceUrl) LIKE 'https://web.archive.org/web/%' " +
             "OR lower(sourceUrl) LIKE 'http://web.archive.org/web/%') " +

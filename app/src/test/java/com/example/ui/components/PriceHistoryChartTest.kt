@@ -81,7 +81,9 @@ class PriceHistoryChartTest {
         }
 
         composeRule.onNodeWithText("Evolución Real del Precio").assertIsDisplayed()
+        composeRule.onNodeWithText("Sin datos todavía").assertIsDisplayed()
         composeRule.onNodeWithText("Wayback (0)").assertIsDisplayed()
+        composeRule.onNodeWithText("Consulta precios para empezar el historial").assertIsDisplayed()
         composeRule.onNodeWithTag("price_history_chart_container").assertIsDisplayed()
     }
 }

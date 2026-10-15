@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
@@ -49,7 +50,10 @@ interface PriceObservationDao {
         "SELECT * FROM price_observations " +
             "WHERE productId = :productId AND storeId = :storeId " +
             "AND observedAt >= :dayStart AND observedAt < :dayEnd " +
-            "LIMIT 1"
+            "AND lower(evidenceType) != 'archive' " +
+            "AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' " +
+            "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
+            "ORDER BY observedAt DESC LIMIT 1"
     )
     suspend fun getObservationForStoreProductDay(
         productId: String,
@@ -57,6 +61,40 @@ interface PriceObservationDao {
         dayStart: Long,
         dayEnd: Long
     ): PriceObservationEntity?
+
+    /**
+     * Atomically save at most one live observation per product/store/local day.
+     * A suspicious observation cannot replace a verified quote. Archived snapshots
+     * are excluded by getObservationForStoreProductDay and never block live prices.
+     */
+    @Transaction
+    suspend fun saveDailyObservationIfNewer(
+        observation: PriceObservationEntity,
+        dayStart: Long,
+        dayEnd: Long
+    ): Boolean {
+        val existing = getObservationForStoreProductDay(
+            observation.productId,
+            observation.storeId,
+            dayStart,
+            dayEnd
+        )
+        if (existing == null) {
+            insert(observation)
+            return true
+        }
+        if (!observation.isVerified && existing.isVerified) return false
+        if (observation.isVerified && !existing.isVerified) {
+            update(observation.copy(id = existing.id))
+            return true
+        }
+        val isNewer = observation.observedAt > existing.observedAt
+        val sameTimeAndBetterPrice =
+            observation.observedAt == existing.observedAt && observation.price < existing.price
+        if (!isNewer && !sameTimeAndBetterPrice) return false
+        update(observation.copy(id = existing.id))
+        return true
+    }
 
     @Query("SELECT COUNT(*) FROM price_observations WHERE productId = :productId")
     suspend fun getObservationCount(productId: String): Int

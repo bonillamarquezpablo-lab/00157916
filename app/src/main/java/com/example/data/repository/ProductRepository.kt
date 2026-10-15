@@ -457,7 +457,7 @@ class ProductRepository(
                 if (!archiveUri.host.equals("web.archive.org", ignoreCase = true) ||
                     !archiveUri.scheme.equals("https", ignoreCase = true)
                 ) return false
-                Regex("""^/web/\\d{14}id_/(https://[^?]+)""")
+                Regex("""^/web/\d{14}id_/(https://[^?]+)""")
                     .find(archiveUri.rawPath.orEmpty())
                     ?.groupValues
                     ?.getOrNull(1)

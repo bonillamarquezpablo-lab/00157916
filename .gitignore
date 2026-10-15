@@ -16,3 +16,17 @@
 local.properties
 .env
 debug.keystore
+# Local credentials, personal environment and signing material — never commit.
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+key.properties
+secrets.properties
+credentials.json
+google-services.json

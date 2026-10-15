@@ -83,7 +83,12 @@ fun isIrrelevantMultiProductBundle(searchQuery: String, resultTitle: String): Bo
     val extraModelCode = queryModels.isNotEmpty() && titleModels.any { it !in queryModels }
     val extraProductType = titleTypes.size >= 2 &&
         (queryTypes.isEmpty() || titleTypes.any { it !in queryTypes })
-    return extraModelCode && extraProductType
+    val hasMultiItemSeparator = Regex(
+        """(?:\\s+\\+\\s+|\\b(with|and|incluye|incluido|acompañado de)\\b)"""
+    ).containsMatchIn(title)
+
+    return (extraModelCode && extraProductType) ||
+        (queryModels.isNotEmpty() && hasMultiItemSeparator && extraProductType)
 }
 
 /** Rejected/hidden offers are transient diagnostics and are never persisted to Room. */

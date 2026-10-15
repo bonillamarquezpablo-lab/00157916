@@ -183,11 +183,43 @@ data class Store(
             }
         }
 
-        fun findByName(name: String): Store = findKnownByName(name)
-            ?: ALL_STORES.firstOrNull {
-                it.id.equals(name, ignoreCase = true) ||
-                    it.domain.contains(name, ignoreCase = true)
+        /**
+         * Legacy lookup used for current-store IDs in older catalog rows. Unknown sellers must
+         * remain explicitly unknown instead of silently being displayed as Amazon.
+         */
+        fun findByName(name: String): Store {
+            findKnownByName(name)?.let { return it }
+
+            // Some repository rows keep a generated ID such as "retailer_anker_com".
+            // Recover the domain when possible so a newer known retailer still resolves correctly.
+            val candidateDomain = name.trim()
+                .removePrefix("retailer_")
+                .replace(Regex("_([a-z]{2,3})$"), ".$1")
+            findKnownByName(candidateDomain)?.let { return it }
+
+            val cleanName = name.trim()
+                .removePrefix("retailer_")
+                .replace('_', ' ')
+                .replace(Regex("\\s+"), " ")
+                .ifBlank { "Tienda desconocida" }
+            val safeId = cleanName.lowercase()
+                .replace(Regex("[^a-z0-9]+"), "_")
+                .trim('_')
+                .ifBlank { "unknown_store" }
+            val plausibleDomain = candidateDomain.takeIf {
+                Regex("""(?i)^(?:[a-z0-9-]+\\.)+[a-z]{2,63}$""").matches(it)
             }
-            ?: AMAZON_ES
+            return Store(
+                id = safeId,
+                name = cleanName,
+                domain = plausibleDomain ?: "unknown.invalid",
+                brandColor = Color(0xFF64748B),
+                isVerifiedSpanish = false,
+                category = "Tienda sin verificar",
+                physicalStores = false,
+                hasLivePriceIntegration = false,
+                hasOfficialSite = plausibleDomain != null
+            )
+        }
     }
 }

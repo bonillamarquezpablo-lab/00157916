@@ -88,6 +88,7 @@ data class TrackerUiState(
     val isCheckingSerpApiAccount: Boolean = false,
     val serpApiAccountStatus: String? = null,
     val isFetchingFreeHistory: Boolean = false,
+    val freeHistoryProductId: String? = null,
     val freeHistoryStatus: String? = null,
     val isPreparingSerpApiAction: Boolean = false,
     val isExecutingSerpApiAction: Boolean = false,
@@ -598,6 +599,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         if (_uiState.value.isFetchingFreeHistory) return
         _uiState.value = _uiState.value.copy(
             isFetchingFreeHistory = true,
+            freeHistoryProductId = product.id,
             freeHistoryStatus = "Buscando precios anteriores gratis…"
         )
         viewModelScope.launch {
@@ -673,8 +675,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
                 val current = _uiState.value
                 _uiState.value = current.copy(
-                    selectedProduct = refreshedProduct ?: current.selectedProduct,
-                    freeHistoryStatus = message
+                    selectedProduct = if (current.selectedProduct?.id == product.id) {
+                        refreshedProduct ?: current.selectedProduct
+                    } else current.selectedProduct,
+                    freeHistoryStatus = if (current.freeHistoryProductId == product.id) {
+                        message
+                    } else current.freeHistoryStatus
                 )
                 showSnackbar(message)
             } catch (cancelled: CancellationException) {
@@ -1411,7 +1417,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun onSelectProduct(product: Product?) {
-        _uiState.value = _uiState.value.copy(selectedProduct = product)
+        _uiState.value = _uiState.value.copy(
+            selectedProduct = product,
+            freeHistoryProductId = product?.id,
+            freeHistoryStatus = null
+        )
     }
 
     fun onOpenAlertSetting(product: Product?) {

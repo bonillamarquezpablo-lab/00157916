@@ -97,6 +97,89 @@ class ProductRepository(
         else list.map { it.toDomainStore() }
     }
 
+    /**
+     * Live directory of sellers represented by at least one valid saved EUR price.
+     * The static 33-store directory remains available for resolving existing products, but it is
+     * deliberately not used as the list shown under the main "Tiendas" tab.
+     */
+    val storesWithSavedPricesStream: Flow<List<Store>> = combine(
+        storeDao.getAllStores(),
+        priceObservationDao.observeAllVerified()
+    ) { storeEntities, observations ->
+        val configuredStores = (storeEntities.map { it.toDomainStore() } + Store.ALL_STORES)
+            .distinctBy { it.id }
+
+        observations.asSequence()
+            .filter { observation ->
+                observation.isVerified &&
+                    observation.currency.equals("EUR", ignoreCase = true) &&
+                    observation.price.isFinite() && observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
+                    observation.observedAt in 1L..System.currentTimeMillis() &&
+                    observation.storeId.isNotBlank()
+            }
+            .mapNotNull { observation ->
+                val merchantHost = merchantHostForObservation(observation)
+                val configuredStore = configuredStoreForObservation(
+                    observation = observation,
+                    stores = configuredStores,
+                    merchantHost = merchantHost
+                )
+                val identity = configuredStore?.id ?: normalizeStoreIdentity(observation.storeName)
+                    .takeIf { it.isNotBlank() }
+                    ?: merchantHost
+                    ?: observation.storeId
+                StorePriceCandidate(
+                    key = configuredStore?.id?.let { "configured:$it" } ?: "merchant:$identity",
+                    observation = observation,
+                    configuredStore = configuredStore,
+                    merchantHost = merchantHost
+                )
+            }
+            .groupBy { it.key }
+            .map { (key, rows) ->
+                val configuredStore = rows.firstNotNullOfOrNull { it.configuredStore }
+                val merchantHost = rows.firstNotNullOfOrNull { it.merchantHost }
+                val savedPriceCount = rows.size
+                if (configuredStore != null) {
+                    configuredStore.copy(
+                        savedPriceCount = savedPriceCount,
+                        hasOfficialSite = true
+                    )
+                } else {
+                    val merchantName = rows.map { it.observation.storeName.trim() }
+                        .filter { it.isNotBlank() }
+                        .groupingBy { it }
+                        .eachCount()
+                        .entries
+                        .maxWithOrNull(compareBy<Map.Entry<String, Int>> { it.value }
+                            .thenByDescending { it.key.length })
+                        ?.key
+                        ?: merchantHost
+                        ?: "Tienda online"
+                    Store(
+                        id = stableOnlineId("price_store_", key),
+                        name = merchantName,
+                        domain = merchantHost ?: "Google Shopping",
+                        brandColor = Color(0xFF047857),
+                        category = "Tienda con precios",
+                        physicalStores = false,
+                        hasLivePriceIntegration = false,
+                        savedPriceCount = savedPriceCount,
+                        hasOfficialSite = merchantHost != null
+                    )
+                }
+            }
+            .distinctBy { normalizeStoreIdentity(it.name) }
+            .sortedBy { it.name.lowercase(Locale.ROOT) }
+    }
+
+    private data class StorePriceCandidate(
+        val key: String,
+        val observation: PriceObservationEntity,
+        val configuredStore: Store?,
+        val merchantHost: String?
+    )
+
     // Persisted Room rows + verified observations + local tracking are the canonical stream.
     // No demo or simulated price points are composed into this flow.
     val allProductsStream: Flow<List<Product>> = combine(
@@ -1336,6 +1419,52 @@ class ProductRepository(
                 .orEmpty()
         )
     }
+
+    private fun configuredStoreForObservation(
+        observation: PriceObservationEntity,
+        stores: List<Store>,
+        merchantHost: String?
+    ): Store? {
+        stores.firstOrNull { it.id == observation.storeId }?.let { return it }
+        merchantHost?.let { host ->
+            stores.firstOrNull { store ->
+                val storeHost = normalizeHost(store.domain.substringBefore('/'))
+                storeHost.isNotBlank() && (host == storeHost || host.endsWith(".$storeHost"))
+            }?.let { return it }
+        }
+        val normalizedName = normalizeStoreIdentity(observation.storeName)
+        if (normalizedName.isBlank()) return null
+        return stores.firstOrNull { store ->
+            val candidate = normalizeStoreIdentity(store.name)
+            candidate.isNotBlank() && (
+                candidate == normalizedName ||
+                    (normalizedName.length >= 5 && candidate.contains(normalizedName)) ||
+                    (candidate.length >= 5 && normalizedName.contains(candidate))
+                )
+        }
+    }
+
+    private fun merchantHostForObservation(observation: PriceObservationEntity): String? {
+        return sequenceOf(observation.sourcePageUrl, observation.sourceUrl)
+            .filter { it.isNotBlank() }
+            .mapNotNull(::parseHttpUri)
+            .map { normalizeHost(it.host.orEmpty()) }
+            .firstOrNull { host ->
+                host.isNotBlank() &&
+                    host != "google.com" &&
+                    !host.endsWith(".google.com") &&
+                    !host.endsWith(".google.es") &&
+                    host != "web.archive.org" &&
+                    !host.endsWith(".web.archive.org")
+            }
+    }
+
+    private fun normalizeStoreIdentity(value: String): String =
+        java.text.Normalizer.normalize(value.lowercase(Locale.ROOT), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+            .replace(Regex("[^a-z0-9]+"), " ")
+            .trim()
+            .replace(Regex("\\s+"), " ")
 
     private fun observationStore(observation: PriceObservationEntity, stores: List<Store>): Store {
         stores.firstOrNull { it.id == observation.storeId }?.let { return it }

@@ -806,7 +806,7 @@ class ProductRepository(
     private fun hasSpecificCatalogIdentity(title: String): Boolean {
         if (modelCodes(title).isNotEmpty()) return true
         val genericWords = setOf(
-            "producto", "articulo", "preservado", "usuario", "demo", "demostracion",
+            "producto", "articulo", "preservado", "usuario", "por", "demo", "demostracion",
             "ejemplo", "prueba", "sin", "datos", "catalogo", "guardado"
         )
         val tokens = normalizedProductTitle(title).split(' ')

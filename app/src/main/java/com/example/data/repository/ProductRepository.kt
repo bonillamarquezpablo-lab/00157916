@@ -469,6 +469,7 @@ class ProductRepository(
         matchingRows.forEach { observation ->
             priceObservationDao.update(
                 observation.copy(
+                    storeId = canonicalStoreId(storeName, resolvedUrl),
                     sourceUrl = resolvedUrl,
                     linkType = "directo"
                 )
@@ -477,7 +478,12 @@ class ProductRepository(
 
         val productEntity = productDao.getProductById(product.id)
         if (productEntity != null && productEntity.storeUrl == originalUrl) {
-            productDao.insert(productEntity.copy(storeUrl = resolvedUrl))
+            productDao.insert(
+                productEntity.copy(
+                    storeUrl = resolvedUrl,
+                    currentStoreId = canonicalStoreId(storeName, resolvedUrl)
+                )
+            )
         }
         return matchingRows.size
     }

@@ -47,6 +47,8 @@ data class Store(
             "la_manzanita" -> "https://lamanzanita.es/"
             "nike_store" -> "https://www.nike.com/es/"
             "powerplanet" -> "https://www.powerplanetonline.com/"
+            "anker_store" -> "https://www.anker.com/eu-en"
+            "ugreen_store" -> "https://www.ugreen.com/es-es"
             "apple_store" -> "https://www.apple.com/es/store"
             "samsung_store" -> "https://www.samsung.com/es/"
             "google_store" -> "https://store.google.com/es/"
@@ -72,7 +74,7 @@ data class Store(
             "amazon.es", "pccomponentes.com", "mediamarkt.es", "elcorteingles.es",
             "fnac.es", "decathlon.es", "sprinter.es", "lamanzanita.es", "nike.com",
             "ikea.com", "backmarket.es", "samsung.com", "store.google.com",
-            "lenovo.com", "hp.com", "coolmod.com"
+            "lenovo.com", "hp.com", "coolmod.com", "anker.com", "ugreen.com"
         )
 
     /**
@@ -98,6 +100,10 @@ data class Store(
             "lenovo.com" -> "https://www.lenovo.com/es/es/search?text=$encoded"
             "hp.com" -> "https://www.hp.com/es-es/shop/Search.aspx?keyword=$encoded"
             "coolmod.com" -> "https://www.coolmod.com/?s=$encoded"
+            // If Shopping only provides a Google catalog link, use the manufacturer's own
+            // on-site search instead of sending the user back to a generic Google results page.
+            "anker.com" -> "https://www.anker.com/eu-en/search?q=$encoded"
+            "ugreen.com" -> "https://www.ugreen.com/es-es/search?q=$encoded"
             else -> officialUrl
         }
     }
@@ -128,6 +134,8 @@ data class Store(
         val LA_MANZANITA = Store("la_manzanita", "La Manzanita", "lamanzanita.es", Color(0xFF475569), category = "Telefonía & Móviles", physicalStores = true)
         val NIKE_STORE = Store("nike_store", "Nike", "nike.com/es", Color(0xFF111111), category = "Deportes & Calzado", physicalStores = true)
         val POWERPLANET = Store("powerplanet", "Powerplanetonline", "powerplanetonline.com", Color(0xFF0284C7), category = "Telefonía & Electrónica", physicalStores = false)
+        val ANKER_STORE = Store("anker_store", "Anker", "anker.com/eu-en", Color(0xFF00A887), category = "Cargadores & Baterías", physicalStores = false)
+        val UGREEN_STORE = Store("ugreen_store", "UGREEN", "ugreen.com/es-es", Color(0xFF008C67), category = "Cargadores & Accesorios", physicalStores = false)
 
         val APPLE_STORE = Store("apple_store", "Apple Store España", "apple.com/es/store", Color(0xFF3A3A3C), category = "Móviles & Informática")
         val SAMSUNG_STORE = Store("samsung_store", "Samsung Shop España", "samsung.com/es", Color(0xFF1428A0), category = "Móviles & Electrónica")
@@ -147,7 +155,7 @@ data class Store(
             AMAZON_ES, PC_COMPONENTES, MEDIA_MARKT, EL_CORTE_INGLES, CARREFOUR, FNAC,
             ALCAMPO, LEROY_MERLIN, DECATHLON, WORTEN, MIRAVIA, GAME, EROSKI,
             CONFORAMA, BAUHAUS, IKEA, LIDL, ALIEXPRESS_PLAZA, SPRINTER, LA_MANZANITA, NIKE_STORE, POWERPLANET,
-            APPLE_STORE, SAMSUNG_STORE, GOOGLE_STORE, XIAOMI_STORE, LENOVO_STORE,
+            ANKER_STORE, UGREEN_STORE, APPLE_STORE, SAMSUNG_STORE, GOOGLE_STORE, XIAOMI_STORE, LENOVO_STORE,
             DELL_STORE, HP_STORE, NEOBYTE, COOLMOD, ALTERNATE, TRADEINN, BACKMARKET, LDLC
         )
 

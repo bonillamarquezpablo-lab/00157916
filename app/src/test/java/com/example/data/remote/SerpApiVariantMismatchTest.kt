@@ -88,6 +88,24 @@ class SerpApiVariantMismatchTest {
         assertEquals(Store.LA_MANZANITA, Store.findKnownByName("La Manzanita"))
     }
     @Test
+    fun ankerAndUgreenFallbackLinksOpenBrandSearchInsteadOfGoogle() {
+        val anker = Store.findKnownByName("Anker", "https://www.google.com/shopping/product/123456789")
+        val ugreen = Store.findKnownByName("UGREEN", "https://www.google.com/shopping/product/123456789")
+
+        assertEquals(Store.ANKER_STORE, anker)
+        assertEquals(Store.UGREEN_STORE, ugreen)
+        assertTrue(anker!!.supportsProductSearch)
+        assertTrue(ugreen!!.supportsProductSearch)
+
+        val ankerUrl = anker.searchUrlFor("Anker Prime Power Bank 27,650 mAh")
+        val ugreenUrl = ugreen.searchUrlFor("UGREEN Nexode 20000mAh 100W")
+        assertTrue(ankerUrl.startsWith("https://www.anker.com/eu-en/search?q="))
+        assertTrue(ugreenUrl.startsWith("https://www.ugreen.com/es-es/search?q="))
+        assertFalse(ankerUrl.contains("google.", ignoreCase = true))
+        assertFalse(ugreenUrl.contains("google.", ignoreCase = true))
+    }
+
+    @Test
     fun rejectsStorageVariantWhenRamAndStorageUseTheSameUnit() {
         val client = SerpApiClient()
         val report = client.parseShoppingResultsDetailed(

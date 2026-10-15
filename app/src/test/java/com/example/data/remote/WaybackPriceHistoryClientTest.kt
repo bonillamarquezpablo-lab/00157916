@@ -115,6 +115,7 @@ class WaybackPriceHistoryClientTest {
         val client = newClient()
         val html = """
             <html><body>
+              <a href="https://www.parfumdreams.es/customer-service">Atención al cliente</a>
               <a href="https://www.google.com/url?url=https%3A%2F%2Fwww.parfumdreams.es%2FPolo-Blue-100ml&sa=U">Parfumdreams</a>
               <a href="https://www.amazon.es/dp/B000000000">Amazon</a>
             </body></html>

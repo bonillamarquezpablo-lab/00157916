@@ -2596,4 +2596,48 @@ class ExampleRobolectricTest {
         }
     }
 
+    @Test
+    fun repositoryRejectsUnrequestedMixedProductBundlesBeforePersistence() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val now = System.currentTimeMillis()
+            val normal = SerpApiShoppingResult(
+                title = "Xiaomi Redmi 17 5G Smartphone",
+                price = 189.99,
+                storeName = "Tienda de prueba",
+                sourceUrl = "https://shop.example/redmi-17",
+                observedAt = now
+            )
+            val bundle = normal.copy(
+                title = "Xiaomi Redmi 17 Smartphone + Apple MacBook Air Laptop",
+                price = 999.99,
+                sourceUrl = "https://shop.example/redmi-macbook-pack"
+            )
+
+            val accepted = repository.filterOnlineSearchResults(
+                listOf(normal, bundle),
+                "Xiaomi Redmi 17"
+            )
+            assertEquals("Only the standalone queried model is eligible", listOf(normal.title), accepted.map { it.title })
+            val reasons = repository.diagnoseOnlineSearchRejections(listOf(normal, bundle), "Xiaomi Redmi 17")
+            assertTrue(
+                "The repository should explain a mixed-product bundle rejection",
+                reasons.any { it.title == bundle.title && it.reason == "Pack con varios productos no solicitado" }
+            )
+        } finally {
+            database.close()
+        }
+    }
+
 }

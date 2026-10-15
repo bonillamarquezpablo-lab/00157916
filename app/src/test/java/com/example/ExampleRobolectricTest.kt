@@ -1781,7 +1781,7 @@ class ExampleRobolectricTest {
                 }
                 """.trimIndent()
             ),
-            query = "Académie Scientifique de Beauté Calendario de Adviento 2024",
+            query = "Calendario de Adviento Académie Scientifique de Beauté 2024",
             observedAt = 123L
         )
 

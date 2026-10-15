@@ -1296,9 +1296,9 @@ class SerpApiClient(
 
         val genericTerms = setOf(
             "zapatilla", "zapatillas", "zapato", "zapatos", "calzado", "sneaker", "sneakers", "shoe", "shoes",
-            "nike", "adidas", "puma", "asics", "reebok", "converse", "vans", "hombre", "mujer",
-            "men", "women", "woman", "unisex", "running", "deportivo", "deportivas", "talla", "size",
-            "eu", "eur", "numero", "n", "y", "para"
+            "nike", "adidas", "puma", "asics", "reebok", "converse", "vans", "new", "balance",
+            "hombre", "mujer", "men", "women", "woman", "unisex", "running", "deportivo", "deportivas",
+            "talla", "size", "eu", "eur", "numero", "n", "y", "para", "de", "del", "la", "el"
         )
         val remainingTerms = normalized.split(' ').filter { token ->
             token.isNotBlank() &&

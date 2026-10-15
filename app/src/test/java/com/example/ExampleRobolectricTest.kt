@@ -1768,7 +1768,7 @@ class ExampleRobolectricTest {
                 "A search may show a provider result even while its seller attribution is being checked",
                 repository.filterOnlineSearchResults(listOf(mislabeledAmazonOffer), "Xiaomi Redmi 17").isNotEmpty()
             )
-            val observationCountBeforeMismatch = database.priceObservationDao().getObservationCount("online_product_redmi17")
+            val observationCountBeforeMismatch = database.priceObservationDao().getVerifiedObservationCount()
             assertEquals(
                 "An Amazon label must not persist a URL that belongs to PcComponentes",
                 0,
@@ -1781,7 +1781,7 @@ class ExampleRobolectricTest {
             assertEquals(
                 "Rejecting a mismatched seller must not add any observation",
                 observationCountBeforeMismatch,
-                database.priceObservationDao().getObservationCount("online_product_redmi17")
+                database.priceObservationDao().getVerifiedObservationCount()
             )
 
             val mislabeledMarketplaceOffer = normalNewPhone.copy(

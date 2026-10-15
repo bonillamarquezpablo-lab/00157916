@@ -16,7 +16,11 @@ data class Store(
     val isVerifiedSpanish: Boolean = true,
     val category: String = "General",
     val physicalStores: Boolean = true,
-    val hasLivePriceIntegration: Boolean = false
+    val hasLivePriceIntegration: Boolean = false,
+    /** Count of valid saved price observations used by the live store directory. */
+    val savedPriceCount: Int = 0,
+    /** False when we only have an indirect Google Shopping link, not the merchant's website. */
+    val hasOfficialSite: Boolean = true
 ) {
     val officialUrl: String
         get() = when (id) {

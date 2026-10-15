@@ -269,9 +269,8 @@ class ProductRepositoryArchiveIsolationTest {
             .allowMainThreadQueries()
             .build()
         try {
-            val now = System.currentTimeMillis()
             val dayStart = Calendar.getInstance().apply {
-                timeInMillis = now
+                timeInMillis = System.currentTimeMillis()
                 set(Calendar.HOUR_OF_DAY, 0)
                 set(Calendar.MINUTE, 0)
                 set(Calendar.SECOND, 0)
@@ -281,6 +280,8 @@ class ProductRepositoryArchiveIsolationTest {
                 timeInMillis = dayStart
                 add(Calendar.DAY_OF_MONTH, 1)
             }.timeInMillis
+            // Midday is safely inside the local day, even when the test happens at midnight.
+            val observationAt = dayStart + 12L * 60L * 60L * 1000L
 
             database.priceObservationDao().insertAll(
                 listOf(
@@ -288,7 +289,7 @@ class ProductRepositoryArchiveIsolationTest {
                         productId = "same-day-product",
                         storeId = "same-store",
                         price = 4.99,
-                        observedAt = now - 1_000L,
+                        observedAt = observationAt - 1_000L,
                         sourceUrl = "https://web.archive.org/web/20261015000000id_/https://shop.example/item",
                         sourceName = "Legacy archive row",
                         isVerified = true,
@@ -299,7 +300,7 @@ class ProductRepositoryArchiveIsolationTest {
                         productId = "same-day-product",
                         storeId = "same-store",
                         price = 49.99,
-                        observedAt = now,
+                        observedAt = observationAt,
                         sourceUrl = "https://shop.example/item",
                         sourceName = "Google Shopping",
                         isVerified = true,

@@ -829,7 +829,7 @@ class ProductRepository(
                 !snapshotUri.host.equals("web.archive.org", ignoreCase = true) ||
                 snapshotUri.port != -1
             ) return false
-            val rawTimestamp = Regex("""^/web/(\\d{14})id_/""")
+            val rawTimestamp = Regex("""^/web/(\d{14})id_/""")
                 .find(snapshotUri.path.orEmpty())?.groupValues?.getOrNull(1) ?: return false
             val captureTime = runCatching {
                 SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {

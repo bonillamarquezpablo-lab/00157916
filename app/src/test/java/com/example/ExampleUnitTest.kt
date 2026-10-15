@@ -219,6 +219,23 @@ class ExampleUnitTest {
             )
         )
         assertTrue("History requires coverage across 90 days plus recent samples", enoughHistory.hasSufficientHistory)
+
+        assertTrue("A just-observed price should be fresh", oneSnapshot.isPriceFresh)
+        val stale = oneSnapshot.copy(priceObservedAt = now - 2L * day)
+        assertFalse("A price older than 24 hours must not be considered current", stale.isPriceFresh)
+        assertTrue("Stale prices need an explicit age label", stale.priceFreshnessLabel.contains("2 días"))
+        val staleWithHistory = enoughHistory.copy(priceObservedAt = now - 2L * day)
+        assertEquals(
+            "Old current quotes must not carry an active deal verdict even with enough historical points",
+            DealVerdict.insufficientHistory().level,
+            staleWithHistory.verdict.level
+        )
+        assertFalse("Stale current prices must not receive a current historic-low badge", staleWithHistory.isAtAth)
+        assertEquals(
+            "Savings cannot be presented as current when the quote is stale",
+            0,
+            staleWithHistory.realSavingsPercent
+        )
     }
 
     @Test

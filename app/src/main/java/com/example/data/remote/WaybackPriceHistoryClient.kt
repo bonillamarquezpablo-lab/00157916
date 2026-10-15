@@ -485,6 +485,14 @@ class WaybackPriceHistoryClient(
         val e = normalizeTitle(expected)
         val a = normalizeTitle(archived)
         if (e.isBlank() || a.isBlank()) return false
+
+        // Never let a high overlap of generic words override a different model, size, year,
+        // or capacity. For example, "Anker Prime 20K Power Bank" must not match a 27K listing.
+        // Merge common unit spellings first so "512 GB" and "512GB" compare consistently.
+        val expectedVariants = requiredVariantTokens(e)
+        val archivedVariants = requiredVariantTokens(a)
+        if (!archivedVariants.containsAll(expectedVariants)) return false
+
         if (onlineProductIdentityKey(expected) == onlineProductIdentityKey(archived)) return true
         val expectedTokens = meaningfulTokens(e)
         val archivedTokens = meaningfulTokens(a)
@@ -492,6 +500,22 @@ class WaybackPriceHistoryClient(
         val overlap = expectedTokens.intersect(archivedTokens)
         return overlap.size >= minOf(2, expectedTokens.size) &&
             overlap.size.toDouble() / expectedTokens.size >= 0.72
+    }
+
+    /**
+     * Variant-defining tokens that must survive a fuzzy title match. Mixed alphanumeric model
+     * codes and standalone numbers with at least two digits are treated as distinguishing values.
+     * Generic words still use the looser overlap rule above.
+     */
+    private fun requiredVariantTokens(normalizedTitle: String): Set<String> {
+        val canonical = normalizedTitle.replace(
+            Regex("""\\b(\\d+)\\s+(gb|tb|mb|mah|wh|w|hz|mm|cm|inch|inches)\\b"""),
+            "$1$2"
+        )
+        return canonical.split(' ').filter { token ->
+            token.length >= 2 && token.any(Char::isDigit) &&
+                (token.any(Char::isLetter) || token.all(Char::isDigit))
+        }.toSet()
     }
 
     private fun meaningfulTokens(value: String): Set<String> {

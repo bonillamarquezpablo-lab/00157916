@@ -1,10 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
+    <!-- Do not transfer local product history, searches, settings or provider credentials. -->
     <cloud-backup>
-        <!-- The matching Android Keystore key is device-bound and cannot be restored elsewhere. -->
-        <exclude domain="sharedpref" path="minimo_serpapi_secret.xml" />
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
     </cloud-backup>
     <device-transfer>
-        <exclude domain="sharedpref" path="minimo_serpapi_secret.xml" />
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
     </device-transfer>
 </data-extraction-rules>

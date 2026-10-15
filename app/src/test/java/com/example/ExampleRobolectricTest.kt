@@ -2939,4 +2939,83 @@ class ExampleRobolectricTest {
         }
     }
 
+
+    @Test
+    fun `main store directory only includes merchants with valid saved prices`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val now = System.currentTimeMillis()
+            database.priceObservationDao().insertAll(
+                listOf(
+                    PriceObservationEntity(
+                        productId = "bike-cassette",
+                        storeId = "pccomponentes",
+                        price = 32.95,
+                        observedAt = now,
+                        sourceUrl = "https://www.pccomponentes.com/cassette-test",
+                        sourceName = "Google Shopping",
+                        isVerified = true,
+                        productTitle = "Cassette Shimano Sora 9V",
+                        storeName = "PcComponentes"
+                    ),
+                    PriceObservationEntity(
+                        productId = "bike-derailleur",
+                        storeId = "pccomponentes",
+                        price = 42.50,
+                        observedAt = now - 60_000L,
+                        sourceUrl = "https://www.pccomponentes.com/derailleur-test",
+                        sourceName = "Google Shopping",
+                        isVerified = true,
+                        productTitle = "Cambio Shimano 9V",
+                        storeName = "PcComponentes"
+                    ),
+                    PriceObservationEntity(
+                        productId = "bike-tyre",
+                        storeId = "online_store_bicimarket",
+                        price = 31.61,
+                        observedAt = now,
+                        sourceUrl = "https://bicimarket.example.test/maxxis",
+                        sourceName = "Google Shopping",
+                        isVerified = true,
+                        productTitle = "Cubierta Maxxis MTB 26",
+                        storeName = "Bici Market"
+                    ),
+                    PriceObservationEntity(
+                        productId = "untrusted",
+                        storeId = "online_store_suspicious",
+                        price = 0.99,
+                        observedAt = now,
+                        sourceUrl = "https://suspicious.example.test/product",
+                        sourceName = "Google Shopping",
+                        isVerified = false,
+                        productTitle = "Producto con precio sospechoso",
+                        storeName = "Tienda sin precio válido"
+                    )
+                )
+            )
+
+            val stores = withTimeout(10_000L) {
+                repository.storesWithSavedPricesStream.first { it.size == 2 }
+            }
+            assertEquals(listOf("Bici Market", "PcComponentes"), stores.map { it.name })
+            assertEquals(2, stores.single { it.id == "pccomponentes" }.savedPriceCount)
+            assertEquals(1, stores.single { it.name == "Bici Market" }.savedPriceCount)
+            assertFalse(stores.any { it.name == "Tienda sin precio válido" })
+            assertFalse(stores.any { it.id == "amazon_es" })
+        } finally {
+            database.close()
+        }
+    }
+
 }

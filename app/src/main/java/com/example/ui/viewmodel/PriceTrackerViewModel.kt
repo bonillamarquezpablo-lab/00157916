@@ -133,8 +133,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         runCatching { PriceAlertScheduler.ensureScheduled(application) }
     }
 
-    val spanishStores: StateFlow<List<Store>> = repository.allStoresStream
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Store.ALL_STORES)
+    // Only show merchants represented by at least one valid saved price. Store.ALL_STORES
+    // remains the internal directory used to resolve existing product and offer records.
+    val spanishStores: StateFlow<List<Store>> = repository.storesWithSavedPricesStream
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Filtered products flow
     val filteredProducts: StateFlow<List<Product>> = combine(

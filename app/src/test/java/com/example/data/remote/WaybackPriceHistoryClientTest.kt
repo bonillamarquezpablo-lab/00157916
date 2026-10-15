@@ -294,6 +294,29 @@ class WaybackPriceHistoryClientTest {
         assertEquals("Nike" to "nike.com", client.resolveBrandMerchant("Nike Air Max Plus Zapatillas"))
         assertEquals("Anker" to "anker.com", client.resolveBrandMerchant("Anker Prime 27K Power Bank"))
         assertEquals(null, client.resolveBrandMerchant("Producto genérico sin marca"))
+
+        val appleUrl = client.buildDomainCdxUrl(
+            domain = "apple.com",
+            expectedTitle = "Apple iPhone 16 256GB",
+            now = 1_800_000_000_000L
+        )
+        val applePathFilter = appleUrl?.queryParameterValues("filter").orEmpty()
+            .firstOrNull { it.startsWith("original:") }.orEmpty()
+        assertTrue("An iPhone 16 path should be found despite a title capacity that is not in the URL", applePathFilter.contains("iphone"))
+        assertTrue(applePathFilter.contains("16"))
+        assertFalse("Capacity alone should not constrain retailer URL discovery", applePathFilter.contains("256gb"))
+
+        val nikeUrl = client.buildDomainCdxUrl(
+            domain = "nike.com",
+            expectedTitle = "Nike Air Max Plus Zapatillas",
+            now = 1_800_000_000_000L
+        )
+        val nikePathFilter = nikeUrl?.queryParameterValues("filter").orEmpty()
+            .firstOrNull { it.startsWith("original:") }.orEmpty()
+        assertTrue(nikePathFilter.contains("air"))
+        assertTrue(nikePathFilter.contains("max"))
+        assertFalse(nikePathFilter.contains("zapatillas"))
+        assertFalse("The host brand itself usually is not in product URL paths", nikePathFilter.contains("nike"))
     }
 
 

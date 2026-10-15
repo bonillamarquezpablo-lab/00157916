@@ -385,10 +385,12 @@ class WaybackPriceHistoryClient(
             .build()
     }
 
-    /** Match normalized tokens across retailer URL separators, e.g. iphone16 -> iphone-16. */
+    /** Match both compact model codes (9n3) and split retailer slugs (iphone-16). */
     private fun urlTokenPattern(token: String): String {
         val pieces = token.split(Regex("""(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])"""))
-        return pieces.joinToString("[^a-z0-9]*") { Regex.escape(it) }
+        val compact = Regex.escape(token)
+        val split = pieces.joinToString("[^a-z0-9]*") { Regex.escape(it) }
+        return "(?:$compact|$split)"
     }
 
     private fun historicalUrlSearchTokens(expectedTitle: String): List<String> {

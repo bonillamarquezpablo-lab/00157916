@@ -604,7 +604,7 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 InfoLine("Versión instalada", BuildConfig.VERSION_NAME)
-                InfoLine("Tiendas registradas", storeCount.toString())
+                InfoLine("Tiendas con precios guardados", storeCount.toString())
                 InfoLine("Fuente de búsqueda", if (serpApiKeyConfigured) "SerpApi · clave guardada, pendiente de prueba" else "No configurada")
                 InfoLine("Perfil online", "No configurado")
                 Text(

@@ -1304,6 +1304,78 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun archivedHistoryCanBeShownBeforeAProductHasALivePrice() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val title = "Anker Prime 27K Power Bank"
+            val originalUrl = "https://shop.example/products/anker-prime-27k"
+            database.productDao().insert(
+                ProductEntity(
+                    id = "archive_only_anker",
+                    title = title,
+                    brand = "Anker",
+                    category = "ACCESSORIES",
+                    currentPrice = 0.0,
+                    athMinPrice = 0.0,
+                    athMinDate = "",
+                    athMinStore = "",
+                    athMaxPrice = 0.0,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "Tienda directa",
+                    storeUrl = originalUrl,
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val now = System.currentTimeMillis()
+            val archivedAt = now - 200L * 24L * 60L * 60L * 1000L
+            val archiveTimestamp = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.format(java.util.Date(archivedAt))
+            val quote = ArchivedPriceQuote(
+                observedAt = archivedAt,
+                price = 79.99,
+                currency = "EUR",
+                productTitle = title,
+                originalUrl = originalUrl,
+                snapshotUrl = "https://web.archive.org/web/" + archiveTimestamp + "id_/" + originalUrl
+            )
+
+            assertEquals(
+                1,
+                repository.recordArchivedPriceHistory(
+                    expectedTitle = title,
+                    originalUrl = originalUrl,
+                    storeName = "Tienda directa",
+                    quotes = listOf(quote)
+                )
+            )
+            val product = withTimeout<com.example.data.model.Product>(10_000L) {
+                repository.allProductsStream.first { list ->
+                    list.any { it.id == "archive_only_anker" && it.priceHistory.any { point -> point.eventLabel == "Internet Archive" } }
+                }.first { it.id == "archive_only_anker" }
+            }
+            assertFalse("Archive history must not verify the current price", product.isPriceVerified)
+            assertEquals("Archive history must not fabricate a current quote", 0.0, product.currentPrice, 0.001)
+            assertTrue("Verified archive points should be visible before a live search", product.priceHistory.any { it.timestamp == archivedAt })
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun fitmentUnconfirmedWheelCandidatesAreNotSavedToMercadoOrHistory() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(

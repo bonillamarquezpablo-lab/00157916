@@ -84,7 +84,7 @@ fun isIrrelevantMultiProductBundle(searchQuery: String, resultTitle: String): Bo
     val extraProductType = titleTypes.size >= 2 &&
         (queryTypes.isEmpty() || titleTypes.any { it !in queryTypes })
     val hasMultiItemSeparator = Regex(
-        """(?:\\s+\\+\\s+|\\b(with|and|incluye|incluido|acompañado de)\\b)"""
+        """(?:\s+\+\s+|\b(with|and|incluye|incluido|acompañado de)\b)"""
     ).containsMatchIn(title)
 
     return (extraModelCode && extraProductType) ||

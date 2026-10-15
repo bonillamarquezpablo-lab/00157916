@@ -88,6 +88,20 @@ class SerpApiVariantMismatchTest {
         assertEquals(Store.LA_MANZANITA, Store.findKnownByName("La Manzanita"))
     }
     @Test
+    fun sellerLookupRequiresARealNameMatchOrMatchingDomain() {
+        assertEquals(null, Store.findKnownByName("a"))
+        assertEquals(null, Store.findKnownByName("ankerpro"))
+        assertEquals(
+            Store.ANKER_STORE,
+            Store.findKnownByName("Anker", "https://www.google.com/shopping/product/123456789")
+        )
+        assertEquals(
+            Store.AMAZON_ES,
+            Store.findKnownByName("Amazon.es", "https://www.google.com/shopping/product/123456789")
+        )
+    }
+
+    @Test
     fun ankerAndUgreenFallbackLinksOpenBrandSearchInsteadOfGoogle() {
         val anker = Store.findKnownByName("Anker", "https://www.google.com/shopping/product/123456789")
         val ugreen = Store.findKnownByName("UGREEN", "https://www.google.com/shopping/product/123456789")

@@ -142,8 +142,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState
     ) { allProducts, state ->
         allProducts
-            // Only the products with real, verified online observations survive into Mercado.
-            .filter { product -> product.isPriceVerified || product.isTracked }
+            // Keep the saved catalogue visible, including products that have not been checked online.
+            // ProductCard must continue to label those items as unverified and hide their stored price.
             .filter { product ->
                 // Category filter
                 (state.selectedCategory == ProductCategory.ALL || product.category == state.selectedCategory)

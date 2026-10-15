@@ -126,6 +126,24 @@ class ProductRepositoryArchiveIsolationTest {
                     collectedAt = now,
                     evidenceType = "archive",
                     sourcePageUrl = "https://shop.example/product/anker-prime"
+                ),
+                // This legacy row was wrongly attached to the Anker product despite an iPhone title
+                // and a seller name that conflicts with the PcComponentes destination.
+                PriceObservationEntity(
+                    productId = productId,
+                    storeId = "mismatched-seller",
+                    price = 49.99,
+                    currency = "EUR",
+                    observedAt = now,
+                    sourceUrl = "https://www.pccomponentes.com/apple-iphone-17-pro-max",
+                    sourceName = "SerpApi · Google Shopping",
+                    isVerified = true,
+                    productTitle = "Apple iPhone 17 Pro Max",
+                    storeName = "Amazon.es",
+                    sourceType = "Google Shopping",
+                    linkType = "directo",
+                    collectedAt = now,
+                    evidenceType = "live"
                 )
             )
             database.priceObservationDao().insertAll(observations)
@@ -155,6 +173,15 @@ class ProductRepositoryArchiveIsolationTest {
                 todayStart - 36L * 60L * 60L * 1000L,
                 product.priceHistory.filterNot { it.isArchiveEvidence }.minOf { it.timestamp })
             assertTrue(product.priceHistory.any { it.sourceUrl == archiveUrl1 })
+            assertFalse(
+                "A verified legacy row with another product title must not contaminate this price history",
+                product.priceHistory.any { it.productTitle == "Apple iPhone 17 Pro Max" }
+            )
+            assertEquals(
+                "Read-time validation must not delete the original row from local Room storage",
+                6,
+                database.priceObservationDao().getObservationCount(productId)
+            )
 
             val mismatchedCaptureTime = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT)
                 .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }

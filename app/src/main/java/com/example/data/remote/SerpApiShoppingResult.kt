@@ -151,7 +151,7 @@ fun isNonRetailPromotionalListing(title: String): Boolean {
         .trim()
         .replace(Regex("\\s+"), " ")
     return Regex(
-        """\\b(impreso con (su|el|tu) logotipo|con (su|el|tu) logo(?:tipo)?|logo impreso|regalo promocional|articulo(?:s)? publicitario(?:s)?|merchandising(?: personalizado)?|personalizad[oa]s? con (?:su|el|tu )?(?:logo|logotipo)|para publicidad|precio por mayor|lote promocional|impresion (?:de )?(?:logo|logotipo))\\b"""
+        """\b(impreso con (su|el|tu) logotipo|con (su|el|tu) logo(?:tipo)?|logo impreso|regalo promocional|articulo(?:s)? publicitario(?:s)?|merchandising(?: personalizado)?|personalizad[oa]s? con (?:su|el|tu )?(?:logo|logotipo)|para publicidad|precio por mayor|lote promocional|impresion (?:de )?(?:logo|logotipo))\b"""
     ).containsMatchIn(normalized)
 }
 

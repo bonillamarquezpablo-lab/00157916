@@ -2,6 +2,11 @@ package com.example.data.model
 
 import androidx.compose.ui.graphics.Color
 
+import java.net.URI
+import java.nio.charset.StandardCharsets
+import java.text.Normalizer
+import java.util.Locale
+
 private fun normalizeStoreIdentifier(value: String): String =
     Normalizer.normalize(value.lowercase(Locale.ROOT), Normalizer.Form.NFD)
         .replace(Regex("\\p{Mn}+"), "")
@@ -9,10 +14,6 @@ private fun normalizeStoreIdentifier(value: String): String =
         .trim()
         .replace(Regex("\\s+"), " ")
 import java.net.URLEncoder
-import java.net.URI
-import java.nio.charset.StandardCharsets
-import java.text.Normalizer
-import java.util.Locale
 
 /**
  * Retailer directory entry. Being listed does not mean that Mínimo can retrieve its

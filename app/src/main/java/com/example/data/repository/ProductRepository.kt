@@ -24,6 +24,7 @@ import com.example.data.remote.isWheelFitmentQuery
 import com.example.data.remote.containsWheelCategoryTerm
 import com.example.data.remote.wheelSetCountForTitle
 import com.example.data.model.Store
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -60,12 +61,21 @@ class ProductRepository(
     // may affect the product UI or its price history.
     private val _latestProducts = MutableStateFlow<List<Product>>(emptyList())
 
+    // Prevent a just-inserted online result from being mistaken for an orphan by startup cleanup.
+    private val startupCleanupCompleted = CompletableDeferred<Unit>()
+
     init {
         // Conservative cleanup: only discard product rows with no observation and no user tracking.
         // Never delete observation history, tracked products/watchlist entries, or persisted stores.
         externalScope.launch {
-            productDao.deleteProductsWithoutObservations()
-            productDao.markProductsWithVerifiedObservations()
+            try {
+                productDao.deleteProductsWithoutObservations()
+                productDao.markProductsWithVerifiedObservations()
+                startupCleanupCompleted.complete(Unit)
+            } catch (failure: Throwable) {
+                startupCleanupCompleted.completeExceptionally(failure)
+                throw failure
+            }
         }
     }
 
@@ -339,6 +349,9 @@ class ProductRepository(
         sourceType: String,
         searchQuery: String = ""
     ): Int {
+        // Startup cleanup must finish before inserting a product row, otherwise cleanup can
+        // race between the product insert and its first Room observation.
+        startupCleanupCompleted.await()
         val normalizedSource = when (sourceType) {
             "AMAZON" -> "Amazon.es"
             "GOOGLE_SHOPPING" -> "Google Shopping"

@@ -517,17 +517,23 @@ class ProductRepository(
         for (quote in quotes.distinctBy { it.observedAt to it.price }) {
             val snapshotUri = parseHttpUri(quote.snapshotUrl) ?: continue
             if (!snapshotUri.host.equals("web.archive.org", ignoreCase = true)) continue
-            val snapshotTimestamp = Regex("""^/web/(\d{14})id_/""")
-                .find(snapshotUri.path.orEmpty())?.groupValues?.getOrNull(1)?.let { rawTimestamp ->
-                    runCatching {
-                        SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
-                            isLenient = false
-                            timeZone = TimeZone.getTimeZone("UTC")
-                        }.parse(rawTimestamp)?.time
-                    }.getOrNull()
-                } ?: continue
+            val rawSnapshotTimestamp = Regex("""^/web/(\d{14})id_/""")
+                .find(snapshotUri.path.orEmpty())?.groupValues?.getOrNull(1) ?: continue
+            val snapshotTimestamp = runCatching {
+                SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+                    isLenient = false
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }.parse(rawSnapshotTimestamp)?.time
+            }.getOrNull() ?: continue
             if (kotlin.math.abs(snapshotTimestamp - quote.observedAt) > 1_000L) continue
             if (!quote.originalUrl.trimEnd('/').equals(originalUrl.trimEnd('/'), ignoreCase = true)) continue
+            // A valid Wayback host and timestamp are not enough: the snapshot must embed the
+            // exact merchant page requested for this product, not a different archived URL.
+            val snapshotPrefix = "/web/" + rawSnapshotTimestamp + "id_/"
+            val snapshotOriginalUrl = quote.snapshotUrl.substringAfter(snapshotPrefix, missingDelimiterValue = "")
+            if (snapshotOriginalUrl.isBlank() ||
+                !snapshotOriginalUrl.trimEnd('/').equals(originalUrl.trimEnd('/'), ignoreCase = true)
+            ) continue
             if (quote.currency != "EUR" ||
                 !quote.price.isFinite() ||
                 quote.price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR ||

@@ -266,6 +266,11 @@ class SerpApiClient(
                     recordDiscard(item, "", "Datos incompletos")
                     return@mapNotNull null
                 }
+            if (!query.isNullOrBlank() && isIrrelevantMultiProductBundle(query, title)) {
+                rejectedAsIrrelevant++
+                recordDiscard(item, title, "Pack con varios productos no solicitado")
+                return@mapNotNull null
+            }
             if (isClearlyNonNewListing(item, title)) {
                 rejectedOther++
                 recordDiscard(item, title, nonNewRejectionReason(item, title))
@@ -509,6 +514,11 @@ class SerpApiClient(
                     resultPcd != wheelFitmentQuery.boltPattern ||
                     (wheelFitmentQuery.widthInches != null && resultWidth != wheelFitmentQuery.widthInches) ||
                     (wheelFitmentQuery.offsetMm != null && resultOffset != wheelFitmentQuery.offsetMm)            } else {
+                if (!query.isNullOrBlank() && isIrrelevantMultiProductBundle(query, title)) {
+                    rejectedAsIrrelevant++
+                    recordDiscard(item, title, "Pack con varios productos no solicitado")
+                    return@mapNotNull null
+                }
                 if (!query.isNullOrBlank() && hasVariantMismatch(query, title)) {
                     rejectedAsIrrelevant++
                     recordDiscard(item, title, "Otro modelo o variante (capacidad, potencia o pack distinto)")

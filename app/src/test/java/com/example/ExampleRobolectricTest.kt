@@ -2877,7 +2877,7 @@ class ExampleRobolectricTest {
 
 
     @Test
-    fun \`main store directory only includes merchants with valid saved prices\`() = runBlocking<Unit> {
+    fun `main store directory only includes merchants with valid saved prices`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,

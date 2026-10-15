@@ -280,4 +280,41 @@ class FreeArchiveHistoryPersistenceTest {
         }
     }
 
+    @Test
+    fun onlineProductLookupReturnsUnverifiedProductWithoutWaitingForHistory() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries().build()
+        val title = "Anker Prime 27K Power Bank"
+        try {
+            database.productDao().insert(
+                ProductEntity(
+                    id = "unverified-no-history", title = title, brand = "Anker",
+                    category = "HOME_APPLIANCES", currentPrice = 499.99,
+                    athMinPrice = 499.99, athMinDate = "Historial en construcción",
+                    athMinStore = "Tienda de prueba", athMaxPrice = 499.99,
+                    avg90dPrice = 0.0, officialPvp = 0.0, currentStoreId = "pccomponentes",
+                    storeUrl = "https://www.pccomponentes.com/anker-prime-27k",
+                    ean = "", isPriceVerified = false
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(), productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val product = withTimeout(2_000L) {
+                repository.awaitProductForOnlineIdentity(
+                    com.example.data.remote.onlineProductIdentityKey(title)
+                )
+            }
+            assertEquals("unverified-no-history", product.id)
+            assertFalse(product.isPriceVerified)
+            assertTrue(product.priceHistory.isEmpty())
+        } finally {
+            database.close()
+        }
+    }
+
 }

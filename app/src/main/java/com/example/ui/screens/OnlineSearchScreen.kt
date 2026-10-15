@@ -375,7 +375,7 @@ fun OnlineSearchScreen(
                 val group = displayGroup.group
                 ShoppingResultCard(
                     group = group,
-                    onOpenProduct = if (group.offers.all { it.isFitmentUnverified }) {
+                    onOpenProduct = if (group.offers.all { it.isFitmentUnverified || it.isCategoryUnverified }) {
                         null
                     } else {
                         { onOpenProduct(group.identityKey) }
@@ -409,7 +409,9 @@ private fun ShoppingResultCard(
     val fitmentUnverified = group.offers.all { it.isFitmentUnverified }
     val categoryUnverified = group.offers.all { it.isCategoryUnverified }
     val wheelSetCount = group.wheelSetCount
-    val hasTrustedPrice = group.offers.any { !it.isSuspiciousPrice }
+    val hasTrustedPrice = group.offers.any {
+        !it.isSuspiciousPrice && !it.isFitmentUnverified && !it.isCategoryUnverified
+    }
     Card(
         modifier = Modifier.fillMaxWidth().then(
             if (onOpenProduct == null) Modifier else Modifier.clickable(onClick = onOpenProduct)
@@ -469,7 +471,9 @@ private fun ShoppingResultCard(
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(group.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     Text(
-                        if (!hasTrustedPrice) {
+                        if (categoryUnverified || fitmentUnverified) {
+                            "Variante por confirmar · " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(best.price)
+                        } else if (!hasTrustedPrice) {
                             "Precio no verificado · " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(best.price)
                         } else if (wheelSetCount != null) {
                             "Desde " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(group.minPrice) + " / llanta"
@@ -540,6 +544,8 @@ private fun ShoppingResultCard(
             OutlinedButton(onClick = onOpenBestOffer, modifier = Modifier.fillMaxWidth()) {
                 Text(
                     when {
+                        (categoryUnverified || fitmentUnverified) && purchaseOffer.isGoogleShoppingProductLink -> "Revisar variante en Google Shopping"
+                        (categoryUnverified || fitmentUnverified) -> "Revisar variante · " + purchaseOffer.storeName
                         !hasTrustedPrice && purchaseOffer.isGoogleShoppingProductLink -> "Revisar oferta sin verificar en Google Shopping"
                         !hasTrustedPrice -> "Revisar oferta sin verificar · ${purchaseOffer.storeName}"
                         purchaseOffer.isGoogleShoppingProductLink -> "Abrir precio más bajo en Google Shopping"

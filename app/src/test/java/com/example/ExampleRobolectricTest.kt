@@ -2875,4 +2875,35 @@ class ExampleRobolectricTest {
         }
     }
 
+
+    @Test
+    fun \`bicycle tyres are not accessories even when titles mention cables\`() {
+        val result = SerpApiShoppingResult(
+            title = "MAXXIS CROSSMARK 2 cables MTB neumáticos de bicicleta 26 27,5 29",
+            price = 31.61,
+            storeName = "Tienda de ejemplo",
+            sourceUrl = "https://shop.example.test/maxxis-crossmark",
+            observedAt = 123L
+        )
+
+        assertFalse(result.isAccessoryOffer)
+        assertEquals("26", com.example.data.remote.requestedBicycleTireDiameter("cubiertas Maxxis MTB 26 pulgadas"))
+        assertTrue(com.example.data.remote.hasAmbiguousBicycleTireDiameter("cubiertas Maxxis MTB 26 pulgadas", result.title))
+        assertFalse(com.example.data.remote.isWrongBicycleTireDiameter("cubiertas Maxxis MTB 26 pulgadas", result.title))
+        assertTrue(com.example.data.remote.isWrongBicycleTireDiameter(
+            "cubiertas Maxxis MTB 26 pulgadas",
+            "Cubierta Maxxis DTH 29x2.30"
+        ))
+    }
+
+    @Test
+    fun \`nine speed mountain bike drivetrain search excludes wheels\`() {
+        assertTrue(com.example.data.remote.isBicycleDrivetrainSearch("Shimano MTB componentes 9V"))
+        assertTrue(com.example.data.remote.isBicycleDrivetrainComponentTitle("Cassette Shimano Sora 9V"))
+        assertTrue(com.example.data.remote.isBicycleDrivetrainComponentTitle("Cambio trasero Shimano Altus M2000 9V"))
+        assertFalse(com.example.data.remote.isBicycleDrivetrainComponentTitle(
+            "Rueda trasera Shimano M475 11-10-9V"
+        ))
+    }
+
 }

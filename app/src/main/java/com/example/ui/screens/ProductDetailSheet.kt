@@ -240,7 +240,11 @@ fun ProductDetailSheet(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Mínimo todavía no ha confirmado el precio de este producto con una fuente y una fecha verificables. No uses los valores de referencia como una oferta real; el historial aparecerá cuando se guarden observaciones fiables.",
+                            text = if (product.priceHistory.isNotEmpty()) {
+                                "El precio actual todavía no está confirmado. Los puntos del gráfico son precios antiguos de fuentes verificables; no demuestran el precio actual, el stock ni el envío."
+                            } else {
+                                "Mínimo todavía no ha confirmado el precio actual de este producto con una fuente y una fecha verificables. No uses los valores de referencia como una oferta real; el histórico solo aparecerá si encontramos capturas con precios verificables."
+                            },
                             fontSize = 12.sp,
                             lineHeight = 17.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant

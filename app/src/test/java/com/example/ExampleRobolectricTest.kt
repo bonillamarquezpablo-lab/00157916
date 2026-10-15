@@ -2198,7 +2198,7 @@ class ExampleRobolectricTest {
 
             val products = withTimeout<List<Product>>(10_000) {
                 repository.allProductsStream.first { rows ->
-                    rows.size == 4 &&
+                    rows.size == 5 &&
                         rows.any { it.id == "online_product_verified" && it.isPriceVerified }
                 }
             }
@@ -2207,16 +2207,19 @@ class ExampleRobolectricTest {
                     "demo_followed_product",
                     "followed_pending_product",
                     "online_product_verified",
-                    "online_product_pending"
+                    "online_product_pending",
+                    "orphan_without_observations"
                 ),
                 products.map { it.id }.toSet()
             )
-            assertEquals("A user-followed demo-labelled product must never be deleted", 4,
+            assertEquals("Startup must preserve every saved product row", 5,
                 database.productDao().getProductCount())
             assertNotNull(database.productDao().getProductById("demo_followed_product"))
             assertNotNull(database.productDao().getProductById("followed_pending_product"))
-            assertEquals("Only the orphan row without history or tracking is eligible for cleanup", null,
-                database.productDao().getProductById("orphan_without_observations"))
+            assertNotNull(
+                "An untracked product without history may still be user-owned data",
+                database.productDao().getProductById("orphan_without_observations")
+            )
 
             assertEquals("Real but unverified observations are retained", 1,
                 database.priceObservationDao().getObservationCount("followed_pending_product"))

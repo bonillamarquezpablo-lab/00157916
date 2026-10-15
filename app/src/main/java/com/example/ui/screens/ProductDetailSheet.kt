@@ -48,6 +48,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Product
+import com.example.data.model.Store
 import com.example.data.remote.extractDirectRetailerUrl
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -575,7 +576,14 @@ fun ProductDetailSheet(
                     val exactRetailerUrl = product.storeUrl
                         .takeIf { product.isPriceVerified }
                         ?.let(::extractDirectRetailerUrl)
-                    val destination = exactRetailerUrl ?: product.currentStore.searchUrlFor(product.title)
+                    val knownRetailer = Store.findKnownByName(
+                        name = product.currentStore.name,
+                        sourceUrl = product.storeUrl
+                    )
+                    val destination = exactRetailerUrl
+                        ?: knownRetailer?.searchUrlFor(product.title)
+                        ?: product.currentStore.officialUrl.takeIf { extractDirectRetailerUrl(it) != null }
+                        ?: product.storeUrl
                     OutlinedButton(
                         onClick = {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(destination))
@@ -590,8 +598,10 @@ fun ProductDetailSheet(
                         Text(
                             when {
                                 exactRetailerUrl != null -> "Ver en ${product.currentStore.name}"
-                                product.currentStore.supportsProductSearch -> "Buscar en ${product.currentStore.name}"
-                                else -> "Abrir web de ${product.currentStore.name}"
+                                knownRetailer?.supportsProductSearch == true -> "Buscar en ${knownRetailer.name}"
+                                knownRetailer != null -> "Abrir web de ${knownRetailer.name}"
+                                extractDirectRetailerUrl(product.currentStore.officialUrl) != null -> "Abrir web de ${product.currentStore.name}"
+                                else -> "Abrir en Google Shopping"
                             },
                             fontSize = 12.sp
                         )

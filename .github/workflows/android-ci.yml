@@ -33,6 +33,9 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Probar el escáner de credenciales con datos sintéticos
+        run: python3 -m unittest discover -s tools -p "test_secret_scan.py" -v
+
       - name: Buscar credenciales accidentales
         run: python3 tools/secret_scan.py
 

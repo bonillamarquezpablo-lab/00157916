@@ -690,9 +690,28 @@ class ProductRepository(
         // Archive metadata has its own provenance checks below. Requiring a verified *current*
         // quote here hid valid old prices for products whose live offer was absent or suspicious.
         // This still requires an existing matching product row and never changes its live price.
-        val product = products.firstOrNull {
+        // Titles alone are not unique: the same model may have multiple saved retailer listings.
+        // Prefer an exact merchant URL; when duplicate title rows remain ambiguous, do not attach
+        // historical prices to an arbitrary product.
+        val matchingProducts = products.filter {
             onlineProductIdentityKey(it.title) == identity
-        } ?: return 0
+        }
+        val originalUrlKey = normalizedProductPageKey(originalUrl) ?: return 0
+        val exactUrlMatches = matchingProducts.filter {
+            normalizedProductPageKey(it.storeUrl) == originalUrlKey
+        }
+        val product = when {
+            exactUrlMatches.size == 1 -> exactUrlMatches.single()
+            exactUrlMatches.size > 1 -> return 0
+            matchingProducts.size == 1 -> matchingProducts.single()
+            else -> {
+                val originalHost = normalizeHost(originalUri.host.orEmpty())
+                matchingProducts.filter { candidate ->
+                    parseHttpUri(candidate.storeUrl)?.host
+                        ?.let(::normalizeHost) == originalHost
+                }.singleOrNull() ?: return 0
+            }
+        }
         val now = System.currentTimeMillis()
         val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)
         val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
@@ -1569,7 +1588,13 @@ class ProductRepository(
         }
     }
 
-    private fun normalizeHost(host: String): String = host.lowercase().removePrefix("www.")
+    private fun normalizedProductPageKey(value: String): String? {
+        val uri = parseHttpUri(value) ?: return null
+        if (!uri.scheme.equals("https", ignoreCase = true) || uri.host.isNullOrBlank()) return null
+        return normalizeHost(uri.host.orEmpty()) + normalizePath(uri)
+    }
+
+    private fun normalizeHost(host: String): String = host.lowercase(Locale.ROOT).removePrefix("www.")
 
     private fun normalizePath(uri: URI): String = uri.path.orEmpty().trimEnd('/').ifEmpty { "/" }
 

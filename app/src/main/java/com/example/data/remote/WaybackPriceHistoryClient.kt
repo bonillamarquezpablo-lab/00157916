@@ -486,14 +486,18 @@ class WaybackPriceHistoryClient(
         val a = normalizeTitle(archived)
         if (e.isBlank() || a.isBlank()) return false
 
+        // Normalize product identity first so known equivalent model spellings (such as
+        // Sony WH-1000XM5 vs WH1000XM5) are not rejected solely because punctuation differs.
+        val sameIdentity = onlineProductIdentityKey(expected) == onlineProductIdentityKey(archived)
+
         // Never let a high overlap of generic words override a different model, size, year,
         // or capacity. For example, "Anker Prime 20K Power Bank" must not match a 27K listing.
         // Merge common unit spellings first so "512 GB" and "512GB" compare consistently.
         val expectedVariants = requiredVariantTokens(e)
         val archivedVariants = requiredVariantTokens(a)
-        if (!archivedVariants.containsAll(expectedVariants)) return false
+        if (!sameIdentity && !archivedVariants.containsAll(expectedVariants)) return false
 
-        if (onlineProductIdentityKey(expected) == onlineProductIdentityKey(archived)) return true
+        if (sameIdentity) return true
         val expectedTokens = meaningfulTokens(e)
         val archivedTokens = meaningfulTokens(a)
         if (expectedTokens.isEmpty() || archivedTokens.isEmpty()) return false

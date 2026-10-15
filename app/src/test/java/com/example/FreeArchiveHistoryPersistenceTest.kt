@@ -215,4 +215,69 @@ class FreeArchiveHistoryPersistenceTest {
         }
     }
 
+    @Test
+    fun archivedHistoryUsesExactRetailerUrlWhenTitlesAreDuplicated() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        val title = "Anker Prime 27K Power Bank"
+        val unrelatedUrl = "https://www.amazon.es/dp/B0ANKERPRIME"
+        val originalUrl = "https://www.pccomponentes.com/anker-prime-27k"
+        val timestampFormat = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val rawTimestamp = timestampFormat.format(Date(System.currentTimeMillis() - 60L * 24L * 60L * 60L * 1000L))
+        val archivedAt = timestampFormat.parse(rawTimestamp)!!.time
+        val snapshotUrl = "https://web.archive.org/web/${rawTimestamp}id_/${originalUrl}"
+
+        fun product(id: String, url: String, storeId: String) = ProductEntity(
+            id = id,
+            title = title,
+            brand = "Anker",
+            category = "HOME_APPLIANCES",
+            currentPrice = 499.99,
+            athMinPrice = 499.99,
+            athMinDate = "Historial en construcción",
+            athMinStore = storeId,
+            athMaxPrice = 499.99,
+            avg90dPrice = 0.0,
+            officialPvp = 0.0,
+            currentStoreId = storeId,
+            storeUrl = url,
+            ean = "",
+            isPriceVerified = false
+        )
+
+        try {
+            // Same model title, different retailer URL. The archive must not be attached to
+            // whichever matching title happens to come first in Room's result order.
+            database.productDao().insert(product("duplicate-amazon", unrelatedUrl, "amazon_es"))
+            database.productDao().insert(product("duplicate-pccomponentes", originalUrl, "pccomponentes"))
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val quote = ArchivedPriceQuote(
+                observedAt = archivedAt,
+                price = 89.99,
+                currency = "EUR",
+                productTitle = title,
+                originalUrl = originalUrl,
+                snapshotUrl = snapshotUrl
+            )
+
+            assertEquals(1, repository.recordArchivedPriceHistory(title, originalUrl, "PcComponentes", listOf(quote)))
+            assertEquals("Do not contaminate the Amazon listing", 0, database.priceObservationDao().getObservationCount("duplicate-amazon"))
+            assertEquals("Save history on the matching retailer listing", 1, database.priceObservationDao().getObservationCount("duplicate-pccomponentes"))
+        } finally {
+            database.close()
+        }
+    }
+
 }

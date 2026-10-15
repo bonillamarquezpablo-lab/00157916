@@ -174,6 +174,27 @@ class ProductRepositoryArchiveIsolationTest {
                 database.priceObservationDao().observeVerifiedHistory(productId).first()
                     .any { it.productTitle == "Apple iPhone 17 Pro Max" }
             )
+
+            val wrongSnapshotTargetInserted = repository.recordArchivedPriceHistory(
+                expectedTitle = title,
+                originalUrl = "https://shop.example/product/anker-prime",
+                storeName = "Tienda de prueba",
+                quotes = listOf(
+                    ArchivedPriceQuote(
+                        observedAt = mismatchedCaptureTime,
+                        price = 19.99,
+                        currency = "EUR",
+                        productTitle = title,
+                        originalUrl = "https://shop.example/product/anker-prime",
+                        snapshotUrl = "https://web.archive.org/web/20260901000000id_/https://other.example/product/anker-prime"
+                    )
+                )
+            )
+            assertEquals(
+                "a Wayback snapshot for a different merchant URL must not be stored",
+                0,
+                wrongSnapshotTargetInserted
+            )
         } finally {
             database.close()
         }

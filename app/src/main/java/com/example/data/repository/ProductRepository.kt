@@ -22,6 +22,10 @@ import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.isIrrelevantMultiProductBundle
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.linkTypeForUrl
+import com.example.data.remote.hasAmbiguousBicycleTireDiameter
+import com.example.data.remote.isBicycleDrivetrainComponentTitle
+import com.example.data.remote.isBicycleDrivetrainSearch
+import com.example.data.remote.isWrongBicycleTireDiameter
 import com.example.data.remote.isWheelFitmentQuery
 import com.example.data.remote.containsWheelCategoryTerm
 import com.example.data.remote.wheelSetCountForTitle

@@ -426,10 +426,10 @@ fun ProductDetailSheet(
                 }
             }
 
-            // The chart combines verified live observations with explicitly labelled archive captures.
-            // Missing dates are left missing; no historical prices are extrapolated or interpolated.
+            // Only validated observations reach priceHistory. Show genuine archive captures
+            // even when there is no verified current quote; never extrapolate missing dates.
             PriceHistoryChart(
-                priceHistory = if (product.isPriceVerified) product.priceHistory else emptyList(),
+                priceHistory = product.priceHistory,
                 avg90dPrice = product.avg90dPrice
             )
 

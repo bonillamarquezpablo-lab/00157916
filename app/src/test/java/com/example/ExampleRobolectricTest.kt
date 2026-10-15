@@ -1313,23 +1313,30 @@ class ExampleRobolectricTest {
         try {
             val title = "Anker Prime 27K Power Bank"
             val originalUrl = "https://shop.example/products/anker-prime-27k"
+            val savedProduct = ProductEntity(
+                id = "archive_only_anker",
+                title = title,
+                brand = "Anker",
+                category = "ACCESSORIES",
+                currentPrice = 0.0,
+                athMinPrice = 0.0,
+                athMinDate = "",
+                athMinStore = "",
+                athMaxPrice = 0.0,
+                avg90dPrice = 0.0,
+                officialPvp = 0.0,
+                currentStoreId = "Tienda directa",
+                storeUrl = originalUrl,
+                ean = "",
+                isPriceVerified = false
+            )
+            database.productDao().insert(savedProduct)
+            // Same normalized title at another retailer must never receive this URL's history.
             database.productDao().insert(
-                ProductEntity(
-                    id = "archive_only_anker",
-                    title = title,
-                    brand = "Anker",
-                    category = "ACCESSORIES",
-                    currentPrice = 0.0,
-                    athMinPrice = 0.0,
-                    athMinDate = "",
-                    athMinStore = "",
-                    athMaxPrice = 0.0,
-                    avg90dPrice = 0.0,
-                    officialPvp = 0.0,
-                    currentStoreId = "Tienda directa",
-                    storeUrl = originalUrl,
-                    ean = "",
-                    isPriceVerified = false
+                savedProduct.copy(
+                    id = "archive_same_title_other_store",
+                    currentStoreId = "Otra tienda",
+                    storeUrl = "https://other.example/products/anker-prime-27k"
                 )
             )
             val repository = ProductRepository(
@@ -1366,11 +1373,15 @@ class ExampleRobolectricTest {
             database.productDao().markProductsWithVerifiedObservations()
             assertFalse(database.productDao().getProductById("archive_only_anker")!!.isPriceVerified)
 
-            val product = withTimeout<com.example.data.model.Product>(10_000L) {
+            val productsWithHistory = withTimeout<List<com.example.data.model.Product>>(10_000L) {
                 repository.allProductsStream.first { list ->
                     list.any { it.id == "archive_only_anker" && it.priceHistory.any { point -> point.eventLabel == "Internet Archive" } }
-                }.first { it.id == "archive_only_anker" }
+                }
             }
+            val product = productsWithHistory.first { it.id == "archive_only_anker" }
+            val otherRetailerProduct = productsWithHistory.first { it.id == "archive_same_title_other_store" }
+            assertTrue("Matching direct URL should receive the archived point", product.priceHistory.any { it.timestamp == archivedAt })
+            assertTrue("A duplicate title at another retailer must not receive this archived point", otherRetailerProduct.priceHistory.none { it.timestamp == archivedAt })
             assertFalse("Archive history must not verify the current price", product.isPriceVerified)
             assertEquals("Archive history must not fabricate a current quote", 0.0, product.currentPrice, 0.001)
             assertTrue("Verified archive points should be visible before a live search", product.priceHistory.any { it.timestamp == archivedAt })

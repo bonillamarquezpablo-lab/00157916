@@ -177,6 +177,11 @@ class OnlineSearchScreenTest {
         }
 
         val searchList = composeRule.onNodeWithTag("online-search-list")
+        // Offer grouping is deliberately computed off the main thread; wait for the first
+        // completed grouping before interacting with the filter chips.
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithText("Todos (5)").fetchSemanticsNodes().isNotEmpty()
+        }
         fun assertVisibleText(text: String) {
             searchList.performScrollToNode(hasText(text))
             composeRule.onNodeWithText(text).assertIsDisplayed()

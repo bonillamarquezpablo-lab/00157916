@@ -2403,4 +2403,60 @@ class ExampleRobolectricTest {
         }
     }
 
+    @Test
+    fun absolutePriceFloorsRejectImplausibleDevicePricesButKeepLegitimateAccessories() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val now = System.currentTimeMillis()
+            fun offer(title: String, price: Double, suffix: String) = SerpApiShoppingResult(
+                title = title,
+                price = price,
+                storeName = "Tienda de prueba",
+                sourceUrl = "https://merchant-${suffix}.example/product",
+                observedAt = now
+            )
+            val suspiciousPhone = offer("Xiaomi Redmi 17 5G 4GB 128GB", 19.99, "phone")
+            val suspiciousLaptop = offer("Apple MacBook Air M3 16GB 256GB", 67.50, "laptop")
+            val suspiciousConsole = offer("Sony PlayStation 5 Slim Console", 39.99, "console")
+            val legitimateCase = offer("Funda protectora para MacBook Air M3", 19.99, "case")
+            val legitimatePhone = offer("Xiaomi Redmi 17 5G 4GB 128GB", 189.99, "phone-valid")
+
+            val accepted = repository.filterOnlineSearchResults(
+                listOf(suspiciousPhone, suspiciousLaptop, suspiciousConsole, legitimateCase, legitimatePhone)
+            )
+
+            assertFalse("A lone implausibly cheap phone must not pass without a comparison set",
+                accepted.any { it.sourceUrl == suspiciousPhone.sourceUrl })
+            assertFalse("A very cheap MacBook must not be accepted based on one listing",
+                accepted.any { it.sourceUrl == suspiciousLaptop.sourceUrl })
+            assertFalse("An implausibly cheap PS5 listing must be rejected",
+                accepted.any { it.sourceUrl == suspiciousConsole.sourceUrl })
+            assertTrue("Legitimate low-price accessories are exempt from device floors",
+                accepted.any { it.sourceUrl == legitimateCase.sourceUrl })
+            assertTrue("A plausible retail phone offer should remain eligible",
+                accepted.any { it.sourceUrl == legitimatePhone.sourceUrl })
+
+            val rejected = repository.diagnoseOnlineSearchRejections(
+                listOf(suspiciousPhone, suspiciousLaptop, suspiciousConsole)
+            )
+            assertTrue(
+                "Low-price rejections should explain the reason",
+                rejected.all { it.reason == "Precio sospechosamente bajo para esta categoría" }
+            )
+        } finally {
+            database.close()
+        }
+    }
+
 }

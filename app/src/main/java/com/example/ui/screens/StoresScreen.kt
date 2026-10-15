@@ -287,7 +287,7 @@ fun StoresScreen(
                         OutlinedButton(
                             onClick = { onSelectStoreForMarket(store.name) },
                             modifier = Modifier
-                                .weight(1f)
+                                .weight(if (store.hasOfficialSite) 1f else 2f)
                                 .height(38.dp),
                             shape = RoundedCornerShape(8.dp)
                         ) {

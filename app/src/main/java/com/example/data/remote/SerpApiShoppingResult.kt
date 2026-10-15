@@ -83,9 +83,12 @@ fun isIrrelevantMultiProductBundle(searchQuery: String, resultTitle: String): Bo
     val extraModelCode = queryModels.isNotEmpty() && titleModels.any { it !in queryModels }
     val extraProductType = titleTypes.size >= 2 &&
         (queryTypes.isEmpty() || titleTypes.any { it !in queryTypes })
+    // Inspect the original title: normalization strips '+', so using the normalized title
+    // silently missed mixed-product listings joined by plus signs.
     val hasMultiItemSeparator = Regex(
-        """(?:\s+\+\s+|\b(with|and|incluye|incluido|acompañado de)\b)"""
-    ).containsMatchIn(title)
+        """(?:\\s+\\+\\s+|\\b(with|and|incluye|incluido|acompañado de)\\b)""",
+        RegexOption.IGNORE_CASE
+    ).containsMatchIn(resultTitle)
 
     return (extraModelCode && extraProductType) ||
         (queryModels.isNotEmpty() && hasMultiItemSeparator && extraProductType)

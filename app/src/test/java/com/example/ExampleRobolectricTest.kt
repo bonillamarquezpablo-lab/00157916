@@ -1781,7 +1781,7 @@ class ExampleRobolectricTest {
                 }
                 """.trimIndent()
             ),
-            query = "Académie Scientifique de Beauté Calendario de Adviento 2024",
+            query = "Calendario de Adviento Académie Scientifique de Beauté 2024",
             observedAt = 123L
         )
 
@@ -1793,6 +1793,84 @@ class ExampleRobolectricTest {
         assertEquals(2, report.rejectedAsIrrelevant)
         assertTrue(report.discardedOffers.any { it.title.contains("Douglas") })
         assertTrue(report.discardedOffers.any { it.title.contains("Galaxy") })
+    }
+
+    @Test
+    fun `specific model search rejects a different model from the same brand`() {
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "search_metadata": {"status": "Success"},
+                  "shopping_results": [
+                    {
+                      "title": "Sony WH-1000XM5 auriculares inalámbricos",
+                      "price": "249,99 €",
+                      "extracted_price": 249.99,
+                      "link": "https://www.example.es/sony-xm5",
+                      "source": "Tienda A"
+                    },
+                    {
+                      "title": "Sony WH-1000XM4 auriculares inalámbricos",
+                      "price": "199,99 €",
+                      "extracted_price": 199.99,
+                      "link": "https://www.example.es/sony-xm4",
+                      "source": "Tienda B"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "Sony WH-1000XM5 auriculares inalámbricos",
+            observedAt = 123L
+        )
+
+        assertEquals(
+            "A matching brand must not make a different model acceptable",
+            listOf("Sony WH-1000XM5 auriculares inalámbricos"),
+            report.results.map { it.title }
+        )
+        assertEquals(1, report.rejectedAsIrrelevant)
+        assertTrue(report.discardedOffers.any { it.title.contains("WH-1000XM4") })
+    }
+
+    @Test
+    fun `specific Samsung Galaxy search rejects adjacent model numbers`() {
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "search_metadata": {"status": "Success"},
+                  "shopping_results": [
+                    {
+                      "title": "Samsung Galaxy S26 Ultra 512GB",
+                      "price": "1.299,00 €",
+                      "extracted_price": 1299.00,
+                      "link": "https://www.example.es/s26",
+                      "source": "Tienda A"
+                    },
+                    {
+                      "title": "Samsung Galaxy S25 Ultra 512GB",
+                      "price": "1.099,00 €",
+                      "extracted_price": 1099.00,
+                      "link": "https://www.example.es/s25",
+                      "source": "Tienda B"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "Samsung Galaxy S26 Ultra 512GB",
+            observedAt = 123L
+        )
+
+        assertEquals(
+            "Same brand and family are not enough when the model number differs",
+            listOf("Samsung Galaxy S26 Ultra 512GB"),
+            report.results.map { it.title }
+        )
+        assertEquals(1, report.rejectedAsIrrelevant)
+        assertTrue(report.discardedOffers.any { it.title.contains("S25") })
     }
 
     @Test

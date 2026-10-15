@@ -1376,6 +1376,9 @@ class SerpApiClient(
         fun tokenMatches(token: String): Boolean = found.any { candidate ->
             when {
                 token == candidate -> true
+                // Never use typo-tolerance for model codes, storage numbers or edition years.
+                // WH-1000XM4 and WH-1000XM5 differ by one character but are different products.
+                token.any(Char::isDigit) -> candidate.endsWith(token)
                 token.length >= 7 && candidate.length >= 7 &&
                     editDistance(token, candidate) <= minOf(2, token.length / 4) -> true
                 containsModelCode && token.length in 2..3 &&
@@ -1392,8 +1395,37 @@ class SerpApiClient(
         // terms must match. This protects brand/model searches from generic category matches
         // such as another brand's advent calendar, even if several generic words overlap.
         if (orderedWanted.size >= 4) {
-            val leadingAnchors = orderedWanted.take(2).filter { it.length >= 4 }
-            if (leadingAnchors.isNotEmpty() && leadingAnchors.none(::tokenMatches)) return false
+            // Ignore category words when choosing identity anchors. A user may start with
+            // "calendario de adviento" before naming the brand; those generic words must not
+            // let a different brand (or even a chocolate calendar) pass as the requested item.
+            val genericAnchorTerms = setOf(
+                "calendario", "calendarios", "calendar", "calendars", "advent",
+                "adviento", "adventskalender", "adventskalenders", "beauty",
+                "auriculares", "headphones", "headphone", "wireless", "inalambricos",
+                "inalambrico", "portatil", "laptop", "smartphone", "movil", "telefono",
+                "teclado", "keyboard", "raton", "mouse", "cargador", "charger",
+                "bateria", "battery", "power", "bank", "perfume", "perfumes",
+                "crema", "cream", "skin", "hombre", "hombres", "mujer", "mujeres",
+                "men", "women", "frauen", "damen", "mann", "kosmetik", "pflege",
+                "galaxy", "pixel", "iphone", "redmi", "poco"
+            )
+            // Keep explicit model/edition numbers even when short (S26, 17, 2024), and
+            // combine them with up to two distinctive text anchors. Otherwise "Samsung Galaxy
+            // S26" could accidentally match "Samsung Galaxy S25" because the first two tokens
+            // identify only the brand/family.
+            val modelAnchors = orderedWanted.filter { token ->
+                token.length >= 2 &&
+                    token !in genericAnchorTerms &&
+                    (token.any(Char::isLetter) && token.any(Char::isDigit) ||
+                        Regex("""(?:19|20)\d{2}""").matches(token))
+            }
+            val textAnchors = orderedWanted.filter { token ->
+                token.length >= 4 && token !in genericAnchorTerms && !token.any(Char::isDigit)
+            }.take(2)
+            val identityAnchors = (textAnchors + modelAnchors).distinct()
+            // Every selected identity anchor must match. Matching only the brand is not
+            // enough when the query also names an exact model or edition.
+            if (identityAnchors.any { anchor -> !tokenMatches(anchor) }) return false
         }
 
         val overlap = wanted.count(::tokenMatches)

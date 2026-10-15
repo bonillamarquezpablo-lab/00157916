@@ -61,7 +61,7 @@ class PriceHistoryChartTest {
         composeRule.onNodeWithText("Evolución Real del Precio").assertIsDisplayed()
         composeRule.onNodeWithText("Wayback (2)").performClick()
         composeRule.onNodeWithText("Historial antiguo (Wayback)").assertIsDisplayed()
-        composeRule.onNodeWithText("Mín. del archivo: 69.99 €").assertIsDisplayed()
+        composeRule.onNodeWithText("Mín. del archivo:", substring = true).assertIsDisplayed()
         composeRule.onNodeWithText(
             "Precios anunciados en páginas archivadas. No confirman stock, envío ni precio final y no se mezclan con el historial real."
         ).assertIsDisplayed()

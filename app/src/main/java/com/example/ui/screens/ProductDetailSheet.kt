@@ -408,7 +408,7 @@ fun ProductDetailSheet(
                 }
             }
 
-            if (product.isPriceVerified) {
+            if (product.isPriceVerified || product.priceHistory.isNotEmpty()) {
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -469,8 +469,11 @@ fun ProductDetailSheet(
             }
             }
 
-            // Free archive lookup runs first; the SerpApi comparison remains a separate paid-quota option.
-            if (product.isPriceVerified) {
+            // Free archive lookup needs a product destination, not a verified live quote.
+            if (product.storeUrl.isNotBlank() ||
+                product.currentStore.officialUrl.isNotBlank() ||
+                product.offers.isNotEmpty()
+            ) {
                 OutlinedButton(
                     onClick = onSearchFreeHistory,
                     enabled = !isSearchingFreeHistory && !isComparingStores,

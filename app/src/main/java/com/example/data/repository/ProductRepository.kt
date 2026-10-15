@@ -649,8 +649,11 @@ class ProductRepository(
 
         val products = productDao.getAllProductsSnapshot()
         val identity = onlineProductIdentityKey(expectedTitle)
+        val normalizedOriginalUrl = originalUrl.trimEnd('/')
         val product = products.firstOrNull {
-            onlineProductIdentityKey(it.title) == identity && it.isPriceVerified
+            onlineProductIdentityKey(it.title) == identity &&
+                (it.isPriceVerified ||
+                    it.storeUrl.trimEnd('/').equals(normalizedOriginalUrl, ignoreCase = true))
         } ?: return 0
         val now = System.currentTimeMillis()
         val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)
@@ -1331,9 +1334,10 @@ class ProductRepository(
         val latestObservation = latestBatch.minByOrNull { it.price }
         val minObservation = snapshotHistory.minByOrNull { it.price }
         val maxObservation = snapshotHistory.maxByOrNull { it.price }
-        // Require both the explicit product flag and a provider-backed observation.
+        // Archive-backed points are independently source-verified and can be displayed before a
+        // live quote exists. They never make the current price verified or establish deal badges.
         val priceIsVerified = isPriceVerified && latestObservation != null
-        val effectiveHistory = if (priceIsVerified) snapshotHistory else emptyList()
+        val effectiveHistory = snapshotHistory
         val effectiveStore = if (priceIsVerified) {
             observationStore(latestObservation!!, stores)
         } else {

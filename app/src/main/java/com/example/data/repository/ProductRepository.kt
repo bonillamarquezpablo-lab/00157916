@@ -444,24 +444,29 @@ class ProductRepository(
         val archiveBacked = observation.evidenceType.equals("archive", ignoreCase = true) ||
             parseHttpUri(observation.sourceUrl)?.host.equals("web.archive.org", ignoreCase = true)
         val merchantUrl = if (archiveBacked) {
-            // Validate the seller against the original retailer page, not web.archive.org.
-            // Older rows may lack sourcePageUrl, so recover the HTTPS target from a standard
-            // Wayback snapshot URL when possible; if neither is trustworthy, reject the row.
-            observation.sourcePageUrl.takeIf { candidate ->
-                parseHttpUri(candidate)?.let { uri ->
-                    uri.scheme.equals("https", ignoreCase = true) &&
-                        !uri.host.equals("web.archive.org", ignoreCase = true)
-                } == true
-            } ?: run {
-                val archiveUri = parseHttpUri(observation.sourceUrl) ?: return false
-                if (!archiveUri.host.equals("web.archive.org", ignoreCase = true) ||
-                    !archiveUri.scheme.equals("https", ignoreCase = true)
-                ) return false
-                Regex("""^/web/\d{14}id_/(https://[^?]+)""")
-                    .find(archiveUri.rawPath.orEmpty())
-                    ?.groupValues
-                    ?.getOrNull(1)
-            } ?: return false
+            // Derive the merchant from the archived target itself. sourcePageUrl is only
+            // supplementary legacy metadata and must not redirect seller validation to a
+            // different trusted domain.
+            val archiveUri = parseHttpUri(observation.sourceUrl) ?: return false
+            if (!archiveUri.host.equals("web.archive.org", ignoreCase = true) ||
+                !archiveUri.scheme.equals("https", ignoreCase = true)
+            ) return false
+            val archivedTarget = Regex("""^/web/\d{14}id_/(https://[^?]+)""")
+                .find(archiveUri.rawPath.orEmpty())
+                ?.groupValues
+                ?.getOrNull(1)
+                ?: return false
+            val archivedTargetUri = parseHttpUri(archivedTarget) ?: return false
+            if (!archivedTargetUri.scheme.equals("https", ignoreCase = true) ||
+                archivedTargetUri.host.equals("web.archive.org", ignoreCase = true)
+            ) return false
+            val legacySourceUri = parseHttpUri(observation.sourcePageUrl)
+            if (legacySourceUri != null &&
+                (!legacySourceUri.scheme.equals("https", ignoreCase = true) ||
+                    !normalizeHost(legacySourceUri.host.orEmpty())
+                        .equals(normalizeHost(archivedTargetUri.host.orEmpty()), ignoreCase = true))
+            ) return false
+            archivedTarget
         } else {
             observation.sourceUrl
         }

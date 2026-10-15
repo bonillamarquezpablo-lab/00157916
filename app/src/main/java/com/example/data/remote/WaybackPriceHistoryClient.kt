@@ -17,6 +17,7 @@ import org.json.JSONException
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.net.URI
+import java.net.URLDecoder
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.text.Normalizer
@@ -39,7 +40,8 @@ data class WaybackBackfillResult(
     val capturesFound: Int = 0,
     val capturesChecked: Int = 0,
     val skippedRecently: Boolean = false,
-    val available: Boolean = false
+    val available: Boolean = false,
+    val storeLinkUnresolved: Boolean = false
 )
 
 /**
@@ -64,12 +66,17 @@ class WaybackPriceHistoryClient(
         originalUrl: String,
         expectedTitle: String,
         now: Long = System.currentTimeMillis(),
-        lookbackDays: Int = DEFAULT_LOOKBACK_DAYS
+        lookbackDays: Int = DEFAULT_LOOKBACK_DAYS,
+        storeName: String = ""
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
         if (!preferences.getBoolean("enabled", true)) {
             return@withContext WaybackBackfillResult()
         }
-        if (!isEligibleDirectUrl(originalUrl) || expectedTitle.isBlank()) {
+        if (expectedTitle.isBlank()) {
+            return@withContext WaybackBackfillResult()
+        }
+        val canResolveShoppingLink = isGoogleShoppingUrl(originalUrl) && storeName.isNotBlank()
+        if (!isEligibleDirectUrl(originalUrl) && !canResolveShoppingLink) {
             return@withContext WaybackBackfillResult()
         }
 
@@ -79,7 +86,18 @@ class WaybackPriceHistoryClient(
             return@withContext WaybackBackfillResult(skippedRecently = true)
         }
 
-        val cdxUrl = buildCdxUrl(originalUrl, now, lookbackDays)
+        val resolvedOriginalUrl = if (isEligibleDirectUrl(originalUrl)) {
+            originalUrl
+        } else {
+            resolveDirectMerchantUrl(originalUrl, storeName) ?: run {
+                // Cache an unsuccessful extraction too, so repeated searches do not repeatedly
+                // fetch a Google Shopping page that does not expose the seller destination.
+                preferences.edit().putLong(attemptKey, now).apply()
+                return@withContext WaybackBackfillResult(storeLinkUnresolved = true)
+            }
+        }
+
+        val cdxUrl = buildCdxUrl(resolvedOriginalUrl, now, lookbackDays)
             ?: return@withContext WaybackBackfillResult()
         val cdxRequest = Request.Builder().url(cdxUrl).header("User-Agent", USER_AGENT).get().build()
         val captures = try {
@@ -112,7 +130,7 @@ class WaybackPriceHistoryClient(
                         } ?: return@withPermit SnapshotFetch(false, null)
                         SnapshotFetch(
                             fetched = true,
-                            quote = parseArchivedPrice(html, expectedTitle, originalUrl, snapshotUrl, capture.timestamp)
+                            quote = parseArchivedPrice(html, expectedTitle, resolvedOriginalUrl, snapshotUrl, capture.timestamp)
                         )
                     }
                 }
@@ -128,6 +146,86 @@ class WaybackPriceHistoryClient(
             capturesChecked = fetched.count { it.fetched },
             available = true
         )
+    }
+
+    private fun resolveDirectMerchantUrl(googleUrl: String, storeName: String): String? {
+        val request = Request.Builder()
+            .url(googleUrl)
+            .header("User-Agent", USER_AGENT)
+            .get()
+            .build()
+        val html = try {
+            http.newCall(request).execute().use { response ->
+                if (response.isSuccessful) response.body?.string() else null
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        } ?: return null
+        return extractDirectMerchantUrl(html, storeName)
+    }
+
+    /**
+     * Extract only outbound URLs whose host matches the seller name shown by Shopping.
+     * Google redirect parameters are unwrapped, but generic links and other sellers are rejected.
+     */
+    internal fun extractDirectMerchantUrl(html: String, storeName: String): String? {
+        if (html.isBlank() || storeName.isBlank()) return null
+        val decodedHtml = html
+            .replace("\\u0026", "&", ignoreCase = true)
+            .replace("\\u003d", "=", ignoreCase = true)
+            .replace("\\/", "/")
+        val candidates = linkedSetOf<String>()
+
+        fun decodeQueryValue(value: String): String =
+            runCatching { URLDecoder.decode(value, Charsets.UTF_8.name()) }.getOrDefault(value)
+
+        fun collectUrl(rawValue: String, depth: Int = 0) {
+            if (depth > 3) return
+            val value = decodeHtml(rawValue).trim().trim('"', '\'')
+            if (value.startsWith("https://", ignoreCase = true) ||
+                value.startsWith("http://", ignoreCase = true)
+            ) candidates += value
+
+            val uri = runCatching { URI(value) }.getOrNull() ?: return
+            val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+            if (!host.startsWith("google.") && !host.endsWith(".google.com") && !host.endsWith(".google.es")) return
+
+            val redirectParameters = setOf("q", "url", "adurl", "uddg", "target", "dest", "destination", "redirect", "redirect_url")
+            uri.rawQuery.orEmpty().split('&').forEach { parameter ->
+                val pair = parameter.split('=', limit = 2)
+                if (pair.size != 2) return@forEach
+                val key = decodeQueryValue(pair[0]).lowercase(Locale.ROOT)
+                if (key !in redirectParameters) return@forEach
+                val target = decodeQueryValue(pair[1])
+                    .replace("\\u0026", "&", ignoreCase = true)
+                    .replace("&amp;", "&", ignoreCase = true)
+                if (target.startsWith("https://", ignoreCase = true) ||
+                    target.startsWith("http://", ignoreCase = true)
+                ) collectUrl(target, depth + 1)
+            }
+        }
+
+        Regex("""(?is)\\bhref\\s*=\\s*["'](.*?)["']""")
+            .findAll(decodedHtml)
+            .forEach { collectUrl(it.groupValues[1]) }
+        Regex("""https?://[^\\s"'<>\\]+""", RegexOption.IGNORE_CASE)
+            .findAll(decodedHtml)
+            .forEach { collectUrl(it.value) }
+
+        val storeCompact = normalizeTitle(storeName).filter(Char::isLetterOrDigit)
+        if (storeCompact.length < 4) return null
+        fun hostMatchesStore(url: String): Boolean {
+            val hostLabels = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.").split('.') }
+                .getOrNull() ?: return false
+            return hostLabels.any { label ->
+                val compactLabel = normalizeTitle(label).filter(Char::isLetterOrDigit)
+                compactLabel.length >= 4 &&
+                    (storeCompact.contains(compactLabel) || compactLabel.contains(storeCompact))
+            }
+        }
+        return candidates.firstOrNull { isEligibleDirectUrl(it) && hostMatchesStore(it) }
     }
 
     private fun buildCdxUrl(originalUrl: String, now: Long, lookbackDays: Int): HttpUrl? {

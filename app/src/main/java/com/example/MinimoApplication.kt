@@ -75,24 +75,25 @@ class MinimoApplication : Application() {
             val fileName = "Minimo-crash-$stamp.txt"
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                var uri: android.net.Uri? = null
+                var insertedUri: android.net.Uri? = null
                 try {
                     val values = ContentValues().apply {
                         put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
                         put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
                         put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                     }
-                    uri = app.contentResolver.insert(
+                    val outputUri = app.contentResolver.insert(
                         MediaStore.Downloads.EXTERNAL_CONTENT_URI,
                         values
                     ) ?: throw IOException("Android no creó el archivo en Descargas.")
-                    val output = app.contentResolver.openOutputStream(uri, "w")
+                    insertedUri = outputUri
+                    val output = app.contentResolver.openOutputStream(outputUri, "w")
                         ?: throw IOException("Android no abrió el archivo de diagnóstico.")
                     output.use { it.write(report.toByteArray(Charsets.UTF_8)) }
                     return "Descargas/$fileName"
                 } catch (failure: Exception) {
-                    if (uri != null) {
-                        runCatching { app.contentResolver.delete(uri, null, null) }
+                    insertedUri?.let { orphan ->
+                        runCatching { app.contentResolver.delete(orphan, null, null) }
                     }
                     Log.e(TAG, "Writing to public Downloads failed; using app-specific storage.", failure)
                 }

@@ -426,7 +426,7 @@ fun PriceHistoryChart(
                     text = when {
                         showingArchiveHistory && validArchiveHistory.isEmpty() -> "No hay capturas Wayback verificadas"
                         showingArchiveHistory -> "Sin capturas archivadas en este rango"
-                        validLiveHistory.isEmpty() -> "Sin datos todavía"
+                        validLiveHistory.isEmpty() -> "Consulta precios para empezar el historial"
                         else -> "Sin datos en este rango"
                     },
                     modifier = Modifier.align(Alignment.Center),

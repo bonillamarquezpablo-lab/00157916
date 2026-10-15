@@ -234,6 +234,47 @@ class WaybackPriceHistoryClient(
         return normalizeMerchantDomain(match.value)
     }
 
+    /**
+     * If a Shopping provider hides the merchant URL/name, fall back only to a recognized
+     * product brand's own store domain. This is a fallback source, not an assumption that the
+     * cheapest third-party seller is the brand itself; archived metadata must still verify title
+     * and EUR price before any point is saved.
+     */
+    internal fun resolveBrandMerchant(productTitle: String): Pair<String, String>? {
+        val normalized = normalizeTitle(productTitle)
+        val brands = listOf(
+            "new balance" to ("New Balance" to "newbalance.es"),
+            "apple" to ("Apple Store" to "apple.com"),
+            "iphone" to ("Apple Store" to "apple.com"),
+            "samsung" to ("Samsung" to "samsung.com"),
+            "galaxy" to ("Samsung" to "samsung.com"),
+            "nike" to ("Nike" to "nike.com"),
+            "adidas" to ("Adidas" to "adidas.com"),
+            "puma" to ("Puma" to "eu.puma.com"),
+            "asics" to ("ASICS" to "asics.com"),
+            "reebok" to ("Reebok" to "reebok.eu"),
+            "converse" to ("Converse" to "converse.com"),
+            "vans" to ("Vans" to "vans.com"),
+            "anker" to ("Anker" to "anker.com"),
+            "ugreen" to ("UGREEN" to "ugreen.com"),
+            "baseus" to ("Baseus" to "baseus.com"),
+            "sony" to ("Sony" to "sony.es"),
+            "xiaomi" to ("Xiaomi" to "mi.com"),
+            "redmi" to ("Xiaomi" to "mi.com"),
+            "jbl" to ("JBL" to "jbl.com"),
+            "logitech" to ("Logitech" to "logitech.com"),
+            "dyson" to ("Dyson" to "dyson.es"),
+            "lenovo" to ("Lenovo" to "lenovo.com"),
+            "dell" to ("Dell" to "dell.com"),
+            "hp" to ("HP" to "hp.com")
+        )
+        val match = brands.firstOrNull { (brand, _) ->
+            Regex("""\\b${Regex.escape(brand)}\\b""").containsMatchIn(normalized)
+        } ?: return null
+        val domain = normalizeMerchantDomain(match.second.second) ?: return null
+        return match.second.first to domain
+    }
+
     private fun normalizeMerchantDomain(value: String): String? {
         val raw = value.trim().removePrefix("https://").removePrefix("http://")
         val uri = runCatching { URI("https://$raw") }.getOrNull() ?: return null

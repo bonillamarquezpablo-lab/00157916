@@ -3,12 +3,9 @@ package com.example.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmark
@@ -74,7 +71,7 @@ enum class MainTab(
     MARKET("Mercado", Icons.Filled.Store, Icons.Outlined.Storefront),
     ATH_DEALS("Mínimos", Icons.Filled.CheckCircle, Icons.Outlined.CheckCircleOutline),
     STORES("Tiendas", Icons.Filled.Business, Icons.Outlined.Business),
-    VERIFIER("Auditor", Icons.Filled.Shield, Icons.Outlined.Shield),
+    VERIFIER("Verificar", Icons.Filled.Shield, Icons.Outlined.Shield),
     ALERTS("Alertas", Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder)
 }
 
@@ -178,11 +175,11 @@ fun MainScreen(
         bottomBar = {
             if (!showSettings && !showOnlineSearch) {
             NavigationBar(
-                modifier = Modifier
-                    .windowInsetsPadding(WindowInsets.navigationBars)
-                    .testTag("main_bottom_nav"),
+                // NavigationBar already applies navigation-bar insets. Applying them twice
+                // leaves an oversized empty strip at the bottom on gesture-navigation devices.
+                modifier = Modifier.testTag("main_bottom_nav"),
                 containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 6.dp
+                tonalElevation = 0.dp
             ) {
                 MainTab.values().forEach { tab ->
                     val isSelected = currentTab == tab
@@ -194,8 +191,8 @@ fun MainScreen(
                                 BadgedBox(
                                     badge = {
                                         Badge(
-                                            containerColor = Color(0xFF059669),
-                                            contentColor = Color.White
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
                                         ) {
                                             Text("${todayAthDeals.size}")
                                         }
@@ -204,7 +201,7 @@ fun MainScreen(
                                     Icon(
                                         imageVector = if (isSelected) tab.selectedIcon else tab.unselectedIcon,
                                         contentDescription = tab.title,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(24.dp)
                                     )
                                 }
                             } else if (tab == MainTab.ALERTS && trackedProducts.isNotEmpty()) {
@@ -221,7 +218,7 @@ fun MainScreen(
                                     Icon(
                                         imageVector = if (isSelected) tab.selectedIcon else tab.unselectedIcon,
                                         contentDescription = tab.title,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(24.dp)
                                     )
                                 }
                             } else {
@@ -235,14 +232,14 @@ fun MainScreen(
                         label = {
                             Text(
                                 text = tab.title,
-                                fontSize = 10.sp,
+                                fontSize = 11.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                             )
                         },
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Color(0xFF047857),
-                            selectedTextColor = Color(0xFF047857),
-                            indicatorColor = Color(0xFF10B981).copy(alpha = 0.2f)
+                            selectedIconColor = MaterialTheme.colorScheme.primary,
+                            selectedTextColor = MaterialTheme.colorScheme.primary,
+                            indicatorColor = MaterialTheme.colorScheme.secondaryContainer
                         ),
                         modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
                     )

@@ -1538,6 +1538,10 @@ class ProductRepository(
             ?: observation.sourceName.substringBefore(" · SerpApi")
                 .takeIf { it.isNotBlank() }
             ?: host.ifBlank { "Comercio consultado" }
+        // The observation URL may be a Google Shopping intermediary. Resolve a known merchant
+        // by its reported store name before constructing a fallback Store whose domain would
+        // otherwise incorrectly become google.com.
+        Store.findKnownByName(merchantName, observation.sourceUrl)?.let { return it }
         return Store(
             id = observation.storeId,
             name = merchantName,

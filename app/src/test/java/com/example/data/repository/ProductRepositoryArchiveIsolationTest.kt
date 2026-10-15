@@ -196,6 +196,27 @@ class ProductRepositoryArchiveIsolationTest {
                 wrongSnapshotTargetInserted
             )
 
+            val wrongCasePathInserted = repository.recordArchivedPriceHistory(
+                expectedTitle = title,
+                originalUrl = "https://shop.example/product/anker-prime",
+                storeName = "Tienda de prueba",
+                quotes = listOf(
+                    ArchivedPriceQuote(
+                        observedAt = mismatchedCaptureTime,
+                        price = 19.99,
+                        currency = "EUR",
+                        productTitle = title,
+                        originalUrl = "https://shop.example/product/anker-prime",
+                        snapshotUrl = "https://web.archive.org/web/20260901000000id_/https://shop.example/Product/Anker-Prime"
+                    )
+                )
+            )
+            assertEquals(
+                "a snapshot of a different case-sensitive merchant path must be rejected",
+                0,
+                wrongCasePathInserted
+            )
+
             val insecureSnapshotInserted = repository.recordArchivedPriceHistory(
                 expectedTitle = title,
                 originalUrl = "https://shop.example/product/anker-prime",

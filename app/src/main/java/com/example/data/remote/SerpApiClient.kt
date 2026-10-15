@@ -1386,23 +1386,23 @@ class SerpApiClient(
 
     private fun isHallEffectKeyboardSearch(value: String): Boolean {
         val normalized = normalize(value)
-        val namesKeyboard = Regex("""\\b(teclado|teclados|keyboard|keyboards)\\b""")
+        val namesKeyboard = Regex("""\b(teclado|teclados|keyboard|keyboards)\b""")
             .containsMatchIn(normalized)
-        val namesHallTechnology = Regex("""\\b(hall|hal|efecto|effect|he|tmr|magnetic|magnetico|magnetica)\\b""")
+        val namesHallTechnology = Regex("""\b(hall|hal|efecto|effect|he|tmr|magnetic|magnetico|magnetica)\b""")
             .containsMatchIn(normalized)
         return namesKeyboard && namesHallTechnology
     }
 
     private fun isHallEffectKeyboardResult(value: String): Boolean {
         val normalized = normalize(value)
-        val namesKeyboard = Regex("""\\b(teclado|teclados|keyboard|keyboards)\\b""")
+        val namesKeyboard = Regex("""\b(teclado|teclados|keyboard|keyboards)\b""")
             .containsMatchIn(normalized)
         if (!namesKeyboard) return false
 
         val explicitTechnology = Regex(
-            """\\b(hall\\s*effect|effect\\s*hall|efecto\\s*hall|hall\\s*sensor|sensor\\s*hall|magnetic|magnetico|magnetica|magneticos|magneticas|tmr|rapid\\s+trigger)\\b"""
+            """\b(hall\s*effect|effect\s*hall|efecto\s*hall|hall\s*sensor|sensor\s*hall|magnetic|magnetico|magnetica|magneticos|magneticas|tmr|rapid\s+trigger)\b"""
         ).containsMatchIn(normalized)
-        val explicitHeLabel = Regex("""\\bhe\\b""").containsMatchIn(normalized)
+        val explicitHeLabel = Regex("""\bhe\b""").containsMatchIn(normalized)
         return explicitTechnology || explicitHeLabel
     }
 

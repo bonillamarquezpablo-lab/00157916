@@ -365,7 +365,8 @@ class ProductRepository(
                     athMaxPrice = maxOf(existingProduct.athMaxPrice, highestToday),
                     currentStoreId = storeId,
                     storeUrl = bestOffer.sourceUrl,
-                    imageUrl = bestOffer.thumbnailUrl.takeIf { it.isNotBlank() } ?: existingProduct.imageUrl,
+                    imageUrl = group.representativeImageUrl.takeIf { it.isNotBlank() }
+                        ?: existingProduct.imageUrl.takeIf { existingProduct.title.equals(displayTitle, ignoreCase = true) },
                     isPriceVerified = hasTrustedOffer || existingProduct.isPriceVerified,
                     googleProductId = bestOffer.googleProductId
                         ?: group.offers.firstNotNullOfOrNull { it.googleProductId }
@@ -387,7 +388,7 @@ class ProductRepository(
                     currentStoreId = storeId,
                     storeUrl = bestOffer.sourceUrl,
                     ean = "",
-                    imageUrl = bestOffer.thumbnailUrl.takeIf { it.isNotBlank() },
+                    imageUrl = group.representativeImageUrl.takeIf { it.isNotBlank() },
                     rating = 0.0,
                     reviewCount = 0,
                     isPriceVerified = group.offers.any { !it.isSuspiciousPrice },

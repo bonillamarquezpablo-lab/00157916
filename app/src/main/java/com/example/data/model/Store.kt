@@ -1,9 +1,18 @@
 package com.example.data.model
 
 import androidx.compose.ui.graphics.Color
+
+private fun normalizeStoreIdentifier(value: String): String =
+    Normalizer.normalize(value.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+        .replace(Regex("\\p{Mn}+"), "")
+        .replace(Regex("[^a-z0-9]+"), " ")
+        .trim()
+        .replace(Regex("\\s+"), " ")
 import java.net.URLEncoder
 import java.net.URI
 import java.nio.charset.StandardCharsets
+import java.text.Normalizer
+import java.util.Locale
 
 /**
  * Retailer directory entry. Being listed does not mean that Mínimo can retrieve its
@@ -164,22 +173,28 @@ data class Store(
          * unknown seller for Amazon, which could send a user to the wrong shop.
          */
         fun findKnownByName(name: String, sourceUrl: String = ""): Store? {
-            val normalizedName = name.trim().lowercase()
-            val sourceHost = runCatching { URI(sourceUrl).host?.lowercase()?.removePrefix("www.") }
-                .getOrNull()
-                .orEmpty()
+            val normalizedName = normalizeStoreIdentifier(name)
+            val sourceHost = runCatching {
+                URI(sourceUrl).host?.lowercase(Locale.ROOT)?.removePrefix("www.")
+            }.getOrNull().orEmpty()
             return ALL_STORES.firstOrNull { store ->
-                val storeName = store.name.lowercase()
-                val storeId = store.id.replace('_', ' ').lowercase()
-                val storeHost = store.domain.substringBefore("/").removePrefix("www.").lowercase()
-                (normalizedName.isNotBlank() &&
-                    (normalizedName == storeName ||
-                        normalizedName.contains(storeName) ||
-                        storeName.contains(normalizedName) ||
+                val storeName = normalizeStoreIdentifier(store.name)
+                val storeId = normalizeStoreIdentifier(store.id.replace('_', ' '))
+                val storeHost = store.domain.substringBefore("/").removePrefix("www.")
+                    .lowercase(Locale.ROOT)
+                val nameMatches = normalizedName.isNotBlank() && (
+                    normalizedName == storeName ||
                         normalizedName == storeId ||
-                        normalizedName.contains(storeId))) ||
-                    (sourceHost.isNotBlank() &&
-                        (sourceHost == storeHost || sourceHost.endsWith(".$storeHost")))
+                        (normalizedName.length >= 4 && (
+                            normalizedName.startsWith("$storeName ") ||
+                                normalizedName.endsWith(" $storeName") ||
+                                normalizedName.contains(" $storeName ") ||
+                                storeName.startsWith("$normalizedName ")
+                            ))
+                    )
+                val hostMatches = sourceHost.isNotBlank() &&
+                    (sourceHost == storeHost || sourceHost.endsWith(".$storeHost"))
+                nameMatches || hostMatches
             }
         }
 

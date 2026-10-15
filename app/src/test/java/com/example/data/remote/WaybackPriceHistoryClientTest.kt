@@ -111,6 +111,23 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun extractsSellerMatchedUrlFromGoogleRedirectAndRejectsOtherMerchants() {
+        val client = newClient()
+        val html = """
+            <html><body>
+              <a href="https://www.google.com/url?url=https%3A%2F%2Fwww.parfumdreams.es%2FPolo-Blue-100ml&sa=U">Parfumdreams</a>
+              <a href="https://www.amazon.es/dp/B000000000">Amazon</a>
+            </body></html>
+        """.trimIndent()
+
+        assertEquals(
+            "https://www.parfumdreams.es/Polo-Blue-100ml",
+            client.extractDirectMerchantUrl(html, "parfumdreams.ES")
+        )
+        assertNull(client.extractDirectMerchantUrl(html, "Ralph Lauren"))
+    }
+
+    @Test
     fun readsExplicitEurProductMetaTagsAndRejectsGoogleUrlAsArchiveTarget() {
         val client = newClient()
         val html = """

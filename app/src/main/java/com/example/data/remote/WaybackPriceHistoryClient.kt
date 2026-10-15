@@ -357,11 +357,11 @@ class WaybackPriceHistoryClient(
         // words must not make a model URL impossible to discover.
         val requiredLookaheads = when {
             modelTokens.isNotEmpty() && textTokens.isNotEmpty() -> listOf(
-                "(?=.*${Regex.escape(modelTokens.first())})",
-                "(?=.*(?:${textTokens.take(2).joinToString("|") { Regex.escape(it) }}))"
+                "(?=.*${urlTokenPattern(modelTokens.first())})",
+                "(?=.*(?:${textTokens.take(2).joinToString("|") { urlTokenPattern(it) }}))"
             )
-            modelTokens.isNotEmpty() -> listOf("(?=.*${Regex.escape(modelTokens.first())})")
-            textTokens.size >= 2 -> textTokens.take(2).map { "(?=.*${Regex.escape(it)})" }
+            modelTokens.isNotEmpty() -> listOf("(?=.*${urlTokenPattern(modelTokens.first())})")
+            textTokens.size >= 2 -> textTokens.take(2).map { "(?=.*${urlTokenPattern(it)})" }
             else -> return null
         }
         val start = (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
@@ -385,6 +385,12 @@ class WaybackPriceHistoryClient(
             // Keeping multiple dates per URL is what makes a historical price series possible.
             .addQueryParameter("limit", MAX_DOMAIN_INDEX_ROWS.toString())
             .build()
+    }
+
+    /** Match normalized tokens across retailer URL separators, e.g. iphone16 -> iphone-16. */
+    private fun urlTokenPattern(token: String): String {
+        val pieces = token.split(Regex("""(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])"""))
+        return pieces.joinToString("[^a-z0-9]*") { Regex.escape(it) }
     }
 
     private fun historicalUrlSearchTokens(expectedTitle: String): List<String> {

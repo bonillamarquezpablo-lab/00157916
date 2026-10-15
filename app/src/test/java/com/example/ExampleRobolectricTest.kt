@@ -2908,7 +2908,7 @@ class ExampleRobolectricTest {
 
 
     @Test
-    fun \`implausible drivetrain prices are visibly marked unverified\`() = runBlocking<Unit> {
+    fun `implausible drivetrain prices are visibly marked unverified`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries().build()

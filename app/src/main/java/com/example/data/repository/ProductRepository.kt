@@ -650,12 +650,22 @@ class ProductRepository(
 
         val products = productDao.getAllProductsSnapshot()
         val identity = onlineProductIdentityKey(expectedTitle)
-        val normalizedOriginalUrl = originalUrl.trimEnd('/')
+        fun normalizeDirectStoreUrl(value: String): String? = runCatching {
+            val uri = java.net.URI(value.trim())
+            val scheme = uri.scheme?.lowercase(Locale.ROOT) ?: return@runCatching null
+            val host = uri.host?.lowercase(Locale.ROOT) ?: return@runCatching null
+            if (scheme !in setOf("http", "https")) return@runCatching null
+            val path = (uri.rawPath ?: "/").trimEnd('/').ifBlank { "/" }
+            "$scheme://$host$path"
+        }.getOrNull()
+
+        val normalizedOriginalUrl = normalizeDirectStoreUrl(originalUrl) ?: return 0
         val matchingProducts = products.filter { onlineProductIdentityKey(it.title) == identity }
-        // Prefer the exact direct URL so duplicate title rows cannot receive another seller's history.
-        val product = matchingProducts.firstOrNull {
-            it.storeUrl.trimEnd('/').equals(normalizedOriginalUrl, ignoreCase = true)
-        } ?: matchingProducts.firstOrNull { it.isPriceVerified } ?: return 0
+        // Never attach archive evidence to a same-title row from another retailer.
+        // An exact normalized direct URL is required; title similarity alone is insufficient.
+        val product = matchingProducts.singleOrNull {
+            normalizeDirectStoreUrl(it.storeUrl) == normalizedOriginalUrl
+        } ?: return 0
         val now = System.currentTimeMillis()
         val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)
         val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }

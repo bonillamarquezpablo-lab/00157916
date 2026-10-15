@@ -228,7 +228,7 @@ fun isGoogleShoppingUrl(sourceUrl: String): Boolean {
     val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
     // Accept Google's actual country domains and subdomains, but not lookalikes such as
     // google.com.attacker.example or google.attacker.example.
-    return Regex("""(?i)^(?:[a-z0-9-]+\\.)*google\\.(?:com|es|[a-z]{2,3}(?:\\.[a-z]{2,3})?)$""")
+    return Regex("""(?i)^(?:[a-z0-9-]+.)*google.(?:com|es|[a-z]{2,3}(?:.[a-z]{2,3})?)$""")
         .matches(host)
 }
 

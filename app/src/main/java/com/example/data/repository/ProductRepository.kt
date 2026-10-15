@@ -196,7 +196,6 @@ class ProductRepository(
                 result.price.isFinite() &&
                 result.price > 0.0 &&
                 result.price <= MAX_HISTORY_PRICE_EUR &&
-                isPlausibleHistoryPrice(result.title, result.price) &&
                 result.observedAt >= HISTORY_START_TIMESTAMP &&
                 !result.isRentalOrMonthly &&
                 !isPromotionalBulkListing(result.title, searchQuery) &&
@@ -246,8 +245,12 @@ class ProductRepository(
         return eligible.map { result ->
             val (hasComparableReference, median) = suspiciousByGroup[comparisonKey(result)] ?: (false to 0.0)
             result.copy(
-                isSuspiciousPrice = !result.isFitmentUnverified &&
-                    hasComparableReference && median > 0.0 && result.price < median * 0.30
+                // Keep suspicious offers visible for diagnosis, but never count them as trusted prices.
+                // Absolute device-price floors complement median checks when only one offer exists.
+                isSuspiciousPrice = result.isSuspiciousPrice ||
+                    (!result.isFitmentUnverified && !isPlausibleHistoryPrice(result.title, result.price)) ||
+                    (!result.isFitmentUnverified &&
+                        hasComparableReference && median > 0.0 && result.price < median * 0.30)
             )
         }
     }

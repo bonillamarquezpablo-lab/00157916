@@ -173,6 +173,7 @@ class WaybackPriceHistoryClientTest {
         assertNotNull(url)
         assertEquals("domain", url!!.queryParameter("matchType"))
         assertEquals("80", url.queryParameter("limit"))
+        assertNull("Domain scans must preserve repeated captures over time", url.queryParameter("collapse"))
         assertTrue(url.queryParameterValues("filter").orEmpty().any {
             it.startsWith("original:") && it.contains("academie") && it.contains("scientifique")
         })

@@ -69,17 +69,18 @@ data class Product(
                 emptyList()
             }
             return PriceBadgeClassifier.classify(
-                isPriceVerified = isPriceVerified,
+                isPriceVerified = isPriceFresh,
                 currentPrice = currentPrice,
                 priorObservedPrices = priorPrices,
                 averagePrice = avg90dPrice,
-                hasValidAverage = hasSufficientHistory
+                hasValidAverage = isPriceFresh && hasSufficientHistory
             )
         }
 
     val verdict: DealVerdict
         get() = when {
             !isPriceVerified -> DealVerdict.unverified()
+            !isPriceFresh -> DealVerdict.insufficientHistory()
             !hasSufficientHistory -> DealVerdict.insufficientHistory()
             else -> DealVerdict.analyze(
                 currentPrice = currentPrice,
@@ -91,24 +92,60 @@ data class Product(
             )
         }
 
+    /** Age of the latest live price observation, in milliseconds; null means unknown/invalid. */
+    val priceAgeMillis: Long?
+        get() {
+            val observedAt = priceObservedAt ?: return null
+            val now = System.currentTimeMillis()
+            if (observedAt > now + FUTURE_TIMESTAMP_TOLERANCE_MS) return null
+            return (now - observedAt).coerceAtLeast(0L)
+        }
+
+    /** A live observation older than 24 hours may remain visible, but is not a current deal. */
+    val isPriceFresh: Boolean
+        get() = isPriceVerified &&
+            priceAgeMillis?.let { it <= PRICE_FRESHNESS_WINDOW_MS } == true
+
+    val priceFreshnessLabel: String
+        get() {
+            if (!isPriceVerified) return "Sin observación online válida"
+            if (priceObservedAt == null) return "Fecha de observación desconocida"
+            val age = priceAgeMillis ?: return "Fecha de observación inválida"
+            return when {
+                age < 60_000L -> "Consultado hace menos de 1 min"
+                age < HOUR_MS -> "Consultado hace menos de 1 h"
+                age < DAY_MS -> "Consultado hace ${'
+}
+}{age / HOUR_MS} h"
+                age < 2L * DAY_MS -> "Consultado hace 1 día · conviene confirmar"
+                else -> "Consultado hace ${'
+}
+}{age / DAY_MS} días · conviene volver a consultar"
+            }
+        }
+
     val realSavingsAmount: Double
-        get() = if (isPriceVerified) (officialPvp - currentPrice).coerceAtLeast(0.0) else 0.0
+        get() = if (isPriceFresh) (officialPvp - currentPrice).coerceAtLeast(0.0) else 0.0
 
     val realSavingsPercent: Int
-        get() = if (isPriceVerified && officialPvp > 0) {
+        get() = if (isPriceFresh && officialPvp > 0) {
             (((officialPvp - currentPrice) / officialPvp) * 100).toInt()
         } else 0
 
     val diffFromAthPercent: Double
-        get() = if (isPriceVerified && athMinPrice > 0) {
+        get() = if (isPriceFresh && athMinPrice > 0) {
             ((currentPrice - athMinPrice) / athMinPrice) * 100
         } else 0.0
 
     val isAtAth: Boolean
-        get() = hasSufficientHistory && currentPrice <= athMinPrice + 0.05
+        get() = isPriceFresh && hasSufficientHistory && currentPrice <= athMinPrice + 0.05
 
     private companion object {
         const val MIN_HISTORY_POINTS = 3
-        const val MAX_PRICE_AGE_FOR_HISTORICAL_CLAIMS = 7L * 24L * 60L * 60L * 1000L
+        const val HOUR_MS = 60L * 60L * 1000L
+        const val DAY_MS = 24L * HOUR_MS
+        const val PRICE_FRESHNESS_WINDOW_MS = DAY_MS
+        const val FUTURE_TIMESTAMP_TOLERANCE_MS = 5L * 60L * 1000L
+        const val MAX_PRICE_AGE_FOR_HISTORICAL_CLAIMS = 7L * DAY_MS
     }
 }

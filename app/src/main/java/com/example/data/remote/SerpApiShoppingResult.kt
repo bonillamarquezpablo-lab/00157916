@@ -1,6 +1,7 @@
 package com.example.data.remote
 
 import java.net.URI
+import java.net.URLDecoder
 import java.text.Normalizer
 import java.util.Locale
 
@@ -228,6 +229,56 @@ fun isGoogleShoppingUrl(sourceUrl: String): Boolean {
     return host.startsWith("google.") ||
         host.endsWith(".google.com") ||
         host.endsWith(".google.es")
+}
+
+/**
+ * Return a retailer destination if a provider URL is already direct or if a Google redirect
+ * embeds the actual destination. Never treats a generic Google Shopping/search page as a seller URL.
+ */
+fun extractDirectRetailerUrl(sourceUrl: String): String? {
+    var current = sourceUrl.trim()
+    if (current.isBlank()) return null
+    val visited = mutableSetOf<String>()
+    val redirectKeys = setOf(
+        "url", "adurl", "q", "u", "dest", "destination", "target",
+        "redirect", "redirect_url", "url_source", "merchant_url", "final_url"
+    )
+
+    repeat(3) {
+        if (!visited.add(current)) return null
+        val uri = runCatching { URI(current) }.getOrNull() ?: return null
+        val scheme = uri.scheme?.lowercase(Locale.ROOT)
+        val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+        if (scheme !in setOf("http", "https") || host.isBlank()) return null
+        if (!isGoogleShoppingUrl(current)) return current
+
+        val nestedCandidates = uri.rawQuery.orEmpty()
+            .split('&')
+            .mapNotNull { parameter ->
+                if (parameter.isBlank()) return@mapNotNull null
+                val keyValue = parameter.split('=', limit = 2)
+                val key = runCatching {
+                    URLDecoder.decode(keyValue[0].replace("+", "%2B"), Charsets.UTF_8.name())
+                }.getOrDefault(keyValue[0]).lowercase(Locale.ROOT)
+                if (key !in redirectKeys || keyValue.size < 2) return@mapNotNull null
+                var decoded = runCatching {
+                    URLDecoder.decode(keyValue[1], Charsets.UTF_8.name())
+                }.getOrDefault(keyValue[1]).trim()
+                if (decoded.startsWith("//")) decoded = "https:$decoded"
+                val target = runCatching { URI(decoded) }.getOrNull() ?: return@mapNotNull null
+                val targetScheme = target.scheme?.lowercase(Locale.ROOT)
+                val targetHost = target.host?.lowercase(Locale.ROOT).orEmpty()
+                if (targetScheme !in setOf("http", "https") || targetHost.isBlank()) {
+                    return@mapNotNull null
+                }
+                decoded
+            }
+        val next = nestedCandidates.firstOrNull { !isGoogleShoppingUrl(it) }
+            ?: nestedCandidates.firstOrNull()
+            ?: return null
+        current = next
+    }
+    return current.takeIf { !isGoogleShoppingUrl(it) }
 }
 
 fun linkTypeForUrl(sourceUrl: String): String =

@@ -183,6 +183,18 @@ class WaybackPriceHistoryClient(
         val normalized = normalizeTitle(storeName)
         val aliases = linkedMapOf(
             "pccomponentes" to "pccomponentes.com",
+            "la manzanita" to "lamanzanita.es",
+            "nike" to "nike.com",
+            "adidas" to "adidas.com",
+            "puma" to "eu.puma.com",
+            "asics" to "asics.com",
+            "new balance" to "newbalance.es",
+            "reebok" to "reebok.eu",
+            "vans" to "vans.com",
+            "converse" to "converse.com",
+            "jdsports" to "jdsports.es",
+            "foot locker" to "footlocker.es",
+            "zalando" to "zalando.es",
             "mediamarkt" to "mediamarkt.es",
             "media markt" to "mediamarkt.es",
             "el corte ingles" to "elcorteingles.es",
@@ -220,6 +232,47 @@ class WaybackPriceHistoryClient(
             normalized == label || normalized.contains(label)
         } ?: return null
         return normalizeMerchantDomain(match.value)
+    }
+
+    /**
+     * If a Shopping provider hides the merchant URL/name, fall back only to a recognized
+     * product brand's own store domain. This is a fallback source, not an assumption that the
+     * cheapest third-party seller is the brand itself; archived metadata must still verify title
+     * and EUR price before any point is saved.
+     */
+    internal fun resolveBrandMerchant(productTitle: String): Pair<String, String>? {
+        val normalized = normalizeTitle(productTitle)
+        val brands = listOf(
+            "new balance" to ("New Balance" to "newbalance.es"),
+            "apple" to ("Apple Store" to "apple.com"),
+            "iphone" to ("Apple Store" to "apple.com"),
+            "samsung" to ("Samsung" to "samsung.com"),
+            "galaxy" to ("Samsung" to "samsung.com"),
+            "nike" to ("Nike" to "nike.com"),
+            "adidas" to ("Adidas" to "adidas.com"),
+            "puma" to ("Puma" to "eu.puma.com"),
+            "asics" to ("ASICS" to "asics.com"),
+            "reebok" to ("Reebok" to "reebok.eu"),
+            "converse" to ("Converse" to "converse.com"),
+            "vans" to ("Vans" to "vans.com"),
+            "anker" to ("Anker" to "anker.com"),
+            "ugreen" to ("UGREEN" to "ugreen.com"),
+            "baseus" to ("Baseus" to "baseus.com"),
+            "sony" to ("Sony" to "sony.es"),
+            "xiaomi" to ("Xiaomi" to "mi.com"),
+            "redmi" to ("Xiaomi" to "mi.com"),
+            "jbl" to ("JBL" to "jbl.com"),
+            "logitech" to ("Logitech" to "logitech.com"),
+            "dyson" to ("Dyson" to "dyson.es"),
+            "lenovo" to ("Lenovo" to "lenovo.com"),
+            "dell" to ("Dell" to "dell.com"),
+            "hp" to ("HP" to "hp.com")
+        )
+        val match = brands.firstOrNull { (brand, _) ->
+            Regex("""\b${Regex.escape(brand)}\b""").containsMatchIn(normalized)
+        } ?: return null
+        val domain = normalizeMerchantDomain(match.second.second) ?: return null
+        return match.second.first to domain
     }
 
     private fun normalizeMerchantDomain(value: String): String? {
@@ -485,13 +538,41 @@ class WaybackPriceHistoryClient(
         val e = normalizeTitle(expected)
         val a = normalizeTitle(archived)
         if (e.isBlank() || a.isBlank()) return false
-        if (onlineProductIdentityKey(expected) == onlineProductIdentityKey(archived)) return true
+
+        // Normalize product identity first so known equivalent model spellings (such as
+        // Sony WH-1000XM5 vs WH1000XM5) are not rejected solely because punctuation differs.
+        val sameIdentity = onlineProductIdentityKey(expected) == onlineProductIdentityKey(archived)
+
+        // Never let a high overlap of generic words override a different model, size, year,
+        // or capacity. For example, "Anker Prime 20K Power Bank" must not match a 27K listing.
+        // Merge common unit spellings first so "512 GB" and "512GB" compare consistently.
+        val expectedVariants = requiredVariantTokens(e)
+        val archivedVariants = requiredVariantTokens(a)
+        if (!sameIdentity && !archivedVariants.containsAll(expectedVariants)) return false
+
+        if (sameIdentity) return true
         val expectedTokens = meaningfulTokens(e)
         val archivedTokens = meaningfulTokens(a)
         if (expectedTokens.isEmpty() || archivedTokens.isEmpty()) return false
         val overlap = expectedTokens.intersect(archivedTokens)
         return overlap.size >= minOf(2, expectedTokens.size) &&
             overlap.size.toDouble() / expectedTokens.size >= 0.72
+    }
+
+    /**
+     * Variant-defining tokens that must survive a fuzzy title match. Mixed alphanumeric model
+     * codes and standalone numbers with at least two digits are treated as distinguishing values.
+     * Generic words still use the looser overlap rule above.
+     */
+    private fun requiredVariantTokens(normalizedTitle: String): Set<String> {
+        val unitRegex = Regex("""\b(\d+)\s+(gb|tb|mb|mah|wh|w|hz|mm|cm|inch|inches)\b""")
+        val canonical = unitRegex.replace(normalizedTitle) { match ->
+            match.groupValues[1] + match.groupValues[2]
+        }
+        return canonical.split(' ').filter { token ->
+            token.length >= 2 && token.any(Char::isDigit) &&
+                (token.any(Char::isLetter) || token.all(Char::isDigit))
+        }.toSet()
     }
 
     private fun meaningfulTokens(value: String): Set<String> {

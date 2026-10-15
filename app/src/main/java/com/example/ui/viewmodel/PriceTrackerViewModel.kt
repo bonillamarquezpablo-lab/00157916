@@ -940,45 +940,29 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     fun searchFreeHistoricalPrices(product: Product) {
         val current = _uiState.value
         if (current.isSearchingFreeHistory) return
-        if (!product.isPriceVerified || !product.currentPrice.isFinite() || product.currentPrice <= 0.0) {
-            _uiState.value = current.copy(
-                freeHistoryStatus = "Necesito una oferta actual verificada para vincular con seguridad las capturas históricas."
-            )
-            return
-        }
 
-        val observedAt = product.priceObservedAt ?: System.currentTimeMillis()
+        // Archived snapshots are independent evidence; a product URL is sufficient to look for
+        // them. Do not require or fabricate a current price to perform this free lookup.
         val candidates = buildList {
             product.offers.forEach { offer ->
                 val destination = offer.url.ifBlank {
                     if (offer.store.id == product.currentStore.id) product.storeUrl
                     else offer.store.officialUrl
                 }
-                if (destination.isBlank() || !offer.price.isFinite() || offer.price <= 0.0) return@forEach
-                add(
-                    SerpApiShoppingResult(
-                        title = product.title,
-                        price = offer.price,
-                        storeName = offer.store.name,
-                        sourceUrl = destination,
-                        observedAt = observedAt
-                    )
-                )
+                buildFreeArchiveCandidate(product.title, offer.store.name, destination)?.let(::add)
             }
             val currentDestination = product.storeUrl.ifBlank { product.currentStore.officialUrl }
-            if (currentDestination.isNotBlank()) {
-                add(
-                    SerpApiShoppingResult(
-                        title = product.title,
-                        price = product.currentPrice,
-                        storeName = product.currentStore.name,
-                        sourceUrl = currentDestination,
-                        observedAt = observedAt
-                    )
-                )
-            }
+            buildFreeArchiveCandidate(product.title, product.currentStore.name, currentDestination)?.let(::add)
         }.distinctBy {
-            "${it.storeName.trim().lowercase(Locale.ROOT)}|${it.sourceUrl.trim().lowercase(Locale.ROOT)}"
+            it.title.trim().lowercase(Locale.ROOT) + "|" + (it.merchantDomain ?: it.directUrl ?: "unknown")
+        }.take(MAX_ARCHIVE_PAGES_PER_SEARCH)
+
+        if (candidates.isEmpty()) {
+            _uiState.value = current.copy(
+                isSearchingFreeHistory = false,
+                freeHistoryStatus = "No hay una URL directa o una tienda identificable para buscar capturas gratuitas. No se ha gastado cuota."
+            )
+            return
         }
 
         _uiState.value = current.copy(
@@ -986,8 +970,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             freeHistoryStatus = "Buscando páginas históricas gratuitas; esta consulta no consume cuota de SerpApi.",
             freeHistoryProductId = product.id
         )
-        startFreeArchiveBackfill(
-            results = candidates,
+        startFreeArchiveBackfillCandidates(
+            candidates = candidates,
             query = product.title,
             provider = current.onlineSearchProvider,
             targetProductId = product.id
@@ -1204,15 +1188,53 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     }
 
     /**
-     * Fetch optional historical prices from the free Internet Archive only for direct retailer
-     * pages. This runs after current results are displayed, does not call SerpApi, and never
-     * uses archived prices to overwrite the current offer. Archive coverage is product-dependent.
+     * Free Wayback lookup runs after live search results are displayed. The current offer price is
+     * used only to prioritize ordinary search candidates; archived quotes are persisted separately.
      */
     private data class FreeArchiveCandidate(
-        val result: SerpApiShoppingResult,
+        val title: String,
+        val storeName: String,
         val directUrl: String?,
         val merchantDomain: String?
     )
+
+    private fun buildFreeArchiveCandidate(
+        title: String,
+        storeName: String,
+        sourceUrl: String
+    ): FreeArchiveCandidate? {
+        if (title.isBlank()) return null
+        val directUrl = sourceUrl.takeIf {
+            !isGoogleShoppingUrl(it) && waybackPriceHistoryClient.isEligibleDirectUrl(it)
+        }
+        val resolvedDomain = waybackPriceHistoryClient.resolveMerchantDomain(
+            storeName = storeName,
+            sourceUrl = sourceUrl
+        )
+        // Some Google Shopping rows expose only Google's intermediate URL and label the source
+        // as "Google Shopping", omitting the seller. If that happens, make a bounded fallback
+        // to a recognized brand's own website; the archived page still needs an exact title and
+        // EUR price, so this does not invent a quote or pretend to know the original seller.
+        val brandFallback = if (resolvedDomain == null) {
+            waybackPriceHistoryClient.resolveBrandMerchant(title)
+        } else null
+        val domain = resolvedDomain ?: brandFallback?.second
+        val genericProviderName = storeName.trim().lowercase(Locale.ROOT) in setOf(
+            "", "google", "google shopping", "google shopping españa", "serpapi", "serp api", "shopping"
+        )
+        val effectiveStoreName = when {
+            brandFallback != null -> brandFallback.first
+            genericProviderName && directUrl != null -> ""
+            else -> storeName
+        }
+        if (directUrl == null && domain == null) return null
+        return FreeArchiveCandidate(
+            title = title,
+            storeName = effectiveStoreName,
+            directUrl = directUrl,
+            merchantDomain = domain
+        )
+    }
 
     private fun startFreeArchiveBackfill(
         results: List<SerpApiShoppingResult>,
@@ -1225,24 +1247,28 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             .filter { it.title.isNotBlank() && it.price.isFinite() && it.price > 0.0 }
             .sortedBy { it.price }
             .mapNotNull { result ->
-                val directUrl = result.sourceUrl.takeIf {
-                    !isGoogleShoppingUrl(it) && waybackPriceHistoryClient.isEligibleDirectUrl(it)
-                }
-                val domain = waybackPriceHistoryClient.resolveMerchantDomain(
+                buildFreeArchiveCandidate(
+                    title = result.title,
                     storeName = result.storeName,
                     sourceUrl = result.sourceUrl
                 )
-                if (directUrl == null && domain == null) null
-                else FreeArchiveCandidate(result, directUrl, domain)
             }
             // One candidate per merchant domain prevents spending the small archive-search
             // budget repeatedly on multiple URL variants from the same retailer.
             .distinctBy {
-                it.result.title.trim().lowercase(Locale.ROOT) + "|" +
-                    (it.merchantDomain ?: it.directUrl ?: "unknown")
+                it.title.trim().lowercase(Locale.ROOT) + "|" + (it.merchantDomain ?: it.directUrl ?: "unknown")
             }
             .take(MAX_ARCHIVE_PAGES_PER_SEARCH)
 
+        startFreeArchiveBackfillCandidates(candidates, query, provider, targetProductId)
+    }
+
+    private fun startFreeArchiveBackfillCandidates(
+        candidates: List<FreeArchiveCandidate>,
+        query: String,
+        provider: OnlineSearchProvider,
+        targetProductId: String? = null
+    ) {
         if (candidates.isEmpty()) {
             appendArchiveNotice(
                 query,
@@ -1265,7 +1291,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     if (candidate.directUrl != null) {
                         attempts += waybackPriceHistoryClient.fetchHistory(
                             originalUrl = candidate.directUrl,
-                            expectedTitle = candidate.result.title
+                            expectedTitle = candidate.title
                         )
                     }
                     // If the exact URL has no usable old prices (or only a Google Shopping link was
@@ -1273,7 +1299,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     if (candidate.merchantDomain != null && attempts.none { it.quotes.isNotEmpty() }) {
                         attempts += waybackPriceHistoryClient.fetchHistoryByMerchantDomain(
                             domain = candidate.merchantDomain,
-                            expectedTitle = candidate.result.title
+                            expectedTitle = candidate.title
                         )
                     }
 
@@ -1289,16 +1315,16 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
                     for ((archiveUrl, urlQuotes) in quotes.groupBy { it.originalUrl }) {
                         val newlySaved = repository.recordArchivedPriceHistory(
-                            expectedTitle = candidate.result.title,
+                            expectedTitle = candidate.title,
                             originalUrl = archiveUrl,
-                            storeName = candidate.result.storeName,
+                            storeName = candidate.storeName,
                             quotes = urlQuotes
                         )
                         savedCount += newlySaved
                     }
 
                     if (quotes.isNotEmpty()) {
-                        val targetIdentity = onlineProductIdentityKey(candidate.result.title)
+                        val targetIdentity = onlineProductIdentityKey(candidate.title)
                         val refreshedProduct = runCatching {
                             withTimeout(10_000L) {
                                 repository.allProductsStream.first { products ->
@@ -1339,7 +1365,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             ". Son precios anunciados en páginas archivadas; puede haber huecos y no garantizan envío, stock ni precio final."
                     }
                     foundCount > 0 ->
-                        "Se encontraron capturas con precios previos, pero no se añadieron porque no se pudieron vincular a una ficha verificada o ya existían esos registros diarios."
+                        "Se encontraron capturas con precios previos, pero no se pudieron vincular a la ficha del producto o ya existían esos registros diarios."
                     checkedCount > 0 ->
                         "Se consultaron $checkedCount capturas gratuitas, pero ninguna expuso un precio EUR verificable para el producto exacto. No se han rellenado datos ausentes."
                     else ->

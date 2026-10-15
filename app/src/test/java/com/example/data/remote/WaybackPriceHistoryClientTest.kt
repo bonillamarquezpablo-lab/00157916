@@ -111,6 +111,69 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun rejectsDifferentModelVariantEvenWhenMostTitleWordsMatch() {
+        val client = newClient()
+        val wrongCapacityHtml = """
+            <script type="application/ld+json">
+            {"@type":"Product","name":"Anker Prime 20K Power Bank",
+             "offers":{"@type":"Offer","price":"59.99","priceCurrency":"EUR"}}
+            </script>
+        """.trimIndent()
+
+        assertNull(
+            "A 20K archived page must not supply history for the 27K model",
+            client.parseArchivedPrice(
+                html = wrongCapacityHtml,
+                expectedTitle = "Anker Prime 27K Power Bank",
+                originalUrl = "https://shop.example/product/anker-prime-27k",
+                snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/product/anker-prime-27k",
+                observedAt = 1_735_732_800_000L
+            )
+        )
+
+        val sameCapacityDifferentFormatting = """
+            <script type="application/ld+json">
+            {"@type":"Product","name":"Samsung Galaxy S26 Ultra 512 GB",
+             "offers":{"@type":"Offer","price":"1299.00","priceCurrency":"EUR"}}
+            </script>
+        """.trimIndent()
+        assertNotNull(
+            "Equivalent capacity formats such as 512GB and 512 GB should still match",
+            client.parseArchivedPrice(
+                html = sameCapacityDifferentFormatting,
+                expectedTitle = "Samsung Galaxy S26 Ultra 512GB",
+                originalUrl = "https://shop.example/product/galaxy-s26-ultra",
+                snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/product/galaxy-s26-ultra",
+                observedAt = 1_735_732_800_000L
+            )
+        )
+    }
+
+    @Test
+    fun acceptsEquivalentSonyHeadphoneModelSpelling() {
+        val client = newClient()
+        val html = """
+            <script type="application/ld+json">
+            {"@type":"Product","name":"Sony WH1000XM5 Wireless Noise Canceling Headphones",
+             "offers":{"@type":"Offer","price":"249.99","priceCurrency":"EUR"}}
+            </script>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "Sony WH-1000XM5 Wireless Headphones",
+            originalUrl = "https://shop.example/product/sony-wh1000xm5",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/product/sony-wh1000xm5",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull(
+            "Equivalent Sony model formatting should pass the identity-key comparison",
+            quote
+        )
+    }
+
+    @Test
     fun readsExplicitEurProductMetaTagsAndRejectsGoogleUrlAsArchiveTarget() {
         val client = newClient()
         val html = """
@@ -217,5 +280,21 @@ class WaybackPriceHistoryClientTest {
         assertEquals(1299.0, quote!!.price, 0.001)
         assertEquals("EUR", quote.currency)
     }
+
+    @Test
+    fun resolvesRecognisedMerchantNamesWhenGoogleDoesNotExposeTheDestinationUrl() {
+        val client = newClient()
+        val googleUrl = "https://www.google.com/search?q=Apple+iPhone+16"
+
+        assertEquals("lamanzanita.es", client.resolveMerchantDomain("La Manzanita", googleUrl))
+        assertEquals("nike.com", client.resolveMerchantDomain("Nike Oficial", googleUrl))
+        assertEquals("sprinter.es", client.resolveMerchantDomain("Sprinter Deportes", googleUrl))
+
+        assertEquals("Apple Store" to "apple.com", client.resolveBrandMerchant("Apple iPhone 16 256GB"))
+        assertEquals("Nike" to "nike.com", client.resolveBrandMerchant("Nike Air Max Plus Zapatillas"))
+        assertEquals("Anker" to "anker.com", client.resolveBrandMerchant("Anker Prime 27K Power Bank"))
+        assertEquals(null, client.resolveBrandMerchant("Producto genérico sin marca"))
+    }
+
 
 }

@@ -35,12 +35,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.StoreOffer
+import com.example.data.model.Store
+import com.example.data.remote.extractDirectRetailerUrl
 
 @Composable
 fun StoreComparisonView(
     offers: List<StoreOffer>,
     athPrice: Double,
     hasSufficientHistory: Boolean = false,
+    productTitle: String = "",
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -94,6 +97,14 @@ fun StoreComparisonView(
         offers.sortedBy { it.price }.forEachIndexed { index, offer ->
             val isBestCurrent = offer.price == minOfferPrice
             val isAtHistoricalMin = hasSufficientHistory && offer.price <= athPrice + 0.05
+            val directDestination = offer.url.takeIf { it.isNotBlank() }?.let(::extractDirectRetailerUrl)
+            val knownStore = Store.findKnownByName(offer.store.name, offer.url)
+            val storeSearchDestination = knownStore?.takeIf { productTitle.isNotBlank() }
+                ?.searchUrlFor(productTitle)
+            val actionDestination = directDestination
+                ?: storeSearchDestination
+                ?: offer.url.takeIf { it.isNotBlank() }
+                ?: knownStore?.officialUrl
 
             Surface(
                 modifier = Modifier
@@ -105,9 +116,8 @@ fun StoreComparisonView(
                         color = if (isBestCurrent) Color(0xFF10B981) else MaterialTheme.colorScheme.outline.copy(alpha = 0.15f),
                         shape = RoundedCornerShape(10.dp)
                     )
-                    .clickable {
-                        val targetUrl = if (offer.url.isNotBlank()) offer.url else "https://www.${offer.store.domain}"
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl))
+                    .clickable(enabled = !actionDestination.isNullOrBlank()) {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(actionDestination!!))
                         context.startActivity(intent)
                     },
                 color = if (isBestCurrent) Color(0xFF10B981).copy(alpha = 0.06f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
@@ -159,7 +169,11 @@ fun StoreComparisonView(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = "Enlace: ${offer.linkType}",
+                                text = when {
+                                    directDestination != null -> "Enlace directo a ${knownStore?.name ?: offer.store.name}"
+                                    storeSearchDestination != null -> "Precio de ${offer.linkType} · buscar en ${knownStore?.name ?: offer.store.name}"
+                                    else -> "Enlace: ${offer.linkType}"
+                                },
                                 fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

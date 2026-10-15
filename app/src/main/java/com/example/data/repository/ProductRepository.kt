@@ -440,17 +440,49 @@ class ProductRepository(
      * This is intentionally non-destructive: invalid legacy rows stay in the database for audit,
      * but cannot set current prices, minima, maxima, averages or deal badges.
      */
-    private fun isEligibleObservationForHistory(observation: PriceObservationEntity): Boolean =
-        observation.isVerified &&
+    private fun isEligibleObservationForHistory(observation: PriceObservationEntity): Boolean {
+        val archiveBacked = observation.evidenceType.equals("archive", ignoreCase = true) ||
+            parseHttpUri(observation.sourceUrl)?.host.equals("web.archive.org", ignoreCase = true)
+        val merchantUrl = if (archiveBacked) {
+            // Derive the merchant from the archived target itself. sourcePageUrl is only
+            // supplementary legacy metadata and must not redirect seller validation to a
+            // different trusted domain.
+            val archiveUri = parseHttpUri(observation.sourceUrl) ?: return false
+            if (!archiveUri.host.equals("web.archive.org", ignoreCase = true) ||
+                !archiveUri.scheme.equals("https", ignoreCase = true)
+            ) return false
+            val archivedTarget = Regex("""^/web/\d{14}id_/(https://[^?]+)""")
+                .find(archiveUri.rawPath.orEmpty())
+                ?.groupValues
+                ?.getOrNull(1)
+                ?: return false
+            val archivedTargetUri = parseHttpUri(archivedTarget) ?: return false
+            if (!archivedTargetUri.scheme.equals("https", ignoreCase = true) ||
+                archivedTargetUri.host.equals("web.archive.org", ignoreCase = true)
+            ) return false
+            val legacySourceUri = parseHttpUri(observation.sourcePageUrl)
+            if (legacySourceUri != null &&
+                (!legacySourceUri.scheme.equals("https", ignoreCase = true) ||
+                    !normalizeHost(legacySourceUri.host.orEmpty())
+                        .equals(normalizeHost(archivedTargetUri.host.orEmpty()), ignoreCase = true))
+            ) return false
+            archivedTarget
+        } else {
+            observation.sourceUrl
+        }
+
+        return observation.isVerified &&
             observation.productId.isNotBlank() &&
             observation.currency == "EUR" &&
             observation.price.isFinite() &&
             observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
             parseHttpUri(observation.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
+            (!archiveBacked || parseHttpUri(observation.sourceUrl)?.host.equals("web.archive.org", ignoreCase = true)) &&
             isEligibleHistoryTitle(observation.productTitle) &&
             !isPromotionalBulkListing(observation.productTitle, "") &&
-            isEligibleSeller(observation.storeName, observation.sourceUrl) &&
+            isEligibleSeller(observation.storeName, merchantUrl) &&
             isPlausibleHistoryPrice(observation.productTitle, observation.price)
+    }
 
     /**
      * Conservative absolute floors catch a lone impossible-looking device price even when there
@@ -646,15 +678,28 @@ class ProductRepository(
         if (expectedTitle.isBlank() || originalUrl.isBlank() || quotes.isEmpty()) return 0
         val originalUri = parseHttpUri(originalUrl) ?: return 0
         if (!originalUri.scheme.equals("https", ignoreCase = true)) return 0
+        val originalHost = normalizeHost(originalUri.host.orEmpty())
+        if (originalHost == "web.archive.org" || originalHost == "archive.org" ||
+            originalHost == "google.com" || originalHost == "google.es" ||
+            originalHost.endsWith(".google.com") || originalHost.endsWith(".google.es") ||
+            originalHost == "bing.com" || originalHost.endsWith(".bing.com")
+        ) return 0
 
         val products = productDao.getAllProductsSnapshot()
         val identity = onlineProductIdentityKey(expectedTitle)
+        // Archive metadata has its own provenance checks below. Requiring a verified *current*
+        // quote here hid valid old prices for products whose live offer was absent or suspicious.
+        // This still requires an existing matching product row and never changes its live price.
         val product = products.firstOrNull {
-            onlineProductIdentityKey(it.title) == identity && it.isPriceVerified
+            onlineProductIdentityKey(it.title) == identity
         } ?: return 0
         val now = System.currentTimeMillis()
         val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)
         val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
+        if (!isEligibleHistoryTitle(expectedTitle) ||
+            isPromotionalBulkListing(expectedTitle, "") ||
+            !isEligibleSeller(merchantName, originalUrl)
+        ) return 0
         val storeId = canonicalStoreId(merchantName, originalUrl)
         var inserted = 0
 
@@ -677,7 +722,11 @@ class ProductRepository(
                 quote.price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR ||
                 quote.observedAt < earliestAllowed ||
                 quote.observedAt >= now ||
-                quote.productTitle.isBlank()
+                quote.productTitle.isBlank() ||
+                onlineProductIdentityKey(quote.productTitle) != identity ||
+                !isEligibleHistoryTitle(quote.productTitle) ||
+                isPromotionalBulkListing(quote.productTitle, "") ||
+                !isPlausibleHistoryPrice(quote.productTitle, quote.price)
             ) continue
 
             val observation = PriceObservationEntity(
@@ -698,7 +747,13 @@ class ProductRepository(
                 evidenceType = "archive",
                 sourcePageUrl = originalUrl
             )
-            if (saveDailyObservation(observation)) inserted++
+            val (dayStart, dayEnd) = localDayBounds(observation.observedAt)
+            if (priceObservationDao.saveArchivedObservationIfLower(
+                    observation = observation,
+                    dayStart = dayStart,
+                    dayEnd = dayEnd
+                )
+            ) inserted++
         }
         return inserted
     }
@@ -1371,7 +1426,9 @@ class ProductRepository(
         }
         val dateFormatter = SimpleDateFormat("dd MMM yyyy", Locale("es", "ES"))
         // Plot just one genuine point per local date: the cheapest valid offer observed that day.
-        val historyPoints = if (priceIsVerified) snapshotHistory.map { observation ->
+        // Verified historical evidence remains visible even when today's live price is not
+        // verified. The current-price fields and deal verdict still depend exclusively on live rows.
+        val historyPoints = snapshotHistory.map { observation ->
             PricePoint(
                 timestamp = observation.observedAt,
                 dateLabel = dateFormatter.format(Date(observation.observedAt)),
@@ -1380,8 +1437,6 @@ class ProductRepository(
                 eventLabel = observation.sourceType.ifBlank { observation.sourceName },
                 linkType = observation.linkType
             )
-        } else {
-            emptyList()
         }
         return Product(
             id = id,
@@ -1483,6 +1538,10 @@ class ProductRepository(
             ?: observation.sourceName.substringBefore(" · SerpApi")
                 .takeIf { it.isNotBlank() }
             ?: host.ifBlank { "Comercio consultado" }
+        // The observation URL may be a Google Shopping intermediary. Resolve a known merchant
+        // by its reported store name before constructing a fallback Store whose domain would
+        // otherwise incorrectly become google.com.
+        Store.findKnownByName(merchantName, observation.sourceUrl)?.let { return it }
         return Store(
             id = observation.storeId,
             name = merchantName,

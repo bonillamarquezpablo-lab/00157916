@@ -48,6 +48,8 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Product
+import com.example.data.model.Store
+import com.example.data.remote.extractDirectRetailerUrl
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -103,12 +105,27 @@ fun ProductDetailSheet(
             append(" Puede haber huecos; los precios históricos no garantizan stock, envío ni precio final.")
         }
     }
-    val latestPricePoint = product.priceHistory.maxByOrNull { it.timestamp }
-    val currentSourceLabel = latestPricePoint
-        ?.eventLabel
-        ?.takeIf { it.isNotBlank() }
-        ?: "Fuente no disponible"
-    val currentLinkType = latestPricePoint?.linkType ?: "directo"
+    // Historical archive/insight points must never be presented as the source for today's price.
+    val latestLivePricePoint = product.priceHistory
+        .filterNot {
+            it.eventLabel.equals("Internet Archive", ignoreCase = true) ||
+                it.eventLabel?.contains("price_insights", ignoreCase = true) == true
+        }
+        .maxByOrNull { it.timestamp }
+    val currentSourceLabel = if (!product.isPriceVerified) {
+        "Sin precio actual verificado"
+    } else {
+        product.priceSource.takeIf { it.isNotBlank() }
+            ?: latestLivePricePoint?.eventLabel?.takeIf { it.isNotBlank() }
+            ?: "Fuente no disponible"
+    }
+    val currentLinkType = if (!product.isPriceVerified) {
+        "Sin oferta actual verificada"
+    } else {
+        product.offers.firstOrNull { it.url == product.storeUrl }?.linkType
+            ?: latestLivePricePoint?.linkType
+            ?: "directo"
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -240,7 +257,11 @@ fun ProductDetailSheet(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Mínimo todavía no ha confirmado el precio de este producto con una fuente y una fecha verificables. No uses los valores de referencia como una oferta real; el historial aparecerá cuando se guarden observaciones fiables.",
+                            text = if (product.priceHistory.isNotEmpty()) {
+                                "El precio actual todavía no está confirmado. Los puntos del gráfico son precios antiguos de fuentes verificables; no demuestran el precio actual, el stock ni el envío."
+                            } else {
+                                "Mínimo todavía no ha confirmado el precio actual de este producto con una fuente y una fecha verificables. No uses los valores de referencia como una oferta real; el histórico solo aparecerá si encontramos capturas con precios verificables."
+                            },
                             fontSize = 12.sp,
                             lineHeight = 17.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -265,15 +286,19 @@ fun ProductDetailSheet(
                         // Current price
                         Column {
                             Text(
-                                text = "Precio Actual",
+                                text = if (product.isPriceVerified) "Precio actual" else "Precio actual no confirmado",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = "${String.format("%.2f", product.currentPrice)} €",
+                                text = if (product.isPriceVerified) {
+                                    "${String.format("%.2f", product.currentPrice)} €"
+                                } else {
+                                    "No disponible"
+                                },
                                 fontWeight = FontWeight.Black,
-                                fontSize = 20.sp,
-                                color = if (product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
+                                fontSize = if (product.isPriceVerified) 20.sp else 15.sp,
+                                color = if (product.isPriceVerified && product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             product.priceObservedAt?.let { observedAt ->
                                 Text(
@@ -292,15 +317,21 @@ fun ProductDetailSheet(
                                 )
                             }
                             Text(
-                                text = "$currentSourceLabel · confirma precio final y stock en la tienda.",
+                                text = if (product.isPriceVerified) {
+                                    "$currentSourceLabel · confirma precio final y stock en la tienda."
+                                } else {
+                                    currentSourceLabel
+                                },
                                 fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            Text(
-                                text = "Enlace: $currentLinkType",
-                                fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            if (product.isPriceVerified) {
+                                Text(
+                                    text = "Enlace: $currentLinkType",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
 
                         // Do not infer a historical low from a single query.
@@ -408,7 +439,7 @@ fun ProductDetailSheet(
                 }
             }
 
-            if (product.isPriceVerified) {
+            if (product.isPriceVerified || product.priceHistory.isNotEmpty()) {
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -426,10 +457,10 @@ fun ProductDetailSheet(
                 }
             }
 
-            // The chart combines verified live observations with explicitly labelled archive captures.
-            // Missing dates are left missing; no historical prices are extrapolated or interpolated.
+            // Only validated observations reach priceHistory. Show genuine archive captures
+            // even when there is no verified current quote; never extrapolate missing dates.
             PriceHistoryChart(
-                priceHistory = if (product.isPriceVerified) product.priceHistory else emptyList(),
+                priceHistory = product.priceHistory,
                 avg90dPrice = product.avg90dPrice
             )
 
@@ -438,7 +469,8 @@ fun ProductDetailSheet(
                 StoreComparisonView(
                     offers = product.offers,
                     athPrice = product.athMinPrice,
-                    hasSufficientHistory = product.hasSufficientHistory
+                    hasSufficientHistory = product.hasSufficientHistory,
+                    productTitle = product.title
                 )
             }
 
@@ -469,8 +501,11 @@ fun ProductDetailSheet(
             }
             }
 
-            // Free archive lookup runs first; the SerpApi comparison remains a separate paid-quota option.
-            if (product.isPriceVerified) {
+            // Free archive lookup needs a product destination, not a verified live quote.
+            if (product.storeUrl.isNotBlank() ||
+                product.currentStore.officialUrl.isNotBlank() ||
+                product.offers.isNotEmpty()
+            ) {
                 OutlinedButton(
                     onClick = onSearchFreeHistory,
                     enabled = !isSearchingFreeHistory && !isComparingStores,
@@ -539,9 +574,19 @@ fun ProductDetailSheet(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    val exactRetailerUrl = product.storeUrl
+                        .takeIf { product.isPriceVerified }
+                        ?.let(::extractDirectRetailerUrl)
+                    val knownRetailer = Store.findKnownByName(
+                        name = product.currentStore.name,
+                        sourceUrl = product.storeUrl
+                    )
+                    val destination = exactRetailerUrl
+                        ?: knownRetailer?.searchUrlFor(product.title)
+                        ?: product.currentStore.officialUrl.takeIf { extractDirectRetailerUrl(it) != null }
+                        ?: product.storeUrl
                     OutlinedButton(
                         onClick = {
-                            val destination = if (product.isPriceVerified) product.storeUrl else product.currentStore.searchUrlFor(product.title)
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(destination))
                             context.startActivity(intent)
                         },
@@ -552,7 +597,13 @@ fun ProductDetailSheet(
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text(
-                            if (product.isPriceVerified) "Ver en ${product.currentStore.name}" else "Buscar en web oficial",
+                            when {
+                                exactRetailerUrl != null -> "Ver en ${product.currentStore.name}"
+                                knownRetailer?.supportsProductSearch == true -> "Buscar en ${knownRetailer.name}"
+                                knownRetailer != null -> "Abrir web de ${knownRetailer.name}"
+                                extractDirectRetailerUrl(product.currentStore.officialUrl) != null -> "Abrir web de ${product.currentStore.name}"
+                                else -> "Abrir en Google Shopping"
+                            },
                             fontSize = 12.sp
                         )
                         Spacer(modifier = Modifier.width(4.dp))

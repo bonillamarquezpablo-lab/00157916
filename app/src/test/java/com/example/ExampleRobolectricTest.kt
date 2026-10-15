@@ -1796,6 +1796,45 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `specific model search rejects a different model from the same brand`() {
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "search_metadata": {"status": "Success"},
+                  "shopping_results": [
+                    {
+                      "title": "Sony WH-1000XM5 auriculares inalámbricos",
+                      "price": "249,99 €",
+                      "extracted_price": 249.99,
+                      "link": "https://www.example.es/sony-xm5",
+                      "source": "Tienda A"
+                    },
+                    {
+                      "title": "Sony WH-1000XM4 auriculares inalámbricos",
+                      "price": "199,99 €",
+                      "extracted_price": 199.99,
+                      "link": "https://www.example.es/sony-xm4",
+                      "source": "Tienda B"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "Sony WH-1000XM5 auriculares inalámbricos",
+            observedAt = 123L
+        )
+
+        assertEquals(
+            "A matching brand must not make a different model acceptable",
+            listOf("Sony WH-1000XM5 auriculares inalámbricos"),
+            report.results.map { it.title }
+        )
+        assertEquals(1, report.rejectedAsIrrelevant)
+        assertTrue(report.discardedOffers.any { it.title.contains("WH-1000XM4") })
+    }
+
+    @Test
     fun `condition metadata marks used and refurbished offers for the opt-in filter`() {
         val report = SerpApiClient().parseShoppingResultsDetailed(
             root = JSONObject(

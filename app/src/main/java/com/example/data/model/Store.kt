@@ -210,7 +210,12 @@ data class Store(
             val candidateDomain = name.trim()
                 .removePrefix("retailer_")
                 .replace(Regex("_([a-z]{2,3})$"), ".$1")
-            findKnownByName(candidateDomain)?.let { return it }
+            if (candidateDomain.isNotBlank()) {
+                findKnownByName(
+                    name = candidateDomain,
+                    sourceUrl = "https://$candidateDomain"
+                )?.let { return it }
+            }
 
             val cleanName = name.trim()
                 .removePrefix("retailer_")

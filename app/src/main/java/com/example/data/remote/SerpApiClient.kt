@@ -729,7 +729,7 @@ class SerpApiClient(
             }
         }
 
-        SerpApiGoogleProductDetails(
+        return SerpApiGoogleProductDetails(
             offers = parseGoogleProductOffers(root, expectedTitle, productId, observedAt),
             priceInsights = history.distinctBy { Triple(it.storeName.lowercase(Locale.ROOT), it.observedAt, it.price) }
                 .sortedBy { it.observedAt },

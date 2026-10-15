@@ -1835,6 +1835,45 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `specific Samsung Galaxy search rejects adjacent model numbers`() {
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "search_metadata": {"status": "Success"},
+                  "shopping_results": [
+                    {
+                      "title": "Samsung Galaxy S26 Ultra 512GB",
+                      "price": "1.299,00 €",
+                      "extracted_price": 1299.00,
+                      "link": "https://www.example.es/s26",
+                      "source": "Tienda A"
+                    },
+                    {
+                      "title": "Samsung Galaxy S25 Ultra 512GB",
+                      "price": "1.099,00 €",
+                      "extracted_price": 1099.00,
+                      "link": "https://www.example.es/s25",
+                      "source": "Tienda B"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "Samsung Galaxy S26 Ultra 512GB",
+            observedAt = 123L
+        )
+
+        assertEquals(
+            "Same brand and family are not enough when the model number differs",
+            listOf("Samsung Galaxy S26 Ultra 512GB"),
+            report.results.map { it.title }
+        )
+        assertEquals(1, report.rejectedAsIrrelevant)
+        assertTrue(report.discardedOffers.any { it.title.contains("S25") })
+    }
+
+    @Test
     fun `condition metadata marks used and refurbished offers for the opt-in filter`() {
         val report = SerpApiClient().parseShoppingResultsDetailed(
             root = JSONObject(

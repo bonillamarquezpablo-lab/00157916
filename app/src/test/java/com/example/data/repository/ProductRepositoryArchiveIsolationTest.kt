@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.AppDatabase
 import com.example.data.local.PriceObservationEntity
 import com.example.data.local.ProductEntity
+import com.example.data.remote.ArchivedPriceQuote
 import com.example.data.model.ProductCategory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -148,6 +149,31 @@ class ProductRepositoryArchiveIsolationTest {
                 todayStart - 36L * 60L * 60L * 1000L,
                 product.priceHistory.filterNot { it.isArchiveEvidence }.minOf { it.timestamp })
             assertTrue(product.priceHistory.any { it.sourceUrl == archiveUrl1 })
+
+            val mismatchedCaptureTime = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT)
+                .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                .parse("20260901000000")!!
+                .time
+            val mismatchedArchiveInserted = repository.recordArchivedPriceHistory(
+                expectedTitle = title,
+                originalUrl = "https://shop.example/product/anker-prime",
+                storeName = "Tienda de prueba",
+                quotes = listOf(
+                    ArchivedPriceQuote(
+                        observedAt = mismatchedCaptureTime,
+                        price = 19.99,
+                        currency = "EUR",
+                        productTitle = "Apple iPhone 17 Pro Max",
+                        originalUrl = "https://shop.example/product/anker-prime",
+                        snapshotUrl = "https://web.archive.org/web/20260901000000id_/https://shop.example/product/anker-prime"
+                    )
+                )
+            )
+            assertEquals("a capture describing a different product must never enter this history", 0, mismatchedArchiveInserted)
+            assertFalse(
+                database.priceObservationDao().observeVerifiedHistory(productId).first()
+                    .any { it.productTitle == "Apple iPhone 17 Pro Max" }
+            )
         } finally {
             database.close()
         }

@@ -1084,7 +1084,12 @@ class ProductRepository(
             imageUrl = imageUrl.orEmpty(),
             isPriceVerified = priceIsVerified,
             priceObservedAt = latestObservation?.observedAt.takeIf { priceIsVerified },
-            googleProductId = googleProductId
+            googleProductId = googleProductId,
+            priceSource = latestObservation
+                ?.let { it.sourceType.ifBlank { it.sourceName } }
+                .orEmpty()
+                .takeIf { priceIsVerified }
+                .orEmpty()
         )
     }
 

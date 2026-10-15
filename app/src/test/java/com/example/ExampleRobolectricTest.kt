@@ -1593,14 +1593,14 @@ class ExampleRobolectricTest {
                 repository.allProductsStream.first { products ->
                     products.any { candidate ->
                         candidate.id == productId &&
-                            candidate.priceHistory.any { it.eventLabel.contains("price_insights", ignoreCase = true) }
+                            candidate.priceHistory.any { it.eventLabel?.contains("price_insights", ignoreCase = true) == true }
                     }
                 }
             }.first { it.id == productId }
 
             assertEquals("Historical provider data must never replace the live current price", 74.99, product.currentPrice, 0.001)
             assertTrue(product.priceHistory.any {
-                it.eventLabel.contains("price_insights", ignoreCase = true) &&
+                it.eventLabel?.contains("price_insights", ignoreCase = true) == true &&
                     it.timestamp == historicalAt && it.price == 69.99
             })
             assertTrue(product.priceHistory.any { it.eventLabel == "Google Shopping" && it.price == 74.99 })

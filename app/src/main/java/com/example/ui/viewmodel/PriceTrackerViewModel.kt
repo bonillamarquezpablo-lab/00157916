@@ -32,6 +32,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.util.Locale
 import java.text.SimpleDateFormat
@@ -978,30 +980,36 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 // or the API key was removed after the previous search.
                 val cached = onlineSearchCache.read(provider.name, query)
                 if (cached != null && (cached.rawResponse != null || cached.results.isNotEmpty())) {
-                    // Re-run current parser/filters over the saved unfiltered response; no new API call.
-                    val cachedReport = if (cached.rawResponse != null) {
-                        val cachedRoot = org.json.JSONObject(cached.rawResponse)
-                        if (provider == OnlineSearchProvider.GOOGLE_SHOPPING) {
-                            serpApiClient.parseShoppingResultsDetailed(cachedRoot, query, cached.savedAt)
+                    // Parsing stored JSON and classifying offers can be CPU-heavy. Keep it off
+                    // Android's main thread so the search screen continues drawing smoothly.
+                    val cachedReport = withContext(Dispatchers.Default) {
+                        if (cached.rawResponse != null) {
+                            val cachedRoot = org.json.JSONObject(cached.rawResponse)
+                            if (provider == OnlineSearchProvider.GOOGLE_SHOPPING) {
+                                serpApiClient.parseShoppingResultsDetailed(cachedRoot, query, cached.savedAt)
+                            } else {
+                                serpApiClient.parseAmazonResultsDetailed(cachedRoot, query, cached.savedAt)
+                            }
                         } else {
-                            serpApiClient.parseAmazonResultsDetailed(cachedRoot, query, cached.savedAt)
+                            com.example.data.remote.SerpApiShoppingSearchReport(
+                                results = cached.results,
+                                rawResultCount = cached.results.size,
+                                rejectedAsIrrelevant = 0,
+                                rejectedForPriceOrCurrency = 0,
+                                rejectedForLink = 0,
+                                rejectedOther = 0,
+                                providerName = if (provider == OnlineSearchProvider.AMAZON) "Amazon.es" else "Google Shopping"
+                            )
                         }
-                    } else {
-                        com.example.data.remote.SerpApiShoppingSearchReport(
-                            results = cached.results,
-                            rawResultCount = cached.results.size,
-                            rejectedAsIrrelevant = 0,
-                            rejectedForPriceOrCurrency = 0,
-                            rejectedForLink = 0,
-                            rejectedOther = 0,
-                            providerName = if (provider == OnlineSearchProvider.AMAZON) "Amazon.es" else "Google Shopping"
-                        )
                     }
                     val cachedResults = cachedReport.results
-                    val safeCachedResults = repository.filterOnlineSearchResults(cachedResults, query)
-                    val cachedDiscarded = (cachedReport.discardedOffers +
-                        repository.diagnoseOnlineSearchRejections(cachedResults, query))
-                        .distinctBy { it.provider + "|" + it.title + "|" + it.priceLabel + "|" + it.reason }
+                    val (safeCachedResults, cachedDiscarded) = withContext(Dispatchers.Default) {
+                        val safe = repository.filterOnlineSearchResults(cachedResults, query)
+                        val discarded = (cachedReport.discardedOffers +
+                            repository.diagnoseOnlineSearchRejections(cachedResults, query))
+                            .distinctBy { it.provider + "|" + it.title + "|" + it.priceLabel + "|" + it.reason }
+                        safe to discarded
+                    }
                     onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = cachedDiscarded
                     val ageMinutes = ((System.currentTimeMillis() - cached.savedAt) / 60_000L).coerceAtLeast(1L)
                     val base = if (safeCachedResults.isEmpty()) {
@@ -1011,7 +1019,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }
                     val cacheNotice = "Resultados guardados hace $ageMinutes min; no se ha consumido otra búsqueda."
                     val savedObservations = if (safeCachedResults.isNotEmpty()) {
-                        repository.recordOnlineSearchResults(safeCachedResults, provider.name, query)
+                        withContext(Dispatchers.Default) {
+                            repository.recordOnlineSearchResults(safeCachedResults, provider.name, query)
+                        }
                     } else 0
                     val historyNotice = if (safeCachedResults.isNotEmpty()) {
                         onlineHistoryNotice(savedObservations, safeCachedResults.size)
@@ -1065,15 +1075,22 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 } else {
                     serpApiClient.searchAmazonOnlineWithDiagnostics(token, query)
                 }
-                val rawResults = providerReport.results
-                val repositoryDiscarded = repository.diagnoseOnlineSearchRejections(rawResults, query)
-                // Use the same plausibility rules for visible cards, cache entries and Room history.
-                val results = repository.filterOnlineSearchResults(rawResults, query)
-                val discarded = (providerReport.discardedOffers + repositoryDiscarded)
-                    .distinctBy { "${it.provider}|${it.title}|${it.priceLabel}|${it.reason}" }
+                // The offer safety checks use many title/model rules. Run both passes on a
+                // background dispatcher rather than blocking Compose while results arrive.
+                val (results, discarded) = withContext(Dispatchers.Default) {
+                    val rawResults = providerReport.results
+                    val repositoryDiscarded = repository.diagnoseOnlineSearchRejections(rawResults, query)
+                    // Use the same plausibility rules for visible cards, cache entries and Room history.
+                    val accepted = repository.filterOnlineSearchResults(rawResults, query)
+                    val rejected = (providerReport.discardedOffers + repositoryDiscarded)
+                        .distinctBy { "${it.provider}|${it.title}|${it.priceLabel}|${it.reason}" }
+                    accepted to rejected
+                }
                 onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = discarded
                 val savedObservations = if (results.isNotEmpty()) {
-                    repository.recordOnlineSearchResults(results, provider.name, query)
+                    withContext(Dispatchers.Default) {
+                        repository.recordOnlineSearchResults(results, provider.name, query)
+                    }
                 } else 0
                 // Cache the raw provider response for 24 hours so future filters can reclassify it.
                 providerReport.rawResponse?.let { onlineSearchCache.writeRaw(provider.name, query, it) }

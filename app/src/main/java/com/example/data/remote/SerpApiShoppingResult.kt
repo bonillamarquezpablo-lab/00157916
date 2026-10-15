@@ -148,7 +148,7 @@ data class SerpApiShoppingResult(
 
     /** True for accessory listings that belong at the end of a main-product search. */
     val isAccessoryOffer: Boolean
-        get() = ACCESSORY_LISTING_PATTERN.containsMatchIn(title)
+        get() = !isBicycleTireListing(title) && ACCESSORY_LISTING_PATTERN.containsMatchIn(title)
 
     val isRentalOrMonthly: Boolean
         get() = Regex(
@@ -244,6 +244,67 @@ private val SECOND_HAND_CONDITION_PATTERN = Regex(
 private val SECOND_HAND_LISTING_PATTERN = Regex(
     """(?i)\b(wallapop|milanuncios|ebay|vinted|particular(?:es)?|amazon[\s_-]*warehouse)\b"""
 )
+
+private val BICYCLE_TIRE_LISTING_PATTERN = Regex(
+    """(?i)\\b(cubiertas?|neum[aá]tic[oa]s?|tyres?|tires?)\\b"""
+)
+
+private val BICYCLE_TIRE_DIAMETER_PATTERN = Regex("""(?<!\\d)(26|27[.,]?5|29)(?!\\d)""")
+
+/** True when a title explicitly identifies a bicycle tyre/cover, even if its text also mentions cables. */
+internal fun isBicycleTireListing(title: String): Boolean =
+    BICYCLE_TIRE_LISTING_PATTERN.containsMatchIn(title)
+
+/** Requested wheel diameter, only for searches that clearly concern bicycle tyres. */
+internal fun requestedBicycleTireDiameter(query: String): String? {
+    val normalized = normalizedWheelCategoryText(query)
+    val tireIntent = Regex("""\\b(maxxis|cubiertas?|neumaticos?|tyres?|tires?)\\b""")
+        .containsMatchIn(normalized)
+    if (!tireIntent) return null
+    return BICYCLE_TIRE_DIAMETER_PATTERN.find(normalized)?.value
+        ?.replace(',', '.')
+        ?.let { if (it == "275") "27.5" else it }
+}
+
+private fun bicycleTireDiameters(title: String): Set<String> =
+    BICYCLE_TIRE_DIAMETER_PATTERN.findAll(normalizedWheelCategoryText(title))
+        .map { it.value.replace(',', '.').let { diameter -> if (diameter == "275") "27.5" else diameter } }
+        .toSet()
+
+/** Reject a listing if it does not advertise the exact tyre diameter requested. */
+internal fun isWrongBicycleTireDiameter(query: String, title: String): Boolean {
+    val requested = requestedBicycleTireDiameter(query) ?: return false
+    if (!isBicycleTireListing(title)) return false
+    return requested !in bicycleTireDiameters(title)
+}
+
+/** A multi-size title is visible for inspection, but its listed price cannot be assigned to one size. */
+internal fun hasAmbiguousBicycleTireDiameter(query: String, title: String): Boolean {
+    val requested = requestedBicycleTireDiameter(query) ?: return false
+    if (!isBicycleTireListing(title)) return false
+    val sizes = bicycleTireDiameters(title)
+    return requested in sizes && sizes.any { it != requested }
+}
+
+/** A 7–12 speed mountain-bike groupset query should not return wheels and unrelated parts. */
+internal fun isBicycleDrivetrainSearch(query: String): Boolean {
+    val normalized = normalizedWheelCategoryText(query)
+    val bicycle = Regex("""\\b(mtb|bicicleta|bicicletas|bici|bike|bicycle)\\b""")
+        .containsMatchIn(normalized)
+    val drivetrainBrand = Regex("""\\b(shimano|sram|microshift|sunrace)\\b""")
+        .containsMatchIn(normalized)
+    val speed = Regex("""\\b(?:7|8|9|10|11|12)\\s*(?:v|velocidades|speed)\\b""")
+        .containsMatchIn(normalized)
+    val explicitTireSearch = requestedBicycleTireDiameter(query) != null
+    return bicycle && drivetrainBrand && speed && !explicitTireSearch
+}
+
+internal fun isBicycleDrivetrainComponentTitle(title: String): Boolean {
+    if (isBicycleTireListing(title) || containsWheelCategoryTerm(title)) return false
+    return Regex(
+        """(?i)\\b(cassette|casete|pi[nñ]ones?|sprockets?|cambio|desviador|derailleur|shifter|manetas?|pulsadores?|cadena|chain|platos?|bielas?|pedalier|transmisi[oó]n|groupset|grupo)\\b"""
+    ).containsMatchIn(title)
+}
 
 private val ACCESSORY_LISTING_PATTERN = Regex(
     """(?i)\b(p[oó]ster(?:es)?|poster(?:s)?|funda(?:s)?|carcasa(?:s)?|cases?|covers?|cargador(?:es)?|chargers?|charging|mop\s+kit|protectores?|protector(?:es)?|screen\s+protector|protector\s+de\s+pantalla|cristal(?:es)?\s+templado|cables?|adaptadores?|hubs?|filtros?|recambios?|repuestos?|soportes?)\b"""

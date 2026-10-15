@@ -207,7 +207,7 @@ class ProductRepository(
                     isAccessoryListing(result.title)
             result.title.isNotBlank() &&
                 !isNonRetailPromotionalListing(result.title) &&
-                isEligibleSeller(result.storeName, result.sourceUrl) &&
+                result.storeName.isNotBlank() &&
                 result.price.isFinite() &&
                 result.price > 0.0 &&
                 result.price <= MAX_HISTORY_PRICE_EUR &&
@@ -354,6 +354,9 @@ class ProductRepository(
         // and wheel listings missing requested fitment dimensions stay visible in the search UI,
         // but are not added to Mercado or its price history.
         val eligible = filterOnlineSearchResults(results, searchQuery)
+            // Keep second-hand and marketplace results visible in search, but never persist them
+            // as comparable new-retail history. Validate seller label against its actual URL here.
+            .filter { isEligibleSeller(it.storeName, it.sourceUrl) && isEligibleHistoryTitle(it.title) }
             .filterNot { it.isSecondHand || it.isFitmentUnverified || it.isCategoryUnverified }
             // Accessories remain visible in online search, but are not saved as the main device.
             .filterNot {

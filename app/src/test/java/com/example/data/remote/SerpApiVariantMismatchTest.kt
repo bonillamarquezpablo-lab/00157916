@@ -128,6 +128,7 @@ class SerpApiVariantMismatchTest {
         assertEquals("Tienda sin verificar", unknown.category)
         assertFalse(unknown.hasOfficialSite)
         assertEquals("unknown.invalid", unknown.domain)
+        assertEquals("", unknown.officialUrl)
     }
 
     @Test

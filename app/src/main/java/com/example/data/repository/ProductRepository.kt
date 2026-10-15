@@ -20,6 +20,8 @@ import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.linkTypeForUrl
+import com.example.data.remote.isGoogleShoppingUrl
+import com.example.data.remote.isNonRetailPromotionalListing
 import com.example.data.remote.isWheelFitmentQuery
 import com.example.data.remote.containsWheelCategoryTerm
 import com.example.data.remote.wheelSetCountForTitle
@@ -39,6 +41,30 @@ import java.util.Date
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
+
+private fun PriceObservationEntity.isArchiveEvidence(): Boolean =
+    evidenceType.equals("archive", ignoreCase = true) ||
+        sourceUrl.startsWith("https://web.archive.org/web/", ignoreCase = true) ||
+        sourceUrl.startsWith("http://web.archive.org/web/", ignoreCase = true)
+
+/**
+ * Compare the actual HTTP resource, not a case-insensitive URL string.
+ * Hosts and schemes are case-insensitive; paths and query strings are not.
+ */
+private fun sameHttpResource(left: String, right: String): Boolean {
+    val leftUri = runCatching { URI(left) }.getOrNull() ?: return false
+    val rightUri = runCatching { URI(right) }.getOrNull() ?: return false
+    val leftScheme = leftUri.scheme ?: return false
+    val rightScheme = rightUri.scheme ?: return false
+    val leftHost = leftUri.host ?: return false
+    val rightHost = rightUri.host ?: return false
+    return leftScheme.equals(rightScheme, ignoreCase = true) &&
+        leftHost.equals(rightHost, ignoreCase = true) &&
+        leftUri.port == rightUri.port &&
+        leftUri.rawUserInfo == rightUri.rawUserInfo &&
+        leftUri.rawPath.orEmpty() == rightUri.rawPath.orEmpty() &&
+        leftUri.rawQuery.orEmpty() == rightUri.rawQuery.orEmpty()
+}
 
 data class UrlAnalysisResult(
     val queryOrUrl: String,
@@ -84,7 +110,15 @@ class ProductRepository(
     ) { productEntities, storeEntities, trackedEntities, observations ->
         val stores = storeEntities.map { it.toDomainStore() }.ifEmpty { Store.ALL_STORES }
         val trackingMap = trackedEntities.associateBy { it.productId }
-        val observationsByProduct = observations.groupBy { it.productId }
+        val productTitleById = productEntities.associate { it.id to it.title }
+        // Validate legacy verified rows on read as well as at ingestion. Invalid rows remain
+        // in Room for diagnosis/recovery, but cannot influence prices, badges or the chart.
+        val observationsByProduct = observations
+            .filter { observation ->
+                val catalogTitle = productTitleById[observation.productId] ?: return@filter false
+                isEligibleObservationForDisplay(observation, catalogTitle)
+            }
+            .groupBy { it.productId }
 
         productEntities.map { entity ->
             val product = entity.toDomainProduct(
@@ -127,7 +161,7 @@ class ProductRepository(
                 quote.currency == "EUR" &&
                 quote.observedAt >= HISTORY_START_TIMESTAMP &&
                 isEligibleHistoryTitle(title) &&
-                isEligibleSeller(quote.storeName) &&
+                isEligibleSeller(quote.storeName, quote.sourceUrl) &&
                 isPlausibleHistoryPrice(title, quote.price)
         }
         if (validQuotes.isEmpty()) return 0
@@ -180,6 +214,7 @@ class ProductRepository(
                     !isAccessorySearchQuery(searchQuery) &&
                     isAccessoryListing(result.title)
             result.title.isNotBlank() &&
+                !isNonRetailPromotionalListing(result.title) &&
                 result.storeName.isNotBlank() &&
                 result.price.isFinite() &&
                 result.price > 0.0 &&
@@ -278,8 +313,10 @@ class ProductRepository(
                     "Segunda mano o reacondicionado"
                 hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title) ->
                     "Otro modelo o variante"
-                !isEligibleSeller(result.storeName) ->
-                    "Otro modelo o vendedor no elegible"
+                isNonRetailPromotionalListing(result.title) ->
+                    "Artículo promocional o merchandising personalizado"
+                !isEligibleSeller(result.storeName, result.sourceUrl) ->
+                    "Nombre de vendedor y dominio no coinciden o el vendedor no es elegible"
                 !isEligibleHistoryTitle(result.title) ->
                     "Título no elegible para historial"
                 filtered == null ->
@@ -325,6 +362,9 @@ class ProductRepository(
         // and wheel listings missing requested fitment dimensions stay visible in the search UI,
         // but are not added to Mercado or its price history.
         val eligible = filterOnlineSearchResults(results, searchQuery)
+            // Keep second-hand and marketplace results visible in search, but never persist them
+            // as comparable new-retail history. Validate seller label against its actual URL here.
+            .filter { isEligibleSeller(it.storeName, it.sourceUrl) && isEligibleHistoryTitle(it.title) }
             .filterNot { it.isSecondHand || it.isFitmentUnverified || it.isCategoryUnverified }
             // Accessories remain visible in online search, but are not saved as the main device.
             .filterNot {
@@ -435,6 +475,56 @@ class ProductRepository(
     }
 
     /**
+     * Replace an intermediate Google Shopping URL with a seller URL verified against the store
+     * label from the provider. This changes only provenance/navigation fields; prices and times
+     * remain exactly as originally observed.
+     */
+    suspend fun updateResolvedStoreLink(
+        expectedTitle: String,
+        storeName: String,
+        originalUrl: String,
+        resolvedUrl: String
+    ): Int {
+        if (expectedTitle.isBlank() || storeName.isBlank() ||
+            !isGoogleShoppingUrl(originalUrl) || isGoogleShoppingUrl(resolvedUrl)
+        ) return 0
+        val resolvedUri = parseHttpUri(resolvedUrl) ?: return 0
+        if (!resolvedUri.scheme.equals("https", ignoreCase = true) ||
+            !isEligibleSeller(storeName, resolvedUrl)
+        ) return 0
+
+        val identity = onlineProductIdentityKey(expectedTitle)
+        val product = productDao.getAllProductsSnapshot().firstOrNull {
+            onlineProductIdentityKey(it.title) == identity
+        } ?: return 0
+        val matchingRows = priceObservationDao.getObservationsForResolvedStoreLink(
+            productId = product.id,
+            storeName = storeName,
+            originalUrl = originalUrl
+        )
+        matchingRows.forEach { observation ->
+            priceObservationDao.update(
+                observation.copy(
+                    storeId = canonicalStoreId(storeName, resolvedUrl),
+                    sourceUrl = resolvedUrl,
+                    linkType = "directo"
+                )
+            )
+        }
+
+        val productEntity = productDao.getProductById(product.id)
+        if (productEntity != null && productEntity.storeUrl == originalUrl) {
+            productDao.insert(
+                productEntity.copy(
+                    storeUrl = resolvedUrl,
+                    currentStoreId = canonicalStoreId(storeName, resolvedUrl)
+                )
+            )
+        }
+        return matchingRows.size
+    }
+
+    /**
      * Persists prices parsed from public Internet Archive captures for a product that already has
      * a current provider-backed row. Archive points use capture time as observedAt and separately
      * record when Mínimo imported them. They never update the product's current price.
@@ -457,30 +547,45 @@ class ProductRepository(
         val now = System.currentTimeMillis()
         val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)
         val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
+        if (!isEligibleSeller(merchantName, originalUrl)) return 0
         val storeId = canonicalStoreId(merchantName, originalUrl)
         var inserted = 0
 
         for (quote in quotes.distinctBy { it.observedAt to it.price }) {
             val snapshotUri = parseHttpUri(quote.snapshotUrl) ?: continue
+            // Historical evidence must come from the HTTPS archive endpoint, not plaintext HTTP.
+            if (!snapshotUri.scheme.equals("https", ignoreCase = true)) continue
             if (!snapshotUri.host.equals("web.archive.org", ignoreCase = true)) continue
-            val snapshotTimestamp = Regex("""^/web/(\d{14})id_/""")
-                .find(snapshotUri.path.orEmpty())?.groupValues?.getOrNull(1)?.let { rawTimestamp ->
-                    runCatching {
-                        SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
-                            isLenient = false
-                            timeZone = TimeZone.getTimeZone("UTC")
-                        }.parse(rawTimestamp)?.time
-                    }.getOrNull()
-                } ?: continue
+            val rawSnapshotTimestamp = Regex("""^/web/(\d{14})id_/""")
+                .find(snapshotUri.path.orEmpty())?.groupValues?.getOrNull(1) ?: continue
+            val snapshotTimestamp = runCatching {
+                SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+                    isLenient = false
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }.parse(rawSnapshotTimestamp)?.time
+            }.getOrNull() ?: continue
             if (kotlin.math.abs(snapshotTimestamp - quote.observedAt) > 1_000L) continue
-            if (!quote.originalUrl.trimEnd('/').equals(originalUrl.trimEnd('/'), ignoreCase = true)) continue
+            if (!sameHttpResource(quote.originalUrl, originalUrl)) continue
+            // A valid Wayback host and timestamp are not enough: the snapshot must embed the
+            // exact merchant page requested for this product, not a different archived URL.
+            val snapshotPrefix = "/web/" + rawSnapshotTimestamp + "id_/"
+            val snapshotOriginalUrl = quote.snapshotUrl.substringAfter(snapshotPrefix, missingDelimiterValue = "")
+            if (snapshotOriginalUrl.isBlank() ||
+                !sameHttpResource(snapshotOriginalUrl, originalUrl)
+            ) continue
             if (quote.currency != "EUR" ||
                 !quote.price.isFinite() ||
                 quote.price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR ||
                 quote.observedAt < earliestAllowed ||
                 quote.observedAt >= now ||
-                quote.productTitle.isBlank()
+                quote.productTitle.isBlank() ||
+                // Recheck product identity at persistence time so a mismatched archive
+                // cannot contaminate another product's history.
+                onlineProductIdentityKey(quote.productTitle) != identity
             ) continue
+
+            // Repeated backfills can return the same public capture. Keep the import idempotent.
+            if (priceObservationDao.getObservationForSnapshot(product.id, quote.snapshotUrl) != null) continue
 
             val observation = PriceObservationEntity(
                 productId = product.id,
@@ -521,7 +626,7 @@ class ProductRepository(
         }
         val valid = filterOnlineSearchResults(offers, expectedTitle)
             .filterNot { it.isSecondHand || it.isRentalOrMonthly }
-            .filter { isEligibleSeller(it.storeName) && isEligibleHistoryTitle(it.title) }
+            .filter { isEligibleSeller(it.storeName, it.sourceUrl) && isEligibleHistoryTitle(it.title) }
             .groupBy { canonicalStoreId(it.storeName, it.sourceUrl) }
             .values
             .mapNotNull { rows ->
@@ -650,6 +755,7 @@ class ProductRepository(
             """\b(segunda\s+mano|usad[oa]s?|used|reacondicionad[oa]s?|refurbished|renewed|pre owned|seminuev[oa]s?|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|cuota|mensual|suscripcion|subscription|pago\s+a\s+plazos|monthly|por\s+mes|per\s+month|mes\s+a\s+mes)\b"""
         )
         return !excludedListing.containsMatchIn(normalized) &&
+            !isNonRetailPromotionalListing(title) &&
             !Regex("""(?i)/\s*mes\b""").containsMatchIn(title)
     }
 
@@ -658,6 +764,116 @@ class ProductRepository(
         val normalized = " " + normalizedProductTitle(storeName) + " "
         val excludedSellers = listOf("rentik", "wallapop", "cash converters", "vinted", "cex")
         return excludedSellers.none { seller -> (" " + seller + " ") in normalized }
+    }
+
+    /**
+     * Validate a retailer label against its actual HTTPS destination when the domain is known.
+     * Unknown small merchants remain eligible; marketplace and rental domains remain excluded.
+     */
+    private fun isEligibleSeller(storeName: String, sourceUrl: String): Boolean {
+        if (!isEligibleSeller(storeName)) return false
+        val uri = parseHttpUri(sourceUrl) ?: return false
+        val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+        if (host.isBlank() || !uri.scheme.equals("https", ignoreCase = true)) return false
+
+        val excludedHosts = listOf(
+            "wallapop.com", "vinted.es", "vinted.com", "cashconverters.es",
+            "cashconverters.co.uk", "webuy.com", "cex.es", "cex.co.uk", "rentik.com"
+        )
+        if (excludedHosts.any { domain -> host == domain || host.endsWith(".$domain") }) return false
+
+        if (host.startsWith("google.") || host.endsWith(".google.com") || host.endsWith(".google.es")) {
+            return true
+        }
+
+        val knownStore = Store.ALL_STORES.firstOrNull { store ->
+            val domain = store.domain.substringBefore('/').removePrefix("www.").lowercase(Locale.ROOT)
+            domain.isNotBlank() && (host == domain || host.endsWith(".$domain"))
+        } ?: return true
+
+        val stopWords = setOf("espana", "online", "tienda", "store", "shop", "seller", "es", "de", "el", "la")
+        val expectedTokens = normalizedProductTitle(knownStore.name).split(' ')
+            .filter { it.length > 2 && it !in stopWords }
+        val actualTokens = normalizedProductTitle(storeName).split(' ')
+            .filter { it.length > 2 && it !in stopWords }
+        val expectedCompact = normalizedProductTitle(knownStore.name).replace(" ", "")
+        val actualCompact = normalizedProductTitle(storeName).replace(" ", "")
+        return expectedTokens.any { it in actualTokens } ||
+            (actualCompact.length >= 4 && expectedCompact.contains(actualCompact)) ||
+            (expectedCompact.length >= 4 && actualCompact.contains(expectedCompact))
+    }
+
+    private fun hasSpecificCatalogIdentity(title: String): Boolean {
+        if (modelCodes(title).isNotEmpty()) return true
+        val genericWords = setOf(
+            "producto", "articulo", "preservado", "usuario", "por", "demo", "demostracion",
+            "ejemplo", "prueba", "sin", "datos", "catalogo", "guardado"
+        )
+        val tokens = normalizedProductTitle(title).split(' ')
+            .filter { it.length > 2 && it !in TITLE_STOP_WORDS && it !in genericWords }
+        return tokens.size >= 2
+    }
+
+    private fun isEligibleObservationForDisplay(
+        observation: PriceObservationEntity,
+        catalogTitle: String
+    ): Boolean {
+        if (!observation.isVerified ||
+            observation.productId.isBlank() ||
+            observation.currency != "EUR" ||
+            !observation.price.isFinite() ||
+            observation.price <= 0.0 ||
+            observation.price > MAX_HISTORY_PRICE_EUR
+        ) return false
+
+        val storedTitle = observation.productTitle.ifBlank { catalogTitle }
+        if (!isEligibleHistoryTitle(storedTitle) ||
+            !isPlausibleHistoryPrice(storedTitle, observation.price)
+        ) return false
+
+        // Some pre-existing user rows carry a generic placeholder title. In that case the
+        // observation itself may contain the only reliable model identity; don't discard it
+        // solely because a legacy catalogue label cannot be matched. Specific catalogue names
+        // still require strict identity/variant agreement before their history is displayed.
+        if (hasSpecificCatalogIdentity(catalogTitle) &&
+            (!isSafeCatalogTitleMatch(storedTitle, catalogTitle) ||
+                hasStrictModelMismatch(catalogTitle, explicitModelMarkers(catalogTitle), storedTitle))
+        ) return false
+
+        val seller = observation.storeName.ifBlank { observation.storeId }
+        if (observation.isArchiveEvidence()) {
+            val snapshotUri = parseHttpUri(observation.sourceUrl) ?: return false
+            if (!snapshotUri.scheme.equals("https", ignoreCase = true) ||
+                !snapshotUri.host.equals("web.archive.org", ignoreCase = true) ||
+                snapshotUri.port != -1
+            ) return false
+            val rawTimestamp = Regex("""^/web/(\d{14})id_/""")
+                .find(snapshotUri.path.orEmpty())?.groupValues?.getOrNull(1) ?: return false
+            val captureTime = runCatching {
+                SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+                    isLenient = false
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }.parse(rawTimestamp)?.time
+            }.getOrNull() ?: return false
+            val now = System.currentTimeMillis()
+            if (kotlin.math.abs(captureTime - observation.observedAt) > 1_000L ||
+                observation.observedAt < now - (1605L * 24L * 60L * 60L * 1000L) ||
+                observation.observedAt >= now
+            ) return false
+
+            val snapshotPrefix = "/web/" + rawTimestamp + "id_/"
+            val archivedOriginalUrl = observation.sourceUrl.substringAfter(
+                snapshotPrefix,
+                missingDelimiterValue = ""
+            )
+            if (archivedOriginalUrl.isBlank()) return false
+            val merchantUrl = observation.sourcePageUrl.ifBlank { archivedOriginalUrl }
+            if (!sameHttpResource(archivedOriginalUrl, merchantUrl)) return false
+            return isEligibleSeller(seller, merchantUrl)
+        }
+
+        if (observation.observedAt < HISTORY_START_TIMESTAMP) return false
+        return isEligibleSeller(seller, observation.sourceUrl)
     }
 
     private fun isAccessoryListing(title: String): Boolean =
@@ -989,8 +1205,11 @@ class ProductRepository(
         // Live rows retain the policy boundary so legacy/demo prices cannot enter the chart.
         // Independently sourced historical archive points may predate that boundary, but only
         // when the row explicitly carries archive provenance from the v8 schema.
+        // Wayback provenance is detected by the durable Room marker and, for defensive
+        // compatibility, by unmistakable archive source fields. Only archive rows bypass the
+        // live-history date boundary; all other live observations remain unchanged.
         val sortedHistory = verifiedObservations.filter { observation ->
-            val eligibleDate = observation.evidenceType == "archive" ||
+            val eligibleDate = observation.isArchiveEvidence() ||
                 observation.observedAt >= HISTORY_START_TIMESTAMP
             eligibleDate &&
                 observation.currency == "EUR" &&
@@ -998,22 +1217,19 @@ class ProductRepository(
                 observation.price > 0.0 &&
                 observation.price <= MAX_HISTORY_PRICE_EUR
         }.sortedBy { it.observedAt }
-        val liveHistory = sortedHistory.filter { it.evidenceType != "archive" }
-        // Current price/store must always come from a live provider observation, never a Wayback
-        // snapshot, even when an archived snapshot was captured later in the same calendar day.
+        val liveHistory = sortedHistory.filterNot { it.isArchiveEvidence() }
+        val archiveHistory = sortedHistory.filter { it.isArchiveEvidence() }
+        // Current price/store can only come from a live provider observation.
         val latestLiveDayStart = liveHistory.lastOrNull()?.let { localDayBounds(it.observedAt).first }
         val latestBatch = liveHistory.filter {
             latestLiveDayStart != null && localDayBounds(it.observedAt).first == latestLiveDayStart
         }
-        // One point per local day. Prefer a live observation for a day when available; otherwise
-        // use its lowest verified archive quote. Gaps remain gaps, with no interpolated values.
-        val snapshotHistory = sortedHistory
+        // Every live-history calculation uses live observations only. Archive captures never
+        // contribute to observed minimum/maximum, averages, sufficiency or chart date boundaries.
+        val snapshotHistory = liveHistory
             .groupBy { localDayBounds(it.observedAt).first }
             .values
-            .mapNotNull { dayOffers ->
-                val liveOffers = dayOffers.filter { it.evidenceType != "archive" }
-                (liveOffers.ifEmpty { dayOffers }).minByOrNull { it.price }
-            }
+            .mapNotNull { dayOffers -> dayOffers.minByOrNull { it.price } }
             .sortedBy { localDayBounds(it.observedAt).first }
         val latestObservation = latestBatch.minByOrNull { it.price }
         val minObservation = snapshotHistory.minByOrNull { it.price }
@@ -1058,15 +1274,32 @@ class ProductRepository(
         }
         val dateFormatter = SimpleDateFormat("dd MMM yyyy", Locale("es", "ES"))
         // Plot just one genuine point per local date: the cheapest valid offer observed that day.
-        val historyPoints = if (priceIsVerified) snapshotHistory.map { observation ->
+        val liveHistoryPoints = snapshotHistory.map { observation ->
             PricePoint(
                 timestamp = observation.observedAt,
                 dateLabel = dateFormatter.format(Date(observation.observedAt)),
                 price = observation.price,
                 storeName = observation.storeName.ifBlank { observationStore(observation, stores).name },
                 eventLabel = observation.sourceType.ifBlank { observation.sourceName },
-                linkType = observation.linkType
+                linkType = observation.linkType,
+                sourceUrl = observation.sourceUrl,
+                evidenceType = "live"
             )
+        }
+        val archivedHistoryPoints = archiveHistory.map { observation ->
+            PricePoint(
+                timestamp = observation.observedAt,
+                dateLabel = dateFormatter.format(Date(observation.observedAt)),
+                price = observation.price,
+                storeName = observation.storeName.ifBlank { observationStore(observation, stores).name },
+                eventLabel = "Internet Archive",
+                linkType = "Archivo histórico",
+                sourceUrl = observation.sourceUrl,
+                evidenceType = "archive"
+            )
+        }
+        val historyPoints = if (priceIsVerified) {
+            (liveHistoryPoints + archivedHistoryPoints).sortedBy { it.timestamp }
         } else {
             emptyList()
         }

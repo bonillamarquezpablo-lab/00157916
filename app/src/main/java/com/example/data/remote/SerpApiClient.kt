@@ -271,6 +271,11 @@ class SerpApiClient(
                 recordDiscard(item, title, nonNewRejectionReason(item, title))
                 return@mapNotNull null
             }
+            if (isNonRetailPromotionalListing(title)) {
+                rejectedOther++
+                recordDiscard(item, title, "Artículo promocional o merchandising personalizado")
+                return@mapNotNull null
+            }
             if (!query.isNullOrBlank() && hasVariantMismatch(query, title)) {
                 rejectedAsIrrelevant++
                 recordDiscard(item, title, "Otro modelo o variante (capacidad, potencia o pack distinto)")
@@ -430,6 +435,11 @@ class SerpApiClient(
             if (isRentalOrMonthlyListing(item, title)) {
                 rejectedOther++
                 recordDiscard(item, title, "Alquiler o cuota mensual")
+                return@mapNotNull null
+            }
+            if (isNonRetailPromotionalListing(title)) {
+                rejectedOther++
+                recordDiscard(item, title, "Artículo promocional o merchandising personalizado")
                 return@mapNotNull null
             }
             var fitmentUnverified = false
@@ -657,7 +667,9 @@ class SerpApiClient(
                 ?: return@mapNotNull null
             val offerTitle = store.optString("title").trim().takeIf { it.isNotBlank() && it != "null" }.orEmpty()
             val combinedTitle = listOf(catalogTitle, offerTitle).filter { it.isNotBlank() }.joinToString(" ")
-            if (isClearlyNonNewListing(store, combinedTitle)) return@mapNotNull null
+            if (isClearlyNonNewListing(store, combinedTitle) ||
+                isNonRetailPromotionalListing(combinedTitle)
+            ) return@mapNotNull null
             val marketplaceSeller = Regex(
                 """(?i)\b(wallapop|milanuncios|ebay|vinted|amazon[\s_-]*warehouse|vendedor\s+particular|particular(?:es)?)\b"""
             ).containsMatchIn("$name $offerTitle")
@@ -822,7 +834,7 @@ class SerpApiClient(
 
         return results.mapNotNull { item ->
             val title = item.optString("title").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            if (isClearlyNonNewListing(item, title)) return@mapNotNull null
+            if (isClearlyNonNewListing(item, title) || isNonRetailPromotionalListing(title)) return@mapNotNull null
             if (hasVariantMismatch(requested.queryTerm, title) ||
                 hasConflictingModelVariant(requested.queryTerm, title)) return@mapNotNull null
             val requestedEan = requested.ean.filter(Char::isDigit)

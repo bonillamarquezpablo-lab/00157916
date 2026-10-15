@@ -1,6 +1,7 @@
 package com.example.data.remote
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -16,6 +17,7 @@ import org.json.JSONException
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.net.URI
+import java.net.URLDecoder
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.text.Normalizer
@@ -38,7 +40,8 @@ data class WaybackBackfillResult(
     val capturesFound: Int = 0,
     val capturesChecked: Int = 0,
     val skippedRecently: Boolean = false,
-    val available: Boolean = false
+    val available: Boolean = false,
+    val storeLinkUnresolved: Boolean = false
 )
 
 /**
@@ -49,9 +52,9 @@ data class WaybackBackfillResult(
 class WaybackPriceHistoryClient(
     context: Context,
     private val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(6, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
-        .callTimeout(7, TimeUnit.SECONDS)
+        .connectTimeout(2, TimeUnit.SECONDS)
+        .readTimeout(2, TimeUnit.SECONDS)
+        .callTimeout(3, TimeUnit.SECONDS)
         .build()
 ) {
     private val preferences = context.applicationContext.getSharedPreferences(
@@ -63,19 +66,32 @@ class WaybackPriceHistoryClient(
         originalUrl: String,
         expectedTitle: String,
         now: Long = System.currentTimeMillis(),
-        lookbackDays: Int = DEFAULT_LOOKBACK_DAYS
+        lookbackDays: Int = DEFAULT_LOOKBACK_DAYS,
+        storeName: String = ""
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
-        if (!isEligibleDirectUrl(originalUrl) || expectedTitle.isBlank()) {
+        if (!preferences.getBoolean("enabled", true)) {
+            return@withContext WaybackBackfillResult()
+        }
+        if (expectedTitle.isBlank()) {
+            return@withContext WaybackBackfillResult()
+        }
+        val canResolveShoppingLink = isGoogleShoppingUrl(originalUrl) && storeName.isNotBlank()
+        if (!isEligibleDirectUrl(originalUrl) && !canResolveShoppingLink) {
             return@withContext WaybackBackfillResult()
         }
 
-        val attemptKey = attemptKey(originalUrl + "|" + expectedTitle)
-        val lastAttempt = preferences.getLong(attemptKey, 0L)
+        // Resolve the page first. A failed link lookup must not suppress a future archive lookup
+        // after the merchant URL becomes available through the separate 24-hour URL cache.
+        val resolvedOriginalUrl = resolveStoreUrl(originalUrl, storeName, expectedTitle)
+            ?: return@withContext WaybackBackfillResult(storeLinkUnresolved = true)
+
+        val archiveAttemptKey = attemptKey(resolvedOriginalUrl + "|" + expectedTitle)
+        val lastAttempt = preferences.getLong(archiveAttemptKey, 0L)
         if (lastAttempt > 0L && now >= lastAttempt && now - lastAttempt < RETRY_INTERVAL_MS) {
             return@withContext WaybackBackfillResult(skippedRecently = true)
         }
 
-        val cdxUrl = buildCdxUrl(originalUrl, now, lookbackDays)
+        val cdxUrl = buildCdxUrl(resolvedOriginalUrl, now, lookbackDays)
             ?: return@withContext WaybackBackfillResult()
         val cdxRequest = Request.Builder().url(cdxUrl).header("User-Agent", USER_AGENT).get().build()
         val captures = try {
@@ -83,6 +99,8 @@ class WaybackPriceHistoryClient(
                 if (!response.isSuccessful) return@withContext WaybackBackfillResult()
                 parseCaptureIndex(response.body?.string().orEmpty())
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
             return@withContext WaybackBackfillResult()
         }
@@ -99,12 +117,14 @@ class WaybackPriceHistoryClient(
                             http.newCall(request).execute().use { response ->
                                 if (response.isSuccessful) response.body?.string() else null
                             }
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
                         } catch (_: Exception) {
                             null
                         } ?: return@withPermit SnapshotFetch(false, null)
                         SnapshotFetch(
                             fetched = true,
-                            quote = parseArchivedPrice(html, expectedTitle, originalUrl, snapshotUrl, capture.timestamp)
+                            quote = parseArchivedPrice(html, expectedTitle, resolvedOriginalUrl, snapshotUrl, capture.timestamp)
                         )
                     }
                 }
@@ -112,7 +132,7 @@ class WaybackPriceHistoryClient(
         }
 
         // Negative results are cached too, avoiding repeated load on the public archive.
-        preferences.edit().putLong(attemptKey, now).apply()
+        preferences.edit().putLong(archiveAttemptKey, now).apply()
         WaybackBackfillResult(
             quotes = fetched.mapNotNull { it.quote }.sortedBy { it.observedAt }
                 .distinctBy { it.observedAt to it.price },
@@ -120,6 +140,162 @@ class WaybackPriceHistoryClient(
             capturesChecked = fetched.count { it.fetched },
             available = true
         )
+    }
+
+    /**
+     * Resolves a Google Shopping destination to a seller URL without spending a SerpApi query.
+     * Results (including misses) are cached locally so a seller page is not fetched on every search.
+     * Direct HTTPS merchant links are returned unchanged.
+     *
+     * This method is intentionally independent of the Wayback enabled preference: retailer links
+     * should still work when the user disables historical archive lookups.
+     */
+    suspend fun resolveStoreUrl(
+        originalUrl: String,
+        storeName: String,
+        expectedTitle: String = ""
+    ): String? = withContext(Dispatchers.IO) {
+        if (isEligibleDirectUrl(originalUrl) && !isGoogleShoppingUrl(originalUrl)) {
+            return@withContext originalUrl
+        }
+        if (!isGoogleShoppingUrl(originalUrl) || storeName.isBlank()) return@withContext null
+
+        val cacheKey = attemptKey("store-link|" + originalUrl + "|" + normalizeTitle(storeName) + "|" + normalizeTitle(expectedTitle))
+        preferences.getString("resolved_link_$cacheKey", null)
+            ?.takeIf { isEligibleDirectUrl(it) && !isGoogleShoppingUrl(it) }
+            ?.let { return@withContext it }
+
+        val lastAttempt = preferences.getLong("resolve_time_$cacheKey", 0L)
+        val now = System.currentTimeMillis()
+        if (lastAttempt > 0L && now >= lastAttempt &&
+            now - lastAttempt < STORE_LINK_RETRY_INTERVAL_MS
+        ) {
+            return@withContext null
+        }
+
+        val resolved = resolveDirectMerchantUrl(originalUrl, storeName, expectedTitle)
+            ?.takeIf { isEligibleDirectUrl(it) && !isGoogleShoppingUrl(it) }
+        val editor = preferences.edit().putLong("resolve_time_$cacheKey", now)
+        if (resolved != null) editor.putString("resolved_link_$cacheKey", resolved)
+        editor.apply()
+        resolved
+    }
+
+    private fun resolveDirectMerchantUrl(googleUrl: String, storeName: String, expectedTitle: String): String? {
+        val request = Request.Builder()
+            .url(googleUrl)
+            .header("User-Agent", USER_AGENT)
+            .get()
+            .build()
+        val page = try {
+            http.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return null
+                response.request.url.toString() to response.body?.string().orEmpty()
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        } ?: return null
+
+        val finalUrl = page.first
+        if (isEligibleDirectUrl(finalUrl) && !isGoogleShoppingUrl(finalUrl) &&
+            matchesMerchantHost(finalUrl, storeName) &&
+            matchesProductPath(finalUrl, expectedTitle)
+        ) return finalUrl
+        return extractDirectMerchantUrl(page.second, storeName, expectedTitle)
+    }
+
+    /**
+     * Extract only outbound URLs whose host matches the seller name shown by Shopping.
+     * Google redirect parameters are unwrapped, but generic links and other sellers are rejected.
+     */
+    internal fun extractDirectMerchantUrl(
+        html: String,
+        storeName: String,
+        expectedTitle: String = ""
+    ): String? {
+        if (html.isBlank() || storeName.isBlank()) return null
+        val decodedHtml = html
+            .replace("\\u0026", "&", ignoreCase = true)
+            .replace("\\u003d", "=", ignoreCase = true)
+            .replace("\\/", "/")
+        val candidates = linkedSetOf<String>()
+
+        fun decodeQueryValue(value: String): String =
+            runCatching { URLDecoder.decode(value, Charsets.UTF_8.name()) }.getOrDefault(value)
+
+        fun collectUrl(rawValue: String, depth: Int = 0) {
+            if (depth > 3) return
+            val value = decodeHtml(rawValue).trim().trim('"', '\'')
+            if (value.startsWith("https://", ignoreCase = true) ||
+                value.startsWith("http://", ignoreCase = true)
+            ) candidates += value
+
+            val uri = runCatching { URI(value) }.getOrNull() ?: return
+            val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+            if (!host.startsWith("google.") && !host.endsWith(".google.com") && !host.endsWith(".google.es")) return
+
+            val redirectParameters = setOf("q", "url", "adurl", "uddg", "target", "dest", "destination", "redirect", "redirect_url")
+            uri.rawQuery.orEmpty().split('&').forEach { parameter ->
+                val pair = parameter.split('=', limit = 2)
+                if (pair.size != 2) return@forEach
+                val key = decodeQueryValue(pair[0]).lowercase(Locale.ROOT)
+                if (key !in redirectParameters) return@forEach
+                val target = decodeQueryValue(pair[1])
+                    .replace("\\u0026", "&", ignoreCase = true)
+                    .replace("&amp;", "&", ignoreCase = true)
+                if (target.startsWith("https://", ignoreCase = true) ||
+                    target.startsWith("http://", ignoreCase = true)
+                ) collectUrl(target, depth + 1)
+            }
+        }
+
+        Regex("""(?is)\bhref\s*=\s*["'](.*?)["']""")
+            .findAll(decodedHtml)
+            .forEach { collectUrl(it.groupValues[1]) }
+        Regex("""https?://[^\s"'<>\\]+""", RegexOption.IGNORE_CASE)
+            .findAll(decodedHtml)
+            .forEach { collectUrl(it.value) }
+
+        val merchantCandidates = candidates
+            .filter { isEligibleDirectUrl(it) && matchesMerchantHost(it, storeName) }
+            .distinct()
+        if (merchantCandidates.isEmpty()) return null
+        if (expectedTitle.isBlank()) return merchantCandidates.first()
+
+        return merchantCandidates
+            .filter { matchesProductPath(it, expectedTitle) }
+            .maxWithOrNull(
+                compareBy<String> { url ->
+                    meaningfulTokens(normalizeTitle(runCatching { URI(url).path.orEmpty() }.getOrDefault("")))
+                        .intersect(meaningfulTokens(normalizeTitle(expectedTitle))).size
+                }.thenBy { runCatching { URI(it).path.orEmpty().length }.getOrDefault(0) }
+            )
+    }
+
+    private fun matchesProductPath(url: String, expectedTitle: String): Boolean {
+        if (expectedTitle.isBlank()) return false
+        val productTokens = meaningfulTokens(normalizeTitle(expectedTitle))
+        if (productTokens.isEmpty()) return false
+        val uri = runCatching { URI(url) }.getOrNull() ?: return false
+        val pageTokens = meaningfulTokens(normalizeTitle(uri.path.orEmpty()))
+        val overlap = productTokens.intersect(pageTokens).size
+        val minimumOverlap = if (productTokens.size <= 3) 1 else 2
+        return overlap >= minimumOverlap
+    }
+
+    private fun matchesMerchantHost(url: String, storeName: String): Boolean {
+        val storeCompact = normalizeTitle(storeName).filter(Char::isLetterOrDigit)
+        if (storeCompact.length < 4) return false
+        val hostLabels = runCatching {
+            URI(url).host.lowercase(Locale.ROOT).removePrefix("www.").split('.')
+        }.getOrNull() ?: return false
+        return hostLabels.any { label ->
+            val compactLabel = normalizeTitle(label).filter(Char::isLetterOrDigit)
+            compactLabel.length >= 4 &&
+                (storeCompact.contains(compactLabel) || compactLabel.contains(storeCompact))
+        }
     }
 
     private fun buildCdxUrl(originalUrl: String, now: Long, lookbackDays: Int): HttpUrl? {
@@ -379,6 +555,7 @@ class WaybackPriceHistoryClient(
         const val MAX_SNAPSHOTS_PER_URL = 12
         private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L
+        const val STORE_LINK_RETRY_INTERVAL_MS = 24L * 60L * 60L * 1000L
         const val DAY_MS = 24L * 60L * 60L * 1000L
         const val MIN_HISTORICAL_PRICE = 0.50
         const val MAX_HISTORICAL_PRICE = 10_000.0

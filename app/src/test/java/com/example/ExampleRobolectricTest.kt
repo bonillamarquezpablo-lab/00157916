@@ -680,7 +680,7 @@ class ExampleRobolectricTest {
             AppDatabase::class.java,
             databaseName
         )
-            .addMigrations(AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8)
+            .addMigrations(AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9)
             .allowMainThreadQueries()
             .build()
 
@@ -773,7 +773,7 @@ class ExampleRobolectricTest {
             AppDatabase::class.java,
             databaseName
         )
-            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8)
+            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9)
             .allowMainThreadQueries()
             .build()
 
@@ -1688,7 +1688,14 @@ class ExampleRobolectricTest {
                     rentalPhoneWithNormalPrice,
                     normalNewPhone,
                     cheapLegitimateAccessory,
-                    suspiciousPowerBank
+                    suspiciousPowerBank,
+                    com.example.data.remote.SerpApiShoppingResult(
+                        title = "Anker Power Bank 20000mAh impreso con su logotipo",
+                        price = 3.99,
+                        storeName = "Amazon.es",
+                        sourceUrl = "https://www.amazon.es/dp/PROMOTIONALPOWERBANK",
+                        observedAt = now
+                    )
                 )
             )
             val prePolicySnapshot = normalNewPhone.copy(observedAt = 1_780_000_000_000L)
@@ -1717,6 +1724,25 @@ class ExampleRobolectricTest {
                 filteredResults.any { it.title.contains("Power Bank", ignoreCase = true) && it.price == 2.99 }
             )
 
+            val promotionalOffer = com.example.data.remote.SerpApiShoppingResult(
+                title = "Anker Power Bank 20000mAh impreso con su logotipo",
+                price = 3.99,
+                storeName = "Amazon.es",
+                sourceUrl = "https://www.amazon.es/dp/PROMOTIONALPOWERBANK",
+                observedAt = now
+            )
+            assertFalse(
+                "Custom logo merchandise is not a comparable consumer retail offer",
+                repository.filterOnlineSearchResults(listOf(promotionalOffer), "Anker Power Bank 20000mAh").isNotEmpty()
+            )
+            assertEquals(
+                "Promotional merchandise must have an explicit rejection reason",
+                "Artículo promocional o merchandising personalizado",
+                repository.diagnoseOnlineSearchRejections(
+                    listOf(promotionalOffer), "Anker Power Bank 20000mAh"
+                ).single().reason
+            )
+
             val excludedSellerResults = listOf(
                 normalNewPhone.copy(storeName = "Wallapop", sourceUrl = "https://www.wallapop.com/xiaomi"),
                 normalNewPhone.copy(storeName = "Cash Converters España", sourceUrl = "https://www.cashconverters.es/xiaomi"),
@@ -1733,6 +1759,44 @@ class ExampleRobolectricTest {
             assertTrue("Monthly payment listings are still excluded", filteredMarketplaceResults.none {
                 it.title.contains("cuota", ignoreCase = true)
             })
+
+            val mislabeledAmazonOffer = normalNewPhone.copy(
+                storeName = "Amazon.es",
+                sourceUrl = "https://www.pccomponentes.com/xiaomi-redmi-17"
+            )
+            assertTrue(
+                "A search may show a provider result even while its seller attribution is being checked",
+                repository.filterOnlineSearchResults(listOf(mislabeledAmazonOffer), "Xiaomi Redmi 17").isNotEmpty()
+            )
+            val observationCountBeforeMismatch = database.priceObservationDao().getVerifiedObservationCount()
+            assertEquals(
+                "An Amazon label must not persist a URL that belongs to PcComponentes",
+                0,
+                repository.recordOnlineSearchResults(
+                    listOf(mislabeledAmazonOffer),
+                    "GOOGLE_SHOPPING",
+                    "Xiaomi Redmi 17"
+                )
+            )
+            assertEquals(
+                "Rejecting a mismatched seller must not add any observation",
+                observationCountBeforeMismatch,
+                database.priceObservationDao().getVerifiedObservationCount()
+            )
+
+            val mislabeledMarketplaceOffer = normalNewPhone.copy(
+                storeName = "Amazon.es",
+                sourceUrl = "https://es.wallapop.com/item/xiaomi-redmi-17"
+            )
+            assertEquals(
+                "A marketplace URL must not be persisted as a new Amazon retail offer",
+                0,
+                repository.recordOnlineSearchResults(
+                    listOf(mislabeledMarketplaceOffer),
+                    "GOOGLE_SHOPPING",
+                    "Xiaomi Redmi 17"
+                )
+            )
 
             val vacuumListings = listOf(
                 cheapLegitimateAccessory.copy(
@@ -2007,6 +2071,7 @@ class ExampleRobolectricTest {
         val query = "Anker Power Bank 20.000 mAh"
         val report = parse(query, JSONArray()
             .put(item("Anker Power Bank 20.000 mAh", price = "39.99", extractedPrice = 39.99))
+            .put(item("Anker Power Bank 20.000 mAh impreso con su logotipo", price = "3.99", extractedPrice = 3.99))
             .put(item("Anker Power Bank 20.000 mAh", condition = "used"))
             .put(item("Anker Power Bank 20.000 mAh alquiler mensual"))
             .put(item("Anker Power Bank 20.000 mAh cuota 4,99 €/mes", price = "4,99 €/mes", extractedPrice = 4.99))
@@ -2017,7 +2082,8 @@ class ExampleRobolectricTest {
             .put(item("Anker Power Bank 20.000 mAh", price = "39.99", extractedPrice = null)))
 
         assertEquals("Amazon.es numeric structured prices are accepted without the € glyph", 1, report.results.size)
-        assertEquals(8, report.discardedOffers.size)
+        assertEquals(9, report.discardedOffers.size)
+        assertTrue(report.discardedOffers.any { it.reason.contains("promocional") })
         assertTrue(report.discardedOffers.any { it.reason.contains("Segunda mano") })
         assertTrue(report.discardedOffers.any { it.reason.contains("Alquiler o cuota") })
         assertTrue(report.discardedOffers.any { it.reason.contains("variante") })

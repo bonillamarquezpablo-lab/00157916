@@ -1,0 +1,488 @@
+package com.example.data.repository
+
+import android.content.Context
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
+import com.example.data.local.AppDatabase
+import com.example.data.local.PriceObservationEntity
+import com.example.data.local.ProductEntity
+import com.example.data.remote.ArchivedPriceQuote
+import com.example.data.model.ProductCategory
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import java.util.Calendar
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
+class ProductRepositoryArchiveIsolationTest {
+
+    @Test
+    fun waybackRowsDoNotChangeCurrentMinimumBadgesOrHistoryStart() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val now = System.currentTimeMillis()
+            val todayStart = Calendar.getInstance().apply {
+                timeInMillis = now
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            val productId = "archive-isolation-test"
+            val title = "Anker Prime 27K Power Bank"
+            database.productDao().insert(
+                ProductEntity(
+                    id = productId,
+                    title = title,
+                    brand = "Anker",
+                    category = ProductCategory.ALL.name,
+                    currentPrice = 250.0,
+                    athMinPrice = 125.0,
+                    athMinDate = "legacy",
+                    athMinStore = "legacy",
+                    athMaxPrice = 300.0,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "sample-store",
+                    storeUrl = "https://shop.example/product/anker-prime",
+                    ean = "",
+                    isPriceVerified = true
+                )
+            )
+
+            fun live(price: Double, observedAt: Long, suffix: String) = PriceObservationEntity(
+                productId = productId,
+                storeId = "sample-store-$suffix",
+                price = price,
+                currency = "EUR",
+                observedAt = observedAt,
+                sourceUrl = "https://shop.example/product/anker-prime?offer=$suffix",
+                sourceName = "SerpApi · Google Shopping",
+                isVerified = true,
+                productTitle = title,
+                storeName = "Tienda de prueba",
+                sourceType = "Google Shopping",
+                linkType = "directo",
+                collectedAt = now,
+                evidenceType = "live"
+            )
+
+            val archiveUrl1 = "https://web.archive.org/web/20251001000000id_/https://shop.example/product/anker-prime"
+            val archiveUrl2 = "https://web.archive.org/web/20260201000000id_/https://shop.example/product/anker-prime"
+            val archiveTimestamp1 = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT)
+                .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                .parse("20251001000000")!!.time
+            val archiveTimestamp2 = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT)
+                .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                .parse("20260201000000")!!.time
+            val observations = listOf(
+                live(220.0, todayStart - 36L * 60L * 60L * 1000L, "old"),
+                live(190.0, todayStart - 12L * 60L * 60L * 1000L, "middle"),
+                live(200.0, now, "current"),
+                // Simulate a row saved by an older v8 build before its provenance marker was repaired.
+                PriceObservationEntity(
+                    productId = productId,
+                    storeId = "sample-store-archive",
+                    price = 5.0,
+                    currency = "EUR",
+                    observedAt = archiveTimestamp1,
+                    sourceUrl = archiveUrl1,
+                    sourceName = "Internet Archive (Wayback Machine)",
+                    isVerified = true,
+                    productTitle = title,
+                    storeName = "Tienda de prueba",
+                    sourceType = "Internet Archive",
+                    linkType = "Archivo histórico",
+                    collectedAt = now,
+                    evidenceType = "live",
+                    sourcePageUrl = "https://shop.example/product/anker-prime"
+                ),
+                PriceObservationEntity(
+                    productId = productId,
+                    storeId = "sample-store-archive-2",
+                    price = 7.0,
+                    currency = "EUR",
+                    observedAt = archiveTimestamp2,
+                    sourceUrl = archiveUrl2,
+                    sourceName = "Internet Archive (Wayback Machine)",
+                    isVerified = true,
+                    productTitle = title,
+                    storeName = "Tienda de prueba",
+                    sourceType = "Internet Archive",
+                    linkType = "Archivo histórico",
+                    collectedAt = now,
+                    evidenceType = "archive",
+                    sourcePageUrl = "https://shop.example/product/anker-prime"
+                ),
+                // This legacy row was wrongly attached to the Anker product despite an iPhone title
+                // and a seller name that conflicts with the PcComponentes destination.
+                PriceObservationEntity(
+                    productId = productId,
+                    storeId = "mismatched-seller",
+                    price = 49.99,
+                    currency = "EUR",
+                    observedAt = now,
+                    sourceUrl = "https://www.pccomponentes.com/apple-iphone-17-pro-max",
+                    sourceName = "SerpApi · Google Shopping",
+                    isVerified = true,
+                    productTitle = "Apple iPhone 17 Pro Max",
+                    storeName = "Amazon.es",
+                    sourceType = "Google Shopping",
+                    linkType = "directo",
+                    collectedAt = now,
+                    evidenceType = "live"
+                )
+            )
+            database.priceObservationDao().insertAll(observations)
+
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val product = kotlinx.coroutines.withTimeout(10_000L) {
+                repository.allProductsStream.first { products -> products.any { it.id == productId } }
+                    .first { it.id == productId }
+            }
+            println(
+                "DEBUG_ARCHIVE history=" + product.priceHistory.joinToString { "${it.timestamp}:${it.price}:${it.sourceUrl}:${it.evidenceType}" } +
+                    " count=" + database.priceObservationDao().getObservationCount(productId)
+            )
+
+            assertEquals("live provider's current quote remains current", 200.0, product.currentPrice, 0.001)
+            assertEquals("archive prices cannot set the observed minimum", 190.0, product.athMinPrice, 0.001)
+            assertEquals("archive prices cannot set the observed maximum", 220.0, product.athMaxPrice, 0.001)
+            assertEquals("both archived rows remain available for the separate archive section", 2,
+                product.priceHistory.count { it.isArchiveEvidence })
+            assertFalse("archive dates must not create a 90-day live history", product.hasSufficientHistory)
+
+            val liveOnly = product.copy(priceHistory = product.priceHistory.filterNot { it.isArchiveEvidence })
+            assertEquals("archive rows must not change the badge classification",
+                liveOnly.priceBadgeState, product.priceBadgeState)
+            assertEquals("archive rows must not change 'Historial desde'",
+                todayStart - 36L * 60L * 60L * 1000L,
+                product.priceHistory.filterNot { it.isArchiveEvidence }.minOf { it.timestamp })
+            assertTrue(product.priceHistory.any { it.sourceUrl == archiveUrl1 })
+            assertFalse(
+                "A verified legacy row with another product title must not contaminate this price history",
+                product.priceHistory.any { it.sourceUrl == "https://www.pccomponentes.com/apple-iphone-17-pro-max" }
+            )
+            assertEquals(
+                "Read-time validation must not delete the original row from local Room storage",
+                6,
+                database.priceObservationDao().getObservationCount(productId)
+            )
+
+            val mismatchedCaptureTime = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT)
+                .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                .parse("20260901000000")!!
+                .time
+            val mismatchedArchiveInserted = repository.recordArchivedPriceHistory(
+                expectedTitle = title,
+                originalUrl = "https://shop.example/product/anker-prime",
+                storeName = "Tienda de prueba",
+                quotes = listOf(
+                    ArchivedPriceQuote(
+                        observedAt = mismatchedCaptureTime,
+                        price = 19.99,
+                        currency = "EUR",
+                        productTitle = "Apple iPhone 17 Pro Max",
+                        originalUrl = "https://shop.example/product/anker-prime",
+                        snapshotUrl = "https://web.archive.org/web/20260901000000id_/https://shop.example/product/anker-prime"
+                    )
+                )
+            )
+            assertEquals("a capture describing a different product must never enter this history", 0, mismatchedArchiveInserted)
+            assertFalse(
+                database.priceObservationDao().observeVerifiedHistory(productId).first()
+                    .any { it.productTitle == "Apple iPhone 17 Pro Max" }
+            )
+
+            val wrongSnapshotTargetInserted = repository.recordArchivedPriceHistory(
+                expectedTitle = title,
+                originalUrl = "https://shop.example/product/anker-prime",
+                storeName = "Tienda de prueba",
+                quotes = listOf(
+                    ArchivedPriceQuote(
+                        observedAt = mismatchedCaptureTime,
+                        price = 19.99,
+                        currency = "EUR",
+                        productTitle = title,
+                        originalUrl = "https://shop.example/product/anker-prime",
+                        snapshotUrl = "https://web.archive.org/web/20260901000000id_/https://other.example/product/anker-prime"
+                    )
+                )
+            )
+            assertEquals(
+                "a Wayback snapshot for a different merchant URL must not be stored",
+                0,
+                wrongSnapshotTargetInserted
+            )
+
+            val wrongCasePathInserted = repository.recordArchivedPriceHistory(
+                expectedTitle = title,
+                originalUrl = "https://shop.example/product/anker-prime",
+                storeName = "Tienda de prueba",
+                quotes = listOf(
+                    ArchivedPriceQuote(
+                        observedAt = mismatchedCaptureTime,
+                        price = 19.99,
+                        currency = "EUR",
+                        productTitle = title,
+                        originalUrl = "https://shop.example/product/anker-prime",
+                        snapshotUrl = "https://web.archive.org/web/20260901000000id_/https://shop.example/Product/Anker-Prime"
+                    )
+                )
+            )
+            assertEquals(
+                "a snapshot of a different case-sensitive merchant path must be rejected",
+                0,
+                wrongCasePathInserted
+            )
+
+            val malformedOriginalUrlInserted = repository.recordArchivedPriceHistory(
+                expectedTitle = title,
+                originalUrl = "https://shop.example/product/anker-prime",
+                storeName = "Tienda de prueba",
+                quotes = listOf(
+                    ArchivedPriceQuote(
+                        observedAt = mismatchedCaptureTime,
+                        price = 19.99,
+                        currency = "EUR",
+                        productTitle = title,
+                        originalUrl = "/relative/path",
+                        snapshotUrl = "https://web.archive.org/web/20260901000000id_/https://shop.example/product/anker-prime"
+                    )
+                )
+            )
+            assertEquals(
+                "malformed quote URLs must be rejected without crashing the import",
+                0,
+                malformedOriginalUrlInserted
+            )
+
+            val insecureSnapshotInserted = repository.recordArchivedPriceHistory(
+                expectedTitle = title,
+                originalUrl = "https://shop.example/product/anker-prime",
+                storeName = "Tienda de prueba",
+                quotes = listOf(
+                    ArchivedPriceQuote(
+                        observedAt = mismatchedCaptureTime,
+                        price = 19.99,
+                        currency = "EUR",
+                        productTitle = title,
+                        originalUrl = "https://shop.example/product/anker-prime",
+                        snapshotUrl = "http://web.archive.org/web/20260901000000id_/https://shop.example/product/anker-prime"
+                    )
+                )
+            )
+            assertEquals(
+                "an insecure HTTP Wayback URL must not be stored as historical evidence",
+                0,
+                insecureSnapshotInserted
+            )
+
+            // Re-running a backfill must not duplicate a capture already in Room.
+            val validSnapshotUrl =
+                "https://web.archive.org/web/20260901000000id_/https://shop.example/product/anker-prime"
+            val validQuote = ArchivedPriceQuote(
+                observedAt = mismatchedCaptureTime,
+                price = 19.99,
+                currency = "EUR",
+                productTitle = title,
+                originalUrl = "https://shop.example/product/anker-prime",
+                snapshotUrl = validSnapshotUrl
+            )
+            assertEquals(
+                "the first valid archived capture should be persisted",
+                1,
+                repository.recordArchivedPriceHistory(
+                    expectedTitle = title,
+                    originalUrl = "https://shop.example/product/anker-prime",
+                    storeName = "Tienda de prueba",
+                    quotes = listOf(validQuote)
+                )
+            )
+            assertEquals(
+                "importing the same archived capture again must be a no-op",
+                0,
+                repository.recordArchivedPriceHistory(
+                    expectedTitle = title,
+                    originalUrl = "https://shop.example/product/anker-prime",
+                    storeName = "Tienda de prueba",
+                    quotes = listOf(validQuote)
+                )
+            )
+            assertEquals(
+                "only one row should exist for this Wayback snapshot",
+                1,
+                database.priceObservationDao().observeVerifiedHistory(productId).first()
+                    .count { it.sourceUrl == validSnapshotUrl }
+            )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun resolvingRetailerLinkChangesOnlyTheDestinationNotThePriceObservation() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val now = System.currentTimeMillis()
+            val productId = "retailer-link-resolution-test"
+            val title = "Anker Prime 27K Power Bank"
+            val googleUrl = "https://www.google.com/search?tbm=shop&q=anker+prime"
+            val directUrl = "https://shop.example/products/anker-prime-27k"
+            database.productDao().insert(
+                ProductEntity(
+                    id = productId,
+                    title = title,
+                    brand = "Anker",
+                    category = ProductCategory.ALL.name,
+                    currentPrice = 89.99,
+                    athMinPrice = 89.99,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "Tienda de prueba",
+                    athMaxPrice = 89.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "link-test-store",
+                    storeUrl = googleUrl,
+                    ean = "",
+                    isPriceVerified = true
+                )
+            )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = productId,
+                    storeId = "link-test-store",
+                    price = 89.99,
+                    currency = "EUR",
+                    observedAt = now,
+                    sourceUrl = googleUrl,
+                    sourceName = "SerpApi · Google Shopping",
+                    isVerified = true,
+                    productTitle = title,
+                    storeName = "Tienda de prueba",
+                    sourceType = "Google Shopping",
+                    linkType = "Google Shopping",
+                    collectedAt = now,
+                    evidenceType = "live"
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+
+            assertEquals(
+                1,
+                repository.updateResolvedStoreLink(
+                    expectedTitle = title,
+                    storeName = "Tienda de prueba",
+                    originalUrl = googleUrl,
+                    resolvedUrl = directUrl
+                )
+            )
+
+            val observation = database.priceObservationDao()
+                .observeVerifiedHistory(productId)
+                .first { rows -> rows.any { it.sourceUrl == directUrl } }
+                .first { it.sourceUrl == directUrl }
+            val updatedProduct = database.productDao().getProductById(productId)
+
+            assertEquals(89.99, observation.price, 0.001)
+            assertEquals(now, observation.observedAt)
+            assertEquals(directUrl, observation.sourceUrl)
+            assertEquals("directo", observation.linkType)
+            assertEquals(directUrl, updatedProduct?.storeUrl)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun dailyLiveLookupSkipsArchiveUrlEvenWhenLegacyEvidenceMarkerSaysLive() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val dayStart = Calendar.getInstance().apply {
+                timeInMillis = System.currentTimeMillis()
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            val dayEnd = Calendar.getInstance().apply {
+                timeInMillis = dayStart
+                add(Calendar.DAY_OF_MONTH, 1)
+            }.timeInMillis
+            // Midday is safely inside the local day, even when the test happens at midnight.
+            val observationAt = dayStart + 12L * 60L * 60L * 1000L
+
+            database.priceObservationDao().insertAll(
+                listOf(
+                    PriceObservationEntity(
+                        productId = "same-day-product",
+                        storeId = "same-store",
+                        price = 4.99,
+                        observedAt = observationAt - 1_000L,
+                        sourceUrl = "https://web.archive.org/web/20261015000000id_/https://shop.example/item",
+                        sourceName = "Legacy archive row",
+                        isVerified = true,
+                        storeName = "Tienda de prueba",
+                        evidenceType = "live"
+                    ),
+                    PriceObservationEntity(
+                        productId = "same-day-product",
+                        storeId = "same-store",
+                        price = 49.99,
+                        observedAt = observationAt,
+                        sourceUrl = "https://shop.example/item",
+                        sourceName = "Google Shopping",
+                        isVerified = true,
+                        storeName = "Tienda de prueba",
+                        evidenceType = "live"
+                    )
+                )
+            )
+
+            val selected = database.priceObservationDao().getObservationForStoreProductDay(
+                productId = "same-day-product",
+                storeId = "same-store",
+                dayStart = dayStart,
+                dayEnd = dayEnd
+            )
+
+            assertEquals("The live seller URL must be selected instead of a Wayback snapshot",
+                "https://shop.example/item", selected?.sourceUrl)
+            assertEquals(49.99, selected?.price ?: 0.0, 0.001)
+        } finally {
+            database.close()
+        }
+    }
+
+}

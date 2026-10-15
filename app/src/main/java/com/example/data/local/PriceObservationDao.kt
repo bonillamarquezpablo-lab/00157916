@@ -42,6 +42,25 @@ interface PriceObservationDao {
     @Query("SELECT * FROM price_observations WHERE productId = :productId AND isVerified = 1 AND observedAt >= :since ORDER BY price ASC")
     suspend fun getVerifiedSince(productId: String, since: Long): List<PriceObservationEntity>
 
+    @Query(
+        "SELECT * FROM price_observations WHERE productId = :productId " +
+            "AND storeName = :storeName AND sourceUrl = :originalUrl " +
+            "AND evidenceType != 'archive'"
+    )
+    suspend fun getObservationsForResolvedStoreLink(
+        productId: String,
+        storeName: String,
+        originalUrl: String
+    ): List<PriceObservationEntity>
+
+    /** Prevent importing the same Wayback capture more than once. */
+    @Query(
+        "SELECT * FROM price_observations " +
+            "WHERE productId = :productId AND sourceUrl = :snapshotUrl " +
+            "LIMIT 1"
+    )
+    suspend fun getObservationForSnapshot(productId: String, snapshotUrl: String): PriceObservationEntity?
+
     @Query("SELECT COUNT(*) FROM price_observations WHERE isVerified = 1")
     suspend fun getVerifiedObservationCount(): Int
 
@@ -49,6 +68,9 @@ interface PriceObservationDao {
         "SELECT * FROM price_observations " +
             "WHERE productId = :productId AND storeId = :storeId " +
             "AND observedAt >= :dayStart AND observedAt < :dayEnd " +
+            "AND lower(evidenceType) != 'archive' " +
+            "AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' " +
+            "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
             "LIMIT 1"
     )
     suspend fun getObservationForStoreProductDay(

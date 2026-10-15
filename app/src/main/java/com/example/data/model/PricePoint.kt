@@ -6,5 +6,14 @@ data class PricePoint(
     val price: Double,
     val storeName: String,
     val eventLabel: String? = null,
-    val linkType: String = "directo"
-)
+    val linkType: String = "directo",
+    /** Direct archived snapshot URL for provenance; never a current offer URL. */
+    val sourceUrl: String? = null,
+    /** Room evidence class; legacy rows are recognized by their explicit archive source label too. */
+    val evidenceType: String = "live"
+) {
+    val isArchiveEvidence: Boolean
+        get() = evidenceType.equals("archive", ignoreCase = true) ||
+            sourceUrl?.startsWith("https://web.archive.org/web/", ignoreCase = true) == true ||
+            sourceUrl?.startsWith("http://web.archive.org/web/", ignoreCase = true) == true
+}

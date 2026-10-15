@@ -1,6 +1,9 @@
 package com.example.ui.components
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -43,6 +46,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -69,12 +73,23 @@ enum class ChartRange(val label: String, val days: Int?) {
 fun PriceHistoryChart(
     priceHistory: List<PricePoint>,
     avg90dPrice: Double,
+    archiveHistory: List<PricePoint> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     var selectedRange by remember { mutableStateOf(ChartRange.ALL) }
     var selectedPointIndex by remember { mutableIntStateOf(-1) }
+    var showingArchiveHistory by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
-    val validHistory = remember(priceHistory) { sanitizePriceHistory(priceHistory) }
+    val validLiveHistory = remember(priceHistory) {
+        sanitizePriceHistory(priceHistory.filterNot { it.isArchiveEvidence })
+    }
+    val validArchiveHistory = remember(archiveHistory) {
+        sanitizePriceHistory(archiveHistory.filter { it.isArchiveEvidence })
+    }
+    // The chart switches series instead of overlaying them. Archive prices never affect live
+    // averages, minimums or deal badges.
+    val validHistory = if (showingArchiveHistory) validArchiveHistory else validLiveHistory
     val filteredPoints = remember(validHistory, selectedRange) {
         val days = selectedRange.days
         if (days == null) validHistory
@@ -84,16 +99,21 @@ fun PriceHistoryChart(
         }
     }
     val historySummary = remember(filteredPoints) { summarizePriceHistory(filteredPoints) }
-    val valid90dAverage = avg90dPrice.takeIf { it.isFinite() && it > 0.0 }
+    val valid90dAverage = avg90dPrice.takeIf {
+        !showingArchiveHistory && it.isFinite() && it > 0.0
+    }
+    val chartLineColor = if (showingArchiveHistory) Color(0xFF7C3AED) else Color(0xFF059669)
 
-    // All labels and historical claims follow the currently selected range.
-    val firstObservationLabel = remember(validHistory, historySummary, filteredPoints) {
+    // All labels and historical claims follow the currently selected series and range.
+    val firstObservationLabel = remember(validHistory, historySummary, filteredPoints, showingArchiveHistory) {
         when {
-            filteredPoints.isEmpty() && validHistory.isEmpty() -> "Sin datos todavía"
-            filteredPoints.isEmpty() -> "Sin datos en este rango"
+            filteredPoints.isEmpty() && validHistory.isEmpty() ->
+                if (showingArchiveHistory) "Sin capturas Wayback verificadas" else "Sin datos todavía"
+            filteredPoints.isEmpty() ->
+                if (showingArchiveHistory) "Sin capturas en este rango" else "Sin datos en este rango"
             else -> historySummary.firstObservedAt?.let { timestamp ->
-                "Historial desde " + SimpleDateFormat("dd MMM yyyy", Locale("es", "ES"))
-                    .format(Date(timestamp))
+                (if (showingArchiveHistory) "Capturas Wayback desde " else "Historial desde ") +
+                    SimpleDateFormat("dd MMM yyyy", Locale("es", "ES")).format(Date(timestamp))
             } ?: "Sin datos todavía"
         }
     }
@@ -133,7 +153,7 @@ fun PriceHistoryChart(
         ) {
             Column {
                 Text(
-                    text = "Evolución Real del Precio",
+                    text = if (showingArchiveHistory) "Historial antiguo (Wayback)" else "Evolución Real del Precio",
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurface
@@ -159,11 +179,12 @@ fun PriceHistoryChart(
                     val observedMinimum = historySummary.minimumObservedPoint
                     Text(
                         text = observedMinimum?.let {
-                            "Mín. del rango: ${String.format("%.2f", it.price)} €"
+                            (if (showingArchiveHistory) "Mín. del archivo: " else "Mín. del rango: ") +
+                                String.format("%.2f", it.price) + " €"
                         } ?: "${historySummary.observationCount} observación${if (historySummary.observationCount == 1) "" else "es"}",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (observedMinimum != null) Color(0xFF059669)
+                        color = if (observedMinimum != null) chartLineColor
                             else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -182,6 +203,43 @@ fun PriceHistoryChart(
                     )
                 }
             }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Choose one source at a time so archived snapshots cannot change live-price claims.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            FilterChip(
+                selected = !showingArchiveHistory,
+                onClick = {
+                    showingArchiveHistory = false
+                    selectedPointIndex = -1
+                },
+                label = { Text("Precios reales", fontSize = 11.sp) },
+                modifier = Modifier.height(30.dp)
+            )
+            FilterChip(
+                selected = showingArchiveHistory,
+                enabled = validArchiveHistory.isNotEmpty(),
+                onClick = {
+                    showingArchiveHistory = true
+                    selectedPointIndex = -1
+                },
+                label = { Text("Wayback (" + validArchiveHistory.size + ")", fontSize = 11.sp) },
+                modifier = Modifier.height(30.dp)
+            )
+        }
+        if (showingArchiveHistory) {
+            Text(
+                text = "Precios anunciados en páginas archivadas. No confirman stock, envío ni precio final y no se mezclan con el historial real.",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -298,8 +356,8 @@ fun PriceHistoryChart(
                     path = fillPath,
                     brush = Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xFF10B981).copy(alpha = 0.35f),
-                            Color(0xFF10B981).copy(alpha = 0.02f)
+                            chartLineColor.copy(alpha = 0.35f),
+                            chartLineColor.copy(alpha = 0.02f)
                         ),
                         startY = paddingTop,
                         endY = height - paddingBottom
@@ -317,7 +375,7 @@ fun PriceHistoryChart(
 
                 drawPath(
                     path = strokePath,
-                    color = Color(0xFF059669),
+                    color = chartLineColor,
                     style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
                 )
 
@@ -365,7 +423,12 @@ fun PriceHistoryChart(
             }
             if (filteredPoints.isEmpty()) {
                 Text(
-                    text = if (priceHistory.isEmpty()) "Sin datos todavía" else "Sin datos en este rango",
+                    text = when {
+                        showingArchiveHistory && validArchiveHistory.isEmpty() -> "No hay capturas Wayback verificadas"
+                        showingArchiveHistory -> "Sin capturas archivadas en este rango"
+                        validLiveHistory.isEmpty() -> "Consulta precios para empezar el historial"
+                        else -> "Sin datos en este rango"
+                    },
                     modifier = Modifier.align(Alignment.Center),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.SemiBold,
@@ -399,10 +462,10 @@ fun PriceHistoryChart(
                             if (historySummary.minimumObservedPoint?.let { selectedPoint.price <= it.price + 0.005 } == true) {
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "★ MÍNIMO DEL RANGO",
+                                    text = if (showingArchiveHistory) "★ MÍNIMO DEL ARCHIVO" else "★ MÍNIMO DEL RANGO",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.ExtraBold,
-                                    color = Color(0xFF059669)
+                                    color = chartLineColor
                                 )
                             }
                         }
@@ -429,6 +492,25 @@ fun PriceHistoryChart(
                         }
                     }
                 }
+            }
+            if (showingArchiveHistory) {
+                selectedPoint.sourceUrl
+                    ?.takeIf { it.startsWith("https://web.archive.org/web/") }
+                    ?.let { snapshotUrl ->
+                        Text(
+                            text = "Abrir captura en Wayback",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(snapshotUrl)))
+                                    }
+                                }
+                                .padding(top = 6.dp),
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
             }
         } else {
             Row(

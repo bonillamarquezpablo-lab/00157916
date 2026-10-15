@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -70,13 +71,8 @@ fun ProductDetailSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     val scrollState = rememberScrollState()
-    val archivedHistoryPoints = product.priceHistory.filter {
-        it.eventLabel.equals("Internet Archive", ignoreCase = true)
-    }
-    val oldestArchivedDate = archivedHistoryPoints.minByOrNull { it.timestamp }?.let {
-        SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(it.timestamp))
-    }
-    val latestPricePoint = product.priceHistory.maxByOrNull { it.timestamp }
+    val archivedHistoryPoints = product.priceHistory.filter { it.isArchiveEvidence }
+    val latestPricePoint = product.priceHistory.filterNot { it.isArchiveEvidence }.maxByOrNull { it.timestamp }
     val currentSourceLabel = latestPricePoint
         ?.eventLabel
         ?.takeIf { it.isNotBlank() }
@@ -385,24 +381,48 @@ fun ProductDetailSheet(
                     )
                     Text(
                         if (archivedHistoryPoints.isNotEmpty()) {
-                            "Historial gratuito recuperado de Internet Archive: " +
-                                archivedHistoryPoints.size + " puntos de capturas verificables" +
-                                (oldestArchivedDate?.let { " desde $it" } ?: "") +
-                                ". Puede haber huecos; estos precios anunciados no garantizan stock, envío ni precio final."
+                            "Se muestran aparte y no cuentan para Mínimo observado, las insignias ni Historial desde. Puede haber huecos; estos precios anunciados no garantizan stock, envío ni precio final."
                         } else {
                             "Todavía no hay capturas antiguas gratuitas verificadas para esta ficha. Mínimo las buscará cuando haya un enlace directo de tienda con páginas archivadas disponibles."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    archivedHistoryPoints.sortedBy { it.timestamp }.forEach { point ->
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "Recuperado de archivo web (aproximado)",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "${point.dateLabel} · ${String.format(Locale("es", "ES"), "%.2f", point.price)} € · ${point.storeName}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            point.sourceUrl?.takeIf { it.startsWith("https://web.archive.org/") }?.let { snapshotUrl ->
+                                Text(
+                                    text = "Abrir captura web",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    textDecoration = TextDecoration.Underline,
+                                    modifier = Modifier.clickable {
+                                        runCatching {
+                                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(snapshotUrl)))
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
-            // The chart combines verified live observations with explicitly labelled archive captures.
-            // Missing dates are left missing; no historical prices are extrapolated or interpolated.
+            // Archive captures are intentionally excluded from the live-price chart and its date/minimum summaries.
             PriceHistoryChart(
-                priceHistory = if (product.isPriceVerified) product.priceHistory else emptyList(),
-                avg90dPrice = product.avg90dPrice
+                priceHistory = if (product.isPriceVerified) product.priceHistory.filterNot { it.isArchiveEvidence } else emptyList(),
+                avg90dPrice = product.avg90dPrice,
+                archiveHistory = if (product.isPriceVerified) archivedHistoryPoints else emptyList()
             )
 
             // Only show offers that came back from the latest provider query.

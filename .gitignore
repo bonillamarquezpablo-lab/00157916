@@ -30,3 +30,6 @@ key.properties
 secrets.properties
 credentials.json
 google-services.json
+# Generated archives and installable packages can accidentally bundle local data.
+*.zip
+*.apk

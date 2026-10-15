@@ -421,7 +421,8 @@ fun ProductDetailSheet(
             // Archive captures are intentionally excluded from the live-price chart and its date/minimum summaries.
             PriceHistoryChart(
                 priceHistory = if (product.isPriceVerified) product.priceHistory.filterNot { it.isArchiveEvidence } else emptyList(),
-                avg90dPrice = product.avg90dPrice
+                avg90dPrice = product.avg90dPrice,
+                archiveHistory = if (product.isPriceVerified) archivedHistoryPoints else emptyList()
             )
 
             // Only show offers that came back from the latest provider query.

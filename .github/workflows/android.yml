@@ -32,6 +32,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Descargar el proyecto
@@ -57,6 +58,7 @@ jobs:
         run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
 
       - name: Ejecutar pruebas unitarias
+        timeout-minutes: 15
         run: gradle :app:testDebugUnitTest --stacktrace
 
       - name: Compilar pruebas instrumentadas Android
@@ -80,6 +82,7 @@ jobs:
       # exceeds this runner's available disk space for userdata.img.
 
       - name: Compilar APK
+        timeout-minutes: 20
         env:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
         run: |

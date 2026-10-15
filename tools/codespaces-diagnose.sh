@@ -1,42 +1,35 @@
 #!/usr/bin/env bash
 set +e
+echo "=== DIAGNÓSTICO MÍNIMO (NO COMPILA) ==="
 
-echo "=== MÍNIMO: DIAGNÓSTICO SIN VOLVER A COMPILAR ==="
 echo
+echo "[MEMORIA]"
+for f in /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.events /sys/fs/cgroup/cpu.max; do
+  if [[ -r "$f" ]]; then printf '%s: ' "$f"; tr '\n' ' ' < "$f"; echo; fi
+done
+
+echo
+echo "[DISCO]"
+df -h /workspaces/00157916 2>/dev/null | tail -1
+
+echo
+echo "[ERRORES DEL ÚLTIMO BUILD]"
 if [[ -f /tmp/minimo-codespaces-build.log ]]; then
-  echo "--- Errores relevantes del último intento ---"
-  grep -niE 'OutOfMemory|out of memory|oom|SIGKILL|Killed|low memory|daemon disappeared|What went wrong|No space left|Exception|BUILD FAILED|FAILURE:' /tmp/minimo-codespaces-build.log | tail -35
-  echo
-  echo "--- Últimas líneas del log del build ---"
-  tail -35 /tmp/minimo-codespaces-build.log
+  grep -hiE 'OutOfMemory|out of memory|oom_kill|SIGKILL|Killed|No space left|What went wrong|BUILD FAILED|FAILURE:|SDK location|requires.*Java|Unsupported class|Could not resolve|Compilation error|e: file:|failed' /tmp/minimo-codespaces-build.log | tail -12 | cut -c1-220
 else
   echo "No existe /tmp/minimo-codespaces-build.log"
 fi
 
 echo
-echo "--- Límites y estado de memoria del contenedor ---"
-for f in /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.events /sys/fs/cgroup/cpu.max; do
-  if [[ -r "$f" ]]; then
-    echo "[$f]"
-    cat "$f"
-  fi
-done
-
-echo
-echo "--- Espacio disponible ---"
-df -h /workspaces/00157916 "$HOME" 2>/dev/null
-
-echo
-echo "--- Registro más reciente del daemon de Gradle ---"
+echo "[ULTIMO LOG DE GRADLE]"
 f="$(ls -t "$HOME"/.gradle/daemon/9.3.1/daemon-*.out.log 2>/dev/null | head -1)"
 if [[ -n "$f" ]]; then
-  echo "Archivo: $f"
-  grep -niE 'OutOfMemory|out of memory|fatal|exception|disappear|stop|shutdown|SIGKILL|Killed|memory|daemon.*started|daemon.*executing' "$f" | tail -35
-  echo
-  tail -25 "$f"
+  echo "Archivo: $(basename "$f")"
+  grep -hiE 'OutOfMemory|out of memory|fatal|exception|disappear|SIGKILL|Killed|unable to create native thread|Could not reserve enough space' "$f" | tail -8 | cut -c1-220
+  echo "Última línea:"
+  tail -1 "$f" | cut -c1-220
 else
-  echo "No se encontró un log del daemon de Gradle 9.3.1"
+  echo "No se encontró log de Gradle 9.3.1"
 fi
-
 echo
-echo "=== Fin del diagnóstico. No se ha vuelto a ejecutar Gradle. ==="
+echo "=== FIN. No se ha ejecutado Gradle. ==="

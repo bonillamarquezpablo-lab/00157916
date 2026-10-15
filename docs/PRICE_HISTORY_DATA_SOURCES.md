@@ -52,7 +52,7 @@ La opción de mayor calidad a largo plazo son feeds, APIs de afiliación o acuer
 
 ## Arquitectura requerida antes de importar historia antigua
 
-La tabla `price_observations` conserva fecha de observación, fecha de adquisición, tipo de evidencia, comercio, moneda, URL de captura, URL original y estado de validación. La migración a la versión 8 incorpora `collectedAt`, `evidenceType` y `sourcePageUrl`. Las futuras fuentes estructuradas (por ejemplo, una API histórica externa) aún tendrán que incorporar su identificador externo de producto y una validación de coincidencia estricta antes de importar datos.
+La tabla `price_observations` conserva fecha de observación, fecha de adquisición, tipo de evidencia, comercio, moneda, URL de captura, URL original y estado de validación. La migración a la versión 8 incorporó `collectedAt`, `evidenceType` y `sourcePageUrl`; la migración 8→9 clasifica las filas archivadas antiguas sin eliminar observaciones. Las nuevas importaciones deben definir explícitamente la procedencia y mantener una validación estricta de producto antes de importar datos.
 
 Las observaciones en vivo anteriores al límite temporal del catálogo siguen excluidas. Las capturas archivadas y los puntos históricos de Google solo pueden entrar por sus rutas específicas, con `evidenceType` explícito, precio EUR verificable, fecha original y comprobación estricta de producto; no se debe relajar el filtro global ni aceptar filas heredadas/sintéticas sin procedencia fiable.
 

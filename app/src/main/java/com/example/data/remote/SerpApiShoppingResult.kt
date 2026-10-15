@@ -4,6 +4,75 @@ import java.net.URI
 import java.text.Normalizer
 import java.util.Locale
 
+private val BUNDLE_TERMS = Regex(
+    """\b(pack|paquete|combo|bundle|kit|set|conjunto|combinacion|combinado)\b"""
+)
+private val ONLINE_PRODUCT_TYPES = listOf(
+    "keyboard" to Regex("""\b(teclado|teclados|keyboard|keyboards)\b"""),
+    "mouse" to Regex("""\b(raton|ratones|mouse|mice)\b"""),
+    "headphones" to Regex("""\b(auricular|auriculares|headphones?|headsets?|cascos)\b"""),
+    "monitor" to Regex("""\b(monitores?|pantallas?|monitors?|display)\b"""),
+    "laptop" to Regex("""\b(portatil|portatiles|laptop|notebook|chromebook)\b"""),
+    "phone" to Regex("""\b(smartphone|movil|moviles|telefono|telefonos|phone)\b"""),
+    "controller" to Regex("""\b(mandos?|controllers?|gamepad)\b"""),
+    "webcam" to Regex("""\b(webcams?|camara web)\b"""),
+    "camera" to Regex("""\b(camaras?|cameras?)\b"""),
+    "microphone" to Regex("""\b(microfonos?|microphones?)\b"""),
+    "speaker" to Regex("""\b(altavoces?|speakers?|soundbar|barra de sonido)\b"""),
+    "console" to Regex("""\b(consolas?|playstation|xbox|nintendo switch)\b""")
+)
+private val ONLINE_MODEL_CODE = Regex("""\b[a-z]{1,8}\d[a-z0-9]{1,12}\b""")
+private val NON_MODEL_CODES = setOf(
+    "usb20", "usb30", "usb32", "wifi6", "wifi7", "typec", "nvme",
+    "4gb", "8gb", "16gb", "32gb", "64gb", "128gb", "256gb", "512gb",
+    "1tb", "2tb"
+)
+
+private fun normalizeOnlineSearchText(value: String): String =
+    Normalizer.normalize(value.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+        .replace(Regex("\\p{Mn}+"), "")
+        .replace(Regex("""[^a-z0-9]+"""), " ")
+        .trim()
+        .replace(Regex("""\\s+"""), " ")
+
+private fun explicitOnlineModelCodes(value: String): Set<String> =
+    ONLINE_MODEL_CODE.findAll(normalizeOnlineSearchText(value))
+        .map { it.value }
+        .filterNot { it in NON_MODEL_CODES }
+        .toSet()
+
+private fun onlineProductTypes(value: String): Set<String> {
+    val normalized = normalizeOnlineSearchText(value)
+    return ONLINE_PRODUCT_TYPES
+        .filter { (_, pattern) -> pattern.containsMatchIn(normalized) }
+        .map { it.first }
+        .toSet()
+}
+
+/**
+ * Rejects bundles that mention the requested model alongside a different product.
+ * An explicit pack/combo query remains eligible; a model-only query does not.
+ */
+fun isIrrelevantMultiProductBundle(searchQuery: String, resultTitle: String): Boolean {
+    if (searchQuery.isBlank() || resultTitle.isBlank()) return false
+    val query = normalizeOnlineSearchText(searchQuery)
+    val title = normalizeOnlineSearchText(resultTitle)
+    if (BUNDLE_TERMS.containsMatchIn(query)) return false
+
+    val queryModels = explicitOnlineModelCodes(query)
+    val titleModels = explicitOnlineModelCodes(title)
+    val queryTypes = onlineProductTypes(query)
+    val titleTypes = onlineProductTypes(title)
+    val hasBundleTerm = BUNDLE_TERMS.containsMatchIn(title)
+
+    if (hasBundleTerm && (queryModels.isNotEmpty() || queryTypes.isNotEmpty())) return true
+
+    val extraModelCode = queryModels.isNotEmpty() && titleModels.any { it !in queryModels }
+    val extraProductType = titleTypes.size >= 2 &&
+        (queryTypes.isEmpty() || titleTypes.any { it !in queryTypes })
+    return extraModelCode && extraProductType
+}
+
 /** Rejected/hidden offers are transient diagnostics and are never persisted to Room. */
 data class RejectedOnlineOffer(
     val title: String,
@@ -200,6 +269,20 @@ data class OnlineProductGroup(
     val cheapestOffer: SerpApiShoppingResult
         get() = offers.filterNot { it.isSuspiciousPrice }.minByOrNull { it.price }
             ?: offers.minBy { it.price }
+
+    /** Prefer a trusted direct retailer destination for the default purchase action. */
+    val bestPurchaseOffer: SerpApiShoppingResult
+        get() = offers.filterNot { it.isSuspiciousPrice || it.isGoogleShoppingProductLink }
+            .minByOrNull { it.price }
+            ?: offers.filterNot { it.isSuspiciousPrice }.minByOrNull { it.price }
+            ?: cheapestOffer
+
+    /** Keep the representative image aligned with the card title; fall back only within this group. */
+    val representativeImageUrl: String
+        get() = offers.firstOrNull {
+            it.title.equals(title, ignoreCase = true) && it.thumbnailUrl.isNotBlank()
+        }?.thumbnailUrl
+            ?: offers.firstOrNull { it.thumbnailUrl.isNotBlank() }?.thumbnailUrl.orEmpty()
 
     val wheelSetCount: Int?
         get() = cheapestOffer.wheelSetCount

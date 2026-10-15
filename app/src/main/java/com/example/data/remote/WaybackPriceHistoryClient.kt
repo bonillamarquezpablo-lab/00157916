@@ -207,10 +207,10 @@ class WaybackPriceHistoryClient(
             }
         }
 
-        Regex("""(?is)\\bhref\\s*=\\s*["'](.*?)["']""")
+        Regex("""(?is)\bhref\s*=\s*["'](.*?)["']""")
             .findAll(decodedHtml)
             .forEach { collectUrl(it.groupValues[1]) }
-        Regex("""https?://[^\\s"'<>\\]+""", RegexOption.IGNORE_CASE)
+        Regex("""https?://[^\s"'<>\\]+""", RegexOption.IGNORE_CASE)
             .findAll(decodedHtml)
             .forEach { collectUrl(it.value) }
 

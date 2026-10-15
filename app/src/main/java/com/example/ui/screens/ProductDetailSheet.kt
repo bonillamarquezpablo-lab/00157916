@@ -48,6 +48,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Product
+import com.example.data.remote.extractDirectRetailerUrl
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -571,9 +572,12 @@ fun ProductDetailSheet(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    val exactRetailerUrl = product.storeUrl
+                        .takeIf { product.isPriceVerified }
+                        ?.let(::extractDirectRetailerUrl)
+                    val destination = exactRetailerUrl ?: product.currentStore.searchUrlFor(product.title)
                     OutlinedButton(
                         onClick = {
-                            val destination = if (product.isPriceVerified) product.storeUrl else product.currentStore.searchUrlFor(product.title)
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(destination))
                             context.startActivity(intent)
                         },
@@ -584,7 +588,11 @@ fun ProductDetailSheet(
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text(
-                            if (product.isPriceVerified) "Ver en ${product.currentStore.name}" else "Buscar en web oficial",
+                            when {
+                                exactRetailerUrl != null -> "Ver en ${product.currentStore.name}"
+                                product.currentStore.supportsProductSearch -> "Buscar en ${product.currentStore.name}"
+                                else -> "Abrir web de ${product.currentStore.name}"
+                            },
                             fontSize = 12.sp
                         )
                         Spacer(modifier = Modifier.width(4.dp))

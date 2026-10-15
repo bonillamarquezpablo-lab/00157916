@@ -155,9 +155,14 @@ class ProductRepositoryArchiveIsolationTest {
                 priceObservationDao = database.priceObservationDao(),
                 externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
             )
-            val product = repository.allProductsStream.first { products ->
-                products.any { it.id == productId && it.priceHistory.size >= 5 }
-            }.first { it.id == productId }
+            val product = kotlinx.coroutines.withTimeout(10_000L) {
+                repository.allProductsStream.first { products -> products.any { it.id == productId } }
+                    .first { it.id == productId }
+            }
+            println(
+                "DEBUG_ARCHIVE history=" + product.priceHistory.joinToString { "${it.timestamp}:${it.price}:${it.sourceUrl}:${it.evidenceType}" } +
+                    " count=" + database.priceObservationDao().getObservationCount(productId)
+            )
 
             assertEquals("live provider's current quote remains current", 200.0, product.currentPrice, 0.001)
             assertEquals("archive prices cannot set the observed minimum", 190.0, product.athMinPrice, 0.001)

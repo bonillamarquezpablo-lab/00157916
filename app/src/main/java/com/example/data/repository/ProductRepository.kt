@@ -20,6 +20,7 @@ import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.linkTypeForUrl
+import com.example.data.remote.isGoogleShoppingUrl
 import com.example.data.remote.isWheelFitmentQuery
 import com.example.data.remote.containsWheelCategoryTerm
 import com.example.data.remote.wheelSetCountForTitle
@@ -437,6 +438,48 @@ class ProductRepository(
             }
         }
         return inserted
+    }
+
+    /**
+     * Replace an intermediate Google Shopping URL with a seller URL verified against the store
+     * label from the provider. This changes only provenance/navigation fields; prices and times
+     * remain exactly as originally observed.
+     */
+    suspend fun updateResolvedStoreLink(
+        expectedTitle: String,
+        storeName: String,
+        originalUrl: String,
+        resolvedUrl: String
+    ): Int {
+        if (expectedTitle.isBlank() || storeName.isBlank() ||
+            !isGoogleShoppingUrl(originalUrl) || isGoogleShoppingUrl(resolvedUrl)
+        ) return 0
+        val resolvedUri = parseHttpUri(resolvedUrl) ?: return 0
+        if (!resolvedUri.scheme.equals("https", ignoreCase = true)) return 0
+
+        val identity = onlineProductIdentityKey(expectedTitle)
+        val product = productDao.getAllProductsSnapshot().firstOrNull {
+            onlineProductIdentityKey(it.title) == identity
+        } ?: return 0
+        val matchingRows = priceObservationDao.getObservationsForResolvedStoreLink(
+            productId = product.id,
+            storeName = storeName,
+            originalUrl = originalUrl
+        )
+        matchingRows.forEach { observation ->
+            priceObservationDao.update(
+                observation.copy(
+                    sourceUrl = resolvedUrl,
+                    linkType = "directo"
+                )
+            )
+        }
+
+        val productEntity = productDao.getProductById(product.id)
+        if (productEntity != null && productEntity.storeUrl == originalUrl) {
+            productDao.insert(productEntity.copy(storeUrl = resolvedUrl))
+        }
+        return matchingRows.size
     }
 
     /**

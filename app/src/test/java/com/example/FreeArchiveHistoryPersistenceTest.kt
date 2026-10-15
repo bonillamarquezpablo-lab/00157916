@@ -191,13 +191,13 @@ class FreeArchiveHistoryPersistenceTest {
                 snapshotUrl = snapshotUrl
             )
 
-            // The archived row may be retained for audit, but a contradictory merchant label
-            // must prevent it from becoming visible, trusted historical evidence.
+            // Reject contradictory seller metadata before persistence. Marking such a row as
+            // verified could pollute other history/aggregate queries even if the chart hides it.
             assertEquals(
-                1,
+                0,
                 repository.recordArchivedPriceHistory(title, originalUrl, "Amazon.es", listOf(quote))
             )
-            assertEquals(1, database.priceObservationDao().getObservationCount("anker-prime-27k-seller-mismatch"))
+            assertEquals(0, database.priceObservationDao().getObservationCount("anker-prime-27k-seller-mismatch"))
 
             val product = withTimeout(10_000L) {
                 repository.allProductsStream.first { rows ->

@@ -426,6 +426,25 @@ fun ProductDetailSheet(
                 }
             }
 
+            OutlinedButton(
+                onClick = onFetchFreeHistory,
+                enabled = !isFetchingFreeHistory,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .testTag("free_history_button"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(if (isFetchingFreeHistory) "Buscando historial gratuito…" else "Buscar historial gratuito · 0 búsquedas")
+            }
+            freeHistoryStatus?.let { status ->
+                Text(
+                    text = status,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
             // The chart combines verified live observations with explicitly labelled archive captures.
             // Missing dates are left missing; no historical prices are extrapolated or interpolated.
             PriceHistoryChart(
@@ -467,25 +486,6 @@ fun ProductDetailSheet(
             }
 
             }
-            }
-
-            OutlinedButton(
-                onClick = onFetchFreeHistory,
-                enabled = !isFetchingFreeHistory,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp)
-                    .testTag("free_history_button"),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text(if (isFetchingFreeHistory) "Buscando historial gratuito…" else "Buscar historial gratuito · 0 búsquedas")
-            }
-            freeHistoryStatus?.let { status ->
-                Text(
-                    text = status,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
 
             // Manual, quota-confirmed store comparison.

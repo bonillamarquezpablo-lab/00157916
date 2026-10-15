@@ -455,7 +455,9 @@ private fun ShoppingResultCard(
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        if (wheelSetCount != null) {
+                        if (best.isGoogleShoppingProductLink) {
+                            "${group.storeCount} tiendas · precio más bajo listado en Google Shopping"
+                        } else if (wheelSetCount != null) {
                             "${group.storeCount} tiendas · precio por llanta más bajo en ${best.storeName}"
                         } else {
                             "${group.storeCount} tiendas · precio más bajo en ${best.storeName}"

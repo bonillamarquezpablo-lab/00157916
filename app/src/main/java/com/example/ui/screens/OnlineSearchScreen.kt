@@ -386,6 +386,8 @@ private fun ShoppingResultCard(
     onOpenBestOffer: () -> Unit
 ) {
     val best = group.cheapestOffer
+    // Shared by the card details and its action button; keep it in the composable scope.
+    val purchaseOffer = group.bestPurchaseOffer
     val fitmentUnverified = group.offers.all { it.isFitmentUnverified }
     val categoryUnverified = group.offers.all { it.isCategoryUnverified }
     val wheelSetCount = group.wheelSetCount
@@ -473,7 +475,6 @@ private fun ShoppingResultCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    val purchaseOffer = group.bestPurchaseOffer
                     if (!purchaseOffer.isGoogleShoppingProductLink && purchaseOffer.sourceUrl != best.sourceUrl) {
                         Text(
                             "El precio más bajo está en Google Shopping; enlace directo: ${purchaseOffer.storeName} · " +

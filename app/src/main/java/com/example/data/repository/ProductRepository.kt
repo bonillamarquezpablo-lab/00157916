@@ -112,6 +112,7 @@ class ProductRepository(
         observations.asSequence()
             .filter { observation ->
                 observation.isVerified &&
+                    !observation.evidenceType.equals("archive", ignoreCase = true) &&
                     observation.currency.equals("EUR", ignoreCase = true) &&
                     observation.price.isFinite() && observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
                     observation.observedAt in 1L..System.currentTimeMillis() &&
@@ -650,11 +651,11 @@ class ProductRepository(
         val products = productDao.getAllProductsSnapshot()
         val identity = onlineProductIdentityKey(expectedTitle)
         val normalizedOriginalUrl = originalUrl.trimEnd('/')
-        val product = products.firstOrNull {
-            onlineProductIdentityKey(it.title) == identity &&
-                (it.isPriceVerified ||
-                    it.storeUrl.trimEnd('/').equals(normalizedOriginalUrl, ignoreCase = true))
-        } ?: return 0
+        val matchingProducts = products.filter { onlineProductIdentityKey(it.title) == identity }
+        // Prefer the exact direct URL so duplicate title rows cannot receive another seller's history.
+        val product = matchingProducts.firstOrNull {
+            it.storeUrl.trimEnd('/').equals(normalizedOriginalUrl, ignoreCase = true)
+        } ?: matchingProducts.firstOrNull { it.isPriceVerified } ?: return 0
         val now = System.currentTimeMillis()
         val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)
         val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
@@ -1375,7 +1376,9 @@ class ProductRepository(
         }
         val dateFormatter = SimpleDateFormat("dd MMM yyyy", Locale("es", "ES"))
         // Plot just one genuine point per local date: the cheapest valid offer observed that day.
-        val historyPoints = if (priceIsVerified) snapshotHistory.map { observation ->
+        // The chart can show independently verified archive history before a live quote exists.
+        // Current-price trust, offers, averages and deal badges remain gated by priceIsVerified.
+        val historyPoints = snapshotHistory.map { observation ->
             PricePoint(
                 timestamp = observation.observedAt,
                 dateLabel = dateFormatter.format(Date(observation.observedAt)),
@@ -1384,8 +1387,6 @@ class ProductRepository(
                 eventLabel = observation.sourceType.ifBlank { observation.sourceName },
                 linkType = observation.linkType
             )
-        } else {
-            emptyList()
         }
         return Product(
             id = id,

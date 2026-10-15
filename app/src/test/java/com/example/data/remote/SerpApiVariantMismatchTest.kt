@@ -35,6 +35,13 @@ class SerpApiVariantMismatchTest {
                       "extracted_price": 49.99,
                       "link": "https://www.nike.com/es/t/run-defy-41",
                       "source": "Nike"
+                    },
+                    {
+                      "title": "Nike P 6000 Hombre",
+                      "price": "119,99 €",
+                      "extracted_price": 119.99,
+                      "link": "https://www.nike.com/es/t/p-6000",
+                      "source": "Nike"
                     }
                   ]
                 }
@@ -44,8 +51,13 @@ class SerpApiVariantMismatchTest {
             observedAt = 1_800_000_000_000L
         )
 
-        assertEquals(1, report.results.size)
-        assertTrue(report.results.single().title.contains("talla 41", ignoreCase = true))
+        assertEquals(2, report.results.size)
+        assertTrue(report.results.any { it.title.contains("talla 41", ignoreCase = true) })
+        assertTrue(
+            "A product page with a size selector should not be rejected just because its title omits the size",
+            report.results.any { it.title == "Nike P 6000 Hombre" }
+        )
+        assertFalse(report.results.any { it.title.contains("talla 44", ignoreCase = true) })
         assertEquals(1, report.rejectedAsIrrelevant)
     }
 

@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
@@ -79,6 +80,40 @@ interface PriceObservationDao {
         dayStart: Long,
         dayEnd: Long
     ): PriceObservationEntity?
+
+    /**
+     * Atomically save at most one live observation per product/store/local day.
+     * A newer observation replaces the existing row; an unverified observation cannot
+     * replace a verified one. Wayback archive rows are excluded by the lookup query above.
+     */
+    @Transaction
+    suspend fun saveDailyObservationIfNewer(
+        observation: PriceObservationEntity,
+        dayStart: Long,
+        dayEnd: Long
+    ): Boolean {
+        val existing = getObservationForStoreProductDay(
+            observation.productId,
+            observation.storeId,
+            dayStart,
+            dayEnd
+        )
+        if (existing == null) {
+            insert(observation)
+            return true
+        }
+        if (!observation.isVerified && existing.isVerified) return false
+        if (observation.isVerified && !existing.isVerified) {
+            update(observation.copy(id = existing.id))
+            return true
+        }
+        val isNewer = observation.observedAt > existing.observedAt
+        val sameTimeAndBetterPrice =
+            observation.observedAt == existing.observedAt && observation.price < existing.price
+        if (!isNewer && !sameTimeAndBetterPrice) return false
+        update(observation.copy(id = existing.id))
+        return true
+    }
 
     @Query("SELECT COUNT(*) FROM price_observations WHERE productId = :productId")
     suspend fun getObservationCount(productId: String): Int

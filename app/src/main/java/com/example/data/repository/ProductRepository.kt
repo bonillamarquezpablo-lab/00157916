@@ -545,6 +545,9 @@ class ProductRepository(
                 onlineProductIdentityKey(quote.productTitle) != identity
             ) continue
 
+            // Repeated backfills can return the same public capture. Keep the import idempotent.
+            if (priceObservationDao.getObservationForSnapshot(product.id, quote.snapshotUrl) != null) continue
+
             val observation = PriceObservationEntity(
                 productId = product.id,
                 storeId = storeId,

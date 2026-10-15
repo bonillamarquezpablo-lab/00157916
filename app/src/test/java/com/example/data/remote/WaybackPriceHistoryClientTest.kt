@@ -281,4 +281,15 @@ class WaybackPriceHistoryClientTest {
         assertEquals("EUR", quote.currency)
     }
 
+    @Test
+    fun resolvesRecognisedMerchantNamesWhenGoogleDoesNotExposeTheDestinationUrl() {
+        val client = newClient()
+        val googleUrl = "https://www.google.com/search?q=Apple+iPhone+16"
+
+        assertEquals("lamanzanita.es", client.resolveMerchantDomain("La Manzanita", googleUrl))
+        assertEquals("nike.com", client.resolveMerchantDomain("Nike Oficial", googleUrl))
+        assertEquals("sprinter.es", client.resolveMerchantDomain("Sprinter Deportes", googleUrl))
+    }
+
+
 }

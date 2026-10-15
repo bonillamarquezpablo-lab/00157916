@@ -356,10 +356,8 @@ class WaybackPriceHistoryClient(
         // exist. If a title only gives a model code, use that exact code; generic brand/category
         // words must not make a model URL impossible to discover.
         val requiredLookaheads = when {
-            modelTokens.isNotEmpty() && textTokens.isNotEmpty() -> listOf(
-                "(?=.*${urlTokenPattern(modelTokens.first())})",
-                "(?=.*(?:${textTokens.take(2).joinToString("|") { urlTokenPattern(it) }}))"
-            )
+            // Model-coded products are already distinctive. Don't require a secondary word like
+            // "wireless" that retailers may omit from the URL slug.
             modelTokens.isNotEmpty() -> listOf("(?=.*${urlTokenPattern(modelTokens.first())})")
             textTokens.size >= 2 -> textTokens.take(2).map { "(?=.*${urlTokenPattern(it)})" }
             else -> return null

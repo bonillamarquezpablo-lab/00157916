@@ -1080,9 +1080,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 } else {
                     onlineSearchResultMessage(results, provider)
                 }
-                // The account endpoint is free; refresh the displayed balance after a live request.
-                val quotaAfter = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
-                val quotaNote = quotaAfter?.let { "Cuota SerpApi: ${it.quotaSummary()}" }.orEmpty()
+                // The balance was checked before the query. Skip a second post-search round trip
+                // so results settle sooner; state clearly that this displayed balance is pre-query.
+                val quotaNote = "Saldo comprobado antes de buscar: ${accountInfo.quotaSummary()} Esta consulta puede haber consumido una búsqueda."
                 val filterNote = onlineFilterNotice(discarded)
                 val historyNote = if (results.isNotEmpty()) {
                     onlineHistoryNotice(savedObservations, results.size)
@@ -1245,9 +1245,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     private fun onlineHistoryNotice(saved: Int, resultCount: Int): String =
         if (saved > 0) {
-            "Historial real: $saved nuevas observaciones guardadas en Room; los productos se han incorporado a Mercado."
+            "Precios de esta búsqueda: $saved observaciones nuevas guardadas en Mercado. Son precios observados ahora, no un historial anterior a la búsqueda. Para consultar precios anteriores, abre la ficha y usa «Comparar tiendas»; solo se mostrarán si la fuente devuelve fechas verificables."
         } else {
-            "Los productos válidos siguen guardados en Mercado; no se añadieron puntos nuevos al historial porque ya estaban registrados hoy o no pasaron los filtros ($resultCount resultados revisados)."
+            "Precios de esta búsqueda: no se añadieron observaciones nuevas porque ya estaban registradas hoy o no pasaron los filtros ($resultCount resultados revisados). El historial anterior se muestra por separado cuando existen fechas verificables."
         }
 
     private fun onlineSearchResultMessage(

@@ -41,9 +41,10 @@
 
 - Documentación del índice CDX: https://github.com/internetarchive/wayback-cdx-server
 - Permite buscar capturas históricas de URL en intervalos de fechas, pero una captura no equivale a una base de precios estructurada.
-- **Implementación inicial en PR #31:** la app consulta gratuitamente hasta 1.600 días para enlaces directos HTTPS de tiendas, toma una muestra limitada de capturas y acepta solo precios con moneda EUR explícita, metadatos estructurados y título coincidente. La caché de intentos evita repetir búsquedas sobre la misma página durante 30 días.
-- La base de datos v8 distingue `observedAt` (fecha de la captura), `collectedAt` (fecha de importación), `evidenceType=archive`, la URL original y la URL de la captura. Los precios archivados no pueden reemplazar la oferta actual; los puntos quedan identificados en el historial.
-- **Límites:** no se garantiza ningún número mínimo de puntos ni cobertura de 1.500 días. La app solo puede obtener datos si la página tiene capturas y el precio aparece en metadata legible; la mayoría de los enlaces intermedios de Google Shopping no son aptos para este método. No se debe inventar un precio cuando la captura no lo expone con claridad.
+- **Implementación de búsqueda gratuita:** la app consulta hasta 1.600 días de capturas de URLs directas HTTPS. Si la búsqueda actual solo tiene un enlace intermediario de Google Shopping o la URL exacta no ofrece precios antiguos, puede hacer una segunda búsqueda CDX gratuita en el dominio de un comercio reconocido, filtrando URLs por términos distintivos del producto. Para limitar carga se consulta un máximo de 80 filas de índice, se descargan hasta 12 capturas por candidato y se priorizan hasta dos comercios por búsqueda. La interfaz de ficha incluye «Buscar histórico gratis · Internet Archive»; no lee la clave ni consume cuota de SerpApi.
+- Se aceptan únicamente precios EUR positivos que aparezcan en metadatos de producto verificables y cuyo título coincida con el producto buscado. Las páginas archivadas que no expongan un precio fiable se descartan.
+- La base de datos distingue `observedAt` (fecha de la captura), `collectedAt` (fecha de importación), `evidenceType=archive`, la URL original y la URL de la captura. Los precios archivados no pueden reemplazar la oferta actual; los puntos quedan identificados en el historial. La caché evita repetir intentos sobre la misma URL o comercio durante 30 días.
+- **Límites:** no se garantiza ningún número mínimo de puntos ni cobertura de 1.600 días. La consulta por dominio es una búsqueda aproximada, limitada y condicionada por la cobertura del archivo; aunque encuentre una página, puede que esta no contenga un precio EUR legible o que el título no permita verificar la variante exacta. No se inventan ni interpolan precios ausentes.
 
 ### 6. Feeds y acuerdos directos con tiendas
 
@@ -51,9 +52,9 @@ La opción de mayor calidad a largo plazo son feeds, APIs de afiliación o acuer
 
 ## Arquitectura requerida antes de importar historia antigua
 
-La tabla `price_observations` conserva fecha de observación, fecha de adquisición, tipo de evidencia, comercio, moneda, URL de captura, URL original y estado de validación. La migración a la versión 8 incorpora `collectedAt`, `evidenceType` y `sourcePageUrl`. Las futuras fuentes estructuradas (por ejemplo, una API histórica externa) aún tendrán que incorporar su identificador externo de producto y una validación de coincidencia estricta antes de importar datos.
+La tabla `price_observations` conserva fecha de observación, fecha de adquisición, tipo de evidencia, comercio, moneda, URL de captura, URL original y estado de validación. La migración a la versión 8 incorporó `collectedAt`, `evidenceType` y `sourcePageUrl`; la migración 8→9 clasifica las filas archivadas antiguas sin eliminar observaciones. Las nuevas importaciones deben definir explícitamente la procedencia y mantener una validación estricta de producto antes de importar datos.
 
-El filtro temporal actual impide que fechas anteriores al 13 de octubre de 2026 entren en el historial validado. No basta con quitar ese filtro global: hay que permitir fechas antiguas únicamente para importaciones identificadas y verificadas, y seguir excluyendo filas heredadas/sintéticas que no tengan procedencia fiable.
+Las observaciones en vivo anteriores al límite temporal del catálogo siguen excluidas. Las capturas archivadas y los puntos históricos de Google solo pueden entrar por sus rutas específicas, con `evidenceType` explícito, precio EUR verificable, fecha original y comprobación estricta de producto; no se debe relajar el filtro global ni aceptar filas heredadas/sintéticas sin procedencia fiable.
 
 ## Reglas de calidad del historial
 

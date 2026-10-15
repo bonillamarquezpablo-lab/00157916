@@ -64,6 +64,9 @@ fun ProductDetailSheet(
     onDismiss: () -> Unit,
     onOpenSetAlert: () -> Unit,
     onCompareStores: () -> Unit = {},
+    onSearchFreeHistory: () -> Unit = {},
+    freeHistoryStatus: String? = null,
+    isSearchingFreeHistory: Boolean = false,
     serpApiActionStatus: String? = null,
     isComparingStores: Boolean = false
 ) {
@@ -95,7 +98,7 @@ fun ProductDetailSheet(
             append(".")
         }
         if (isEmpty()) {
-            append("Todavía no hay un historial anterior verificado para esta ficha. Los precios de la búsqueda actual no demuestran cómo costaba antes. Pulsa «Comparar tiendas» para comprobar si Google ofrece fechas y precios históricos; esa consulta consume una búsqueda de SerpApi y puede que Google no publique datos para este producto.")
+            append("Todavía no hay un historial anterior verificado. Pulsa «Buscar histórico gratis» para revisar páginas públicas archivadas sin gastar cuota de SerpApi. Si el comercio no está archivado o no publicó un precio EUR verificable, no se puede reconstruir ese precio. «Comparar tiendas» es una consulta adicional de SerpApi y tampoco garantiza datos históricos.")
         } else {
             append(" Puede haber huecos; los precios históricos no garantizan stock, envío ni precio final.")
         }
@@ -464,6 +467,31 @@ fun ProductDetailSheet(
             }
 
             }
+            }
+
+            // Free archive lookup runs first; the SerpApi comparison remains a separate paid-quota option.
+            if (product.isPriceVerified) {
+                OutlinedButton(
+                    onClick = onSearchFreeHistory,
+                    enabled = !isSearchingFreeHistory && !isComparingStores,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .testTag("free_history_button"),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        if (isSearchingFreeHistory) "Buscando histórico gratuito…" 
+                        else "Buscar histórico gratis · Internet Archive"
+                    )
+                }
+                freeHistoryStatus?.let { status ->
+                    Text(
+                        text = status,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             // Manual, quota-confirmed store comparison.

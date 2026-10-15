@@ -134,4 +134,88 @@ class WaybackPriceHistoryClientTest {
         assertFalse(client.isEligibleDirectUrl("https://www.google.com/shopping/product/123456"))
         assertFalse(client.isEligibleDirectUrl("https://shop.example/"))
     }
+    @Test
+    fun parsesDotOnlyEuropeanThousandsSeparatorInArchivedMetadata() {
+        val client = newClient()
+        val html = """
+            <html><head>
+              <meta property="og:title" content="Samsung Galaxy S26 Ultra 512GB" />
+              <meta property="product:price:amount" content="1.299" />
+              <meta property="product:price:currency" content="EUR" />
+            </head></html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "Samsung Galaxy S26 Ultra 512GB",
+            originalUrl = "https://shop.example/product/galaxy-s26-ultra",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/product/galaxy-s26-ultra",
+            observedAt = 1_735_732_800_000L
+        )
+        assertNotNull(quote)
+        assertEquals(1299.0, quote!!.price, 0.001)
+    }
+
+    @Test
+    fun resolvesKnownMerchantLabelsAndBuildsBoundedFreeDomainQuery() {
+        val client = newClient()
+        assertEquals("notino.es", client.resolveMerchantDomain("Notino.es"))
+        assertEquals("douglas.es", client.resolveMerchantDomain("Douglas"))
+        assertEquals("amazon.es", client.resolveMerchantDomain("Amazon España"))
+        assertNull("Generic search-engine labels must not be treated as stores", client.resolveMerchantDomain("Google Shopping"))
+
+        val url = client.buildDomainCdxUrl(
+            domain = "notino.es",
+            expectedTitle = "Académie Scientifique de Beauté Calendario de Adviento 2024",
+            now = 1_800_000_000_000L,
+            lookbackDays = 1600
+        )
+        assertNotNull(url)
+        assertEquals("domain", url!!.queryParameter("matchType"))
+        assertEquals("80", url.queryParameter("limit"))
+        assertNull("Domain scans must preserve repeated captures over time", url.queryParameter("collapse"))
+        assertTrue(url.queryParameterValues("filter").orEmpty().any { raw ->
+            val filter = raw.orEmpty()
+            filter.startsWith("original:") && filter.contains("academie") && filter.contains("scientifique")
+        })
+        assertNull(
+            "A generic category is too ambiguous for a domain-wide archive search",
+            client.buildDomainCdxUrl("notino.es", "Calendario de Adviento", now = 1_800_000_000_000L)
+        )
+
+        val shortModelUrl = client.buildDomainCdxUrl(
+            domain = "example.es",
+            expectedTitle = "Volkswagen Polo 9N3 1.9 SDI",
+            now = 1_800_000_000_000L
+        )
+        assertNotNull("Short model codes should be included in the archive URL filter", shortModelUrl)
+        assertTrue(shortModelUrl!!.queryParameterValues("filter").orEmpty().any { raw ->
+            raw.orEmpty().startsWith("original:") && raw.orEmpty().contains("9n3")
+        })
+    }
+
+    @Test
+    fun parsesEuropeanThousandsAndDecimalSeparatorsInArchivedPriceMetadata() {
+        val client = newClient()
+        val html = """
+            <html><head>
+              <meta property="og:title" content="Samsung Galaxy S26 Ultra 512GB" />
+              <meta property="product:price:amount" content="1.299,00" />
+              <meta property="product:price:currency" content="EUR" />
+            </head></html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "Samsung Galaxy S26 Ultra 512GB",
+            originalUrl = "https://shop.example/product/galaxy-s26-ultra",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/product/galaxy-s26-ultra",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull(quote)
+        assertEquals(1299.0, quote!!.price, 0.001)
+        assertEquals("EUR", quote.currency)
+    }
+
 }

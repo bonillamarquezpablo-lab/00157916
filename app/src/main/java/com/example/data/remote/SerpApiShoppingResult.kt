@@ -35,11 +35,24 @@ private fun normalizeOnlineSearchText(value: String): String =
         .trim()
         .replace(Regex("""\s+"""), " ")
 
-private fun explicitOnlineModelCodes(value: String): Set<String> =
-    ONLINE_MODEL_CODE.findAll(normalizeOnlineSearchText(value))
+private fun explicitOnlineModelCodes(value: String): Set<String> {
+    val normalized = normalizeOnlineSearchText(value)
+    val codes = ONLINE_MODEL_CODE.findAll(normalized)
         .map { it.value }
         .filterNot { it in NON_MODEL_CODES }
-        .toSet()
+        .toMutableSet()
+    val tokens = normalized.split(' ').filter { it.isNotBlank() }
+    // Consumers often type model families with a space, e.g. "Redmi 17" or "WH 1000XM5".
+    val modelFamilies = setOf("redmi", "poco", "iphone", "pixel", "galaxy", "wh", "dyson", "roborock")
+    for (index in tokens.indices) {
+        val family = tokens[index]
+        val next = tokens.getOrNull(index + 1) ?: continue
+        if (family in modelFamilies && Regex("""^\d+[a-z0-9]*$""").matches(next)) {
+            codes += family + next
+        }
+    }
+    return codes
+}
 
 private fun onlineProductTypes(value: String): Set<String> {
     val normalized = normalizeOnlineSearchText(value)

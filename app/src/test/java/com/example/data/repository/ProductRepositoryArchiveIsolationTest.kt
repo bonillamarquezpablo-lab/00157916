@@ -175,7 +175,7 @@ class ProductRepositoryArchiveIsolationTest {
             assertTrue(product.priceHistory.any { it.sourceUrl == archiveUrl1 })
             assertFalse(
                 "A verified legacy row with another product title must not contaminate this price history",
-                product.priceHistory.any { it.productTitle == "Apple iPhone 17 Pro Max" }
+                product.priceHistory.any { it.sourceUrl == "https://www.pccomponentes.com/apple-iphone-17-pro-max" }
             )
             assertEquals(
                 "Read-time validation must not delete the original row from local Room storage",

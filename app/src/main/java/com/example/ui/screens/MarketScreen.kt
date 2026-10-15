@@ -229,15 +229,16 @@ fun MarketScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     if (uiState.selectedStoreName != null) {
-                        Text(
-                            text = "Limpiar filtro",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .padding(horizontal = 4.dp, vertical = 2.dp)
-                        )
+                        androidx.compose.material3.TextButton(
+                            onClick = { onStoreFilterSelect(null) },
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                        ) {
+                            Text(
+                                text = "Limpiar filtro",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
 

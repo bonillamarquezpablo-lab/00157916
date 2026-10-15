@@ -1862,6 +1862,7 @@ class ExampleRobolectricTest {
                 }
             }.first { it.id == sonyProductId }
             assertEquals("Google Shopping", productAfterGoogleObservation.priceHistory.single().linkType)
+            assertEquals("Google Shopping", productAfterGoogleObservation.priceSource)
             assertTrue(productAfterGoogleObservation.offers.any {
                 it.store.name == "PcComponentes" && it.linkType == "Google Shopping"
             })

@@ -1584,7 +1584,7 @@ class SerpApiClient(
             .replace(Regex("\\s+"), " ")
 
     private fun storeIdForHost(host: String, merchantName: String = ""): String {
-        if (host == "google.com" || host.endsWith(".google.com")) {
+        if (isGoogleShoppingUrl("https://$host")) {
             val merchant = normalize(merchantName)
             val knownStoreId = when {
                 "amazon" in merchant -> "amazon_es"

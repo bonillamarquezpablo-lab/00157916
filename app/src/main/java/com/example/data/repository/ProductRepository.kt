@@ -21,6 +21,7 @@ import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.linkTypeForUrl
 import com.example.data.remote.isGoogleShoppingUrl
+import com.example.data.remote.isNonRetailPromotionalListing
 import com.example.data.remote.isWheelFitmentQuery
 import com.example.data.remote.containsWheelCategoryTerm
 import com.example.data.remote.wheelSetCountForTitle
@@ -205,6 +206,7 @@ class ProductRepository(
                     !isAccessorySearchQuery(searchQuery) &&
                     isAccessoryListing(result.title)
             result.title.isNotBlank() &&
+                !isNonRetailPromotionalListing(result.title) &&
                 result.storeName.isNotBlank() &&
                 result.price.isFinite() &&
                 result.price > 0.0 &&
@@ -299,6 +301,8 @@ class ProductRepository(
                     "Sin precio válido"
                 result.isRentalOrMonthly ->
                     "Alquiler o cuota mensual"
+                isNonRetailPromotionalListing(result.title) ->
+                    "Artículo promocional o merchandising personalizado"
                 result.isSecondHand ->
                     "Segunda mano o reacondicionado"
                 hasStrictModelMismatch(searchQuery, queryModelMarkers, result.title) ->
@@ -737,6 +741,7 @@ class ProductRepository(
             """\b(segunda\s+mano|usad[oa]s?|used|reacondicionad[oa]s?|refurbished|renewed|pre owned|seminuev[oa]s?|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|cuota|mensual|suscripcion|subscription|pago\s+a\s+plazos|monthly|por\s+mes|per\s+month|mes\s+a\s+mes)\b"""
         )
         return !excludedListing.containsMatchIn(normalized) &&
+            !isNonRetailPromotionalListing(title) &&
             !Regex("""(?i)/\s*mes\b""").containsMatchIn(title)
     }
 

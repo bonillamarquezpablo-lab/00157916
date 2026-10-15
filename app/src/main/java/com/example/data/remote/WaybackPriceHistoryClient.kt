@@ -202,7 +202,8 @@ class WaybackPriceHistoryClient(
 
         val finalUrl = page.first
         if (isEligibleDirectUrl(finalUrl) && !isGoogleShoppingUrl(finalUrl) &&
-            matchesMerchantHost(finalUrl, storeName)
+            matchesMerchantHost(finalUrl, storeName) &&
+            matchesProductPath(finalUrl, expectedTitle)
         ) return finalUrl
         return extractDirectMerchantUrl(page.second, storeName, expectedTitle)
     }
@@ -265,22 +266,25 @@ class WaybackPriceHistoryClient(
         if (merchantCandidates.isEmpty()) return null
         if (expectedTitle.isBlank()) return merchantCandidates.first()
 
-        val productTokens = meaningfulTokens(normalizeTitle(expectedTitle))
-        if (productTokens.isEmpty()) return null
-        val minimumOverlap = if (productTokens.size <= 3) 1 else 2
         return merchantCandidates
-            .map { url ->
-                val uri = runCatching { URI(url) }.getOrNull()
-                val pageTokens = meaningfulTokens(normalizeTitle(uri?.path.orEmpty()))
-                val overlap = productTokens.intersect(pageTokens).size
-                url to overlap
-            }
-            .filter { (_, overlap) -> overlap >= minimumOverlap }
+            .filter { matchesProductPath(it, expectedTitle) }
             .maxWithOrNull(
-                compareBy<Pair<String, Int>> { it.second }
-                    .thenBy { runCatching { URI(it.first).path.orEmpty().length }.getOrDefault(0) }
+                compareBy<String> { url ->
+                    meaningfulTokens(normalizeTitle(runCatching { URI(url).path.orEmpty() }.getOrDefault("")))
+                        .intersect(meaningfulTokens(normalizeTitle(expectedTitle))).size
+                }.thenBy { runCatching { URI(it).path.orEmpty().length }.getOrDefault(0) }
             )
-            ?.first
+    }
+
+    private fun matchesProductPath(url: String, expectedTitle: String): Boolean {
+        if (expectedTitle.isBlank()) return false
+        val productTokens = meaningfulTokens(normalizeTitle(expectedTitle))
+        if (productTokens.isEmpty()) return false
+        val uri = runCatching { URI(url) }.getOrNull() ?: return false
+        val pageTokens = meaningfulTokens(normalizeTitle(uri.path.orEmpty()))
+        val overlap = productTokens.intersect(pageTokens).size
+        val minimumOverlap = if (productTokens.size <= 3) 1 else 2
+        return overlap >= minimumOverlap
     }
 
     private fun matchesMerchantHost(url: String, storeName: String): Boolean {

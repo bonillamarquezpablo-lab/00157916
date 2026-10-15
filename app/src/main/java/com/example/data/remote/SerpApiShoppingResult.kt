@@ -300,10 +300,14 @@ internal fun isBicycleDrivetrainSearch(query: String): Boolean {
 }
 
 internal fun isBicycleDrivetrainComponentTitle(title: String): Boolean {
-    if (isBicycleTireListing(title) || containsWheelCategoryTerm(title)) return false
+    val normalized = normalizedWheelCategoryText(title)
+    if (isBicycleTireListing(title) ||
+        Regex("""\b(ruedas?|llantas?|wheel(?:s)?|rims?|cubiertas?|neumaticos?|tyres?|tires?)\b""")
+            .containsMatchIn(normalized)
+    ) return false
     return Regex(
-        """(?i)\b(cassette|casete|pi[nñ]ones?|sprockets?|cambio|desviador|derailleur|shifter|manetas?|pulsadores?|cadena|chain|platos?|bielas?|pedalier|transmisi[oó]n|groupset|grupo)\b"""
-    ).containsMatchIn(title)
+        """\b(cassette|casete|pi[nñ]ones?|sprockets?|cambio|desviador|derailleur|shifter|manetas?|pulsadores?|cadena|chain|platos?|bielas?|pedalier|transmisi[oó]n|groupset|grupo)\b"""
+    ).containsMatchIn(normalized)
 }
 
 private val ACCESSORY_LISTING_PATTERN = Regex(

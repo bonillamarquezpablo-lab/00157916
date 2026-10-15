@@ -2358,4 +2358,49 @@ class ExampleRobolectricTest {
         )
     }
 
+    @Test
+    fun knownRetailerDestinationMustAgreeWithSellerLabelButGoogleRedirectsRemainAllowed() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val now = System.currentTimeMillis()
+            val pcComponentes = SerpApiShoppingResult(
+                title = "Xiaomi Redmi 17 5G 4GB 128GB",
+                price = 179.99,
+                storeName = "PcComponentes",
+                sourceUrl = "https://www.pccomponentes.com/xiaomi-redmi-17",
+                observedAt = now
+            )
+            val mislabeled = pcComponentes.copy(storeName = "Amazon.es - Seller")
+            val googleRedirect = pcComponentes.copy(
+                storeName = "Amazon.es",
+                sourceUrl = "https://www.google.com/shopping/product/123"
+            )
+
+            val accepted = repository.filterOnlineSearchResults(
+                listOf(mislabeled, pcComponentes, googleRedirect),
+                searchQuery = "Xiaomi Redmi 17"
+            )
+
+            assertTrue("A known domain with a matching seller name should remain eligible",
+                accepted.any { it.sourceUrl == pcComponentes.sourceUrl && it.storeName == "PcComponentes" })
+            assertFalse("A known domain must not be attributed to a contradictory seller label",
+                accepted.any { it.storeName == "Amazon.es - Seller" })
+            assertTrue("Google Shopping links remain valid indirect destinations",
+                accepted.any { it.sourceUrl == googleRedirect.sourceUrl })
+        } finally {
+            database.close()
+        }
+    }
+
 }

@@ -289,6 +289,11 @@ class WaybackPriceHistoryClientTest {
         assertEquals("lamanzanita.es", client.resolveMerchantDomain("La Manzanita", googleUrl))
         assertEquals("nike.com", client.resolveMerchantDomain("Nike Oficial", googleUrl))
         assertEquals("sprinter.es", client.resolveMerchantDomain("Sprinter Deportes", googleUrl))
+
+        assertEquals("Apple Store" to "apple.com", client.resolveBrandMerchant("Apple iPhone 16 256GB"))
+        assertEquals("Nike" to "nike.com", client.resolveBrandMerchant("Nike Air Max Plus Zapatillas"))
+        assertEquals("Anker" to "anker.com", client.resolveBrandMerchant("Anker Prime 27K Power Bank"))
+        assertEquals(null, client.resolveBrandMerchant("Producto genérico sin marca"))
     }
 
 

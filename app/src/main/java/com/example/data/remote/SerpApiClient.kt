@@ -1277,9 +1277,21 @@ class SerpApiClient(
         val t = title.lowercase(Locale.ROOT).replace(',', '.')
         val units = listOf("mah", "wh", "w", "gb", "tb", "ml", "kg", "g", "l", "inch", "pulgadas")
         for (unit in units) {
-            val qMatch = Regex("""(\d+(?:\.\d+)?)\s*${Regex.escape(unit)}\b""").find(q) ?: continue
-            val tMatch = Regex("""(\d+(?:\.\d+)?)\s*${Regex.escape(unit)}\b""").find(t) ?: continue
-            if (qMatch.groupValues[1].toDoubleOrNull() != tMatch.groupValues[1].toDoubleOrNull()) return true
+            val pattern = Regex("""(\d+(?:\.\d+)?)\s*""" + Regex.escape(unit) + """\b""")
+            val queryValues = pattern.findAll(q)
+                .mapNotNull { it.groupValues[1].toDoubleOrNull() }
+                .toList()
+            val titleValues = pattern.findAll(t)
+                .mapNotNull { it.groupValues[1].toDoubleOrNull() }
+                .toList()
+            if (queryValues.isEmpty() || titleValues.isEmpty()) continue
+
+            // Products may specify several values in the same unit (for example RAM and storage
+            // in GB). Compare all of them, not only the first occurrence. Sorting makes this
+            // independent of whether the retailer lists RAM or storage first.
+            if (queryValues.size == titleValues.size &&
+                queryValues.sorted() != titleValues.sorted()
+            ) return true
         }
         val pack = Regex("""\b(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(ml|g|kg|l)\b""").find(t)
         if (pack != null) {

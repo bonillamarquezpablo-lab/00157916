@@ -25,6 +25,7 @@ import com.example.data.remote.linkTypeForUrl
 import com.example.data.remote.hasAmbiguousBicycleTireDiameter
 import com.example.data.remote.isBicycleDrivetrainComponentTitle
 import com.example.data.remote.isBicycleDrivetrainSearch
+import com.example.data.remote.isBicycleTireListing
 import com.example.data.remote.isWrongBicycleTireDiameter
 import com.example.data.remote.isWheelFitmentQuery
 import com.example.data.remote.containsWheelCategoryTerm

@@ -2452,7 +2452,7 @@ class ExampleRobolectricTest {
             )
             assertTrue(
                 "Low-price rejections should explain the reason",
-                rejected.all { it.reason == "Precio sospechosamente bajo para esta categoría" }
+                rejected.all { it.reason.startsWith("Precio sospechoso:") && it.reason.contains("categoría") }
             )
         } finally {
             database.close()

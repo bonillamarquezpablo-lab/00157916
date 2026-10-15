@@ -697,19 +697,31 @@ class ProductRepository(
             onlineProductIdentityKey(it.title) == identity
         }
         val originalUrlKey = normalizedProductPageKey(originalUrl) ?: return 0
+        val originalPathKey = normalizedProductPagePathKey(originalUrl) ?: return 0
         val exactUrlMatches = matchingProducts.filter {
             normalizedProductPageKey(it.storeUrl) == originalUrlKey
         }
         val product = when {
             exactUrlMatches.size == 1 -> exactUrlMatches.single()
             exactUrlMatches.size > 1 -> return 0
-            matchingProducts.size == 1 -> matchingProducts.single()
             else -> {
-                val originalHost = normalizeHost(originalUri.host.orEmpty())
-                matchingProducts.filter { candidate ->
-                    parseHttpUri(candidate.storeUrl)?.host
-                        ?.let(::normalizeHost) == originalHost
-                }.singleOrNull() ?: return 0
+                // Query or fragment values can identify a purchasable variant. Do not fall back
+                // to a title/host match when the same page path has a conflicting variant key.
+                val conflictingPageVariant = matchingProducts.any { candidate ->
+                    normalizedProductPagePathKey(candidate.storeUrl) == originalPathKey &&
+                        normalizedProductPageKey(candidate.storeUrl) != originalUrlKey
+                }
+                if (conflictingPageVariant) return 0
+
+                if (matchingProducts.size == 1) {
+                    matchingProducts.single()
+                } else {
+                    val originalHost = normalizeHost(originalUri.host.orEmpty())
+                    matchingProducts.filter { candidate ->
+                        parseHttpUri(candidate.storeUrl)?.host
+                            ?.let(::normalizeHost) == originalHost
+                    }.singleOrNull() ?: return 0
+                }
             }
         }
         val now = System.currentTimeMillis()
@@ -1581,7 +1593,34 @@ class ProductRepository(
     private fun normalizedProductPageKey(value: String): String? {
         val uri = parseHttpUri(value) ?: return null
         if (!uri.scheme.equals("https", ignoreCase = true) || uri.host.isNullOrBlank()) return null
-        return normalizeHost(uri.host.orEmpty()) + normalizePath(uri)
+        val pathKey = normalizedProductPagePathKey(value) ?: return null
+        val trackingKeys = setOf(
+            "gclid", "dclid", "fbclid", "msclkid", "yclid", "gbraid", "wbraid",
+            "mc_cid", "mc_eid", "_ga", "_gl", "ref_src", "igshid"
+        )
+        // Remove only known tracking parameters. Preserve variant, SKU, capacity, colour and
+        // model selectors because they can identify different purchasable products.
+        val meaningfulQuery = uri.rawQuery.orEmpty()
+            .split('&')
+            .filter { it.isNotEmpty() }
+            .filterNot { parameter ->
+                val rawKey = parameter.substringBefore('=')
+                val decodedKey = runCatching {
+                    java.net.URLDecoder.decode(rawKey.replace("+", "%2B"), "UTF-8")
+                }.getOrDefault(rawKey).lowercase(Locale.ROOT)
+                decodedKey.startsWith("utm_") || decodedKey in trackingKeys
+            }
+            .joinToString("&")
+        val querySuffix = if (meaningfulQuery.isEmpty()) "" else "?$meaningfulQuery"
+        val fragmentSuffix = uri.rawFragment?.let { "#$it" }.orEmpty()
+        return pathKey + querySuffix + fragmentSuffix
+    }
+
+    private fun normalizedProductPagePathKey(value: String): String? {
+        val uri = parseHttpUri(value) ?: return null
+        if (!uri.scheme.equals("https", ignoreCase = true) || uri.host.isNullOrBlank()) return null
+        val portSuffix = if (uri.port == -1 || uri.port == 443) "" else ":${uri.port}"
+        return normalizeHost(uri.host.orEmpty()) + portSuffix + normalizePath(uri)
     }
 
     private fun normalizeHost(host: String): String = host.lowercase(Locale.ROOT).removePrefix("www.")

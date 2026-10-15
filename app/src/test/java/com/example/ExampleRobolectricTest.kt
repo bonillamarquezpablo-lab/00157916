@@ -1304,6 +1304,78 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun archiveHistoryDoesNotAttachToDifferentQueryVariant() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val title = "Anker Prime 27K Power Bank"
+            val storedVariantUrl = "https://shop.example/products/anker-prime-27k?variant=512"
+            val archivedVariantUrl = "https://shop.example/products/anker-prime-27k?variant=256"
+            database.productDao().insert(
+                ProductEntity(
+                    id = "anker_variant_512",
+                    title = title,
+                    brand = "Anker",
+                    category = "ACCESSORIES",
+                    currentPrice = 99.99,
+                    athMinPrice = 0.0,
+                    athMinDate = "",
+                    athMinStore = "",
+                    athMaxPrice = 0.0,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "Tienda directa",
+                    storeUrl = storedVariantUrl,
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val now = System.currentTimeMillis()
+            val archivedAt = now - 200L * 24L * 60L * 60L * 1000L
+            val archiveTimestamp = java.text.SimpleDateFormat(
+                "yyyyMMddHHmmss", java.util.Locale.ROOT
+            ).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.format(java.util.Date(archivedAt))
+            val quote = ArchivedPriceQuote(
+                observedAt = archivedAt,
+                price = 79.99,
+                currency = "EUR",
+                productTitle = title,
+                originalUrl = archivedVariantUrl,
+                snapshotUrl = "https://web.archive.org/web/" + archiveTimestamp + "id_/" + archivedVariantUrl
+            )
+
+            assertEquals(
+                "A 256 GB archive capture must not attach to the saved 512 GB variant",
+                0,
+                repository.recordArchivedPriceHistory(
+                    expectedTitle = title,
+                    originalUrl = archivedVariantUrl,
+                    storeName = "Tienda directa",
+                    quotes = listOf(quote)
+                )
+            )
+            assertTrue(
+                "A rejected variant mismatch must not persist an observation",
+                database.priceObservationDao().observeVerifiedHistory("anker_variant_512").first().isEmpty()
+            )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun fitmentUnconfirmedWheelCandidatesAreNotSavedToMercadoOrHistory() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(

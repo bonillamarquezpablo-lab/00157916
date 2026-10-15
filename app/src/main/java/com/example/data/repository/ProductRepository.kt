@@ -1439,10 +1439,10 @@ class ProductRepository(
 
     private fun normalizeStoreIdentity(value: String): String =
         java.text.Normalizer.normalize(value.lowercase(Locale.ROOT), java.text.Normalizer.Form.NFD)
-            .replace(Regex("\\\\p{Mn}+"), "")
+            .replace(Regex("\\p{Mn}+"), "")
             .replace(Regex("[^a-z0-9]+"), " ")
             .trim()
-            .replace(Regex("\\\\s+"), " ")
+            .replace(Regex("\\s+"), " ")
 
     private fun observationStore(observation: PriceObservationEntity, stores: List<Store>): Store {
         stores.firstOrNull { it.id == observation.storeId }?.let { return it }

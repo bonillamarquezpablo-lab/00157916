@@ -12,7 +12,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
 import java.text.Normalizer
+import java.text.ParsePosition
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 import kotlin.math.ceil
 
@@ -40,6 +44,21 @@ data class SerpApiQuote(
     val storeName: String,
     val sourceName: String = "SerpApi · Google Shopping España",
     val googleProductId: String? = null
+)
+
+/** A historical point explicitly returned by Google's product-price insights. */
+data class SerpApiPriceInsight(
+    val productTitle: String,
+    val storeName: String,
+    val price: Double,
+    val currency: String,
+    val observedAt: Long
+)
+
+data class SerpApiGoogleProductDetails(
+    val offers: List<SerpApiShoppingResult>,
+    val priceInsights: List<SerpApiPriceInsight>,
+    val priceHistoryAvailable: Boolean
 )
 
 data class SerpApiBatchResult(
@@ -625,18 +644,116 @@ class SerpApiClient(
         productId: String,
         expectedTitle: String,
         observedAt: Long = System.currentTimeMillis()
-    ): List<SerpApiShoppingResult> = withContext(Dispatchers.IO) {
+    ): List<SerpApiShoppingResult> =
+        searchGoogleProductDetails(token, productId, expectedTitle, observedAt).offers
+
+    /**
+     * Fetches current store offers and any historical series Google exposes in the same request.
+     * No extra SerpApi search is spent to read price_insights.
+     */
+    suspend fun searchGoogleProductDetails(
+        token: String,
+        productId: String,
+        expectedTitle: String,
+        observedAt: Long = System.currentTimeMillis()
+    ): SerpApiGoogleProductDetails = withContext(Dispatchers.IO) {
         val apiKey = token.trim()
         require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
         val safeProductId = productId.trim()
             .takeIf { it.matches(Regex("[0-9]{5,}")) }
             ?: throw SerpApiException("Este producto no tiene un ID de catálogo de Google Shopping válido; no se ha lanzado ninguna búsqueda.")
-        parseGoogleProductOffers(
+        parseGoogleProductDetails(
             root = executeJson(buildGoogleProductUrl(apiKey, safeProductId)),
             expectedTitle = expectedTitle,
             productId = safeProductId,
             observedAt = observedAt
         )
+    }
+
+    /** Parser isolated from network access so current offers and historical insights can be tested offline. */
+    internal fun parseGoogleProductDetails(
+        root: JSONObject,
+        expectedTitle: String,
+        productId: String,
+        observedAt: Long = System.currentTimeMillis()
+    ): SerpApiGoogleProductDetails {
+        val product = root.optJSONObject("product_results")
+        val catalogTitle = product?.optString("title").orEmpty().trim()
+        val catalogMatches = catalogTitle.isNotBlank() &&
+            !hasVariantMismatch(expectedTitle, catalogTitle) &&
+            !hasConflictingModelVariant(expectedTitle, catalogTitle) &&
+            isPlausibleProductMatch(expectedTitle, catalogTitle)
+        if (!catalogMatches) {
+            return SerpApiGoogleProductDetails(
+                offers = parseGoogleProductOffers(root, expectedTitle, productId, observedAt),
+                priceInsights = emptyList(),
+                priceHistoryAvailable = false
+            )
+        }
+
+        val insightBlock = product?.optJSONObject("price_insights")
+        val historyAvailable = insightBlock?.optBoolean("price_history", false) == true
+        val currency = insightBlock?.optString("currency").orEmpty().uppercase(Locale.ROOT)
+        if (!historyAvailable || currency != "EUR") {
+            return SerpApiGoogleProductDetails(
+                offers = parseGoogleProductOffers(root, expectedTitle, productId, observedAt),
+                priceInsights = emptyList(),
+                priceHistoryAvailable = historyAvailable
+            )
+        }
+
+        val earliestAllowed = observedAt - MAX_PRICE_INSIGHT_LOOKBACK_DAYS * DAY_MS
+        val history = mutableListOf<SerpApiPriceInsight>()
+        val stores = insightBlock.optJSONArray("stores")
+        if (stores != null) {
+            for (storeIndex in 0 until stores.length()) {
+                val store = stores.optJSONObject(storeIndex) ?: continue
+                val storeName = store.optString("name").trim()
+                    .takeIf { it.isNotBlank() && it != "null" } ?: continue
+                val prices = store.optJSONArray("prices") ?: continue
+                for (priceIndex in 0 until prices.length()) {
+                    val item = prices.optJSONObject(priceIndex) ?: continue
+                    val timestamp = parsePriceInsightDate(item.optString("date")) ?: continue
+                    val price = item.opt("price")?.toString()?.toDoubleOrNull() ?: continue
+                    if (timestamp < earliestAllowed || timestamp >= observedAt ||
+                        !price.isFinite() || price !in MIN_PRICE_INSIGHT_EUR..MAX_PRICE_INSIGHT_EUR
+                    ) continue
+                    history += SerpApiPriceInsight(
+                        productTitle = catalogTitle,
+                        storeName = storeName,
+                        price = price,
+                        currency = currency,
+                        observedAt = timestamp
+                    )
+                }
+            }
+        }
+
+        SerpApiGoogleProductDetails(
+            offers = parseGoogleProductOffers(root, expectedTitle, productId, observedAt),
+            priceInsights = history.distinctBy { Triple(it.storeName.lowercase(Locale.ROOT), it.observedAt, it.price) }
+                .sortedBy { it.observedAt },
+            priceHistoryAvailable = historyAvailable
+        )
+    }
+
+    private fun parsePriceInsightDate(value: String): Long? {
+        val input = value.trim().replace(Regex("\\s+"), " ")
+        if (input.isBlank()) return null
+        val locales = listOf(Locale.US, Locale.UK, Locale("es", "ES"))
+        val patterns = listOf("MMM d, yyyy", "MMMM d, yyyy", "d MMM yyyy", "d MMMM yyyy", "yyyy-MM-dd", "dd/MM/yyyy")
+        for (locale in locales) {
+            for (pattern in patterns) {
+                val formatter = SimpleDateFormat(pattern, locale).apply {
+                    isLenient = false
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }
+                val position = ParsePosition(0)
+                val date: Date = formatter.parse(input, position) ?: continue
+                if (position.index == input.length) return date.time
+            }
+        }
+        return null
     }
 
     /** Parser isolated from network access so the full Google Product API shape can be tested offline. */
@@ -1211,6 +1328,10 @@ class SerpApiClient(
     }.getOrDefault(false)
 
     private fun isPlausibleProductMatch(requested: String, returned: String): Boolean {
+        // "Teclado Hall"/"teclado efecto Hall" is a technology search, not a literal
+        // two-word product name. Match Hall/HE/TMR keyboards without accepting "Hall of Fame".
+        if (isHallEffectKeyboardSearch(requested)) return isHallEffectKeyboardResult(returned)
+
         val wanted = tokens(requested)
         val found = tokens(returned)
         if (wanted.isEmpty() || found.isEmpty()) return false
@@ -1261,6 +1382,28 @@ class SerpApiClient(
         val compactTitle = normalize(returned).replace(" ", "")
         return compactQuery.length >= 8 && compactTitle.length >= 8 &&
             (compactTitle.contains(compactQuery) || compactQuery.contains(compactTitle))
+    }
+
+    private fun isHallEffectKeyboardSearch(value: String): Boolean {
+        val normalized = normalize(value)
+        val namesKeyboard = Regex("""\\b(teclado|teclados|keyboard|keyboards)\\b""")
+            .containsMatchIn(normalized)
+        val namesHallTechnology = Regex("""\\b(hall|hal|efecto|effect|he|tmr|magnetic|magnetico|magnetica)\\b""")
+            .containsMatchIn(normalized)
+        return namesKeyboard && namesHallTechnology
+    }
+
+    private fun isHallEffectKeyboardResult(value: String): Boolean {
+        val normalized = normalize(value)
+        val namesKeyboard = Regex("""\\b(teclado|teclados|keyboard|keyboards)\\b""")
+            .containsMatchIn(normalized)
+        if (!namesKeyboard) return false
+
+        val explicitTechnology = Regex(
+            """\\b(hall\\s*effect|effect\\s*hall|efecto\\s*hall|hall\\s*sensor|sensor\\s*hall|magnetic|magnetico|magnetica|magneticos|magneticas|tmr|rapid\\s+trigger)\\b"""
+        ).containsMatchIn(normalized)
+        val explicitHeLabel = Regex("""\\bhe\\b""").containsMatchIn(normalized)
+        return explicitTechnology || explicitHeLabel
     }
 
     private fun tokens(value: String): Set<String> =
@@ -1323,6 +1466,10 @@ class SerpApiClient(
 
     private companion object {
         const val MAX_PRODUCTS_PER_BATCH = 40
+        const val MAX_PRICE_INSIGHT_LOOKBACK_DAYS = 1605L
+        const val MIN_PRICE_INSIGHT_EUR = 0.50
+        const val MAX_PRICE_INSIGHT_EUR = 10_000.0
+        const val DAY_MS = 24L * 60L * 60L * 1000L
         const val MAX_ONLINE_RESULTS = 100
         const val INTER_REQUEST_DELAY_MS = 1_200L
         val STOP_WORDS = setOf(

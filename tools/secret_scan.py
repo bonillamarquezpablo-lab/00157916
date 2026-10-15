@@ -104,8 +104,8 @@ def scan_zip(path: str, data: bytes, findings: list[tuple[str, str]]) -> None:
             except (OSError, RuntimeError, zipfile.BadZipFile):
                 findings.append((f"{path}!/{member}", "Unable to read archive member"))
                 continue
-            if b"\x00" not in member_bytes:
-                scan_bytes(f"{path}!/{member}", member_bytes, findings)
+            # High-confidence patterns are ASCII; scan binary members too so DEX strings are not skipped.
+            scan_bytes(f"{path}!/{member}", member_bytes, findings)
 
 
 

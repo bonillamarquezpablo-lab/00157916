@@ -150,6 +150,30 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun acceptsEquivalentSonyHeadphoneModelSpelling() {
+        val client = newClient()
+        val html = """
+            <script type="application/ld+json">
+            {"@type":"Product","name":"Sony WH1000XM5 Wireless Noise Canceling Headphones",
+             "offers":{"@type":"Offer","price":"249.99","priceCurrency":"EUR"}}
+            </script>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "Sony WH-1000XM5 Wireless Headphones",
+            originalUrl = "https://shop.example/product/sony-wh1000xm5",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/product/sony-wh1000xm5",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull(
+            "Equivalent Sony model formatting should pass the identity-key comparison",
+            quote
+        )
+    }
+
+    @Test
     fun readsExplicitEurProductMetaTagsAndRejectsGoogleUrlAsArchiveTarget() {
         val client = newClient()
         val html = """

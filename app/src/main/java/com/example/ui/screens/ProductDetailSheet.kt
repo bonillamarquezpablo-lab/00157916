@@ -76,6 +76,30 @@ fun ProductDetailSheet(
     val oldestArchivedDate = archivedHistoryPoints.minByOrNull { it.timestamp }?.let {
         SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(it.timestamp))
     }
+    val googleInsightPoints = product.priceHistory.filter {
+        it.eventLabel.contains("price_insights", ignoreCase = true)
+    }
+    val oldestGoogleInsightDate = googleInsightPoints.minByOrNull { it.timestamp }?.let {
+        SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(it.timestamp))
+    }
+    val historicalSourceSummary = buildString {
+        if (googleInsightPoints.isNotEmpty()) {
+            append("Google Shopping: ${googleInsightPoints.size} puntos históricos")
+            oldestGoogleInsightDate?.let { append(" desde $it") }
+            append(".")
+        }
+        if (archivedHistoryPoints.isNotEmpty()) {
+            if (isNotEmpty()) append(" ")
+            append("Internet Archive: ${archivedHistoryPoints.size} capturas")
+            oldestArchivedDate?.let { append(" desde $it") }
+            append(".")
+        }
+        if (isEmpty()) {
+            append("Todavía no hay una serie histórica externa verificada para esta ficha. Pulsa «Comparar tiendas» para comprobar si Google ofrece fechas y precios históricos; esa consulta consume una búsqueda de SerpApi. Si Google no publica el historial, Mínimo lo construirá con nuevas observaciones.")
+        } else {
+            append(" Puede haber huecos; los precios históricos no garantizan stock, envío ni precio final.")
+        }
+    }
     val latestPricePoint = product.priceHistory.maxByOrNull { it.timestamp }
     val currentSourceLabel = latestPricePoint
         ?.eventLabel
@@ -140,7 +164,7 @@ fun ProductDetailSheet(
                                     "Precio observado para ${product.title}: ${String.format("%.2f", product.currentPrice)} € en ${product.currentStore.name}. " +
                                         "Aún no hay observaciones durante 90 días para afirmar un mínimo histórico o un descuento."
                                 else ->
-                                    "Ficha de demostración de Mínimo: ${product.title}.\\nNo contiene precios verificados ni un historial real."
+                                    "Ficha sin precio verificado de Mínimo: ${product.title}.\\nNo contiene una oferta ni un historial real confirmados."
                             }
                             val intent = Intent(Intent.ACTION_SEND).apply {
                                 type = "text/plain"
@@ -208,12 +232,12 @@ fun ProductDetailSheet(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = "Precio e historial no verificados",
+                            text = "Ficha sin precio verificado",
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Los valores numéricos de esta ficha son datos de ejemplo y no se presentan como precios reales. El gráfico permanecerá vacío hasta disponer de observaciones reales con fuente y fecha.",
+                            text = "Mínimo todavía no ha confirmado el precio de este producto con una fuente y una fecha verificables. No uses los valores de referencia como una oferta real; el historial aparecerá cuando se guarden observaciones fiables.",
                             fontSize = 12.sp,
                             lineHeight = 17.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -392,14 +416,7 @@ fun ProductDetailSheet(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        if (archivedHistoryPoints.isNotEmpty()) {
-                            "Historial gratuito recuperado de Internet Archive: " +
-                                archivedHistoryPoints.size + " puntos de capturas verificables" +
-                                (oldestArchivedDate?.let { " desde $it" } ?: "") +
-                                ". Puede haber huecos; estos precios anunciados no garantizan stock, envío ni precio final."
-                        } else {
-                            "Todavía no hay capturas antiguas gratuitas verificadas para esta ficha. Mínimo las buscará cuando haya un enlace directo de tienda con páginas archivadas disponibles."
-                        },
+                        historicalSourceSummary,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

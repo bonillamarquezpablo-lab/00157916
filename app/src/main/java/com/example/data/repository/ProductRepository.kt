@@ -125,6 +125,7 @@ class ProductRepository(
      * destinations are both allowed; link type is recorded separately for the UI.
      */
     suspend fun recordSerpApiQuotes(quotes: List<SerpApiQuote>): Int {
+        startupCleanupCompleted.await()
         // Resolve titles from persisted products only. The bundled demonstration catalogue is not
         // a valid source for a real market observation.
         val storedProducts = productDao.getAllProductsSnapshot()
@@ -528,6 +529,7 @@ class ProductRepository(
         storeName: String,
         quotes: List<ArchivedPriceQuote>
     ): Int {
+        startupCleanupCompleted.await()
         if (expectedTitle.isBlank() || originalUrl.isBlank() || quotes.isEmpty()) return 0
         val originalUri = parseHttpUri(originalUrl) ?: return 0
         if (!originalUri.scheme.equals("https", ignoreCase = true)) return 0
@@ -598,6 +600,7 @@ class ProductRepository(
         expectedTitle: String,
         offers: List<SerpApiShoppingResult>
     ): Int {
+        startupCleanupCompleted.await()
         val product = productDao.getProductById(productId) ?: return 0
         if (expectedTitle.isBlank() || onlineProductIdentityKey(product.title) != onlineProductIdentityKey(expectedTitle)) {
             return 0

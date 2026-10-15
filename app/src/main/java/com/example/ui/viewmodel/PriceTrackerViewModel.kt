@@ -1207,14 +1207,30 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         val directUrl = sourceUrl.takeIf {
             !isGoogleShoppingUrl(it) && waybackPriceHistoryClient.isEligibleDirectUrl(it)
         }
-        val domain = waybackPriceHistoryClient.resolveMerchantDomain(
+        val resolvedDomain = waybackPriceHistoryClient.resolveMerchantDomain(
             storeName = storeName,
             sourceUrl = sourceUrl
         )
+        // Some Google Shopping rows expose only Google's intermediate URL and label the source
+        // as "Google Shopping", omitting the seller. If that happens, make a bounded fallback
+        // to a recognized brand's own website; the archived page still needs an exact title and
+        // EUR price, so this does not invent a quote or pretend to know the original seller.
+        val brandFallback = if (resolvedDomain == null) {
+            waybackPriceHistoryClient.resolveBrandMerchant(title)
+        } else null
+        val domain = resolvedDomain ?: brandFallback?.second
+        val genericProviderName = storeName.trim().lowercase(Locale.ROOT) in setOf(
+            "", "google", "google shopping", "google shopping españa", "serpapi", "serp api", "shopping"
+        )
+        val effectiveStoreName = when {
+            brandFallback != null -> brandFallback.first
+            genericProviderName && directUrl != null -> ""
+            else -> storeName
+        }
         if (directUrl == null && domain == null) return null
         return FreeArchiveCandidate(
             title = title,
-            storeName = storeName,
+            storeName = effectiveStoreName,
             directUrl = directUrl,
             merchantDomain = domain
         )

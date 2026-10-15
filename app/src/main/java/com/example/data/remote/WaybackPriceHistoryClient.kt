@@ -80,17 +80,15 @@ class WaybackPriceHistoryClient(
             return@withContext WaybackBackfillResult()
         }
 
-        val attemptKey = attemptKey(originalUrl + "|" + expectedTitle)
-        val lastAttempt = preferences.getLong(attemptKey, 0L)
+        // Resolve the page first. A failed link lookup must not suppress a future archive lookup
+        // after the merchant URL becomes available through the separate 24-hour URL cache.
+        val resolvedOriginalUrl = resolveStoreUrl(originalUrl, storeName, expectedTitle)
+            ?: return@withContext WaybackBackfillResult(storeLinkUnresolved = true)
+
+        val archiveAttemptKey = attemptKey(resolvedOriginalUrl + "|" + expectedTitle)
+        val lastAttempt = preferences.getLong(archiveAttemptKey, 0L)
         if (lastAttempt > 0L && now >= lastAttempt && now - lastAttempt < RETRY_INTERVAL_MS) {
             return@withContext WaybackBackfillResult(skippedRecently = true)
-        }
-
-        val resolvedOriginalUrl = resolveStoreUrl(originalUrl, storeName, expectedTitle) ?: run {
-            // Cache an unsuccessful extraction too, so repeated searches do not repeatedly
-            // fetch a Google Shopping page that does not expose the seller destination.
-            preferences.edit().putLong(attemptKey, now).apply()
-            return@withContext WaybackBackfillResult(storeLinkUnresolved = true)
         }
 
         val cdxUrl = buildCdxUrl(resolvedOriginalUrl, now, lookbackDays)
@@ -134,7 +132,7 @@ class WaybackPriceHistoryClient(
         }
 
         // Negative results are cached too, avoiding repeated load on the public archive.
-        preferences.edit().putLong(attemptKey, now).apply()
+        preferences.edit().putLong(archiveAttemptKey, now).apply()
         WaybackBackfillResult(
             quotes = fetched.mapNotNull { it.quote }.sortedBy { it.observedAt }
                 .distinctBy { it.observedAt to it.price },

@@ -196,6 +196,27 @@ class ProductRepositoryArchiveIsolationTest {
                 wrongSnapshotTargetInserted
             )
 
+            val insecureSnapshotInserted = repository.recordArchivedPriceHistory(
+                expectedTitle = title,
+                originalUrl = "https://shop.example/product/anker-prime",
+                storeName = "Tienda de prueba",
+                quotes = listOf(
+                    ArchivedPriceQuote(
+                        observedAt = mismatchedCaptureTime,
+                        price = 19.99,
+                        currency = "EUR",
+                        productTitle = title,
+                        originalUrl = "https://shop.example/product/anker-prime",
+                        snapshotUrl = "http://web.archive.org/web/20260901000000id_/https://shop.example/product/anker-prime"
+                    )
+                )
+            )
+            assertEquals(
+                "an insecure HTTP Wayback URL must not be stored as historical evidence",
+                0,
+                insecureSnapshotInserted
+            )
+
             // Re-running a backfill must not duplicate a capture already in Room.
             val validSnapshotUrl =
                 "https://web.archive.org/web/20260901000000id_/https://shop.example/product/anker-prime"

@@ -115,7 +115,7 @@ fun ProductCard(
                                 .padding(horizontal = 7.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = if (product.isPriceVerified) product.currentStore.name else "Ficha de demostración",
+                                text = if (product.isPriceVerified) product.currentStore.name else "Sin precio verificado",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp,
                                 color = if (product.isPriceVerified) product.currentStore.brandColor else MaterialTheme.colorScheme.onSurfaceVariant
@@ -197,7 +197,7 @@ fun ProductCard(
             // Price Section
             if (!product.isPriceVerified) {
                 Text(
-                    text = "SIN PRECIO ACTUAL · TIENDA NO CONSULTADA",
+                    text = "SIN PRECIO VERIFICADO · CONSULTA PENDIENTE",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.error

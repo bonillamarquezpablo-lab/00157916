@@ -288,7 +288,8 @@ class WaybackPriceHistoryClient(
             .addQueryParameter("filter", "original:$urlPattern")
             .addQueryParameter("from", from)
             .addQueryParameter("to", to)
-            .addQueryParameter("collapse", "timestamp:6")
+            // Do not collapse by timestamp here: this query spans many product URLs.
+            // Keeping multiple dates per URL is what makes a historical price series possible.
             .addQueryParameter("limit", MAX_DOMAIN_INDEX_ROWS.toString())
             .build()
     }

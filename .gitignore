@@ -33,3 +33,12 @@ google-services.json
 # Generated archives and installable packages can accidentally bundle local data.
 *.zip
 *.apk
+# Other credential stores and local signing formats.
+*.p8
+*.asc
+id_rsa
+id_ed25519
+.npmrc
+.pypirc
+service-account.json
+firebase-adminsdk.json

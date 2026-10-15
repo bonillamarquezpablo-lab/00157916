@@ -11,6 +11,7 @@ import com.example.data.repository.SpanishMarketData
 import com.example.ui.components.ChartRange
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
+import com.example.data.remote.isIrrelevantMultiProductBundle
 import com.example.data.remote.onlineProductIdentityKey
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -300,4 +301,71 @@ class ExampleUnitTest {
         assertTrue(names.any { it.contains("Fnac", ignoreCase = true) })
         assertTrue(names.any { it.contains("Alcampo", ignoreCase = true) })
     }
+    @Test
+    fun exactModelSearchRejectsUnrequestedMultiProductBundles() {
+        val bundle =
+            "Teclados Logitech Pack G213 Prodigy Teclado Gaming + Logitech G203 Lightsync 2nd Gen Ratón Gaming"
+
+        assertTrue(isIrrelevantMultiProductBundle("Logitech G203", bundle))
+        assertFalse(
+            isIrrelevantMultiProductBundle(
+                "Logitech G203",
+                "Logitech G203 Lightsync Gaming Mouse"
+            )
+        )
+        assertFalse(
+            "Explicit pack searches must still allow combo listings",
+            isIrrelevantMultiProductBundle("Logitech G203 pack", bundle)
+        )
+    }
+
+    @Test
+    fun groupedProductKeepsRepresentativeImageAndPrefersDirectPurchaseLink() {
+        val lowest = SerpApiShoppingResult(
+            title = "Smartphone Sony WH-1000XM5 Wireless Headphones",
+            price = 11.95,
+            storeName = "Tienda barata",
+            sourceUrl = "https://www.google.com/shopping/product/123",
+            thumbnailUrl = "https://images.example/other-colour.jpg",
+            observedAt = 1_800_000_000_000L
+        )
+        val representative = SerpApiShoppingResult(
+            title = "Sony WH-1000XM5 Wireless Headphones",
+            price = 24.99,
+            storeName = "Tienda oficial",
+            sourceUrl = "https://shop.example.com/sony-wh1000xm5",
+            thumbnailUrl = "https://images.example/sony-black.jpg",
+            observedAt = 1_800_000_000_000L
+        )
+
+        val group = groupOnlineShoppingResults(listOf(lowest, representative)).single()
+
+        assertEquals(representative.title, group.title)
+        assertEquals(representative.thumbnailUrl, group.representativeImageUrl)
+        assertEquals("The lowest observed price remains available for comparison", 11.95, group.minPrice, 0.001)
+        assertEquals("The default purchase action should prefer a direct retailer URL", representative, group.bestPurchaseOffer)
+    }
+
+    @Test
+    fun groupedProductFallsBackToAnotherThumbnailWithinTheSameProductGroup() {
+        val representativeWithoutImage = SerpApiShoppingResult(
+            title = "Sony WH-1000XM5 Wireless Headphones",
+            price = 199.99,
+            storeName = "Tienda barata",
+            sourceUrl = "https://cheap.example/sony",
+            observedAt = 1_800_000_000_000L
+        )
+        val otherListing = representativeWithoutImage.copy(
+            title = "Smartphone Sony WH-1000XM5 Wireless Headphones",
+            price = 219.99,
+            storeName = "Tienda con imagen",
+            sourceUrl = "https://retailer.example/sony",
+            thumbnailUrl = "https://images.example/sony.jpg"
+        )
+
+        val group = groupOnlineShoppingResults(listOf(representativeWithoutImage, otherListing)).single()
+
+        assertEquals(otherListing.thumbnailUrl, group.representativeImageUrl)
+    }
+
 }

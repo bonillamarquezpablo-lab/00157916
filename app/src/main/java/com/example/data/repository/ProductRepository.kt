@@ -61,7 +61,7 @@ private fun sameHttpResource(left: String, right: String): Boolean {
         leftHost.equals(rightHost, ignoreCase = true) &&
         leftUri.port == rightUri.port &&
         leftUri.rawUserInfo == rightUri.rawUserInfo &&
-        leftUri.rawPath.orEmpty().trimEnd('/') == rightUri.rawPath.orEmpty().trimEnd('/') &&
+        leftUri.rawPath.orEmpty() == rightUri.rawPath.orEmpty() &&
         leftUri.rawQuery.orEmpty() == rightUri.rawQuery.orEmpty()
 }
 

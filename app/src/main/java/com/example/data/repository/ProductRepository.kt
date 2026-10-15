@@ -710,7 +710,7 @@ class ProductRepository(
         if (title.isBlank()) return false
         val normalized = normalizedProductTitle(title)
         val excludedListing = Regex(
-            """\b(segunda\s+mano|usad[oa]s?|used|reacondicionad[oa]s?|refurbished|renewed|pre owned|seminuev[oa]s?|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|cuota|mensual|suscripcion|subscription|pago\s+a\s+plazos|monthly|por\s+mes|per\s+month|mes\s+a\s+mes)\b"""
+            """\b(segunda\s+mano|usad[oa]s?|used|reacondicionad[oa]s?|refurbished|renewed|pre owned|seminuev[oa]s?|open\s+box|caja\s+abierta|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|cuota|mensual|suscripcion|subscription|pago\s+a\s+plazos|monthly|por\s+mes|per\s+month|mes\s+a\s+mes)\b"""
         )
         return !excludedListing.containsMatchIn(normalized) &&
             !Regex("""(?i)/\s*mes\b""").containsMatchIn(title)

@@ -208,7 +208,7 @@ fun OnlineSearchScreen(
                                 Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(17.dp))
                                 Spacer(Modifier.width(5.dp))
                             }
-                            Text("Google Shopping", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("Buscar ofertas", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         OutlinedButton(
                             onClick = onAmazonSearch,
@@ -235,7 +235,7 @@ fun OnlineSearchScreen(
                             ) {
                                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(5.dp))
-                                Text("Actualizar (puede gastar cuota)", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("Actualizar resultados ahora (puede consumir cuota)", maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         } else {
                             Spacer(Modifier.weight(1f))

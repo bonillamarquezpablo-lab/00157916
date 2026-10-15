@@ -348,7 +348,9 @@ fun MainScreen(
             },
             onCompareStores = { viewModel.prepareCompareStores(product) },
             onFetchFreeHistory = { viewModel.fetchFreePriceHistory(product) },
-            freeHistoryStatus = uiState.freeHistoryStatus,
+            freeHistoryStatus = uiState.freeHistoryStatus.takeIf {
+                uiState.freeHistoryProductId == product.id
+            },
             isFetchingFreeHistory = uiState.isFetchingFreeHistory,
             serpApiActionStatus = uiState.serpApiActionStatus,
             isComparingStores = uiState.isPreparingSerpApiAction ||

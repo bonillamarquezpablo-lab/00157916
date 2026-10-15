@@ -196,6 +196,7 @@ class ProductRepository(
                 result.price.isFinite() &&
                 result.price > 0.0 &&
                 result.price <= MAX_HISTORY_PRICE_EUR &&
+                isPlausibleHistoryPrice(result.title, result.price) &&
                 result.observedAt >= HISTORY_START_TIMESTAMP &&
                 !result.isRentalOrMonthly &&
                 !isPromotionalBulkListing(result.title, searchQuery) &&
@@ -285,6 +286,8 @@ class ProductRepository(
                     "Datos incompletos"
                 !result.price.isFinite() || result.price <= 0.0 || result.price > MAX_HISTORY_PRICE_EUR ->
                     "Sin precio válido"
+                !isPlausibleHistoryPrice(result.title, result.price) ->
+                    "Precio sospechosamente bajo para esta categoría"
                 result.isRentalOrMonthly ->
                     "Alquiler o cuota mensual"
                 isPromotionalBulkListing(result.title, searchQuery) ->
@@ -336,8 +339,42 @@ class ProductRepository(
             isEligibleSeller(observation.storeName, observation.sourceUrl) &&
             isPlausibleHistoryPrice(observation.productTitle, observation.price)
 
-    private fun isPlausibleHistoryPrice(title: String, price: Double): Boolean =
-        price.isFinite() && price > 0.0 && price <= MAX_HISTORY_PRICE_EUR
+    /**
+     * Conservative absolute floors catch a lone impossible-looking device price even when there
+     * are no comparable offers for median-based outlier detection. Explicit accessories are exempt:
+     * a cheap case or cable must not be rejected because its title mentions a laptop or console.
+     */
+    private fun isPlausibleHistoryPrice(title: String, price: Double): Boolean {
+        if (!price.isFinite() || price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR) return false
+        val normalized = normalizedProductTitle(title)
+        val accessory = Regex(
+            """\b(funda|case|carcasa|protector|cristal|cable|cargador|adaptador|repuesto|replacement|cover|bumper|pantalla|bateria|solo caja|dummy|mando|controller|gamepad|videojuego|juego)\b"""
+        ).containsMatchIn(normalized)
+        if (accessory) return true
+
+        val smartphone = Regex(
+            """\b(iphone|redmi|poco|pixel|oneplus|realme|oppo|vivo|honor|smartphone|galaxy\s+(s|a|z|m)\s?\d{1,2})\b"""
+        ).containsMatchIn(normalized)
+        if (smartphone && price < 45.0) return false
+
+        val tablet = Regex("""\b(ipad|tablet|galaxy\s+tab|lenovo\s+tab)\b""")
+            .containsMatchIn(normalized)
+        if (tablet && price < 50.0) return false
+
+        val laptop = Regex("""\b(laptop|portatil|macbook|chromebook|notebook)\b""")
+            .containsMatchIn(normalized)
+        if (laptop && price < 100.0) return false
+
+        val television = Regex("""\b(oled|qled|televisor|television|smart\s+tv|tv\s+(oled|qled|samsung|lg|sony))\b""")
+            .containsMatchIn(normalized)
+        if (television && price < 80.0) return false
+
+        val console = Regex("""\b(playstation\s*5|ps5|xbox\s+(series|one)|nintendo\s+switch)\b""")
+            .containsMatchIn(normalized)
+        if (console && price < 70.0) return false
+
+        return true
+    }
 
     /**
      * Persist each valid "new in store" result returned by a manual online search.

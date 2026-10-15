@@ -244,6 +244,14 @@ fun ProductCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    if (product.isPriceVerified && !product.isPriceFresh) {
+                        Text(
+                            text = product.priceFreshnessLabel,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.tertiary
+                        )
+                    }
                     if (product.isPriceVerified) {
                         Text(
                             text = "Precio observado en Google Shopping; confirma el precio final en la tienda.",

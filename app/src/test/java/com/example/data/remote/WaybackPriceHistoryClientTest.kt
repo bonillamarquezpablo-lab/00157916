@@ -111,6 +111,45 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun rejectsDifferentModelVariantEvenWhenMostTitleWordsMatch() {
+        val client = newClient()
+        val wrongCapacityHtml = """
+            <script type="application/ld+json">
+            {"@type":"Product","name":"Anker Prime 20K Power Bank",
+             "offers":{"@type":"Offer","price":"59.99","priceCurrency":"EUR"}}
+            </script>
+        """.trimIndent()
+
+        assertNull(
+            "A 20K archived page must not supply history for the 27K model",
+            client.parseArchivedPrice(
+                html = wrongCapacityHtml,
+                expectedTitle = "Anker Prime 27K Power Bank",
+                originalUrl = "https://shop.example/product/anker-prime-27k",
+                snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/product/anker-prime-27k",
+                observedAt = 1_735_732_800_000L
+            )
+        )
+
+        val sameCapacityDifferentFormatting = """
+            <script type="application/ld+json">
+            {"@type":"Product","name":"Samsung Galaxy S26 Ultra 512 GB",
+             "offers":{"@type":"Offer","price":"1299.00","priceCurrency":"EUR"}}
+            </script>
+        """.trimIndent()
+        assertNotNull(
+            "Equivalent capacity formats such as 512GB and 512 GB should still match",
+            client.parseArchivedPrice(
+                html = sameCapacityDifferentFormatting,
+                expectedTitle = "Samsung Galaxy S26 Ultra 512GB",
+                originalUrl = "https://shop.example/product/galaxy-s26-ultra",
+                snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/product/galaxy-s26-ultra",
+                observedAt = 1_735_732_800_000L
+            )
+        )
+    }
+
+    @Test
     fun readsExplicitEurProductMetaTagsAndRejectsGoogleUrlAsArchiveTarget() {
         val client = newClient()
         val html = """

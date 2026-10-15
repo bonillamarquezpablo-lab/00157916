@@ -52,9 +52,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.example.data.model.Store
 import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
+import com.example.data.remote.extractDirectRetailerUrl
 import com.example.data.remote.isAccessorySearchQuery
 import com.example.data.remote.isWheelFitmentQuery
 import com.example.ui.viewmodel.OnlineSearchProvider
@@ -397,7 +399,22 @@ fun OnlineSearchScreen(
                     },
                     onOpenBestOffer = {
                         val purchaseOffer = group.bestPurchaseOffer
-                        openStoreUrl(context, purchaseOffer.sourceUrl, preferAmazonApp = purchaseOffer.isAmazonOffer)
+                        val directDestination = extractDirectRetailerUrl(purchaseOffer.sourceUrl)
+                        val knownStore = Store.findKnownByName(
+                            name = purchaseOffer.storeName,
+                            sourceUrl = purchaseOffer.sourceUrl
+                        )
+                        // When Google exposes only a catalog page, route to the identified
+                        // retailer's own search page instead of a generic Google search.
+                        val destination = directDestination
+                            ?: knownStore?.searchUrlFor(purchaseOffer.title)
+                            ?: purchaseOffer.sourceUrl
+                        openStoreUrl(
+                            context,
+                            destination,
+                            preferAmazonApp = purchaseOffer.isAmazonOffer &&
+                                destination.contains("amazon.es", ignoreCase = true)
+                        )
                     }
                 )
             }
@@ -421,6 +438,12 @@ private fun ShoppingResultCard(
     val best = group.cheapestOffer
     // Shared by the card details and its action button; keep it in the composable scope.
     val purchaseOffer = group.bestPurchaseOffer
+    val directRetailerUrl = extractDirectRetailerUrl(purchaseOffer.sourceUrl)
+    val knownRetailer = Store.findKnownByName(
+        name = purchaseOffer.storeName,
+        sourceUrl = purchaseOffer.sourceUrl
+    )
+    val canOpenRetailer = directRetailerUrl != null || knownRetailer != null
     val fitmentUnverified = group.offers.all { it.isFitmentUnverified }
     val categoryUnverified = group.offers.all { it.isCategoryUnverified }
     val wheelSetCount = group.wheelSetCount
@@ -559,11 +582,14 @@ private fun ShoppingResultCard(
             OutlinedButton(onClick = onOpenBestOffer, modifier = Modifier.fillMaxWidth()) {
                 Text(
                     when {
-                        (categoryUnverified || fitmentUnverified) && purchaseOffer.isGoogleShoppingProductLink -> "Revisar variante en Google Shopping"
+                        (categoryUnverified || fitmentUnverified) && !canOpenRetailer && purchaseOffer.isGoogleShoppingProductLink -> "Revisar variante en Google Shopping"
+                        (categoryUnverified || fitmentUnverified) && knownRetailer != null && directRetailerUrl == null -> "Buscar variante en ${knownRetailer.name}"
                         (categoryUnverified || fitmentUnverified) -> "Revisar variante · " + purchaseOffer.storeName
-                        !hasTrustedPrice && purchaseOffer.isGoogleShoppingProductLink -> "Revisar oferta sin verificar en Google Shopping"
+                        !hasTrustedPrice && !canOpenRetailer && purchaseOffer.isGoogleShoppingProductLink -> "Revisar oferta sin verificar en Google Shopping"
+                        !hasTrustedPrice && knownRetailer != null && directRetailerUrl == null -> "Buscar oferta sin verificar en ${knownRetailer.name}"
                         !hasTrustedPrice -> "Revisar oferta sin verificar · ${purchaseOffer.storeName}"
-                        purchaseOffer.isGoogleShoppingProductLink -> "Abrir precio más bajo en Google Shopping"
+                        purchaseOffer.isGoogleShoppingProductLink && knownRetailer != null && directRetailerUrl == null -> "Buscar en ${knownRetailer.name}"
+                        purchaseOffer.isGoogleShoppingProductLink && directRetailerUrl == null -> "Abrir en Google Shopping"
                         else -> "Abrir oferta directa · ${purchaseOffer.storeName}"
                     }
                 )

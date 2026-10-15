@@ -85,11 +85,11 @@ fun SetAlertDialog(
                 Text(
                     text = when {
                         product.hasSufficientHistory ->
-                            "Precio observado: ${String.format("%.2f", product.currentPrice)} €\\nMínimo observado en los datos disponibles: ${String.format("%.2f", product.athMinPrice)} €.\\n\\nEl objetivo se guarda en este móvil; esta versión todavía no comprueba precios en segundo plano ni envía avisos automáticos."
+                            "Precio observado: ${String.format("%.2f", product.currentPrice)} €\nMínimo observado en los datos disponibles: ${String.format("%.2f", product.athMinPrice)} €.\n\nEl objetivo se guarda en este móvil. Con una clave SerpApi válida y conexión a Internet, Mínimo revisa automáticamente hasta 3 productos seguidos al día. Android puede retrasar la comprobación; para recibir avisos, activa las notificaciones y concede permiso."
                         product.isPriceVerified ->
-                            "Precio observado: ${String.format("%.2f", product.currentPrice)} €. Aún no hay suficientes datos para calcular un mínimo histórico.\\n\\nEl objetivo se guarda en este móvil; esta versión todavía no comprueba precios en segundo plano ni envía avisos automáticos."
+                            "Precio observado: ${String.format("%.2f", product.currentPrice)} €. Aún no hay suficientes datos para calcular un mínimo histórico.\n\nEl objetivo se guarda en este móvil. Con una clave SerpApi válida y conexión a Internet, Mínimo revisa automáticamente hasta 3 productos seguidos al día. Android puede retrasar la comprobación; para recibir avisos, activa las notificaciones y concede permiso."
                         else ->
-                            "Esta ficha contiene datos de demostración y no tiene un precio actual consultado. Puedes guardar un objetivo manual, pero esta versión todavía no comprueba precios en segundo plano ni envía avisos automáticos."
+                            "Esta ficha aún no tiene un precio actual verificado. Puedes guardar un objetivo; con una clave SerpApi válida y conexión a Internet, Mínimo revisa automáticamente hasta 3 productos seguidos al día. Android puede retrasar la comprobación; para recibir avisos, activa las notificaciones y concede permiso."
                     },
                     fontSize = 12.sp,
                     lineHeight = 16.sp

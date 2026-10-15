@@ -516,6 +516,8 @@ class ProductRepository(
 
         for (quote in quotes.distinctBy { it.observedAt to it.price }) {
             val snapshotUri = parseHttpUri(quote.snapshotUrl) ?: continue
+            // Historical evidence must come from the HTTPS archive endpoint, not plaintext HTTP.
+            if (!snapshotUri.scheme.equals("https", ignoreCase = true)) continue
             if (!snapshotUri.host.equals("web.archive.org", ignoreCase = true)) continue
             val rawSnapshotTimestamp = Regex("""^/web/(\d{14})id_/""")
                 .find(snapshotUri.path.orEmpty())?.groupValues?.getOrNull(1) ?: continue

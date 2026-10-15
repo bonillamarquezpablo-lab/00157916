@@ -1236,7 +1236,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     async {
                         candidate to waybackPriceHistoryClient.resolveStoreUrl(
                             originalUrl = candidate.sourceUrl,
-                            storeName = candidate.storeName
+                            storeName = candidate.storeName,
+                            expectedTitle = candidate.title
                         )
                     }
                 }.awaitAll()

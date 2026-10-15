@@ -18,6 +18,7 @@ import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.groupOnlineShoppingResults
+import com.example.data.remote.isIrrelevantMultiProductBundle
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.linkTypeForUrl
 import com.example.data.remote.isWheelFitmentQuery
@@ -199,6 +200,7 @@ class ProductRepository(
                 result.observedAt >= HISTORY_START_TIMESTAMP &&
                 !result.isRentalOrMonthly &&
                 !isPromotionalBulkListing(result.title, searchQuery) &&
+                !isIrrelevantMultiProductBundle(searchQuery, result.title) &&
                 !hasStrictModelMismatch(
                     searchQuery,
                     queryModelMarkers,
@@ -295,6 +297,8 @@ class ProductRepository(
                     "Alquiler o cuota mensual"
                 isPromotionalBulkListing(result.title, searchQuery) ->
                     "Merchandising promocional o lote no solicitado"
+                isIrrelevantMultiProductBundle(searchQuery, result.title) ->
+                    "Pack con varios productos no solicitado"
                 !isMerchantDestinationConsistent(result.storeName, result.sourceUrl) ->
                     "El dominio del enlace no coincide con el vendedor"
                 result.isSecondHand ->

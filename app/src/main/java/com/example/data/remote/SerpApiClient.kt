@@ -1403,13 +1403,22 @@ class SerpApiClient(
                 "teclado", "keyboard", "raton", "mouse", "cargador", "charger",
                 "bateria", "battery", "power", "bank", "perfume", "perfumes",
                 "crema", "cream", "skin", "hombre", "hombres", "mujer", "mujeres",
-                "men", "women", "frauen", "damen", "mann", "kosmetik", "pflege"
+                "men", "women", "frauen", "damen", "mann", "kosmetik", "pflege",
+                "galaxy", "pixel", "iphone", "redmi", "poco"
             )
-            val identityAnchors = orderedWanted
-                .filter { it.length >= 4 && it !in genericAnchorTerms }
-                .take(2)
+            // Keep explicit model/edition numbers even when short (S26, 17, 2024), and
+            // combine them with up to two distinctive text anchors. Otherwise "Samsung Galaxy
+            // S26" could accidentally match "Samsung Galaxy S25" because the first two tokens
+            // identify only the brand/family.
+            val modelAnchors = orderedWanted.filter { token ->
+                token.any(Char::isDigit) && token.length >= 2 && token !in genericAnchorTerms
+            }
+            val textAnchors = orderedWanted.filter { token ->
+                token.length >= 4 && token !in genericAnchorTerms && !token.any(Char::isDigit)
+            }.take(2)
+            val identityAnchors = (textAnchors + modelAnchors).distinct()
             // Every selected identity anchor must match. Matching only the brand is not
-            // enough when the query also names an exact model (e.g. WH-1000XM5 vs WH-1000XM4).
+            // enough when the query also names an exact model or edition.
             if (identityAnchors.any { anchor -> !tokenMatches(anchor) }) return false
         }
 

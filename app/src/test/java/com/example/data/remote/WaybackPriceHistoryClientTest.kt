@@ -135,6 +135,28 @@ class WaybackPriceHistoryClientTest {
         assertFalse(client.isEligibleDirectUrl("https://shop.example/"))
     }
     @Test
+    fun parsesDotOnlyEuropeanThousandsSeparatorInArchivedMetadata() {
+        val client = newClient()
+        val html = """
+            <html><head>
+              <meta property="og:title" content="Samsung Galaxy S26 Ultra 512GB" />
+              <meta property="product:price:amount" content="1.299" />
+              <meta property="product:price:currency" content="EUR" />
+            </head></html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "Samsung Galaxy S26 Ultra 512GB",
+            originalUrl = "https://shop.example/product/galaxy-s26-ultra",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/product/galaxy-s26-ultra",
+            observedAt = 1_735_732_800_000L
+        )
+        assertNotNull(quote)
+        assertEquals(1299.0, quote!!.price, 0.001)
+    }
+
+    @Test
     fun resolvesKnownMerchantLabelsAndBuildsBoundedFreeDomainQuery() {
         val client = newClient()
         assertEquals("notino.es", client.resolveMerchantDomain("Notino.es"))

@@ -810,7 +810,9 @@ class SerpApiClient(
             ) return@mapNotNull null
 
             val priceText = store.optString("price")
-            if (hasExplicitForeignCurrency(priceText)) return@mapNotNull null
+            if (hasExplicitForeignCurrency(priceText) || hasExplicitNonEurCurrency(store)) {
+                return@mapNotNull null
+            }
             val extractedPrice = store.opt("extracted_price")
                 ?.takeIf { it !is JSONObject && it !is JSONArray }
                 ?.toString()

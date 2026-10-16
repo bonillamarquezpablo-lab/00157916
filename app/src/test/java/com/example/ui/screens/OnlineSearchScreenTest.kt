@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.testTag
 import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiShoppingResult
+import com.example.data.remote.groupOnlineShoppingResults
 import com.example.ui.viewmodel.OnlineSearchProvider
 import com.example.ui.viewmodel.TrackerUiState
 import org.json.JSONObject

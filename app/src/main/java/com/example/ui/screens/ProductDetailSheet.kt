@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.Product
 import com.example.data.model.Store
 import com.example.data.remote.extractDirectRetailerUrl
+import com.example.data.remote.isGoogleShoppingUrl
 import com.example.security.openExternalHttpsUrl
 import com.example.security.safeExternalHttpsUrl
 import java.text.SimpleDateFormat
@@ -582,21 +583,29 @@ fun ProductDetailSheet(
                         name = product.currentStore.name,
                         sourceUrl = product.storeUrl
                     )
+                    val catalogOnlyGoogleLink = extractDirectRetailerUrl(product.storeUrl) == null &&
+                        isGoogleShoppingUrl(product.storeUrl) &&
+                        !product.googleProductId.isNullOrBlank()
                     val destination = exactRetailerUrl
-                        ?: knownRetailer?.searchUrlFor(product.title)
-                        ?: product.currentStore.officialUrl.takeIf { extractDirectRetailerUrl(it) != null }
-                        ?: product.storeUrl
+                        ?: if (catalogOnlyGoogleLink) null else
+                            knownRetailer?.searchUrlFor(product.title)
+                                ?: product.currentStore.officialUrl.takeIf { extractDirectRetailerUrl(it) != null }
+                                ?: product.storeUrl
                     val safeDestination = safeExternalHttpsUrl(destination)
                     OutlinedButton(
-                        onClick = { openExternalHttpsUrl(context, safeDestination) },
+                        onClick = {
+                            if (catalogOnlyGoogleLink) onCompareStores()
+                            else safeDestination?.let { openExternalHttpsUrl(context, it) }
+                        },
                         modifier = Modifier
                             .weight(1f)
                             .height(44.dp),
-                        enabled = safeDestination != null,
+                        enabled = catalogOnlyGoogleLink || safeDestination != null,
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text(
                             when {
+                                catalogOnlyGoogleLink -> "Comparar tiendas y enlaces directos"
                                 exactRetailerUrl != null -> "Ver en ${product.currentStore.name}"
                                 knownRetailer?.supportsProductSearch == true -> "Buscar en ${knownRetailer.name}"
                                 knownRetailer != null -> "Abrir web de ${knownRetailer.name}"

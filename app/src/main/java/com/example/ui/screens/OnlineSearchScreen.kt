@@ -419,6 +419,13 @@ fun OnlineSearchScreen(
                                 preferAmazonApp = purchaseOffer.isAmazonOffer &&
                                     directDestination.contains("amazon.es", ignoreCase = true)
                             )
+                            purchaseOffer.isGoogleShoppingProductLink &&
+                                canOpenProductDetail && !purchaseOffer.googleProductId.isNullOrBlank() -> {
+                                // A catalog ID can retrieve retailer links through the quota-confirmed
+                                // comparison flow. Don't route back to Google or a generic store search
+                                // when that path is available.
+                                onOpenProduct(group.identityKey)
+                            }
                             knownStore != null -> {
                                 val storeDestination = knownStore.searchUrlFor(purchaseOffer.title)
                                 openStoreUrl(
@@ -427,12 +434,6 @@ fun OnlineSearchScreen(
                                     preferAmazonApp = purchaseOffer.isAmazonOffer &&
                                         storeDestination.contains("amazon.es", ignoreCase = true)
                                 )
-                            }
-                            canOpenProductDetail && !purchaseOffer.googleProductId.isNullOrBlank() -> {
-                                // The catalog page is not a retailer URL. Open the saved product
-                                // so the user can explicitly run the quota-confirmed store-offers
-                                // action instead of being silently sent back to a Google result.
-                                onOpenProduct(group.identityKey)
                             }
                             else -> openStoreUrl(
                                 context,
@@ -610,10 +611,10 @@ private fun ShoppingResultCard(
                         (categoryUnverified || fitmentUnverified) && !canOpenRetailer && purchaseOffer.isGoogleShoppingProductLink -> "Revisar variante en Google Shopping"
                         (categoryUnverified || fitmentUnverified) && knownRetailer != null && directRetailerUrl == null -> "Buscar variante en ${knownRetailer.name}"
                         (categoryUnverified || fitmentUnverified) -> "Revisar variante · " + purchaseOffer.storeName
-                        purchaseOffer.isGoogleShoppingProductLink && knownRetailer != null && directRetailerUrl == null -> "Buscar en ${knownRetailer.name}"
                         purchaseOffer.isGoogleShoppingProductLink && directRetailerUrl == null &&
                             onOpenProduct != null && !purchaseOffer.googleProductId.isNullOrBlank() ->
                             "Ver tiendas y enlaces directos"
+                        purchaseOffer.isGoogleShoppingProductLink && knownRetailer != null && directRetailerUrl == null -> "Buscar en ${knownRetailer.name}"
                         !hasTrustedPrice && !canOpenRetailer && purchaseOffer.isGoogleShoppingProductLink ->
                             "Revisar oferta sin verificar en Google Shopping"
                         !hasTrustedPrice && knownRetailer != null && directRetailerUrl == null -> "Buscar oferta sin verificar en ${knownRetailer.name}"

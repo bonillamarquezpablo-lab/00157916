@@ -103,7 +103,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     private companion object {
         const val TRACKED_REFRESH_COOLDOWN_MS = 24L * 60L * 60L * 1000L
         const val MAX_TRACKED_REFRESH_PER_TAP = 10
-        const val MAX_ARCHIVE_PAGES_PER_SEARCH = 2
+        const val MAX_ARCHIVE_PAGES_PER_SEARCH = 4
         const val MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS = 20_000L
     }
 
@@ -1270,7 +1270,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         val candidates = results
             .filterNot { it.isSecondHand || it.isRentalOrMonthly || it.isFitmentUnverified || it.isCategoryUnverified }
             .filter { it.title.isNotBlank() && it.price.isFinite() && it.price > 0.0 }
-            .sortedBy { it.price }
+            // Direct merchant pages usually expose better historical product metadata than
+            // Google catalog redirects. Prefer those URLs first, then sort by the observed price.
+            .sortedWith(
+                compareBy<SerpApiShoppingResult> { it.isGoogleShoppingProductLink }
+                    .thenBy { it.price }
+            )
             .mapNotNull { result ->
                 buildFreeArchiveCandidate(
                     title = result.title,

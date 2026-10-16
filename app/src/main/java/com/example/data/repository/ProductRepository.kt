@@ -610,22 +610,27 @@ class ProductRepository(
             }
             val productEntity = if (existingProduct != null) {
                 existingProduct.copy(
-                    title = displayTitle,
-                    brand = existingProduct.brand.takeIf { it.isNotBlank() }
-                        ?: inferProductBrand(displayTitle),
-                    category = if (existingProduct.category == ProductCategory.ALL.name) {
+                    // Un untrusted-only batch cannot rewrite the saved product's identifying UI data.
+                    title = if (hasTrustedOffer) displayTitle else existingProduct.title,
+                    brand = if (hasTrustedOffer && existingProduct.brand.isBlank()) {
+                        inferProductBrand(displayTitle)
+                    } else existingProduct.brand,
+                    category = if (hasTrustedOffer && existingProduct.category == ProductCategory.ALL.name) {
                         inferProductCategory(displayTitle, searchQuery).name
                     } else existingProduct.category,
                     currentPrice = currentMinimum,
                     athMinPrice = if (hasTrustedOffer && existingProduct.athMinPrice <= 0.0) currentMinimum else existingProduct.athMinPrice,
-                    athMinDate = existingProduct.athMinDate.ifBlank { "Historial en construcción" },
+                    athMinDate = if (hasTrustedOffer) existingProduct.athMinDate.ifBlank { "Historial en construcción" }
+                        else existingProduct.athMinDate,
                     athMinStore = safeMinStore,
                     athMaxPrice = if (hasTrustedOffer) maxOf(existingProduct.athMaxPrice, trustedHighestToday ?: currentMinimum)
                         else existingProduct.athMaxPrice,
                     currentStoreId = safeStoreId,
                     storeUrl = safeStoreUrl,
-                    imageUrl = group.representativeImageUrl.takeIf { it.isNotBlank() }
-                        ?: existingProduct.imageUrl.takeIf { existingProduct.title.equals(displayTitle, ignoreCase = true) },
+                    imageUrl = if (hasTrustedOffer) {
+                        group.representativeImageUrl.takeIf { it.isNotBlank() }
+                            ?: existingProduct.imageUrl.takeIf { existingProduct.title.equals(displayTitle, ignoreCase = true) }
+                    } else existingProduct.imageUrl,
                     isPriceVerified = hasTrustedOffer || existingProduct.isPriceVerified,
                     googleProductId = safeGoogleProductId
                 )

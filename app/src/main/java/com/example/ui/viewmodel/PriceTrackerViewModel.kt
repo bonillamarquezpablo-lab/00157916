@@ -953,7 +953,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             val currentDestination = product.storeUrl.ifBlank { product.currentStore.officialUrl }
             buildFreeArchiveCandidate(product.title, product.currentStore.name, currentDestination)?.let(::add)
         }.distinctBy {
-            it.title.trim().lowercase(Locale.ROOT) + "|" + (it.merchantDomain ?: it.directUrl ?: "unknown")
+            // Different direct product URLs on one merchant domain may represent distinct variants.
+            // Deduplicate exact URLs first; use the domain only for domain-only discovery candidates.
+            it.title.trim().lowercase(Locale.ROOT) + "|" + (it.directUrl ?: it.merchantDomain ?: "unknown")
         }.take(MAX_ARCHIVE_PAGES_PER_SEARCH)
 
         if (candidates.isEmpty()) {
@@ -1354,7 +1356,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
                 val notice = when {
                     skippedCount == candidates.size ->
-                        "Estas consultas gratuitas ya se comprobaron recientemente. Se evita repetirlas durante 30 días para no sobrecargar Internet Archive."
+                        "Estas consultas gratuitas ya se comprobaron recientemente. La caché evita repetirlas mientras siga vigente, según si había precios útiles o si la consulta falló."
                     savedCount > 0 -> {
                         val oldest = archiveDates.minOrNull()?.let { timestamp ->
                             SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(timestamp))

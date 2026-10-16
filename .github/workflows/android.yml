@@ -76,8 +76,10 @@ jobs:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
-          VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))
-          VERSION_NAME="1.5.${GITHUB_RUN_NUMBER}"
+          # Keep every CI build installable over the previously installed 1.5.920.
+          # The 2xxx versionCode range and 1.6.x name are intentionally newer than 1.5.x.
+          VERSION_CODE=$((2000 + GITHUB_RUN_NUMBER))
+          VERSION_NAME="1.6.${GITHUB_RUN_NUMBER}"
           echo "Building Mínimo ${VERSION_NAME} (versionCode ${VERSION_CODE})"
           gradle :app:assembleDebug --stacktrace -PVERSION_CODE="${VERSION_CODE}" -PVERSION_NAME="${VERSION_NAME}"
 

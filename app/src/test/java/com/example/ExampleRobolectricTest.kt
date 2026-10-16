@@ -954,8 +954,9 @@ class ExampleRobolectricTest {
             assertEquals(0, repository.recordOnlineSearchResults(listOf(duplicate), "GOOGLE_SHOPPING"))
             assertEquals(2, database.priceObservationDao().getVerifiedObservationCount())
 
-            // A following day's query must be retained as a second dated history point.
-            val nextDay = now + 24L * 60L * 60L * 1000L
+            // A previous day's query must be retained as a second dated history point.
+            // Never synthesize a future timestamp just to exercise daily grouping.
+            val nextDay = now - 24L * 60L * 60L * 1000L
             val tomorrowResults = listOf(
                 results[0].copy(price = 229.99, observedAt = nextDay),
                 results[1].copy(price = 224.99, observedAt = nextDay)

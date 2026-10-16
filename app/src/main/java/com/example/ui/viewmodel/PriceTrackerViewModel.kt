@@ -573,20 +573,20 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     return@launch
                 }
 
-                val firstTen = eligible.take(MAX_TRACKED_REFRESH_PER_TAP)
-                val searches = minOf(firstTen.size, accountCapacity(accountInfo))
+                val firstBatch = eligible.take(MAX_TRACKED_REFRESH_PER_TAP)
+                val searches = minOf(firstBatch.size, accountCapacity(accountInfo))
                 if (searches <= 0) {
                     val message = quotaBlockMessage(accountInfo)
                     _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
                     showSnackbar(message)
                     return@launch
                 }
-                pendingTrackedRefreshProducts = firstTen.take(searches)
+                pendingTrackedRefreshProducts = firstBatch.take(searches)
                 val selectionNote = when {
                     eligible.size > MAX_TRACKED_REFRESH_PER_TAP ->
                         "Hay ${eligible.size} productos pendientes; esta pulsación procesa como máximo ${MAX_TRACKED_REFRESH_PER_TAP} para reducir carga. Al terminar, pulsa «Actualizar guardados» de nuevo para continuar con los siguientes."
-                    searches < firstTen.size ->
-                        "Por el saldo disponible solo se podrán consultar ${searches} de ${firstTen.size} productos pendientes."
+                    searches < firstBatch.size ->
+                        "Por el saldo disponible solo se podrán consultar ${searches} de ${firstBatch.size} productos pendientes."
                     else -> "Se omiten los productos consultados en las últimas 24 horas."
                 }
                 _uiState.value = _uiState.value.copy(

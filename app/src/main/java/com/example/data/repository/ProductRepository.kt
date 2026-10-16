@@ -1610,6 +1610,7 @@ class ProductRepository(
                 }.getOrDefault(rawKey).lowercase(Locale.ROOT)
                 decodedKey.startsWith("utm_") || decodedKey in trackingKeys
             }
+            .sorted()
             .joinToString("&")
         val querySuffix = if (meaningfulQuery.isEmpty()) "" else "?$meaningfulQuery"
         val fragmentSuffix = uri.rawFragment?.let { "#$it" }.orEmpty()

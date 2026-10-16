@@ -297,6 +297,8 @@ class WaybackPriceHistoryClientTest {
         assertEquals("lamanzanita.es", client.resolveMerchantDomain("La Manzanita", googleUrl))
         assertEquals("nike.com", client.resolveMerchantDomain("Nike Oficial", googleUrl))
         assertEquals("sprinter.es", client.resolveMerchantDomain("Sprinter Deportes", googleUrl))
+        assertEquals("ebay.es", client.resolveMerchantDomain("eBay - mvh-racing", googleUrl))
+        assertEquals("movistar.es", client.resolveMerchantDomain("Movistar", googleUrl))
 
         assertEquals("Apple Store" to "apple.com", client.resolveBrandMerchant("Apple iPhone 16 256GB"))
         assertEquals("Nike" to "nike.com", client.resolveBrandMerchant("Nike Air Max Plus Zapatillas"))

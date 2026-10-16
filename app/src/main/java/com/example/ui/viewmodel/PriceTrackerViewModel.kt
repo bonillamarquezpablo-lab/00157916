@@ -8,6 +8,7 @@ import com.example.data.local.AppDatabase
 import com.example.data.remote.OnlineSearchCache
 import com.example.data.remote.WaybackPriceHistoryClient
 import com.example.data.remote.isGoogleShoppingUrl
+import com.example.data.remote.extractDirectRetailerUrl
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.SerpApiAccountInfo
@@ -1207,13 +1208,29 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         sourceUrl: String
     ): FreeArchiveCandidate? {
         if (title.isBlank()) return null
-        val directUrl = sourceUrl.takeIf {
-            !isGoogleShoppingUrl(it) && waybackPriceHistoryClient.isEligibleDirectUrl(it)
-        }
         val resolvedDomain = waybackPriceHistoryClient.resolveMerchantDomain(
             storeName = storeName,
             sourceUrl = sourceUrl
         )
+        // Un enlace de Google puede contener la URL real de la tienda en un parámetro de
+        // redirección. Solo aceptamos ese destino si pertenece al comercio identificado;
+        // nunca inferimos el vendedor a partir de un redirect genérico de Google.
+        val extractedUrl = extractDirectRetailerUrl(sourceUrl)
+        val directUrl = extractedUrl?.takeIf { candidateUrl ->
+            if (!waybackPriceHistoryClient.isEligibleDirectUrl(candidateUrl)) {
+                false
+            } else if (!isGoogleShoppingUrl(sourceUrl)) {
+                true
+            } else {
+                val expectedDomain = resolvedDomain ?: return@takeIf false
+                val actualHost = runCatching {
+                    java.net.URI(candidateUrl).host.orEmpty()
+                        .lowercase(Locale.ROOT)
+                        .removePrefix("www.")
+                }.getOrDefault("")
+                actualHost == expectedDomain || actualHost.endsWith(".$expectedDomain")
+            }
+        }
         // Some Google Shopping rows expose only Google's intermediate URL and label the source
         // as "Google Shopping", omitting the seller. If that happens, make a bounded fallback
         // to a recognized brand's own website; the archived page still needs an exact title and

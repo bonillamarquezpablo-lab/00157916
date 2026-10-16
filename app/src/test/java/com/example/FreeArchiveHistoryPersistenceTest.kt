@@ -8,6 +8,7 @@ import com.example.data.local.ProductEntity
 import com.example.data.local.PriceObservationEntity
 import com.example.data.repository.ProductRepository
 import com.example.data.remote.ArchivedPriceQuote
+import com.example.data.remote.SerpApiShoppingResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -730,6 +731,81 @@ class FreeArchiveHistoryPersistenceTest {
             assertEquals(1, product.priceHistory.size)
             assertEquals(89.99, product.priceHistory.single().price, 0.001)
             assertEquals(archivedAt, product.priceHistory.single().timestamp)
+        } finally {
+            database.close()
+        }
+    }
+
+
+    @Test
+    fun suspiciousHuaweiPhonePricesStayVisibleButDoNotReplaceSavedPrice() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        val productTitle = "Huawei Mate X6 Smartphone"
+        val originalPrice = 1499.99
+        val now = System.currentTimeMillis()
+
+        try {
+            database.productDao().insert(
+                ProductEntity(
+                    id = "huawei-mate-x6-price-floor-test",
+                    title = productTitle,
+                    brand = "Huawei",
+                    category = "SMARTPHONES",
+                    currentPrice = originalPrice,
+                    athMinPrice = originalPrice,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "Fnac España",
+                    athMaxPrice = originalPrice,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "fnac",
+                    storeUrl = "https://www.fnac.es/",
+                    ean = "",
+                    isPriceVerified = true
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao()
+            )
+            val suspiciousOffers = listOf(
+                SerpApiShoppingResult(
+                    title = productTitle,
+                    price = 5.62,
+                    storeName = "Fnac España",
+                    sourceUrl = "https://www.fnac.es/Huawei-Mate-X6",
+                    observedAt = now
+                ),
+                SerpApiShoppingResult(
+                    title = productTitle,
+                    price = 5.96,
+                    storeName = "MediaMarkt España",
+                    sourceUrl = "https://www.mediamarkt.es/Huawei-Mate-X6",
+                    observedAt = now
+                )
+            )
+
+            val diagnosed = repository.filterOnlineSearchResults(
+                suspiciousOffers,
+                searchQuery = productTitle
+            )
+            assertEquals(2, diagnosed.size)
+            assertTrue("A €5 phone listing must be retained only as a suspicious observation",
+                diagnosed.all { it.isSuspiciousPrice })
+
+            repository.recordOnlineSearchResults(
+                results = suspiciousOffers,
+                sourceType = "GOOGLE_SHOPPING",
+                searchQuery = productTitle
+            )
+            val saved = database.productDao().getProductById("huawei-mate-x6-price-floor-test")
+            assertEquals(originalPrice, saved!!.currentPrice, 0.001)
         } finally {
             database.close()
         }

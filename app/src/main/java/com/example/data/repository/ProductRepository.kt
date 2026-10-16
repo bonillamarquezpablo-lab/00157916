@@ -113,6 +113,7 @@ class ProductRepository(
         observations.asSequence()
             .filter { observation ->
                 observation.isVerified &&
+                    isLiveObservation(observation) &&
                     observation.currency.trim().equals("EUR", ignoreCase = true) &&
                     observation.price.isFinite() && observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
                     observation.observedAt in 1L..System.currentTimeMillis() &&

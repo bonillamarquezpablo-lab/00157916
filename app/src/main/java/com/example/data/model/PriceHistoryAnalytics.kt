@@ -36,3 +36,36 @@ fun summarizePriceHistory(points: List<PricePoint>): PriceHistorySummary {
             .takeIf { validPoints.size >= 2 }
     )
 }
+
+/**
+ * Minimum among prices actually captured by Mínimo. Third-party historical insights and
+ * archived snapshots are excluded: they are useful context, but Mínimo did not observe them
+ * on their original dates. Unlike a historical claim, this can return a single first observation.
+ */
+data class InAppObservedMinimum(
+    val observationCount: Int,
+    val lowestPoint: PricePoint?
+)
+
+/**
+ * Summarizes only live observations made by the app's price collection flow.
+ * A single result is displayed as a first recorded price, not as a historical record.
+ */
+fun summarizeInAppObservedPrices(points: List<PricePoint>): InAppObservedMinimum {
+    val appObservedPoints = sanitizePriceHistory(
+        points.filterNot { point ->
+            val source = point.eventLabel.orEmpty()
+            val linkType = point.linkType
+            source.contains("internet archive", ignoreCase = true) ||
+                source.contains("web.archive.org", ignoreCase = true) ||
+                source.contains("price_insights", ignoreCase = true) ||
+                linkType.contains("archivo", ignoreCase = true) ||
+                linkType.contains("historial google shopping", ignoreCase = true)
+        }
+    )
+    return InAppObservedMinimum(
+        observationCount = appObservedPoints.size,
+        lowestPoint = appObservedPoints.minByOrNull { it.price }
+    )
+}
+

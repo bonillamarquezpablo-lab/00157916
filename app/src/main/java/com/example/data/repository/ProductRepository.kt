@@ -145,11 +145,27 @@ class ProductRepository(
     ): Boolean {
         val observedTitle = observation.productTitle.ifBlank { catalogTitle }
         val seller = observation.storeName.ifBlank { observation.storeId }
+        val source = observation.sourceType.ifBlank { observation.sourceName }
+        val sourceIsRecognized = source.equals("Google Shopping", ignoreCase = true) ||
+            source.equals("Amazon.es", ignoreCase = true) ||
+            observation.sourceName.equals("Amazon.es", ignoreCase = true) ||
+            observation.sourceName.equals("GOOGLE_SHOPPING", ignoreCase = true)
+        val uri = parseHttpUri(observation.sourceUrl)
+        val host = uri?.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+        val pointsToSearchInsteadOfMerchant = host in setOf(
+            "google.com", "google.es", "shopping.google.com"
+        ) || host.contains("googleadservices.com") ||
+            host.contains("googlesyndication.com") || host.contains("googleusercontent.com")
         return observation.productId.isNotBlank() &&
+            observation.observedAt > 0L &&
+            observation.observedAt <= System.currentTimeMillis() + MAX_FUTURE_OBSERVATION_SKEW_MS &&
             observation.price.isFinite() &&
             observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
-            observation.currency == "EUR" &&
-            parseHttpUri(observation.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
+            observation.currency.equals("EUR", ignoreCase = true) &&
+            uri?.scheme.equals("https", ignoreCase = true) &&
+            !pointsToSearchInsteadOfMerchant &&
+            sourceIsRecognized &&
+            observation.sourceType in setOf("Google Shopping", "Amazon.es") &&
             isEligibleHistoryTitle(observedTitle) &&
             isEligibleSeller(seller) &&
             isPlausibleHistoryPrice(observedTitle, observation.price) &&
@@ -169,13 +185,18 @@ class ProductRepository(
         }
         val validQuotes = quotes.filter { quote ->
             val title = titleById[quote.productId].orEmpty()
-            quote.productId.isNotBlank() &&
+            val uri = parseHttpUri(quote.sourceUrl)
+            title.isNotBlank() &&
+                quote.productId.isNotBlank() &&
+                quote.observedAt > 0L &&
+                quote.observedAt <= System.currentTimeMillis() + MAX_FUTURE_OBSERVATION_SKEW_MS &&
                 quote.price.isFinite() && quote.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
-                quote.currency == "EUR" &&
-                parseHttpUri(quote.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
+                quote.currency.equals("EUR", ignoreCase = true) &&
+                uri?.scheme.equals("https", ignoreCase = true) &&
                 isEligibleHistoryTitle(title) &&
                 isEligibleSeller(quote.storeName) &&
-                isPlausibleHistoryPrice(title, quote.price)
+                isPlausibleHistoryPrice(title, quote.price) &&
+                isSafeCatalogTitleMatch(title, title)
         }
         if (validQuotes.isEmpty()) return 0
 
@@ -224,11 +245,21 @@ class ProductRepository(
         val deviceSearch = isDeviceSearchQuery(searchQuery)
         val queryModelMarkers = explicitModelMarkers(searchQuery)
         val eligible = results.filter { result ->
+            val uri = parseHttpUri(result.sourceUrl)
+            val host = uri?.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+            val pointsToSearchInsteadOfMerchant = host in setOf(
+                "google.com", "google.es", "shopping.google.com"
+            ) || host.contains("googleadservices.com") ||
+                host.contains("googlesyndication.com") || host.contains("googleusercontent.com")
             result.title.isNotBlank() &&
                 result.storeName.isNotBlank() &&
+                result.observedAt > 0L &&
+                result.observedAt <= System.currentTimeMillis() + MAX_FUTURE_OBSERVATION_SKEW_MS &&
                 result.price.isFinite() &&
                 result.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
-                parseHttpUri(result.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
+                result.currency.equals("EUR", ignoreCase = true) &&
+                uri?.scheme.equals("https", ignoreCase = true) &&
+                !pointsToSearchInsteadOfMerchant &&
                 isEligibleHistoryTitle(result.title) &&
                 isEligibleSeller(result.storeName) &&
                 isPlausibleHistoryPrice(result.title, result.price) &&
@@ -640,6 +671,7 @@ class ProductRepository(
     private companion object {
         const val MIN_HISTORY_PRICE_EUR = 5.0
         const val MAX_HISTORY_PRICE_EUR = 10000.0
+        const val MAX_FUTURE_OBSERVATION_SKEW_MS = 5L * 60L * 1000L
         const val MIN_OUTLIER_PRICE_RATIO = 0.20
         const val ACCESSORY_PRICE_RATIO = 0.25
         val TITLE_STOP_WORDS = setOf(

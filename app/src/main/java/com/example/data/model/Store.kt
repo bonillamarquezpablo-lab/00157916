@@ -216,9 +216,15 @@ data class Store(
                 .removePrefix("retailer_")
                 .replace(Regex("_([a-z]{2,3})$"), ".$1")
             if (candidateDomain.isNotBlank()) {
+                // The canonical EU storefront for UGREEN is eu.ugreen.com, while older
+                // observations may encode the brand as retailer_ugreen_com.
+                val lookupDomain = when (candidateDomain.lowercase(Locale.ROOT)) {
+                    "ugreen.com" -> "eu.ugreen.com"
+                    else -> candidateDomain
+                }
                 findKnownByName(
-                    name = candidateDomain,
-                    sourceUrl = "https://$candidateDomain"
+                    name = lookupDomain,
+                    sourceUrl = "https://$lookupDomain"
                 )?.let { return it }
             }
 

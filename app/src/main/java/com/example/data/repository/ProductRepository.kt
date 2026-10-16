@@ -865,12 +865,17 @@ class ProductRepository(
         if (expectedTitle.isBlank() || onlineProductIdentityKey(product.title) != onlineProductIdentityKey(expectedTitle)) {
             return 0
         }
+        val targetIsAccessory = isAccessorySearchQuery(expectedTitle) || isAccessoryListing(expectedTitle)
+        val expectedIdentity = onlineProductIdentityKey(expectedTitle)
         val valid = filterOnlineSearchResults(offers, expectedTitle)
-            // Uncertain wheel fitment/category results may remain visible for inspection, but
-            // must never become verified comparison-history observations.
+            // Uncertain wheel fitment/category results and standalone accessories must never
+            // become verified comparison-history observations for the main product.
             .filterNot {
                 it.isSecondHand || it.isRentalOrMonthly ||
-                    it.isFitmentUnverified || it.isCategoryUnverified
+                    it.isFitmentUnverified || it.isCategoryUnverified ||
+                    (!targetIsAccessory &&
+                        (it.isAccessoryOffer || isAccessoryListing(it.title)) &&
+                        onlineProductIdentityKey(it.title) != expectedIdentity)
             }
             .filter { isEligibleSeller(it.storeName, it.sourceUrl) && isEligibleHistoryTitle(it.title) }
             .groupBy { canonicalStoreId(it.storeName, it.sourceUrl) }

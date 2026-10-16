@@ -62,7 +62,7 @@ interface PriceObservationDao {
         "SELECT * FROM price_observations " +
             "WHERE productId = :productId AND storeId = :storeId " +
             "AND observedAt >= :dayStart AND observedAt < :dayEnd " +
-            "AND lower(evidenceType) != 'archive' " +
+            "AND lower(evidenceType) = 'live' " +
             "AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' " +
             "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
             "ORDER BY observedAt DESC LIMIT 1"
@@ -95,6 +95,52 @@ interface PriceObservationDao {
         dayStart: Long,
         dayEnd: Long
     ): PriceObservationEntity?
+
+    /**
+     * Historical Google Product API insights have a separate identity per merchant/day.
+     * They must not overwrite a live quote (or be overwritten by one).
+     */
+    @Query(
+        "SELECT * FROM price_observations " +
+            "WHERE productId = :productId AND storeId = :storeId " +
+            "AND observedAt >= :dayStart AND observedAt < :dayEnd " +
+            "AND isVerified = 1 AND lower(evidenceType) = 'google_insights' " +
+            "ORDER BY price ASC, observedAt DESC LIMIT 1"
+    )
+    suspend fun getGoogleInsightObservationForStoreProductDay(
+        productId: String,
+        storeId: String,
+        dayStart: Long,
+        dayEnd: Long
+    ): PriceObservationEntity?
+
+    /**
+     * Retain one verified historical insight per product/store/local day without colliding with
+     * live quotations or Wayback captures. A repeated import keeps the lower sourced insight.
+     */
+    @Transaction
+    suspend fun saveGoogleInsightObservationIfLower(
+        observation: PriceObservationEntity,
+        dayStart: Long,
+        dayEnd: Long
+    ): Boolean {
+        val existing = getGoogleInsightObservationForStoreProductDay(
+            observation.productId,
+            observation.storeId,
+            dayStart,
+            dayEnd
+        )
+        if (existing == null) {
+            insert(observation)
+            return true
+        }
+        val isLowerPrice = observation.price < existing.price
+        val samePriceWithNewerCapture =
+            observation.price == existing.price && observation.observedAt > existing.observedAt
+        if (!isLowerPrice && !samePriceWithNewerCapture) return false
+        update(observation.copy(id = existing.id))
+        return true
+    }
 
     /**
      * Keep the lowest verified archived price per product/store/day. A repeated import does not

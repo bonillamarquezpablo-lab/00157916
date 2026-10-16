@@ -117,4 +117,35 @@ class SerpApiVariantMismatchTest {
         assertEquals(1, report.rejectedAsIrrelevant)
     }
 
+    @Test
+    fun unknownSellerMustNotBeSilentlyLabeledAsAmazon() {
+        val unknown = Store.findByName("Tienda local")
+
+        assertFalse(unknown.id == Store.AMAZON_ES.id)
+        assertFalse(unknown.name.contains("Amazon", ignoreCase = true))
+        assertEquals("Tienda sin verificar", unknown.category)
+        assertFalse(unknown.hasOfficialSite)
+        assertEquals("unknown.invalid", unknown.domain)
+        assertEquals("", unknown.officialUrl)
+    }
+
+    @Test
+    fun generatedKnownRetailerIdStillResolvesToKnownSeller() {
+        assertEquals(Store.ANKER_STORE, Store.findByName("retailer_anker_com"))
+        assertEquals(Store.UGREEN_STORE, Store.findByName("retailer_ugreen_com"))
+    }
+
+    @Test
+    fun ankerAndUgreenFallbackLinksStayOnFirstPartyDomains() {
+        val anker = Store.findKnownByName("Anker", "https://www.google.com/shopping/product/123456789")
+        val ugreen = Store.findKnownByName("UGREEN", "https://www.google.com/shopping/product/123456789")
+
+        assertEquals(Store.ANKER_STORE, anker)
+        assertEquals(Store.UGREEN_STORE, ugreen)
+        assertTrue(anker!!.supportsProductSearch)
+        assertTrue(ugreen!!.supportsProductSearch)
+        assertTrue(anker.searchUrlFor("Anker Prime Power Bank").startsWith("https://www.anker.com/eu-en/search?q="))
+        assertTrue(ugreen.searchUrlFor("UGREEN Nexode 100W").startsWith("https://eu.ugreen.com/es-es/search?q="))
+    }
+
 }

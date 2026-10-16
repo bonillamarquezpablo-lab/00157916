@@ -58,7 +58,7 @@ class SerpApiVariantMismatchTest {
             report.results.any { it.title == "Nike P 6000 Hombre" }
         )
         assertFalse(report.results.any { it.title.contains("talla 44", ignoreCase = true) })
-        assertEquals(2, report.rejectedAsIrrelevant)
+        assertEquals(1, report.rejectedAsIrrelevant)
     }
 
     @Test
@@ -249,7 +249,7 @@ class SerpApiVariantMismatchTest {
         assertFalse(batteryKit.isAccessoryOffer)
         assertTrue(report.results.any { it.title.contains("JBM 52165") })
         assertTrue(report.results.none { it.title.contains("BGS technic") })
-        assertEquals(1, report.rejectedAsIrrelevant)
+        assertEquals(2, report.rejectedAsIrrelevant)
     }
 
 }

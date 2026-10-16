@@ -320,4 +320,55 @@ class WaybackPriceHistoryClientTest {
     }
 
 
+    @Test
+    fun explicitProductPriceMetadataTakesPrecedenceOverConflictingJsonLdOffers() {
+        val client = newClient()
+        val html = """
+            <html><head>
+              <meta property="og:title" content="Anker Prime 27K Power Bank" />
+              <meta property="product:price:amount" content="79.99" />
+              <meta property="product:price:currency" content="EUR" />
+              <script type="application/ld+json">
+              {"@type":"Product","name":"Anker Prime 27K Power Bank",
+               "offers":{"@type":"Offer","price":"99.99","priceCurrency":"EUR"}}
+              </script>
+            </head></html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "Anker Prime 27K Power Bank",
+            originalUrl = "https://shop.example/products/anker-prime-27k",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/products/anker-prime-27k",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull(quote)
+        assertEquals("Explicit page price metadata should beat a conflicting JSON-LD offer", 79.99, quote!!.price, 0.001)
+    }
+
+    @Test
+    fun rejectsAmbiguousJsonLdOffersInsteadOfChoosingTheFirstPrice() {
+        val client = newClient()
+        val html = """
+            <script type="application/ld+json">
+            {"@type":"Product","name":"Anker Prime 27K Power Bank",
+             "offers":[
+               {"@type":"Offer","price":"79.99","priceCurrency":"EUR"},
+               {"@type":"Offer","price":"99.99","priceCurrency":"EUR"}
+             ]}
+            </script>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "Anker Prime 27K Power Bank",
+            originalUrl = "https://shop.example/products/anker-prime-27k",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/products/anker-prime-27k",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNull("Multiple incompatible offer prices must not become arbitrary historical evidence", quote)
+    }
+
 }

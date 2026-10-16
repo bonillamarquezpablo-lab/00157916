@@ -543,7 +543,13 @@ class ProductRepository(
         val huaweiPhone = Regex(
             """\bhuawei\s+(mate\s*x?\s*\d+|pura\s*\d+|nova\s*\d+|p\s*\d{1,2}|y\s*\d{1,2})\b"""
         ).containsMatchIn(normalized)
-        if ((smartphone || huaweiPhone) && price < 45.0) return false
+        // Shopping often truncates Huawei model names, so a low-price handset can arrive without
+        // a recognized family name. Since explicit accessories already returned above, treat an
+        // otherwise Huawei-branded listing below €20 as suspicious instead of trusting €5 offers.
+        val genericHuaweiDevice = Regex("""\bhuawei\b""").containsMatchIn(normalized)
+        if (((smartphone || huaweiPhone) && price < 45.0) ||
+            (genericHuaweiDevice && price < 20.0)
+        ) return false
 
         val tablet = Regex("""\b(ipad|tablet|galaxy\s+tab|lenovo\s+tab|huawei\s+(matepad|mediapad))\b""")
             .containsMatchIn(normalized)

@@ -64,7 +64,8 @@ class FreeArchiveHistoryPersistenceTest {
                     currentStoreId = "pccomponentes",
                     storeUrl = originalUrl,
                     ean = "",
-                    isPriceVerified = false
+                    // Simulate a stale cached flag from an old live quote.
+                    isPriceVerified = true
                 )
             )
 
@@ -89,6 +90,12 @@ class FreeArchiveHistoryPersistenceTest {
                     evidenceType = "archive",
                     sourcePageUrl = originalUrl
                 )
+            )
+
+            database.productDao().markProductsWithVerifiedObservations()
+            assertFalse(
+                "Archive-only/unverified observations must clear a stale positive current-price flag",
+                database.productDao().getProductById("anker-prime-27k-test")!!.isPriceVerified
             )
 
             val repository = ProductRepository(

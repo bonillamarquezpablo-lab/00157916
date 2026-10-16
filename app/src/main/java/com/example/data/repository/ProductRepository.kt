@@ -537,9 +537,15 @@ class ProductRepository(
         val smartphone = Regex(
             """\b(iphone|redmi|poco|pixel|oneplus|realme|oppo|vivo|honor|smartphone|galaxy\s+(s|a|z|m)\s?\d{1,2})\b"""
         ).containsMatchIn(normalized)
-        if (smartphone && price < 45.0) return false
+        // Huawei's phone families often omit the generic words "móvil" or "smartphone"
+        // from Shopping titles. Treat Mate/Pura/Nova/P/Y phone families as devices, not as
+        // cheap accessory listings, so a 5 € case cannot become the price of the handset.
+        val huaweiPhone = Regex(
+            """\bhuawei\s+(mate\s+[x\d]|mate\s?\d|pura\s?\d|nova\s?\d|p\s?\d{1,2}|y\s?\d{1,2})\b"""
+        ).containsMatchIn(normalized)
+        if ((smartphone || huaweiPhone) && price < 45.0) return false
 
-        val tablet = Regex("""\b(ipad|tablet|galaxy\s+tab|lenovo\s+tab)\b""")
+        val tablet = Regex("""\b(ipad|tablet|galaxy\s+tab|lenovo\s+tab|huawei\s+(matepad|mediapad))\b""")
             .containsMatchIn(normalized)
         if (tablet && price < 50.0) return false
 
@@ -983,16 +989,34 @@ class ProductRepository(
             )
             if (saveDailyObservation(observation)) savedCount++
         }
-        // A saved row can still be an unverified diagnostic offer. It must not switch the
-        // parent product to "verified" unless at least one trusted comparison quote was saved.
-        val savedTrustedOffer = valid.any { !it.isSuspiciousPrice }
-        if (savedCount > 0 && savedTrustedOffer) {
-            productDao.updatePriceVerification(productId, true)
-            val googleId = valid.filterNot { it.isSuspiciousPrice }
-                .firstNotNullOfOrNull { it.googleProductId }
-            if (!googleId.isNullOrBlank() && product.googleProductId != googleId) {
-                productDao.insert(product.copy(googleProductId = googleId))
-            }
+        // A saved row can still be an unverified diagnostic offer. Only a trusted
+        // same-product offer may update the headline/current price shown on the saved product.
+        val bestTrustedOffer = valid.filterNot { it.isSuspiciousPrice }
+            .minByOrNull { it.price / (it.wheelSetCount ?: 1) }
+        if (savedCount > 0 && bestTrustedOffer != null) {
+            val livePrice = bestTrustedOffer.price / (bestTrustedOffer.wheelSetCount ?: 1)
+            val latestProduct = productDao.getProductById(productId) ?: product
+            val newHistoricalMinimum = latestProduct.athMinPrice <= 0.0 || livePrice < latestProduct.athMinPrice
+            val googleId = bestTrustedOffer.googleProductId?.takeIf { it.isNotBlank() }
+                ?: latestProduct.googleProductId
+            val directRetailerUrl = extractDirectRetailerUrl(bestTrustedOffer.sourceUrl)
+            productDao.insert(
+                latestProduct.copy(
+                    currentPrice = livePrice,
+                    athMinPrice = if (newHistoricalMinimum) livePrice else latestProduct.athMinPrice,
+                    athMinDate = if (newHistoricalMinimum) {
+                        SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES"))
+                            .format(Date(bestTrustedOffer.observedAt))
+                    } else latestProduct.athMinDate,
+                    athMinStore = if (newHistoricalMinimum) bestTrustedOffer.storeName else latestProduct.athMinStore,
+                    currentStoreId = canonicalStoreId(bestTrustedOffer.storeName, bestTrustedOffer.sourceUrl),
+                    // Keep an intermediate Google URL out of storeUrl when a direct URL is absent;
+                    // the detail screen can then use the saved merchant to open its own search page.
+                    storeUrl = directRetailerUrl ?: latestProduct.storeUrl,
+                    isPriceVerified = true,
+                    googleProductId = googleId
+                )
+            )
         }
         return savedCount
     }

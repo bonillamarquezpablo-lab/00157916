@@ -53,23 +53,8 @@ class ProductRepository(
     private val _latestProducts = MutableStateFlow<List<Product>>(emptyList())
     private val _simulationOverrides = MutableStateFlow<Map<String, Product>>(emptyMap())
 
-    init {
-        // The database must never seed a demonstration catalogue. On upgrade, discard old rows
-        // that do not have real verified online observations and their orphaned watchlist/history.
-        // The static Store.ALL_STORES directory is read-only metadata and does not need Room rows.
-        externalScope.launch {
-            // Purge demo-linked history and watchlist rows before removing the products themselves.
-            priceObservationDao.deleteExplicitDemoObservations()
-            trackedDao.deleteTrackingForDemoProducts()
-            productDao.deleteExplicitDemoProducts()
-            priceObservationDao.deleteUnverifiedObservations()
-            sanitizeLegacyObservations()
-            productDao.deleteProductsWithoutVerifiedObservations()
-            productDao.markProductsWithVerifiedObservations()
-            trackedDao.deleteTrackingForMissingProducts()
-            storeDao.deleteAll()
-        }
-    }
+    // Startup must be read-only: never bulk-delete local products, observations, stores or tracking.
+    // Data validation and any future cleanup must run as an explicit, separately tested migration.
 
     val allStoresStream: Flow<List<Store>> = storeDao.getAllStores().map { list ->
         if (list.isEmpty()) Store.ALL_STORES

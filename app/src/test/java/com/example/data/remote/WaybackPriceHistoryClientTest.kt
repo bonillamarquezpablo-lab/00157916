@@ -383,7 +383,7 @@ class WaybackPriceHistoryClientTest {
                 .putLong(key, lastAttempt)
                 .putBoolean("${key}_has_quotes", false)
                 .commit()
-            assertFalse(
+            assertTrue(
                 "An empty search is suppressed during the first week",
                 client.wasAttemptedRecently(key, lastAttempt + 6L * WaybackPriceHistoryClient.DAY_MS)
             )

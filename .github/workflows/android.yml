@@ -46,7 +46,17 @@ jobs:
         run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
 
       - name: Ejecutar pruebas unitarias
-        run: gradle :app:testDebugUnitTest --stacktrace
+        shell: bash
+        run: |
+          set +e
+          gradle :app:testDebugUnitTest --stacktrace
+          test_status=$?
+          if [ "$test_status" -ne 0 ]; then
+            echo "===== Detalle XML de las pruebas fallidas ====="
+            find app/build/test-results/testDebugUnitTest -maxdepth 1 -type f -name '*.xml' -exec cat {} ; || true
+            echo "===== Fin del detalle de pruebas ====="
+            exit "$test_status"
+          fi
 
       - name: Restaurar clave de firma estable
         env:

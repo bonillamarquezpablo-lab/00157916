@@ -301,7 +301,7 @@ class WaybackPriceHistoryClientTest {
             now = 1_800_000_000_000L
         )
         val applePathFilter = appleUrl?.queryParameterValues("filter").orEmpty()
-            .firstOrNull { it.startsWith("original:") } ?: ""
+            .firstOrNull { (it ?: "").startsWith("original:") } ?: ""
         assertTrue("An iPhone 16 path should be found despite a title capacity that is not in the URL", applePathFilter.contains("iphone"))
         assertTrue(applePathFilter.contains("16"))
         assertFalse("Capacity alone should not constrain retailer URL discovery", applePathFilter.contains("256gb"))
@@ -312,7 +312,7 @@ class WaybackPriceHistoryClientTest {
             now = 1_800_000_000_000L
         )
         val nikePathFilter = nikeUrl?.queryParameterValues("filter").orEmpty()
-            .firstOrNull { it.startsWith("original:") } ?: ""
+            .firstOrNull { (it ?: "").startsWith("original:") } ?: ""
         assertTrue(nikePathFilter.contains("air"))
         assertTrue(nikePathFilter.contains("max"))
         assertFalse(nikePathFilter.contains("zapatillas"))

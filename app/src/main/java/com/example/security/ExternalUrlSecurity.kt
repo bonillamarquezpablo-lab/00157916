@@ -51,5 +51,5 @@ internal fun openExternalHttpsUrl(context: Context, value: String?): Boolean {
     }
 }
 
-private val IPV4_LITERAL = Regex("""\\d{1,3}(?:\\.\\d{1,3}){3}""")
+private val IPV4_LITERAL = Regex("""\d{1,3}(?:\.\d{1,3}){3}""")
 private const val MAX_EXTERNAL_URL_LENGTH = 4096

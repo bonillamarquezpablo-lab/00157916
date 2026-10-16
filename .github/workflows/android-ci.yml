@@ -70,6 +70,10 @@ jobs:
         timeout-minutes: 15
         run: gradle :app:testDebugUnitTest --stacktrace
 
+      - name: Analizar código y manifiesto Android
+        timeout-minutes: 10
+        run: gradle :app:lintDebug --stacktrace
+
       - name: Mostrar detalles de pruebas fallidas
         if: always()
         shell: bash

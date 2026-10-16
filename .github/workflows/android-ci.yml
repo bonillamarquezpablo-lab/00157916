@@ -92,3 +92,45 @@ jobs:
 
       - name: Compilar pruebas instrumentadas Android
         run: gradle :app:compileDebugAndroidTestKotlin --stacktrace
+
+      # Build a test APK on the PR branch without exposing the stable signing key.
+      # This temporary key makes the artifact installable, but it will not upgrade
+      # an APK signed with the private, stable key used on main.
+      - name: Crear clave de depuración temporal
+        run: |
+          set -euo pipefail
+          keytool -genkeypair -noprompt \
+            -keystore debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey >/dev/null
+
+      - name: Compilar APK de prueba
+        timeout-minutes: 20
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))
+          VERSION_NAME="1.5.${GITHUB_RUN_NUMBER}"
+          echo "Building Mínimo ${VERSION_NAME} (versionCode ${VERSION_CODE})"
+          gradle :app:assembleDebug --stacktrace -PVERSION_CODE="${VERSION_CODE}" -PVERSION_NAME="${VERSION_NAME}"
+
+      - name: Verificar firma y validez del APK
+        run: |
+          set -euo pipefail
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "${APK_PATH}"
+          "${ANDROID_HOME}/build-tools/36.0.0/apksigner" verify --verbose --print-certs "${APK_PATH}"
+          sha256sum "${APK_PATH}"
+
+      - name: Guardar APK de prueba durante 7 días
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: minimo-apk-pr-${{ github.event.pull_request.number || github.run_number }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7

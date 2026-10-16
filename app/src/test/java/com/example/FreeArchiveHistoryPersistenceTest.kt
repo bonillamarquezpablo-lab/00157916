@@ -125,6 +125,22 @@ class FreeArchiveHistoryPersistenceTest {
                 repository.recordArchivedPriceHistory(title, originalUrl, "Tienda de prueba", listOf(quote))
             )
 
+            val alternateSellerUrl = "https://www.amazon.es/dp/B0TESTANKER"
+            val alternateSellerQuote = quote.copy(
+                originalUrl = alternateSellerUrl,
+                snapshotUrl = "https://web.archive.org/web/${rawTimestamp}id_/${alternateSellerUrl}"
+            )
+            assertEquals(
+                "An unverified product may not accept history from another seller URL",
+                0,
+                repository.recordArchivedPriceHistory(
+                    title,
+                    alternateSellerUrl,
+                    "Amazon.es",
+                    listOf(alternateSellerQuote)
+                )
+            )
+
             val product = withTimeout(10_000L) {
                 repository.allProductsStream.first { rows ->
                     rows.any { row ->

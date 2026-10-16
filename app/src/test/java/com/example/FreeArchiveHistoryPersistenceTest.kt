@@ -811,4 +811,65 @@ class FreeArchiveHistoryPersistenceTest {
         }
     }
 
+
+    @Test
+    fun trustedStoreComparisonUpdatesCurrentSavedPrice() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        val title = "Anker Prime 27K Power Bank"
+
+        try {
+            database.productDao().insert(
+                ProductEntity(
+                    id = "anker-prime-27k-comparison-update-test",
+                    title = title,
+                    brand = "Anker",
+                    category = "HOME_APPLIANCES",
+                    currentPrice = 499.99,
+                    athMinPrice = 499.99,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "Tienda anterior",
+                    athMaxPrice = 499.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "pccomponentes",
+                    storeUrl = "https://www.pccomponentes.com/anker-prime-27k",
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao()
+            )
+            val quote = SerpApiShoppingResult(
+                title = title,
+                price = 89.99,
+                storeName = "PcComponentes",
+                sourceUrl = "https://www.pccomponentes.com/anker-prime-27k-powerbank",
+                observedAt = System.currentTimeMillis()
+            )
+
+            val savedCount = repository.recordProductComparisonOffers(
+                productId = "anker-prime-27k-comparison-update-test",
+                expectedTitle = title,
+                offers = listOf(quote)
+            )
+            val savedProduct = database.productDao()
+                .getProductById("anker-prime-27k-comparison-update-test")
+
+            assertEquals(1, savedCount)
+            assertEquals(89.99, savedProduct!!.currentPrice, 0.001)
+            assertTrue(savedProduct.isPriceVerified)
+            assertEquals("pccomponentes", savedProduct.currentStoreId)
+        } finally {
+            database.close()
+        }
+    }
+
 }

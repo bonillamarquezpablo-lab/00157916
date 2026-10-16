@@ -704,19 +704,13 @@ class FreeArchiveHistoryPersistenceTest {
             )
 
             val differentSellerUrl = "https://www.amazon.es/dp/B0FUJIFILMTEST"
-            val otherRawTimestamp = timestampFormat.format(Date(
-                System.currentTimeMillis() - 30L * 24L * 60L * 60L * 1000L
-            ))
-            val otherArchivedAt = timestampFormat.parse(otherRawTimestamp)!!.time
             val differentSellerQuote = quote.copy(
-                observedAt = otherArchivedAt,
-                price = 94.99,
                 originalUrl = differentSellerUrl,
-                snapshotUrl = "https://web.archive.org/web/${otherRawTimestamp}id_/${differentSellerUrl}"
+                snapshotUrl = "https://web.archive.org/web/${rawTimestamp}id_/${differentSellerUrl}"
             )
             assertEquals(
-                "A unique exact product can collect valid historical prices from a second eligible retailer",
-                1,
+                "The same unverified product must still reject archived prices from a different seller",
+                0,
                 repository.recordArchivedPriceHistory(title, differentSellerUrl, "Amazon.es", listOf(differentSellerQuote))
             )
 
@@ -730,11 +724,9 @@ class FreeArchiveHistoryPersistenceTest {
             }
             assertFalse("Archive history must never verify the current price", product.isPriceVerified)
             assertEquals("Archive history must not fabricate a current price", 0.0, product.currentPrice, 0.001)
-            assertEquals(2, product.priceHistory.size)
-            assertEquals(listOf(89.99, 94.99), product.priceHistory.map { it.price })
-            assertEquals(listOf(archivedAt, otherArchivedAt), product.priceHistory.map { it.timestamp })
-            assertTrue(product.priceHistory.any { it.storeName == "FUJIFILM X | GFX eShop" })
-            assertTrue(product.priceHistory.any { it.storeName == "Amazon.es" })
+            assertEquals(1, product.priceHistory.size)
+            assertEquals(89.99, product.priceHistory.single().price, 0.001)
+            assertEquals(archivedAt, product.priceHistory.single().timestamp)
         } finally {
             database.close()
         }

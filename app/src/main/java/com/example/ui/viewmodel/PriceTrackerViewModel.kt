@@ -20,6 +20,7 @@ import com.example.data.remote.extractGoogleShoppingProductId
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.Store
+import com.example.data.model.hasComparableInAppMinimum
 import com.example.data.model.summarizeInAppObservedPrices
 import com.example.data.repository.ProductRepository
 import com.example.notifications.PriceAlertScheduler
@@ -202,9 +203,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 if (filters.onlyAthFilter) product.isAtAth else true
             }
             .filter { product ->
-                // Show only products with at least one dated price actually collected by Mínimo.
+                // A confirmed Mínimo minimum needs verified prices captured on two different days.
                 if (filters.showInAppMinimumsFilter) {
-                    summarizeInAppObservedPrices(product.priceHistory).lowestPoint != null
+                    hasComparableInAppMinimum(product.priceHistory)
                 } else true
             }
             .filter { product ->
@@ -215,30 +216,50 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 } else true
             }
             .let { list ->
-                // The Mínimo-observed view sorts by its own lowest captured quote, not a provider's ATH.
-                if (filters.showInAppMinimumsFilter) {
-                    list.sortedWith(
-                        compareBy<Product> {
-                            summarizeInAppObservedPrices(it.priceHistory).lowestPoint?.price
-                                ?: Double.POSITIVE_INFINITY
-                        }.thenBy { it.title.lowercase(Locale.ROOT) }
-                    )
-                } else when (filters.sortOption) {
+                // Cache each product's in-app minimum once for filtering/sorting this snapshot.
+                val inAppMinimumsByProductId = if (filters.showInAppMinimumsFilter) {
+                    list.associate { it.id to summarizeInAppObservedPrices(it.priceHistory) }
+                } else {
+                    emptyMap()
+                }
+                when (filters.sortOption) {
                     SortOption.BEST_ATH_DISCOUNT -> list.sortedWith(
                         compareByDescending<Product> { it.isPriceVerified }
                             .thenByDescending { it.realSavingsPercent }
                             .thenBy { it.title.lowercase() }
                     )
-                    SortOption.PRICE_LOW_HIGH -> list.sortedWith(
-                        compareByDescending<Product> { it.isPriceVerified }
-                            .thenBy { if (it.isPriceVerified) it.currentPrice else Double.POSITIVE_INFINITY }
-                            .thenBy { it.title.lowercase() }
-                    )
-                    SortOption.PRICE_HIGH_LOW -> list.sortedWith(
-                        compareByDescending<Product> { it.isPriceVerified }
-                            .thenByDescending { if (it.isPriceVerified) it.currentPrice else Double.NEGATIVE_INFINITY }
-                            .thenBy { it.title.lowercase() }
-                    )
+                    SortOption.PRICE_LOW_HIGH -> {
+                        if (filters.showInAppMinimumsFilter) {
+                            list.sortedWith(
+                                compareBy<Product> {
+                                    inAppMinimumsByProductId[it.id]?.lowestPoint?.price
+                                        ?: Double.POSITIVE_INFINITY
+                                }.thenBy { it.title.lowercase(Locale.ROOT) }
+                            )
+                        } else {
+                            list.sortedWith(
+                                compareByDescending<Product> { it.isPriceVerified }
+                                    .thenBy { if (it.isPriceVerified) it.currentPrice else Double.POSITIVE_INFINITY }
+                                    .thenBy { it.title.lowercase() }
+                            )
+                        }
+                    }
+                    SortOption.PRICE_HIGH_LOW -> {
+                        if (filters.showInAppMinimumsFilter) {
+                            list.sortedWith(
+                                compareByDescending<Product> {
+                                    inAppMinimumsByProductId[it.id]?.lowestPoint?.price
+                                        ?: Double.NEGATIVE_INFINITY
+                                }.thenBy { it.title.lowercase(Locale.ROOT) }
+                            )
+                        } else {
+                            list.sortedWith(
+                                compareByDescending<Product> { it.isPriceVerified }
+                                    .thenByDescending { if (it.isPriceVerified) it.currentPrice else Double.NEGATIVE_INFINITY }
+                                    .thenBy { it.title.lowercase() }
+                            )
+                        }
+                    }
                     SortOption.NAME_AZ -> list.sortedBy { it.title.lowercase() }
                     SortOption.NAME_ZA -> list.sortedByDescending { it.title.lowercase() }
                     SortOption.CATEGORY_AZ -> list.sortedWith(
@@ -1567,7 +1588,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         val showMinimums = !current.showInAppMinimumsFilter
         _uiState.value = current.copy(
             showInAppMinimumsFilter = showMinimums,
-            onlyAthFilter = if (showMinimums) false else current.onlyAthFilter
+            onlyAthFilter = if (showMinimums) false else current.onlyAthFilter,
+            sortOption = if (showMinimums && current.sortOption == SortOption.BEST_ATH_DISCOUNT) {
+                SortOption.PRICE_LOW_HIGH
+            } else current.sortOption
         )
     }
 

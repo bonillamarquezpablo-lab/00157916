@@ -371,4 +371,39 @@ class WaybackPriceHistoryClientTest {
         assertNull("Multiple incompatible offer prices must not become arbitrary historical evidence", quote)
     }
 
+    @Test
+    fun negativeArchiveCacheRetriesAfterSevenDaysButPositiveCacheWaitsThirty() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        val client = newClient()
+        val key = "attempt_retry_policy_regression"
+        val lastAttempt = 1_700_000_000_000L
+        try {
+            preferences.edit()
+                .putLong(key, lastAttempt)
+                .putBoolean("${key}_has_quotes", false)
+                .commit()
+            assertFalse(
+                "An empty search is suppressed during the first week",
+                client.wasAttemptedRecently(key, lastAttempt + 6L * WaybackPriceHistoryClient.DAY_MS)
+            )
+            assertFalse(
+                "An empty search can be retried after seven days",
+                client.wasAttemptedRecently(key, lastAttempt + 8L * WaybackPriceHistoryClient.DAY_MS)
+            )
+
+            preferences.edit().putBoolean("${key}_has_quotes", true).commit()
+            assertTrue(
+                "A useful history remains cached for thirty days",
+                client.wasAttemptedRecently(key, lastAttempt + 8L * WaybackPriceHistoryClient.DAY_MS)
+            )
+            assertFalse(
+                "A useful history can be refreshed after thirty days",
+                client.wasAttemptedRecently(key, lastAttempt + 31L * WaybackPriceHistoryClient.DAY_MS)
+            )
+        } finally {
+            preferences.edit().remove(key).remove("${key}_has_quotes").commit()
+        }
+    }
+
 }

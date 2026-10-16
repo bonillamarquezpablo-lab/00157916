@@ -784,6 +784,12 @@ class ProductRepository(
                 }
             }
         }
+        // Without a verified live quote, archive history may only be attached to the exact
+        // merchant URL already stored on this product. A matching title alone is not enough:
+        // do not import another seller's old price into an unverified product row.
+        val hasVerifiedLiveQuote = priceObservationDao.getLatestVerified(product.id) != null
+        if (!hasVerifiedLiveQuote && normalizedProductPageKey(product.storeUrl) != originalUrlKey) return 0
+
         val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
         // Product identity and variant ambiguity were checked above. Let one product accumulate
         // separately keyed historical observations from multiple eligible retailers; each quote

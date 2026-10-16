@@ -306,6 +306,17 @@ class WaybackPriceHistoryClientTest {
         assertTrue(applePathFilter.contains("16"))
         assertFalse("Capacity alone should not constrain retailer URL discovery", applePathFilter.contains("256gb"))
 
+        val samsungUrl = client.buildDomainCdxUrl(
+            domain = "samsung.com",
+            expectedTitle = "OLED Samsung TQ48S95HAEXXC 48 4K Smart TV",
+            now = 1_800_000_000_000L
+        )
+        val samsungPathFilter = samsungUrl?.queryParameterValues("filter").orEmpty()
+            .firstOrNull { (it ?: "").startsWith("original:") } ?: ""
+        assertTrue("Samsung archive lookup should retain the exact model as one discovery route", samsungPathFilter.contains("tq48s95haexxc"))
+        assertTrue("It should also try meaningful title words in case the SKU is absent from the URL", samsungPathFilter.contains("oled"))
+        assertTrue("Alternative title-term route should allow short retailer URLs", samsungPathFilter.contains("smart"))
+
         val nikeUrl = client.buildDomainCdxUrl(
             domain = "nike.com",
             expectedTitle = "Nike Air Max Plus Zapatillas",

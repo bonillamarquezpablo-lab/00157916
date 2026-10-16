@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.StoreOffer
 import com.example.data.model.Store
 import com.example.data.remote.extractDirectRetailerUrl
+import com.example.security.openExternalHttpsUrl
+import com.example.security.safeExternalHttpsUrl
 
 @Composable
 fun StoreComparisonView(
@@ -105,6 +107,7 @@ fun StoreComparisonView(
                 ?: storeSearchDestination
                 ?: offer.url.takeIf { it.isNotBlank() }
                 ?: knownStore?.officialUrl
+            val safeActionDestination = safeExternalHttpsUrl(actionDestination)
 
             Surface(
                 modifier = Modifier
@@ -116,9 +119,8 @@ fun StoreComparisonView(
                         color = if (isBestCurrent) Color(0xFF10B981) else MaterialTheme.colorScheme.outline.copy(alpha = 0.15f),
                         shape = RoundedCornerShape(10.dp)
                     )
-                    .clickable(enabled = !actionDestination.isNullOrBlank()) {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(actionDestination!!))
-                        context.startActivity(intent)
+                    .clickable(enabled = safeActionDestination != null) {
+                        openExternalHttpsUrl(context, safeActionDestination)
                     },
                 color = if (isBestCurrent) Color(0xFF10B981).copy(alpha = 0.06f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
             ) {

@@ -148,9 +148,16 @@ data class SerpApiShoppingResult(
                 SECOND_HAND_CONDITION_PATTERN.containsMatchIn(title)
         }
 
+    /** True for spare/replacement parts; shown separately from convenience accessories. */
+    val isReplacementPartOffer: Boolean
+        get() = !isBicycleTireListing(title) &&
+            REPLACEMENT_PART_LISTING_PATTERN.containsMatchIn(title) &&
+            !isPrimaryImpactWrenchListing(title)
+
     /** True for accessory listings that belong at the end of a main-product search. */
     val isAccessoryOffer: Boolean
-        get() = !isBicycleTireListing(title) &&
+        get() = !isReplacementPartOffer &&
+            !isBicycleTireListing(title) &&
             ACCESSORY_LISTING_PATTERN.containsMatchIn(title) &&
             !isPrimaryImpactWrenchListing(title)
 
@@ -366,6 +373,9 @@ internal fun isBicycleDrivetrainComponentTitle(title: String): Boolean {
 
 private val ACCESSORY_LISTING_PATTERN = Regex(
     """(?i)\b(p[oó]ster(?:es)?|poster(?:s)?|funda(?:s)?|carcasa(?:s)?|cases?|covers?|cargador(?:es)?|chargers?|charging|mop\s+kit|protectores?|protector(?:es)?|screen\s+protector|protector\s+de\s+pantalla|cristal(?:es)?\s+templado|cables?|adaptadores?|hubs?|filtros?|recambios?|repuestos?|soportes?)\b"""
+)
+private val REPLACEMENT_PART_LISTING_PATTERN = Regex(
+    """(?i)\b(recambios?|repuestos?|replacement\s+parts?|spare\s+parts?|piezas?\s+de\s+repuesto|motores?\s+vibrador(?:es)?|vibration\s+motors?)\b"""
 )
 
 private val PRIMARY_IMPACT_WRENCH_LISTING_PATTERN = Regex(

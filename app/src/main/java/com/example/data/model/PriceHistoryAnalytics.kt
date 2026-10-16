@@ -98,3 +98,26 @@ private fun localDayStart(timestamp: Long): Long =
         set(Calendar.MILLISECOND, 0)
     }.timeInMillis
 
+/**
+ * Sorts rows by their confirmed in-app minimum. Products without a minimum stay at the end
+ * in either direction; a stable textual tie-break makes the order predictable.
+ */
+fun <T> sortByObservedMinimum(
+    items: List<T>,
+    ascending: Boolean,
+    minimumPrice: (T) -> Double?,
+    tieBreaker: (T) -> String
+): List<T> = items.sortedWith { first, second ->
+    val firstPrice = minimumPrice(first)
+    val secondPrice = minimumPrice(second)
+    when {
+        firstPrice == null && secondPrice == null ->
+            tieBreaker(first).compareTo(tieBreaker(second), ignoreCase = true)
+        firstPrice == null -> 1
+        secondPrice == null -> -1
+        firstPrice != secondPrice ->
+            if (ascending) firstPrice.compareTo(secondPrice) else secondPrice.compareTo(firstPrice)
+        else -> tieBreaker(first).compareTo(tieBreaker(second), ignoreCase = true)
+    }
+}
+

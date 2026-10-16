@@ -251,6 +251,8 @@ class WaybackPriceHistoryClient(
             "carrefour" to "carrefour.es",
             "fnac" to "fnac.es",
             "amazon" to "amazon.es",
+            "ebay" to "ebay.es",
+            "movistar" to "movistar.es",
             "notino" to "notino.es",
             "douglas" to "douglas.es",
             "alcampo" to "alcampo.es",

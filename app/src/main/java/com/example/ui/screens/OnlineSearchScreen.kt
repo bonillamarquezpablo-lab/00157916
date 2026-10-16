@@ -57,6 +57,8 @@ import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.extractDirectRetailerUrl
+import com.example.security.openExternalHttpsUrl
+import com.example.security.safeExternalHttpsUrl
 import com.example.data.remote.isAccessorySearchQuery
 import com.example.data.remote.isWheelFitmentQuery
 import com.example.ui.viewmodel.OnlineSearchProvider
@@ -644,16 +646,22 @@ private fun openAmazonSearch(context: Context, query: String) {
 }
 
 private fun openStoreUrl(context: Context, url: String, preferAmazonApp: Boolean) {
-    val uri = Uri.parse(url)
-    if (preferAmazonApp) {
+    val safeUrl = safeExternalHttpsUrl(url) ?: return
+    val uri = Uri.parse(safeUrl)
+    val host = uri.host.orEmpty().lowercase(Locale.ROOT)
+    val isAmazonDomain = host == "amazon.es" || host.endsWith(".amazon.es")
+
+    if (preferAmazonApp && isAmazonDomain) {
         val amazonIntent = Intent(Intent.ACTION_VIEW, uri).setPackage(AMAZON_SHOPPING_PACKAGE)
         try {
             context.startActivity(amazonIntent)
             return
         } catch (_: ActivityNotFoundException) {
-            // Amazon app isn't installed; continue with the website below.
+            // Amazon app isn't installed; continue with the validated HTTPS website below.
+        } catch (_: SecurityException) {
+            // A blocked app intent must not crash the search screen.
         }
     }
-    context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+    openExternalHttpsUrl(context, safeUrl)
 }
 

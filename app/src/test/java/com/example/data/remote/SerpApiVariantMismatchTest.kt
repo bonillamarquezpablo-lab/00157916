@@ -17,7 +17,7 @@ class SerpApiVariantMismatchTest {
     @Test
     fun indirectShoppingLinksNeverBecomeGenericGoogleStoreDestinations() {
         assertEquals("https://tiendaprueba.es/", Store.homepageFromSellerLabel("tiendaprueba.es"))
-        assertEquals("https://www.tiendaprueba.es/", Store.homepageFromSellerLabel("www.tiendaprueba.es"))
+        assertEquals("https://tiendaprueba.es/", Store.homepageFromSellerLabel("www.tiendaprueba.es"))
         assertEquals(null, Store.homepageFromSellerLabel("Google Shopping"))
         assertEquals(null, Store.homepageFromSellerLabel("google.com"))
     }

@@ -26,6 +26,7 @@ interface PriceObservationDao {
     @Query(
         "SELECT * FROM price_observations " +
             "WHERE productId = :productId AND isVerified = 1 " +
+            "AND (NOT (lower(evidenceType) = 'archive' OR lower(sourceUrl) LIKE 'https://web.archive.org/web/%' OR lower(sourceUrl) LIKE 'http://web.archive.org/web/%') OR (upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 AND trim(productTitle) <> '')) " +
             "ORDER BY observedAt DESC"
     )
     fun observeVerifiedHistory(productId: String): Flow<List<PriceObservationEntity>>
@@ -41,7 +42,7 @@ interface PriceObservationDao {
     )
     suspend fun getLatestVerified(productId: String): PriceObservationEntity?
 
-    @Query("SELECT * FROM price_observations WHERE isVerified = 1 ORDER BY observedAt ASC")
+    @Query("SELECT * FROM price_observations WHERE isVerified = 1 AND (NOT (lower(evidenceType) = 'archive' OR lower(sourceUrl) LIKE 'https://web.archive.org/web/%' OR lower(sourceUrl) LIKE 'http://web.archive.org/web/%') OR (upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 AND trim(productTitle) <> '')) ORDER BY observedAt ASC")
     fun observeAllVerified(): Flow<List<PriceObservationEntity>>
 
     /** Verified live sources recorded for one product; used to safely associate other merchant URLs. */
@@ -66,7 +67,7 @@ interface PriceObservationDao {
     )
     suspend fun getVerifiedSince(productId: String, since: Long): List<PriceObservationEntity>
 
-    @Query("SELECT COUNT(*) FROM price_observations WHERE isVerified = 1")
+    @Query("SELECT COUNT(*) FROM price_observations WHERE isVerified = 1 AND (NOT (lower(evidenceType) = 'archive' OR lower(sourceUrl) LIKE 'https://web.archive.org/web/%' OR lower(sourceUrl) LIKE 'http://web.archive.org/web/%') OR (upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 AND trim(productTitle) <> ''))")
     suspend fun getVerifiedObservationCount(): Int
 
     @Query(
@@ -98,6 +99,9 @@ interface PriceObservationDao {
             "AND (lower(evidenceType) = 'archive' " +
             "OR lower(sourceUrl) LIKE 'https://web.archive.org/web/%' " +
             "OR lower(sourceUrl) LIKE 'http://web.archive.org/web/%') " +
+            "AND upper(trim(currency)) = 'EUR' " +
+            "AND price >= 0.5 AND price <= 10000.0 " +
+            "AND trim(productTitle) <> '' " +
             "ORDER BY price ASC, observedAt DESC LIMIT 1"
     )
     suspend fun getArchivedObservationForStoreProductDay(

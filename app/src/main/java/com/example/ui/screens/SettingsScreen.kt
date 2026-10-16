@@ -583,7 +583,11 @@ fun SettingsScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
                     Text(
-                        "  Ninguna clave de proveedor guardada en la app",
+                        if (serpApiKeyConfigured) {
+                            "  Clave de SerpApi cifrada en este dispositivo"
+                        } else {
+                            "  No hay ninguna clave de proveedor guardada"
+                        },
                         style = MaterialTheme.typography.bodySmall
                     )
                 }

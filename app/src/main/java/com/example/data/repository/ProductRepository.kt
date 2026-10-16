@@ -933,9 +933,13 @@ class ProductRepository(
             )
             if (saveDailyObservation(observation)) savedCount++
         }
-        if (savedCount > 0) {
+        // A saved row can still be an unverified diagnostic offer. It must not switch the
+        // parent product to "verified" unless at least one trusted comparison quote was saved.
+        val savedTrustedOffer = valid.any { !it.isSuspiciousPrice }
+        if (savedCount > 0 && savedTrustedOffer) {
             productDao.updatePriceVerification(productId, true)
-            val googleId = valid.firstNotNullOfOrNull { it.googleProductId }
+            val googleId = valid.filterNot { it.isSuspiciousPrice }
+                .firstNotNullOfOrNull { it.googleProductId }
             if (!googleId.isNullOrBlank() && product.googleProductId != googleId) {
                 productDao.insert(product.copy(googleProductId = googleId))
             }

@@ -675,9 +675,9 @@ class WaybackPriceHistoryClient(
     }
 
     private fun canonicalizeArchiveTitle(value: String): String =
-        value.replace(Regex("""\\btq(?=\\d{2,}[a-z0-9])"""), "")
-            .replace(Regex("""\\bqe(?=\\d{2,}[a-z0-9])"""), "")
-            .replace(Regex("""\\b(?:2k|4k|8k|uhd|fhd|fullhd)\\b"""), " ")
+        value.replace(Regex("""\btq(?=\d{2,}[a-z0-9])"""), "")
+            .replace(Regex("""\bqe(?=\d{2,}[a-z0-9])"""), "")
+            .replace(Regex("""\b(?:2k|4k|8k|uhd|fhd|fullhd)\b"""), " ")
 
     /**
      * Variant-defining tokens that must survive a fuzzy title match. Mixed alphanumeric model

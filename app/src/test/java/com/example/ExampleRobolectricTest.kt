@@ -3330,4 +3330,73 @@ class ExampleRobolectricTest {
         }
     }
 
+    @Test
+    fun suspiciousOnlySearchResultsCannotReplaceSavedProductStoreOrExtrema() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val title = "Anker Power Bank 20000mAh 65W"
+            val originalUrl = "https://www.pccomponentes.com/anker-power-bank-20000mah-65w"
+            val product = ProductEntity(
+                id = "anker-power-bank-suspicious-only",
+                title = title,
+                brand = "Anker",
+                category = "ACCESSORIES",
+                currentPrice = 99.99,
+                athMinPrice = 89.99,
+                athMinDate = "14 oct 2026",
+                athMinStore = "PcComponentes",
+                athMaxPrice = 129.99,
+                avg90dPrice = 105.0,
+                officialPvp = 149.99,
+                currentStoreId = "pccomponentes",
+                storeUrl = originalUrl,
+                ean = "",
+                isPriceVerified = false,
+                googleProductId = "123456789"
+            )
+            database.productDao().insert(product)
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val suspicious = SerpApiShoppingResult(
+                title = title,
+                price = 1.99,
+                storeName = "Vendedor desconocido",
+                sourceUrl = "https://unknown-seller.example/anker-power-bank",
+                observedAt = System.currentTimeMillis(),
+                condition = "new",
+                isSuspiciousPrice = true
+            )
+
+            repository.recordOnlineSearchResults(
+                results = listOf(suspicious),
+                sourceType = "GOOGLE_SHOPPING",
+                searchQuery = title
+            )
+
+            val updated = database.productDao().getProductById(product.id)!!
+            assertEquals("A suspicious-only result must not change the saved current price", 99.99, updated.currentPrice, 0.001)
+            assertEquals("A suspicious-only result must not replace the direct retailer URL", originalUrl, updated.storeUrl)
+            assertEquals("A suspicious-only result must not replace the saved current store", "pccomponentes", updated.currentStoreId)
+            assertEquals("A suspicious-only result must not alter the observed minimum", 89.99, updated.athMinPrice, 0.001)
+            assertEquals("A suspicious-only result must not alter the observed maximum", 129.99, updated.athMaxPrice, 0.001)
+            assertEquals("A suspicious-only result must not replace the catalogue ID", "123456789", updated.googleProductId)
+            assertEquals(1, database.priceObservationDao().getObservationCount(product.id))
+            assertTrue(
+                "The suspicious observation may be retained for audit but must stay unverified",
+                database.priceObservationDao().observeVerifiedHistory(product.id).first().isEmpty()
+            )
+        } finally {
+            database.close()
+        }
+    }
+
 }

@@ -185,8 +185,11 @@ fun ProductDetailSheet(
                                 product.isPriceVerified ->
                                     "Precio observado para ${product.title}: ${String.format("%.2f", product.currentPrice)} € en ${product.currentStore.name}. " +
                                         "Aún no hay observaciones durante 90 días para afirmar un mínimo histórico o un descuento."
+                                product.priceHistory.isNotEmpty() ->
+                                    "Historial registrado para ${product.title}: mínimo en los datos disponibles de ${String.format("%.2f", product.athMinPrice)} € " +
+                                        "(${product.athMinDate} en ${product.athMinStore}). El precio actual sigue sin verificar."
                                 else ->
-                                    "Ficha sin precio verificado de Mínimo: ${product.title}.\\nNo contiene una oferta ni un historial real confirmados."
+                                    "Ficha sin precio verificado de Mínimo: ${product.title}.\\nTodavía no contiene una oferta ni un historial real confirmados."
                             }
                             val intent = Intent(Intent.ACTION_SEND).apply {
                                 type = "text/plain"
@@ -344,26 +347,26 @@ fun ProductDetailSheet(
                                         modifier = Modifier
                                             .size(7.dp)
                                             .clip(CircleShape)
-                                            .background(Color(0xFF10B981))
+                                            .background(if (product.isPriceFresh && product.hasSufficientHistory) Color(0xFF10B981) else MaterialTheme.colorScheme.outline)
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
                                         text = when {
-                                            product.hasSufficientHistory -> "MÍNIMO OBSERVADO"
+                                            product.isPriceFresh && product.hasSufficientHistory -> "MÍNIMO OBSERVADO"
                                             product.hasObservedHistoricalRange -> "MÍNIMO EN DATOS DISPONIBLES"
                                             product.priceHistory.size > 1 -> "MENOR PRECIO REGISTRADO"
-                                            else -> "PRIMER PRECIO HISTÓRICO"
+                                            else -> "PRIMER PRECIO REGISTRADO"
                                         },
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF059669)
+                                        color = if (product.isPriceFresh && product.hasSufficientHistory) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                                 Text(
                                     text = "${String.format("%.2f", product.athMinPrice)} €",
                                     fontWeight = FontWeight.Black,
                                     fontSize = 20.sp,
-                                    color = if (product.hasSufficientHistory) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
+                                    color = if (product.isPriceFresh && product.hasSufficientHistory) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
                                     text = "${product.athMinDate} en ${product.athMinStore}",
@@ -426,7 +429,7 @@ fun ProductDetailSheet(
                                     )
                                 }
                             }
-                            if (product.officialPvp > product.currentPrice) {
+                            if (product.isPriceFresh && product.officialPvp > product.currentPrice) {
                                 Column(horizontalAlignment = Alignment.End) {
                                     Text(
                                         text = "Diferencia frente al PVP",

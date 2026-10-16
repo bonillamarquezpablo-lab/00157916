@@ -712,8 +712,8 @@ class FreeArchiveHistoryPersistenceTest {
                 snapshotUrl = "https://web.archive.org/web/${rawTimestamp}id_/${differentSellerUrl}"
             )
             assertEquals(
-                "The same unverified product must still reject archived prices from a different seller",
-                0,
+                "A verified capture from another eligible retailer may contribute to the same exact product's history",
+                1,
                 repository.recordArchivedPriceHistory(title, differentSellerUrl, "Amazon.es", listOf(differentSellerQuote))
             )
 

@@ -110,6 +110,38 @@ class OnlineSearchScreenTest {
     }
 
     @Test
+    fun replacementPartsAreNotClassifiedAsGenericAccessories() {
+        val replacement = SerpApiShoppingResult(
+            title = "Motor vibrador de repuesto para mando PS5 DualSense",
+            price = 4.99,
+            storeName = "Tienda de recambios",
+            sourceUrl = "https://recambios.example.test/motor-vibrador",
+            observedAt = 1_800_000_000_000L
+        )
+        val accessory = SerpApiShoppingResult(
+            title = "Funda protectora para mando PS5 DualSense",
+            price = 8.99,
+            storeName = "Tienda de accesorios",
+            sourceUrl = "https://fundas.example.test/dual-sense",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertTrue(replacement.isReplacementPartOffer)
+        assertFalse(replacement.isAccessoryOffer)
+        assertTrue(accessory.isAccessoryOffer)
+        assertFalse(accessory.isReplacementPartOffer)
+
+        val displayed = buildOnlineSearchDisplayGroups(
+            results = listOf(replacement, accessory),
+            query = "mando PS5 DualSense",
+            showSecondHand = false,
+            amazonOnly = false
+        )
+        assertTrue(displayed.any { row -> row.group.offers.all { it.isReplacementPartOffer } })
+        assertTrue(displayed.any { row -> row.group.offers.all { it.isAccessoryOffer } })
+    }
+
+    @Test
     fun secondHandOffersJoinTheSamePriceOrderWhenEnabled() {
         // Model-first searches still contain an explicit diameter + PCD and must share one price order.
         val query = "RIAL Milano 14\" 5x100"

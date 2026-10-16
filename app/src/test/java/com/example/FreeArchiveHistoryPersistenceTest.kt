@@ -542,4 +542,104 @@ class FreeArchiveHistoryPersistenceTest {
         }
     }
 
+    @Test
+    fun laterArchivedCaptureMislabelledLiveCannotOverrideSameDayLiveQuote() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val now = System.currentTimeMillis()
+            val directUrl = "https://shop.example/sony-wh1000xm5"
+            val title = "Sony WH-1000XM5"
+            val liveAt = now - 80_000L
+            val archivedAt = now - 20_000L
+            val captureTimestamp = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+                isLenient = false
+                timeZone = TimeZone.getTimeZone("UTC")
+            }.format(Date(archivedAt))
+            val snapshotUrl = "https://web.archive.org/web/${captureTimestamp}id_/${directUrl}"
+
+            database.productDao().insert(
+                ProductEntity(
+                    id = "live-archive-same-day-test",
+                    title = title,
+                    brand = "Sony",
+                    category = "TV_AUDIO",
+                    currentPrice = 199.99,
+                    athMinPrice = 199.99,
+                    athMinDate = "",
+                    athMinStore = "",
+                    athMaxPrice = 199.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "shop",
+                    storeUrl = directUrl,
+                    ean = "",
+                    isPriceVerified = true
+                )
+            )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "live-archive-same-day-test",
+                    storeId = "shop",
+                    price = 199.99,
+                    currency = "EUR",
+                    observedAt = liveAt,
+                    sourceUrl = directUrl,
+                    sourceName = "Google Shopping",
+                    isVerified = true,
+                    productTitle = title,
+                    storeName = "Shop",
+                    sourceType = "Google Shopping",
+                    linkType = "directo",
+                    collectedAt = now,
+                    evidenceType = "live"
+                )
+            )
+            // Simulate a legacy DB row whose source is clearly an archive even though the label is wrong.
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "live-archive-same-day-test",
+                    storeId = "shop",
+                    price = 10.00,
+                    currency = "EUR",
+                    observedAt = archivedAt,
+                    sourceUrl = snapshotUrl,
+                    sourceName = "Internet Archive",
+                    isVerified = true,
+                    productTitle = title,
+                    storeName = "Shop",
+                    sourceType = "Internet Archive",
+                    linkType = "Archivo histórico",
+                    collectedAt = now,
+                    evidenceType = "live",
+                    sourcePageUrl = directUrl
+                )
+            )
+            database.productDao().markProductsWithVerifiedObservations()
+
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val product = withTimeout(10_000L) {
+                repository.allProductsStream.first { rows ->
+                    rows.any { it.id == "live-archive-same-day-test" && it.priceHistory.isNotEmpty() }
+                }.first { it.id == "live-archive-same-day-test" }
+            }
+
+            assertTrue(product.isPriceVerified)
+            assertEquals("The live quote must remain the current price", 199.99, product.currentPrice, 0.001)
+            assertEquals("The live observation must be the only point for a day that has a live quote", 1, product.priceHistory.size)
+            assertEquals(199.99, product.priceHistory.single().price, 0.001)
+        } finally {
+            database.close()
+        }
+    }
+
 }

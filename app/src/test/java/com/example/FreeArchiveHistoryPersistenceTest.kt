@@ -204,6 +204,21 @@ class FreeArchiveHistoryPersistenceTest {
                 0,
                 repository.recordArchivedPriceHistory(title, originalUrl, "Amazon.es", listOf(quote))
             )
+            val lookalikeGoogleUrl = "https://google.attacker.example/anker-prime-27k"
+            val lookalikeQuote = quote.copy(
+                originalUrl = lookalikeGoogleUrl,
+                snapshotUrl = "https://web.archive.org/web/${rawTimestamp}id_/${lookalikeGoogleUrl}"
+            )
+            assertEquals(
+                "A lookalike Google hostname must not be trusted as a retailer/archive target",
+                0,
+                repository.recordArchivedPriceHistory(
+                    title,
+                    lookalikeGoogleUrl,
+                    "Tienda desconocida",
+                    listOf(lookalikeQuote)
+                )
+            )
             assertEquals(0, database.priceObservationDao().getObservationCount("anker-prime-27k-seller-mismatch"))
 
             val product = withTimeout(10_000L) {

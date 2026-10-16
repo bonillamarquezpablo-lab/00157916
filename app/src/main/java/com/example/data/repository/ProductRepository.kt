@@ -764,7 +764,12 @@ class ProductRepository(
         // own direct URL. This permits old prices before a live search without letting any same-
         // title archive URL populate an unverified product from another seller or variant.
         val hasVerifiedLiveQuote = priceObservationDao.getLatestVerified(product.id) != null
-        if (!hasVerifiedLiveQuote && normalizedProductPageKey(product.storeUrl) != originalUrlKey) return 0
+        val productOwnsArchiveUrl = normalizedProductPageKey(product.storeUrl) == originalUrlKey
+        // A Google Shopping-only product has no direct retailer URL yet. Historical capture
+        // may be attached before the first live search only when this product identity is unique
+        // in Room; ambiguous duplicate cards are rejected above rather than guessed.
+        val uniqueGoogleOnlyProduct = isGoogleShoppingUrl(product.storeUrl) && matchingProducts.size == 1
+        if (!hasVerifiedLiveQuote && !productOwnsArchiveUrl && !uniqueGoogleOnlyProduct) return 0
 
         val now = System.currentTimeMillis()
         val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)

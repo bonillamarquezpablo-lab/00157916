@@ -22,6 +22,7 @@ import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.isIrrelevantMultiProductBundle
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.linkTypeForUrl
+import com.example.data.remote.isGoogleShoppingUrl
 import com.example.data.remote.hasAmbiguousBicycleTireDiameter
 import com.example.data.remote.isBicycleDrivetrainComponentTitle
 import com.example.data.remote.isBicycleDrivetrainSearch
@@ -680,8 +681,7 @@ class ProductRepository(
         if (!originalUri.scheme.equals("https", ignoreCase = true)) return 0
         val originalHost = normalizeHost(originalUri.host.orEmpty())
         if (originalHost == "web.archive.org" || originalHost == "archive.org" ||
-            originalHost == "google.com" || originalHost == "google.es" ||
-            originalHost.endsWith(".google.com") || originalHost.endsWith(".google.es") ||
+            isGoogleShoppingUrl(originalUrl) || originalHost.startsWith("google.") ||
             originalHost == "bing.com" || originalHost.endsWith(".bing.com")
         ) return 0
 
@@ -1006,8 +1006,11 @@ class ProductRepository(
     private fun isMerchantDestinationConsistent(storeName: String, sourceUrl: String): Boolean {
         val host = parseHttpUri(sourceUrl)?.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
         if (host.isBlank()) return false
+        if (isGoogleShoppingUrl(sourceUrl)) return true
+        // A lookalike such as google.com.attacker.example or google.attacker.example is
+        // not an intermediary; do not let it bypass retailer/source consistency checks.
         if (host.startsWith("google.") || host.endsWith(".google.com") || host.endsWith(".google.es")) {
-            return true
+            return false
         }
 
         val knownStore = Store.ALL_STORES.firstOrNull { store ->

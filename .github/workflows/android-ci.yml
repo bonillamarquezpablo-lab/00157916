@@ -145,11 +145,11 @@ jobs:
         timeout-minutes: 20
         run: |
           set -euo pipefail
-          # Candidate version: advance stable numbering while preserving the stable signing key.
-          # This targets installed 1.5.901/code 1901 -> 1.5.904/code 1904.
+          # Candidate version: preserve Android backup rules and advance version numbering.
+          # This targets installed 1.5.901/code 1901 -> 1.5.905/code 1905.
           # The stable certificate is used only by the guarded direct-push job above.
-          VERSION_CODE=1904
-          VERSION_NAME="1.5.904"
+          VERSION_CODE=1905
+          VERSION_NAME="1.5.905"
           echo "Building Mínimo ${VERSION_NAME} (versionCode ${VERSION_CODE})"
           gradle :app:assembleDebug --stacktrace -PVERSION_CODE="${VERSION_CODE}" -PVERSION_NAME="${VERSION_NAME}"
 

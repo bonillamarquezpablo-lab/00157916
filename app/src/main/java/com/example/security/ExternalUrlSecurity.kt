@@ -28,7 +28,7 @@ internal fun safeExternalHttpsUrl(value: String?): String? {
 
     val host = uri.host.lowercase(Locale.ROOT).trimEnd('.')
     if (host == "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return null
-    if (host == "localhost" || !host.contains('.')) return null
+    if (!host.contains('.')) return null
 
     // Result links are retailer web pages, not raw IP endpoints. Blocking IP literals also
     // prevents untrusted offers from opening router/admin panels or local network services.

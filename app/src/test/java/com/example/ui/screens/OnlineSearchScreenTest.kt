@@ -122,6 +122,12 @@ class OnlineSearchScreenTest {
             }
         }
 
+        // Grouping runs on Dispatchers.Default; wait for the asynchronous display groups
+        // before asserting the result card's navigation label.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Ver tiendas y enlaces directos")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithText("Ver tiendas y enlaces directos").assertIsDisplayed()
         composeRule.onNodeWithText("Ver tiendas y enlaces directos").performClick()
         assertEquals(

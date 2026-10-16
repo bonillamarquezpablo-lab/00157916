@@ -92,6 +92,33 @@ jobs:
           echo "Building Mínimo ${VERSION_NAME} (versionCode ${VERSION_CODE})"
           gradle :app:assembleDebug --stacktrace -PVERSION_CODE="${VERSION_CODE}" -PVERSION_NAME="${VERSION_NAME}"
 
+      - name: Verificar identidad, versión y firma del APK
+        shell: bash
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          VERSION_CODE=$((2000 + GITHUB_RUN_NUMBER))
+          VERSION_NAME="1.6.${GITHUB_RUN_NUMBER}"
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+
+          test -s "$APK"
+          BADGING="$("$AAPT" dump badging "$APK")"
+          printf '%s\n' "$BADGING"
+          printf '%s\n' "$BADGING" | grep -F "package: name='com.aistudio.preciominimo.esrxvt' versionCode='${VERSION_CODE}' versionName='${VERSION_NAME}'"
+
+          SIGNATURE="$("$APKSIGNER" verify --verbose --print-certs "$APK")"
+          printf '%s\n' "$SIGNATURE"
+          ACTUAL_CERT="$(printf '%s\n' "$SIGNATURE" | sed -n 's/.*certificate SHA-256 digest: //p' | head -n 1 | tr -d ': ' | tr '[:lower:]' '[:upper:]')"
+          EXPECTED_CERT="F631A8C0A194008E77A312A78775E95837DBC66DF635EAE9B966E5C294ADD450"
+          test "$ACTUAL_CERT" = "$EXPECTED_CERT" || {
+            echo "::error::La firma del APK no coincide con el certificado estable esperado."
+            exit 1
+          }
+          echo "APK verificado: paquete, versión, firma y certificado válidos."
+
       - name: Guardar el APK
         uses: actions/upload-artifact@v4
         with:

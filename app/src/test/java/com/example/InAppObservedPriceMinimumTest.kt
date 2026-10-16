@@ -1,9 +1,12 @@
 package com.example
 
 import com.example.data.model.PricePoint
+import com.example.data.model.hasComparableInAppMinimum
 import com.example.data.model.summarizeInAppObservedPrices
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class InAppObservedPriceMinimumTest {
@@ -45,5 +48,38 @@ class InAppObservedPriceMinimumTest {
         )
         assertEquals(0, archiveOnly.observationCount)
         assertNull(archiveOnly.lowestPoint)
+    }
+
+    @Test
+    fun confirmedMinimumRequiresVerifiedObservationsOnTwoDifferentLocalDays() {
+        val start = 1_800_000_000_000L
+        val dayOne = PricePoint(
+            timestamp = start,
+            dateLabel = "día 1",
+            price = 30.00,
+            storeName = "Tienda A",
+            eventLabel = "Google Shopping"
+        )
+        val secondQuoteSameDay = dayOne.copy(
+            timestamp = start + 60L * 60L * 1000L,
+            price = 10.00
+        )
+
+        val sameDayOnly = listOf(dayOne, secondQuoteSameDay)
+        assertEquals(1, summarizeInAppObservedPrices(sameDayOnly).observationCount)
+        assertFalse(hasComparableInAppMinimum(sameDayOnly))
+
+        val nextDay = dayOne.copy(
+            timestamp = start + 24L * 60L * 60L * 1000L,
+            dateLabel = "día 2",
+            price = 20.00
+        )
+        val twoDays = listOf(dayOne, secondQuoteSameDay, nextDay)
+        val summary = summarizeInAppObservedPrices(twoDays)
+
+        assertEquals(2, summary.observationCount)
+        assertTrue(hasComparableInAppMinimum(twoDays))
+        assertEquals("The minimum is computed from the lowest quote of each distinct day", 10.00,
+            summary.lowestPoint?.price ?: -1.0, 0.001)
     }
 }

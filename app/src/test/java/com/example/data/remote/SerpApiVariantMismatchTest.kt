@@ -15,6 +15,14 @@ import org.robolectric.annotation.Config
 class SerpApiVariantMismatchTest {
 
     @Test
+    fun indirectShoppingLinksNeverBecomeGenericGoogleStoreDestinations() {
+        assertEquals("https://tiendaprueba.es/", Store.homepageFromSellerLabel("tiendaprueba.es"))
+        assertEquals("https://www.tiendaprueba.es/", Store.homepageFromSellerLabel("www.tiendaprueba.es"))
+        assertEquals(null, Store.homepageFromSellerLabel("Google Shopping"))
+        assertEquals(null, Store.homepageFromSellerLabel("google.com"))
+    }
+
+    @Test
     fun rejectsWrongShoeSizeWhenQueryOmitsTheWordTallaButKeepsTheRequestedSize() {
         val client = SerpApiClient()
         val report = client.parseShoppingResultsDetailed(

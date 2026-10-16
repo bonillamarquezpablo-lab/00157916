@@ -112,7 +112,7 @@ private data class ProductFilterOptions(
 class PriceTrackerViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         const val TRACKED_REFRESH_COOLDOWN_MS = 24L * 60L * 60L * 1000L
-        const val MAX_TRACKED_REFRESH_PER_TAP = 10
+        const val MAX_TRACKED_REFRESH_PER_TAP = 3
         const val MAX_ARCHIVE_PAGES_PER_SEARCH = 4
         const val MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS = 20_000L
     }
@@ -584,7 +584,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 pendingTrackedRefreshProducts = firstTen.take(searches)
                 val selectionNote = when {
                     eligible.size > MAX_TRACKED_REFRESH_PER_TAP ->
-                        "Hay ${eligible.size} productos pendientes; esta pulsación prioriza los 10 consultados hace más tiempo."
+                        "Hay ${eligible.size} productos pendientes; esta pulsación procesa como máximo ${MAX_TRACKED_REFRESH_PER_TAP} para reducir carga. Al terminar, pulsa «Actualizar guardados» de nuevo para continuar con los siguientes."
                     searches < firstTen.size ->
                         "Por el saldo disponible solo se podrán consultar ${searches} de ${firstTen.size} productos pendientes."
                     else -> "Se omiten los productos consultados en las últimas 24 horas."

@@ -441,9 +441,19 @@ class ProductRepository(
      * This is intentionally non-destructive: invalid legacy rows stay in the database for audit,
      * but cannot set current prices, minima, maxima, averages or deal badges.
      */
+    /** A malformed legacy row can carry an archive URL while still being labeled "live". */
+    private fun isArchiveBackedObservation(observation: PriceObservationEntity): Boolean {
+        if (observation.evidenceType.equals("archive", ignoreCase = true)) return true
+        val host = parseHttpUri(observation.sourceUrl)?.host?.lowercase(Locale.ROOT)
+        return host == "web.archive.org" || host == "archive.org"
+    }
+
+    private fun isLiveObservation(observation: PriceObservationEntity): Boolean =
+        observation.evidenceType.equals("live", ignoreCase = true) &&
+            !isArchiveBackedObservation(observation)
+
     private fun isEligibleObservationForHistory(observation: PriceObservationEntity): Boolean {
-        val archiveBacked = observation.evidenceType.equals("archive", ignoreCase = true) ||
-            parseHttpUri(observation.sourceUrl)?.host.equals("web.archive.org", ignoreCase = true)
+        val archiveBacked = isArchiveBackedObservation(observation)
         val merchantUrl = if (archiveBacked) {
             // Derive the merchant from the archived target itself. sourcePageUrl is only
             // supplementary legacy metadata and must not redirect seller validation to a
@@ -1451,7 +1461,7 @@ class ProductRepository(
         }.sortedBy { it.observedAt }
         // Only current search observations establish the live price. Historical-provider points
         // remain visible on the chart but can never replace the current quote.
-        val liveHistory = sortedHistory.filter { it.evidenceType == "live" }
+        val liveHistory = sortedHistory.filter(::isLiveObservation)
         // Current price/store must always come from a live provider observation, never a Wayback
         // snapshot, even when an archived snapshot was captured later in the same calendar day.
         val latestLiveDayStart = liveHistory.lastOrNull()?.let { localDayBounds(it.observedAt).first }
@@ -1464,7 +1474,7 @@ class ProductRepository(
             .groupBy { localDayBounds(it.observedAt).first }
             .values
             .mapNotNull { dayOffers ->
-                val liveOffers = dayOffers.filter { it.evidenceType == "live" }
+                val liveOffers = dayOffers.filter(::isLiveObservation)
                 (liveOffers.ifEmpty { dayOffers }).minByOrNull { it.price }
             }
             .sortedBy { localDayBounds(it.observedAt).first }

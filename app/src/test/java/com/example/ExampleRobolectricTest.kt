@@ -1645,7 +1645,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `Google historical insights are saved separately and never replace current price`() = runBlocking<Unit> {
+    fun `Google historical insights are saved before current price verification and never replace it`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,
@@ -1671,7 +1671,7 @@ class ExampleRobolectricTest {
                     currentStoreId = "amazon_es",
                     storeUrl = "https://www.google.com/shopping/product/123456789",
                     ean = "",
-                    isPriceVerified = true,
+                    isPriceVerified = false,
                     googleProductId = "123456789"
                 )
             )
@@ -1728,6 +1728,7 @@ class ExampleRobolectricTest {
             }.first { it.id == productId }
 
             assertEquals("Historical provider data must never replace the live current price", 74.99, product.currentPrice, 0.001)
+            assertFalse("Historical insights must not verify the current quote", product.isPriceVerified)
             assertTrue(product.priceHistory.any {
                 it.eventLabel?.contains("price_insights", ignoreCase = true) == true &&
                     it.timestamp == historicalAt && it.price == 69.99

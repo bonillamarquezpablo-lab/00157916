@@ -2,4 +2,5 @@
 <full-backup-content>
     <!-- The encrypted provider key is device-bound; do not copy its ciphertext into backups. -->
     <exclude domain="sharedpref" path="minimo_serpapi_secret.xml" />
+    <exclude domain="file" path="crash-reports/" />
 </full-backup-content>

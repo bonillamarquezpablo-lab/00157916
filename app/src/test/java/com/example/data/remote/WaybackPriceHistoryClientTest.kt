@@ -382,7 +382,19 @@ class WaybackPriceHistoryClientTest {
             preferences.edit()
                 .putLong(key, lastAttempt)
                 .putBoolean("${key}_has_quotes", false)
+                .putBoolean("${key}_failed", false)
                 .commit()
+            preferences.edit().putBoolean("${key}_failed", true).commit()
+            assertTrue(
+                "A transient network failure is briefly suppressed to avoid repeated requests",
+                client.wasAttemptedRecently(key, lastAttempt + 10L * 60L * 1000L)
+            )
+            assertFalse(
+                "A transient network failure may be retried after thirty minutes",
+                client.wasAttemptedRecently(key, lastAttempt + 31L * 60L * 1000L)
+            )
+
+            preferences.edit().putBoolean("${key}_failed", false).commit()
             assertTrue(
                 "An empty search is suppressed during the first week",
                 client.wasAttemptedRecently(key, lastAttempt + 6L * WaybackPriceHistoryClient.DAY_MS)
@@ -392,7 +404,10 @@ class WaybackPriceHistoryClientTest {
                 client.wasAttemptedRecently(key, lastAttempt + 8L * WaybackPriceHistoryClient.DAY_MS)
             )
 
-            preferences.edit().putBoolean("${key}_has_quotes", true).commit()
+            preferences.edit()
+                .putBoolean("${key}_has_quotes", true)
+                .putBoolean("${key}_failed", false)
+                .commit()
             assertTrue(
                 "A useful history remains cached for thirty days",
                 client.wasAttemptedRecently(key, lastAttempt + 8L * WaybackPriceHistoryClient.DAY_MS)
@@ -402,7 +417,11 @@ class WaybackPriceHistoryClientTest {
                 client.wasAttemptedRecently(key, lastAttempt + 31L * WaybackPriceHistoryClient.DAY_MS)
             )
         } finally {
-            preferences.edit().remove(key).remove("${key}_has_quotes").commit()
+            preferences.edit()
+                .remove(key)
+                .remove("${key}_has_quotes")
+                .remove("${key}_failed")
+                .commit()
         }
     }
 

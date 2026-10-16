@@ -55,6 +55,7 @@ import java.util.Date
 import java.util.Locale
 import com.example.data.model.Product
 import com.example.data.model.Store
+import com.example.security.openExternalHttpsUrl
 
 @Composable
 fun ProductCard(
@@ -368,9 +369,7 @@ fun ProductCard(
                                 TextButton(
                                     onClick = {
                                         val searchUrl = store.searchUrlFor(product.title)
-                                        context.startActivity(
-                                            Intent(Intent.ACTION_VIEW, Uri.parse(searchUrl))
-                                        )
+                                        openExternalHttpsUrl(context, searchUrl)
                                         showStoreComparison = false
                                     }
                                 ) {

@@ -146,10 +146,10 @@ jobs:
         run: |
           set -euo pipefail
           # Candidate version: preserve Android backup rules and advance version numbering.
-          # This targets installed 1.5.901/code 1901 -> 1.5.917/code 1917.
+          # This targets installed 1.5.901/code 1901 -> 1.5.918/code 1918.
           # The stable certificate is used only by the guarded direct-push job above.
-          VERSION_CODE=1917
-          VERSION_NAME="1.5.917"
+          VERSION_CODE=1918
+          VERSION_NAME="1.5.918"
           echo "Building Mínimo ${VERSION_NAME} (versionCode ${VERSION_CODE})"
           gradle :app:assembleDebug --stacktrace -PVERSION_CODE="${VERSION_CODE}" -PVERSION_NAME="${VERSION_NAME}"
 

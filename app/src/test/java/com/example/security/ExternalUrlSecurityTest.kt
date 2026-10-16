@@ -33,6 +33,10 @@ class ExternalUrlSecurityTest {
         assertNull(safeExternalHttpsUrl("https://example.com:8443/product"))
         assertNull(safeExternalHttpsUrl("https://localhost/private"))
         assertNull(safeExternalHttpsUrl("https://router.local/admin"))
+        assertNull(safeExternalHttpsUrl("https://192.168.1.1/admin"))
+        assertNull(safeExternalHttpsUrl("https://127.0.0.1:443/admin"))
+        assertNull(safeExternalHttpsUrl("https://internal-host/admin"))
+        assertNull(safeExternalHttpsUrl("https://router.example/admin"))
     }
 
     @Test

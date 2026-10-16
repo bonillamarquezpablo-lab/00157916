@@ -53,7 +53,7 @@ jobs:
           test_status=$?
           if [ "$test_status" -ne 0 ]; then
             echo "===== Detalle XML de las pruebas fallidas ====="
-            find app/build/test-results/testDebugUnitTest -maxdepth 1 -type f -name '*.xml' -exec cat {} ; || true
+            find app/build/test-results/testDebugUnitTest -maxdepth 1 -type f -name '*.xml' -print0 | xargs -0 -r cat || true
             echo "===== Fin del detalle de pruebas ====="
             exit "$test_status"
           fi

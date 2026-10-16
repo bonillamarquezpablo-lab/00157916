@@ -674,9 +674,11 @@ class WaybackPriceHistoryClient(
             overlap.size.toDouble() / expectedTokens.size >= 0.72
     }
 
-    private fun canonicalizeArchiveTitle(value: String): String =
+        private fun canonicalizeArchiveTitle(value: String): String =
         value.replace(Regex("""\btq(?=\d{2,}[a-z0-9])"""), "")
             .replace(Regex("""\bqe(?=\d{2,}[a-z0-9])"""), "")
+            // Preserve diagonal value while equating "48 inch" and "48"; 48 still differs from 55.
+            .replace(Regex("""\b(\d{2,})\s+inches?\b"""), "$1")
             .replace(Regex("""\b(?:2k|4k|8k|uhd|fhd|fullhd)\b"""), " ")
 
     /**

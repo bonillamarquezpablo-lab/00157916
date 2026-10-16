@@ -77,6 +77,10 @@ fun ProductDetailSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     val scrollState = rememberScrollState()
+    val distinctHistoryDays = product.priceHistory
+        .map { SimpleDateFormat("yyyyMMdd", Locale.ROOT).format(Date(it.timestamp)) }
+        .distinct()
+        .size
     val archivedHistoryPoints = product.priceHistory.filter {
         it.eventLabel.equals("Internet Archive", ignoreCase = true)
     }
@@ -473,6 +477,17 @@ fun ProductDetailSheet(
                 priceHistory = product.priceHistory,
                 avg90dPrice = product.avg90dPrice
             )
+            if (distinctHistoryDays < 2) {
+                Text(
+                    text = if (distinctHistoryDays == 0) {
+                        "Aún no hay observaciones fechadas para dibujar el historial. Mínimo no inventa precios anteriores."
+                    } else {
+                        "Solo hay observaciones de un día. Para mostrar una evolución o una media de 90 días hacen falta precios fechados en días distintos o capturas históricas recuperables."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             // Only show offers that came back from the latest provider query.
             if (product.offers.isNotEmpty()) {

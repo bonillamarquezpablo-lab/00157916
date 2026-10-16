@@ -50,6 +50,8 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.Product
 import com.example.data.model.Store
 import com.example.data.remote.extractDirectRetailerUrl
+import com.example.security.openExternalHttpsUrl
+import com.example.security.safeExternalHttpsUrl
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -585,15 +587,13 @@ fun ProductDetailSheet(
                         ?: knownRetailer?.searchUrlFor(product.title)
                         ?: product.currentStore.officialUrl.takeIf { extractDirectRetailerUrl(it) != null }
                         ?: product.storeUrl
+                    val safeDestination = safeExternalHttpsUrl(destination)
                     OutlinedButton(
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(destination))
-                            context.startActivity(intent)
-                        },
+                        onClick = { openExternalHttpsUrl(context, safeDestination) },
                         modifier = Modifier
                             .weight(1f)
                             .height(44.dp),
-                        enabled = true,
+                        enabled = safeDestination != null,
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text(

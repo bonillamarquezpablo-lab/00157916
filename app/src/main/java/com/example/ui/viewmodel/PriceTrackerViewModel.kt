@@ -101,6 +101,14 @@ data class TrackerUiState(
     val snackbarMessage: String? = null
 )
 
+private data class ProductFilterOptions(
+    val searchQuery: String,
+    val selectedCategory: ProductCategory,
+    val onlyAthFilter: Boolean,
+    val selectedStoreName: String?,
+    val sortOption: SortOption
+)
+
 class PriceTrackerViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         const val TRACKED_REFRESH_COOLDOWN_MS = 24L * 60L * 60L * 1000L
@@ -151,11 +159,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     // re-sorting the entire catalogue. Only actual filter/sort changes invalidate this snapshot.
     private val productFilterOptions = _uiState.map { state ->
         ProductFilterOptions(
-            searchQuery = filters.searchQuery,
-            selectedCategory = filters.selectedCategory,
-            onlyAthFilter = filters.onlyAthFilter,
-            selectedStoreName = filters.selectedStoreName,
-            sortOption = filters.sortOption
+            searchQuery = state.searchQuery,
+            selectedCategory = state.selectedCategory,
+            onlyAthFilter = state.onlyAthFilter,
+            selectedStoreName = state.selectedStoreName,
+            sortOption = state.sortOption
         )
     }.distinctUntilChanged()
 

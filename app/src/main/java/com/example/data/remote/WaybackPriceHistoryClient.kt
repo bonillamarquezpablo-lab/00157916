@@ -11,11 +11,13 @@ import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.ResponseBody
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.net.URI
+import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.text.Normalizer
@@ -102,7 +104,12 @@ class WaybackPriceHistoryClient(
 
     private fun wasAttemptedRecently(key: String, now: Long): Boolean {
         val lastAttempt = preferences.getLong(key, 0L)
-        return lastAttempt > 0L && now >= lastAttempt && now - lastAttempt < RETRY_INTERVAL_MS
+        if (lastAttempt <= 0L || now < lastAttempt) return false
+        // Empty searches should be retried sooner than useful archived histories.
+        // Legacy cache entries without this flag are treated as negative results.
+        val hadQuotes = preferences.getBoolean("${key}_has_quotes", false)
+        val retryInterval = if (hadQuotes) RETRY_INTERVAL_MS else NEGATIVE_RETRY_INTERVAL_MS
+        return now - lastAttempt < retryInterval
     }
 
     private suspend fun queryCdxAndFetchPrices(
@@ -115,7 +122,9 @@ class WaybackPriceHistoryClient(
         val captures = try {
             http.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return WaybackBackfillResult()
-                parseCaptureIndex(response.body?.string().orEmpty())
+                val body = readBodyLimited(response.body, MAX_CDX_BODY_BYTES)
+                    ?: return WaybackBackfillResult()
+                parseCaptureIndex(body)
             }
         } catch (_: Exception) {
             return WaybackBackfillResult()
@@ -135,7 +144,9 @@ class WaybackPriceHistoryClient(
                             .build()
                         val html = try {
                             http.newCall(snapshotRequest).execute().use { response ->
-                                if (response.isSuccessful) response.body?.string() else null
+                                if (response.isSuccessful) {
+                                    readBodyLimited(response.body, MAX_SNAPSHOT_BODY_BYTES)
+                                } else null
                             }
                         } catch (_: Exception) {
                             null
@@ -155,12 +166,16 @@ class WaybackPriceHistoryClient(
             }.awaitAll()
         }
 
-        // Cache negative results too; explicit user retries must not hammer the public archive.
-        preferences.edit().putLong(cacheKey, now).apply()
+        // Cache useful histories for 30 days, but retry empty/ambiguous results after 7 days.
+        val quotes = fetched.mapNotNull { it.quote }
+            .sortedBy { it.observedAt }
+            .distinctBy { Triple(it.originalUrl, it.observedAt, it.price) }
+        preferences.edit()
+            .putLong(cacheKey, now)
+            .putBoolean("${cacheKey}_has_quotes", quotes.isNotEmpty())
+            .apply()
         return WaybackBackfillResult(
-            quotes = fetched.mapNotNull { it.quote }
-                .sortedBy { it.observedAt }
-                .distinctBy { Triple(it.originalUrl, it.observedAt, it.price) },
+            quotes = quotes,
             capturesFound = captures.size,
             capturesChecked = fetched.count { it.fetched },
             available = true
@@ -481,22 +496,42 @@ class WaybackPriceHistoryClient(
         observedAt: Long
     ): ArchivedPriceQuote? {
         if (html.isBlank() || expectedTitle.isBlank() || observedAt <= 0L) return null
-        val candidates = mutableListOf<Triple<String, Double, String>>()
-        extractJsonLdProductOffers(html).forEach(candidates::add)
+        val jsonLdCandidates = extractJsonLdProductOffers(html)
 
-        val pageTitle = readMeta(html, setOf("og:title", "twitter:title"))
+        val pageTitle = readMeta(html, setOf("og:title"))
+            ?: readMeta(html, setOf("twitter:title"))
             ?: Regex("""(?is)<title[^>]*>(.*?)</title>""").find(html)?.groupValues?.getOrNull(1)?.let(::decodeHtml)
-        val currency = readMeta(html, setOf("product:price:currency", "og:price:currency", "priceCurrency", "pricecurrency"))
-        val price = readMeta(html, setOf("product:price:amount", "og:price:amount", "price", "product:price"))
-            ?.let(::parsePositivePrice)
-        if (!pageTitle.isNullOrBlank() && price != null && !currency.isNullOrBlank()) {
-            candidates += Triple(pageTitle, price, currency.uppercase(Locale.ROOT))
-        }
 
-        val matching = candidates.firstOrNull { candidate ->
+        // Prefer the page's explicit product price metadata in a stable priority order.
+        // readMeta(Set) follows document order, so each key is queried separately here.
+        val metaPrice = listOf(
+            "product:price:amount", "og:price:amount", "price", "product:price"
+        ).firstNotNullOfOrNull { key ->
+            readMeta(html, setOf(key))?.let(::parsePositivePrice)
+        }
+        val metaCurrency = listOf(
+            "product:price:currency", "og:price:currency", "pricecurrency"
+        ).firstNotNullOfOrNull { key -> readMeta(html, setOf(key)) }
+            ?.uppercase(Locale.ROOT)
+
+        fun isValidCandidate(candidate: Triple<String, Double, String>): Boolean =
             candidate.third.equals("EUR", ignoreCase = true) &&
                 candidate.second in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE &&
                 isMatchingProductTitle(expectedTitle, candidate.first)
+
+        val explicitMeta = if (!pageTitle.isNullOrBlank() && metaPrice != null && !metaCurrency.isNullOrBlank()) {
+            Triple(pageTitle, metaPrice, metaCurrency).takeIf(::isValidCandidate)
+        } else null
+
+        // JSON-LD can contain several sellers/offers or both regular and sale prices. Never let
+        // the JSON property order decide which price becomes historical evidence.
+        val matchingJsonLd = jsonLdCandidates.filter(::isValidCandidate)
+        val matching = explicitMeta ?: run {
+            val distinctPrices = matchingJsonLd
+                .map { it.second to it.third.uppercase(Locale.ROOT) }
+                .distinct()
+            if (distinctPrices.size != 1) return null
+            matchingJsonLd.firstOrNull()
         } ?: return null
 
         return ArchivedPriceQuote(
@@ -682,6 +717,25 @@ class WaybackPriceHistoryClient(
         return true
     }
 
+    /** Read bounded response bodies so unexpectedly large archived pages cannot spike app memory. */
+    private fun readBodyLimited(body: ResponseBody?, maxBytes: Int): String? {
+        body ?: return null
+        if (body.contentLength() > maxBytes) return null
+        val output = ByteArrayOutputStream(minOf(maxBytes, 16 * 1024))
+        body.byteStream().use { input ->
+            val buffer = ByteArray(8 * 1024)
+            var total = 0
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                if (count > maxBytes - total) return null
+                output.write(buffer, 0, count)
+                total += count
+            }
+        }
+        return output.toString(Charsets.UTF_8.name())
+    }
+
     private fun sampleCaptures(captures: List<WaybackCapture>, max: Int): List<WaybackCapture> {
         if (captures.size <= max) return captures
         if (max <= 1) return listOf(captures.first())
@@ -717,6 +771,9 @@ class WaybackPriceHistoryClient(
         private const val MAX_DOMAIN_INDEX_ROWS = 80
         private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L
+        const val NEGATIVE_RETRY_INTERVAL_MS = 7L * 24L * 60L * 60L * 1000L
+        private const val MAX_CDX_BODY_BYTES = 256 * 1024
+        private const val MAX_SNAPSHOT_BODY_BYTES = 2 * 1024 * 1024
         const val DAY_MS = 24L * 60L * 60L * 1000L
         const val MIN_HISTORICAL_PRICE = 0.50
         const val MAX_HISTORICAL_PRICE = 10_000.0

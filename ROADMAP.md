@@ -34,7 +34,8 @@
 - [~] **F01 — Limpiar observaciones heredadas inválidas.** Revalidar los registros ya guardados al leerlos y sanear Room de observaciones que incumplen precio, vendedor, URL, moneda o identidad. Criterio: un MacBook a 67,50 € de un vendedor excluido no aparece como precio comparable aunque venga de una instalación anterior.
 - [~] **F02 — Identidad estricta de variante.** Exigir coincidencia de modelo y capacidades solicitadas cuando estén presentes. Criterio: no mezclar 8/16 GB, 256/512 GB ni versiones Pro/Ultra/FE incompatibles.
 - [~] **F03 — Separar nuevo, usado, reacondicionado y promocional.** Inspeccionar condición estructurada y título; rechazar usados y artículos personalizados/lotes no solicitados en el historial de producto nuevo. Criterio: regresiones para `second_hand_condition`, Wallapop, multipacks y artículos con logotipo.
-- [ ] **F04 — Puntuación de calidad y detección de atípicos.** Calcular confianza con identidad, dispersión de precios, antigüedad y calidad de URL; marcar valores sospechosos en vez de llamarlos chollos automáticamente.
+- [~] **F04 — Validación temporal y de destino para nuevas observaciones.** En `ProductRepository`, rechazar URLs de búsqueda de Google y dominios de redirección publicitaria, fechas futuras de más de cinco minutos, timestamps no positivos, proveedores desconocidos y monedas inconsistentes. Las observaciones heredadas pasan la misma validación al mostrarse; las filas inválidas se excluyen sin borrar el historial completo. Se añadieron pruebas de regresión para enlaces de búsqueda y fechas futuras.
+- [ ] **F04b — Puntuación de calidad y detección de atípicos.** Calcular confianza con identidad, dispersión de precios, antigüedad y calidad de URL; marcar valores sospechosos en vez de llamarlos chollos automáticamente.** Calcular confianza con identidad, dispersión de precios, antigüedad y calidad de URL; marcar valores sospechosos en vez de llamarlos chollos automáticamente.
 - [ ] **F05 — Procedencia transparente.** Guardar proveedor, vendedor, URL de destino, hora de observación y tipo de enlace; diferenciar enlace directo de fallback a Google.
 - [ ] **F06 — Comparación multifuente unificada.** Mostrar juntos resultados de Google Shopping y Amazon.es cuando se solicite, con deduplicación y procedencia por oferta; respetar la cuota antes de cada consulta.
 - [ ] **F07 — Conectores oficiales/feeds autorizados.** Evaluar APIs, feeds de comercios y redes como Awin solo tras disponer de cuenta, permisos y condiciones compatibles. No simular APIs ni hacer scraping indiscriminado.
@@ -57,6 +58,8 @@
 ## Trabajo iniciado en la rama `fix/price-quality-phase-01`
 
 - Revalidación de observaciones persistidas en tiempo de lectura y limpieza inicial de registros heredados que ya no cumplen las reglas actuales.
+- Validación adicional de timestamps y de destino directo: se rechazan fechas futuras no plausibles y enlaces cuya URL final aparente ser una búsqueda de Google/redirección publicitaria.
+- Prueba Robolectric de regresión para asegurar que una oferta válida de tienda se conserva mientras se excluyen los enlaces de búsqueda de Google y las observaciones futuras.
 - Filtros en parsers para condición usada/reacondicionada, variantes de memoria incompatibles y lotes/artículos promocionales.
 - Regresión de parser para un MacBook con memoria incorrecta, una oferta reacondicionada y una batería promocional con logotipo.
 - El gráfico de precio deja de mostrarse con una única observación; la ficha explica que aún no existe una evolución temporal.

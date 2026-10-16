@@ -2918,11 +2918,16 @@ class ExampleRobolectricTest {
             val suspiciousPhone = offer("Xiaomi Redmi 17 5G 4GB 128GB", 19.99, "phone")
             val suspiciousLaptop = offer("Apple MacBook Air M3 16GB 256GB", 67.50, "laptop")
             val suspiciousConsole = offer("Sony PlayStation 5 Slim Console", 39.99, "console")
+            val suspiciousHuawei = offer("Huawei X9 5G 128 GB", 5.62, "huawei-low")
             val legitimateCase = offer("Funda protectora para MacBook Air M3", 19.99, "case")
+            val legitimateHuaweiCase = offer("Funda protectora para Huawei X9 5G", 5.62, "huawei-case")
             val legitimatePhone = offer("Xiaomi Redmi 17 5G 4GB 128GB", 189.99, "phone-valid")
 
             val accepted = repository.filterOnlineSearchResults(
-                listOf(suspiciousPhone, suspiciousLaptop, suspiciousConsole, legitimateCase, legitimatePhone)
+                listOf(
+                    suspiciousPhone, suspiciousLaptop, suspiciousConsole, suspiciousHuawei,
+                    legitimateCase, legitimateHuaweiCase, legitimatePhone
+                )
             )
 
             assertTrue("Keep the cheap phone visible for diagnosis, but flag it as suspicious",
@@ -2931,13 +2936,17 @@ class ExampleRobolectricTest {
                 accepted.any { it.sourceUrl == suspiciousLaptop.sourceUrl && it.isSuspiciousPrice })
             assertTrue("Keep the implausibly cheap PS5 visible for diagnosis, but flag it",
                 accepted.any { it.sourceUrl == suspiciousConsole.sourceUrl && it.isSuspiciousPrice })
+            assertTrue("A truncated Huawei model at €5.62 must not become a trusted handset/device price",
+                accepted.any { it.sourceUrl == suspiciousHuawei.sourceUrl && it.isSuspiciousPrice })
+            assertTrue("A low-priced Huawei case remains a legitimate accessory",
+                accepted.any { it.sourceUrl == legitimateHuaweiCase.sourceUrl && !it.isSuspiciousPrice })
             assertTrue("Legitimate low-price accessories are exempt from device floors",
                 accepted.any { it.sourceUrl == legitimateCase.sourceUrl })
             assertTrue("A plausible retail phone offer should remain eligible",
                 accepted.any { it.sourceUrl == legitimatePhone.sourceUrl })
 
             val rejected = repository.diagnoseOnlineSearchRejections(
-                listOf(suspiciousPhone, suspiciousLaptop, suspiciousConsole)
+                listOf(suspiciousPhone, suspiciousLaptop, suspiciousConsole, suspiciousHuawei)
             )
             assertTrue(
                 "Low-price rejections should explain the reason",

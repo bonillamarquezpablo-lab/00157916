@@ -834,8 +834,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             expectedTitle = product.title,
             observedAt = now
         )
-        val safeOffers = repository.filterOnlineSearchResults(details.offers, product.title)
-            .filterNot { it.isSecondHand || it.isRentalOrMonthly }
+        val safeOffers = repository.filterProductComparisonOffers(details.offers, product.title)
         val savedHistory = repository.recordGooglePriceInsightsHistory(
             productId = product.id,
             expectedTitle = product.title,

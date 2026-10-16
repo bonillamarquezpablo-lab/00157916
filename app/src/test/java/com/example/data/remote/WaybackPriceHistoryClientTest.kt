@@ -301,7 +301,7 @@ class WaybackPriceHistoryClientTest {
             now = 1_800_000_000_000L
         )
         val applePathFilter = appleUrl?.queryParameterValues("filter").orEmpty()
-            .firstOrNull { it.startsWith("original:") }.orEmpty()
+            .firstOrNull { (it ?: "").startsWith("original:") } ?: ""
         assertTrue("An iPhone 16 path should be found despite a title capacity that is not in the URL", applePathFilter.contains("iphone"))
         assertTrue(applePathFilter.contains("16"))
         assertFalse("Capacity alone should not constrain retailer URL discovery", applePathFilter.contains("256gb"))
@@ -312,12 +312,117 @@ class WaybackPriceHistoryClientTest {
             now = 1_800_000_000_000L
         )
         val nikePathFilter = nikeUrl?.queryParameterValues("filter").orEmpty()
-            .firstOrNull { it.startsWith("original:") }.orEmpty()
+            .firstOrNull { (it ?: "").startsWith("original:") } ?: ""
         assertTrue(nikePathFilter.contains("air"))
         assertTrue(nikePathFilter.contains("max"))
         assertFalse(nikePathFilter.contains("zapatillas"))
         assertFalse("The host brand itself usually is not in product URL paths", nikePathFilter.contains("nike"))
     }
 
+
+    @Test
+    fun explicitProductPriceMetadataTakesPrecedenceOverConflictingJsonLdOffers() {
+        val client = newClient()
+        val html = """
+            <html><head>
+              <meta property="og:title" content="Anker Prime 27K Power Bank" />
+              <meta property="product:price:amount" content="79.99" />
+              <meta property="product:price:currency" content="EUR" />
+              <script type="application/ld+json">
+              {"@type":"Product","name":"Anker Prime 27K Power Bank",
+               "offers":{"@type":"Offer","price":"99.99","priceCurrency":"EUR"}}
+              </script>
+            </head></html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "Anker Prime 27K Power Bank",
+            originalUrl = "https://shop.example/products/anker-prime-27k",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/products/anker-prime-27k",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull(quote)
+        assertEquals("Explicit page price metadata should beat a conflicting JSON-LD offer", 79.99, quote!!.price, 0.001)
+    }
+
+    @Test
+    fun rejectsAmbiguousJsonLdOffersInsteadOfChoosingTheFirstPrice() {
+        val client = newClient()
+        val html = """
+            <script type="application/ld+json">
+            {"@type":"Product","name":"Anker Prime 27K Power Bank",
+             "offers":[
+               {"@type":"Offer","price":"79.99","priceCurrency":"EUR"},
+               {"@type":"Offer","price":"99.99","priceCurrency":"EUR"}
+             ]}
+            </script>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "Anker Prime 27K Power Bank",
+            originalUrl = "https://shop.example/products/anker-prime-27k",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/products/anker-prime-27k",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNull("Multiple incompatible offer prices must not become arbitrary historical evidence", quote)
+    }
+
+    @Test
+    fun negativeArchiveCacheRetriesAfterSevenDaysButPositiveCacheWaitsThirty() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        val client = newClient()
+        val key = "attempt_retry_policy_regression"
+        val lastAttempt = 1_700_000_000_000L
+        try {
+            preferences.edit()
+                .putLong(key, lastAttempt)
+                .putBoolean("${key}_has_quotes", false)
+                .putBoolean("${key}_failed", false)
+                .commit()
+            preferences.edit().putBoolean("${key}_failed", true).commit()
+            assertTrue(
+                "A transient network failure is briefly suppressed to avoid repeated requests",
+                client.wasAttemptedRecently(key, lastAttempt + 10L * 60L * 1000L)
+            )
+            assertFalse(
+                "A transient network failure may be retried after thirty minutes",
+                client.wasAttemptedRecently(key, lastAttempt + 31L * 60L * 1000L)
+            )
+
+            preferences.edit().putBoolean("${key}_failed", false).commit()
+            assertTrue(
+                "An empty search is suppressed during the first week",
+                client.wasAttemptedRecently(key, lastAttempt + 6L * WaybackPriceHistoryClient.DAY_MS)
+            )
+            assertFalse(
+                "An empty search can be retried after seven days",
+                client.wasAttemptedRecently(key, lastAttempt + 8L * WaybackPriceHistoryClient.DAY_MS)
+            )
+
+            preferences.edit()
+                .putBoolean("${key}_has_quotes", true)
+                .putBoolean("${key}_failed", false)
+                .commit()
+            assertTrue(
+                "A useful history remains cached for thirty days",
+                client.wasAttemptedRecently(key, lastAttempt + 8L * WaybackPriceHistoryClient.DAY_MS)
+            )
+            assertFalse(
+                "A useful history can be refreshed after thirty days",
+                client.wasAttemptedRecently(key, lastAttempt + 31L * WaybackPriceHistoryClient.DAY_MS)
+            )
+        } finally {
+            preferences.edit()
+                .remove(key)
+                .remove("${key}_has_quotes")
+                .remove("${key}_failed")
+                .commit()
+        }
+    }
 
 }

@@ -1304,6 +1304,100 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun archiveHistoryDoesNotAttachToDifferentQueryVariant() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val title = "Anker Prime 27K Power Bank"
+            val storedVariantUrl = "https://shop.example/products/anker-prime-27k?variant=512&color=black&utm_source=affiliate"
+            val archivedVariantUrl = "https://shop.example/products/anker-prime-27k?variant=256"
+            database.productDao().insert(
+                ProductEntity(
+                    id = "anker_variant_512",
+                    title = title,
+                    brand = "Anker",
+                    category = "ACCESSORIES",
+                    currentPrice = 99.99,
+                    athMinPrice = 0.0,
+                    athMinDate = "",
+                    athMinStore = "",
+                    athMaxPrice = 0.0,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "Tienda directa",
+                    storeUrl = storedVariantUrl,
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val now = System.currentTimeMillis()
+            val archivedAt = now - 200L * 24L * 60L * 60L * 1000L
+            val archiveTimestamp = java.text.SimpleDateFormat(
+                "yyyyMMddHHmmss", java.util.Locale.ROOT
+            ).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.format(java.util.Date(archivedAt))
+            val quote = ArchivedPriceQuote(
+                observedAt = archivedAt,
+                price = 79.99,
+                currency = "EUR",
+                productTitle = title,
+                originalUrl = archivedVariantUrl,
+                snapshotUrl = "https://web.archive.org/web/" + archiveTimestamp + "id_/" + archivedVariantUrl
+            )
+
+            assertEquals(
+                "A 256 GB archive capture must not attach to the saved 512 GB variant",
+                0,
+                repository.recordArchivedPriceHistory(
+                    expectedTitle = title,
+                    originalUrl = archivedVariantUrl,
+                    storeName = "Tienda directa",
+                    quotes = listOf(quote)
+                )
+            )
+            assertTrue(
+                "A rejected variant mismatch must not persist an observation",
+                database.priceObservationDao().observeVerifiedHistory("anker_variant_512").first().isEmpty()
+            )
+
+            // Equivalent URLs with reordered parameters and a known tracking key must still match.
+            val equivalentVariantUrl = "https://shop.example/products/anker-prime-27k?color=black&variant=512"
+            val validQuote = quote.copy(
+                price = 89.99,
+                originalUrl = equivalentVariantUrl,
+                snapshotUrl = "https://web.archive.org/web/" + archiveTimestamp + "id_/" + equivalentVariantUrl
+            )
+            assertEquals(
+                "Query ordering and tracking parameters must not prevent valid history from being attached",
+                1,
+                repository.recordArchivedPriceHistory(
+                    expectedTitle = title,
+                    originalUrl = equivalentVariantUrl,
+                    storeName = "Tienda directa",
+                    quotes = listOf(validQuote)
+                )
+            )
+            assertEquals(
+                1,
+                database.priceObservationDao().observeVerifiedHistory("anker_variant_512").first().size
+            )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun fitmentUnconfirmedWheelCandidatesAreNotSavedToMercadoOrHistory() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
@@ -1337,6 +1431,40 @@ class ExampleRobolectricTest {
             assertEquals(0, saved)
             assertTrue(database.productDao().getAllProductsSnapshot().isEmpty())
             assertEquals(0, database.priceObservationDao().getVerifiedObservationCount())
+
+            // The Google Product API comparison path must enforce the same fitment gate;
+            // otherwise a result excluded from live search could still enter the price history.
+            val savedProduct = ProductEntity(
+                id = "rial-milano-wheel-comparison",
+                title = "RIAL Milano llanta",
+                brand = "RIAL",
+                category = "SPORTS",
+                currentPrice = 0.0,
+                athMinPrice = 0.0,
+                athMinDate = "",
+                athMinStore = "",
+                athMaxPrice = 0.0,
+                avg90dPrice = 0.0,
+                officialPvp = 0.0,
+                currentStoreId = "Tienda de llantas",
+                storeUrl = "https://shop.example.test/rial-milano",
+                ean = "",
+                isPriceVerified = false
+            )
+            database.productDao().insert(savedProduct)
+            assertEquals(
+                "Fitment-unverified wheels must not become persisted comparison offers",
+                0,
+                repository.recordProductComparisonOffers(
+                    productId = savedProduct.id,
+                    expectedTitle = savedProduct.title,
+                    offers = listOf(result.copy(isFitmentUnverified = true))
+                )
+            )
+            assertEquals(
+                0,
+                database.priceObservationDao().getObservationCount(savedProduct.id)
+            )
         } finally {
             database.close()
         }
@@ -1356,7 +1484,8 @@ class ExampleRobolectricTest {
                   {"name":"Amazon.es","title":"Sony WH-1000XM5","price":"309,00 €","extracted_price":309.00,"link":"https://www.google.com/shopping/product/987654321?gl=es"},
                   {"name":"Wallapop","title":"Sony WH-1000XM5","price":"120,00 €","extracted_price":120.00,"link":"https://es.wallapop.com/item/sony","condition":"used"},
                   {"name":"Tienda cuotas","title":"Sony WH-1000XM5 19,99 €/mes","price":"19,99 €","extracted_price":19.99,"link":"https://shop.example.test/monthly"},
-                  {"name":"Foreign Shop","title":"Sony WH-1000XM5","price":"$250.00","extracted_price":250.00,"link":"https://shop.example.test/usd"}
+                  {"name":"Foreign Shop","title":"Sony WH-1000XM5","price":"$250.00","extracted_price":250.00,"link":"https://shop.example.test/usd"},
+                  {"name":"Structured Foreign Shop","title":"Sony WH-1000XM5","price":"99.99","extracted_price":99.99,"currency":"USD","link":"https://shop.example.test/structured-usd"}
                 ]
               }
             }
@@ -3138,6 +3267,197 @@ class ExampleRobolectricTest {
             assertEquals(1, stores.single { it.name == "Bici Market" }.savedPriceCount)
             assertFalse(stores.any { it.name == "Tienda sin precio válido" })
             assertFalse(stores.any { it.id == "amazon_es" })
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun standaloneAccessoryCannotBecomeTheMainProductComparisonPrice() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val title = "Sony WH-1000XM5 Wireless Headphones"
+            val product = ProductEntity(
+                id = "sony-wh1000xm5-accessory-isolation",
+                title = title,
+                brand = "Sony",
+                category = "TV_AUDIO",
+                currentPrice = 199.99,
+                athMinPrice = 199.99,
+                athMinDate = "",
+                athMinStore = "Tienda anterior",
+                athMaxPrice = 199.99,
+                avg90dPrice = 0.0,
+                officialPvp = 0.0,
+                currentStoreId = "shop",
+                storeUrl = "https://shop.example.test/sony-wh1000xm5",
+                ean = "",
+                isPriceVerified = false
+            )
+            database.productDao().insert(product)
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val accessory = SerpApiShoppingResult(
+                title = "Funda para Sony WH-1000XM5 Auriculares",
+                price = 5.99,
+                storeName = "Tienda",
+                sourceUrl = "https://shop.example.test/funda-sony-wh1000xm5",
+                observedAt = System.currentTimeMillis(),
+                condition = "new"
+            )
+
+            assertEquals(
+                "A standalone case must not be saved as the headphone's live comparison price",
+                0,
+                repository.recordProductComparisonOffers(
+                    productId = product.id,
+                    expectedTitle = title,
+                    offers = listOf(accessory)
+                )
+            )
+            assertEquals(0, database.priceObservationDao().getObservationCount(product.id))
+            assertFalse(database.productDao().getProductById(product.id)!!.isPriceVerified)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun suspiciousOnlySearchResultsCannotReplaceSavedProductStoreOrExtrema() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val title = "Anker Power Bank 20000mAh 65W"
+            val originalUrl = "https://www.pccomponentes.com/anker-power-bank-20000mah-65w"
+            val product = ProductEntity(
+                id = "anker-power-bank-suspicious-only",
+                title = title,
+                brand = "Anker",
+                category = "ACCESSORIES",
+                currentPrice = 99.99,
+                athMinPrice = 89.99,
+                athMinDate = "14 oct 2026",
+                athMinStore = "PcComponentes",
+                athMaxPrice = 129.99,
+                avg90dPrice = 105.0,
+                officialPvp = 149.99,
+                currentStoreId = "pccomponentes",
+                storeUrl = originalUrl,
+                ean = "",
+                isPriceVerified = false,
+                googleProductId = "123456789"
+            )
+            database.productDao().insert(product)
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val suspicious = SerpApiShoppingResult(
+                title = title,
+                price = 1.99,
+                storeName = "Vendedor desconocido",
+                sourceUrl = "https://unknown-seller.example/anker-power-bank",
+                observedAt = System.currentTimeMillis(),
+                condition = "new",
+                isSuspiciousPrice = true
+            )
+
+            repository.recordOnlineSearchResults(
+                results = listOf(suspicious),
+                sourceType = "GOOGLE_SHOPPING",
+                searchQuery = title
+            )
+
+            val updated = database.productDao().getProductById(product.id)!!
+            assertEquals("A suspicious-only result must not change the saved current price", 99.99, updated.currentPrice, 0.001)
+            assertEquals("A suspicious-only result must not replace the direct retailer URL", originalUrl, updated.storeUrl)
+            assertEquals("A suspicious-only result must not replace the saved current store", "pccomponentes", updated.currentStoreId)
+            assertEquals("A suspicious-only result must not alter the observed minimum", 89.99, updated.athMinPrice, 0.001)
+            assertEquals("A suspicious-only result must not alter the observed maximum", 129.99, updated.athMaxPrice, 0.001)
+            assertEquals("A suspicious-only result must not replace the catalogue ID", "123456789", updated.googleProductId)
+            assertEquals(1, database.priceObservationDao().getObservationCount(product.id))
+            assertTrue(
+                "The suspicious observation may be retained for audit but must stay unverified",
+                database.priceObservationDao().observeVerifiedHistory(product.id).first().isEmpty()
+            )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun suspiciousOnlyProductComparisonDoesNotVerifyCurrentProductPrice() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val product = ProductEntity(
+                id = "anker-comparison-suspicious-only",
+                title = "Anker Prime 27K Power Bank",
+                brand = "Anker",
+                category = "ACCESSORIES",
+                currentPrice = 0.0,
+                athMinPrice = 0.0,
+                athMinDate = "",
+                athMinStore = "",
+                athMaxPrice = 0.0,
+                avg90dPrice = 0.0,
+                officialPvp = 0.0,
+                currentStoreId = "unknown_store",
+                storeUrl = "",
+                ean = "",
+                isPriceVerified = false
+            )
+            database.productDao().insert(product)
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val suspicious = SerpApiShoppingResult(
+                title = product.title,
+                price = 1.99,
+                storeName = "Vendedor desconocido",
+                sourceUrl = "https://seller.example.test/anker-prime-27k",
+                observedAt = System.currentTimeMillis(),
+                condition = "new",
+                isSuspiciousPrice = true,
+                googleProductId = "123456789"
+            )
+
+            assertEquals(
+                1,
+                repository.recordProductComparisonOffers(
+                    productId = product.id,
+                    expectedTitle = product.title,
+                    offers = listOf(suspicious)
+                )
+            )
+            val refreshed = database.productDao().getProductById(product.id)!!
+            assertFalse("An unverified diagnostic offer must not verify the current price", refreshed.isPriceVerified)
+            assertTrue(
+                database.priceObservationDao().observeVerifiedHistory(product.id).first().isEmpty()
+            )
+            assertEquals("Suspicious catalogue IDs must not be attached to the product", null, refreshed.googleProductId)
         } finally {
             database.close()
         }

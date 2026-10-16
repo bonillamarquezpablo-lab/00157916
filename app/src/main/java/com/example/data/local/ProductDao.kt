@@ -21,7 +21,7 @@ interface ProductDao {
     suspend fun getProductById(productId: String): ProductEntity?
 
     /** Reconcile the cached verification flag from source-backed observations. */
-    @Query("UPDATE products SET isPriceVerified = 1 WHERE id IN (SELECT DISTINCT productId FROM price_observations WHERE isVerified = 1)")
+    @Query("UPDATE products SET isPriceVerified = CASE WHEN id IN (SELECT DISTINCT productId FROM price_observations WHERE isVerified = 1 AND lower(evidenceType) = 'live' AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%') THEN 1 ELSE 0 END")
     suspend fun markProductsWithVerifiedObservations(): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

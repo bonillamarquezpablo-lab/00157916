@@ -26,31 +26,55 @@ interface PriceObservationDao {
     @Query(
         "SELECT * FROM price_observations " +
             "WHERE productId = :productId AND isVerified = 1 " +
+            "AND (NOT (lower(evidenceType) = 'archive' OR lower(sourceUrl) LIKE 'https://web.archive.org/web/%' OR lower(sourceUrl) LIKE 'http://web.archive.org/web/%') OR (upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 AND trim(productTitle) <> '')) " +
             "ORDER BY observedAt DESC"
     )
     fun observeVerifiedHistory(productId: String): Flow<List<PriceObservationEntity>>
 
+    /** Latest validated live quote; archived snapshots never represent the current price. */
     @Query(
         "SELECT * FROM price_observations " +
             "WHERE productId = :productId AND isVerified = 1 " +
+            "AND lower(evidenceType) = 'live' " +
+            "AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' " +
+            "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
             "ORDER BY observedAt DESC LIMIT 1"
     )
     suspend fun getLatestVerified(productId: String): PriceObservationEntity?
 
-    @Query("SELECT * FROM price_observations WHERE isVerified = 1 ORDER BY observedAt ASC")
+    @Query("SELECT * FROM price_observations WHERE isVerified = 1 AND (NOT (lower(evidenceType) = 'archive' OR lower(sourceUrl) LIKE 'https://web.archive.org/web/%' OR lower(sourceUrl) LIKE 'http://web.archive.org/web/%') OR (upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 AND trim(productTitle) <> '')) ORDER BY observedAt ASC")
     fun observeAllVerified(): Flow<List<PriceObservationEntity>>
 
-    @Query("SELECT * FROM price_observations WHERE productId = :productId AND isVerified = 1 AND observedAt >= :since ORDER BY price ASC")
+    /** Verified live sources recorded for one product; used to safely associate other merchant URLs. */
+    @Query(
+        "SELECT * FROM price_observations " +
+            "WHERE productId = :productId AND isVerified = 1 " +
+            "AND lower(evidenceType) = 'live' " +
+            "AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' " +
+            "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
+            "ORDER BY observedAt DESC"
+    )
+    suspend fun getVerifiedLiveObservationsForProduct(productId: String): List<PriceObservationEntity>
+
+    /** Recent price-alert candidates must be live quotes, never past archive imports. */
+    @Query(
+        "SELECT * FROM price_observations " +
+            "WHERE productId = :productId AND isVerified = 1 AND observedAt >= :since " +
+            "AND lower(evidenceType) = 'live' " +
+            "AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' " +
+            "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
+            "ORDER BY price ASC"
+    )
     suspend fun getVerifiedSince(productId: String, since: Long): List<PriceObservationEntity>
 
-    @Query("SELECT COUNT(*) FROM price_observations WHERE isVerified = 1")
+    @Query("SELECT COUNT(*) FROM price_observations WHERE isVerified = 1 AND (NOT (lower(evidenceType) = 'archive' OR lower(sourceUrl) LIKE 'https://web.archive.org/web/%' OR lower(sourceUrl) LIKE 'http://web.archive.org/web/%') OR (upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 AND trim(productTitle) <> ''))")
     suspend fun getVerifiedObservationCount(): Int
 
     @Query(
         "SELECT * FROM price_observations " +
             "WHERE productId = :productId AND storeId = :storeId " +
             "AND observedAt >= :dayStart AND observedAt < :dayEnd " +
-            "AND lower(evidenceType) != 'archive' " +
+            "AND lower(evidenceType) = 'live' " +
             "AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' " +
             "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
             "ORDER BY observedAt DESC LIMIT 1"
@@ -75,6 +99,9 @@ interface PriceObservationDao {
             "AND (lower(evidenceType) = 'archive' " +
             "OR lower(sourceUrl) LIKE 'https://web.archive.org/web/%' " +
             "OR lower(sourceUrl) LIKE 'http://web.archive.org/web/%') " +
+            "AND upper(trim(currency)) = 'EUR' " +
+            "AND price >= 0.5 AND price <= 10000.0 " +
+            "AND trim(productTitle) <> '' " +
             "ORDER BY price ASC, observedAt DESC LIMIT 1"
     )
     suspend fun getArchivedObservationForStoreProductDay(
@@ -83,6 +110,52 @@ interface PriceObservationDao {
         dayStart: Long,
         dayEnd: Long
     ): PriceObservationEntity?
+
+    /**
+     * Historical Google Product API insights have a separate identity per merchant/day.
+     * They must not overwrite a live quote (or be overwritten by one).
+     */
+    @Query(
+        "SELECT * FROM price_observations " +
+            "WHERE productId = :productId AND storeId = :storeId " +
+            "AND observedAt >= :dayStart AND observedAt < :dayEnd " +
+            "AND isVerified = 1 AND lower(evidenceType) = 'google_insights' " +
+            "ORDER BY price ASC, observedAt DESC LIMIT 1"
+    )
+    suspend fun getGoogleInsightObservationForStoreProductDay(
+        productId: String,
+        storeId: String,
+        dayStart: Long,
+        dayEnd: Long
+    ): PriceObservationEntity?
+
+    /**
+     * Retain one verified historical insight per product/store/local day without colliding with
+     * live quotations or Wayback captures. A repeated import keeps the lower sourced insight.
+     */
+    @Transaction
+    suspend fun saveGoogleInsightObservationIfLower(
+        observation: PriceObservationEntity,
+        dayStart: Long,
+        dayEnd: Long
+    ): Boolean {
+        val existing = getGoogleInsightObservationForStoreProductDay(
+            observation.productId,
+            observation.storeId,
+            dayStart,
+            dayEnd
+        )
+        if (existing == null) {
+            insert(observation)
+            return true
+        }
+        val isLowerPrice = observation.price < existing.price
+        val samePriceWithNewerCapture =
+            observation.price == existing.price && observation.observedAt > existing.observedAt
+        if (!isLowerPrice && !samePriceWithNewerCapture) return false
+        update(observation.copy(id = existing.id))
+        return true
+    }
 
     /**
      * Keep the lowest verified archived price per product/store/day. A repeated import does not

@@ -22,6 +22,7 @@ import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.isIrrelevantMultiProductBundle
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.linkTypeForUrl
+import com.example.data.remote.isGoogleShoppingUrl
 import com.example.data.remote.hasAmbiguousBicycleTireDiameter
 import com.example.data.remote.isBicycleDrivetrainComponentTitle
 import com.example.data.remote.isBicycleDrivetrainSearch
@@ -112,7 +113,7 @@ class ProductRepository(
         observations.asSequence()
             .filter { observation ->
                 observation.isVerified &&
-                    observation.currency.equals("EUR", ignoreCase = true) &&
+                    observation.currency.trim().equals("EUR", ignoreCase = true) &&
                     observation.price.isFinite() && observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
                     observation.observedAt in 1L..System.currentTimeMillis() &&
                     observation.storeId.isNotBlank()
@@ -440,9 +441,19 @@ class ProductRepository(
      * This is intentionally non-destructive: invalid legacy rows stay in the database for audit,
      * but cannot set current prices, minima, maxima, averages or deal badges.
      */
+    /** A malformed legacy row can carry an archive URL while still being labeled "live". */
+    private fun isArchiveBackedObservation(observation: PriceObservationEntity): Boolean {
+        if (observation.evidenceType.equals("archive", ignoreCase = true)) return true
+        val host = parseHttpUri(observation.sourceUrl)?.host?.lowercase(Locale.ROOT)
+        return host == "web.archive.org" || host == "archive.org"
+    }
+
+    private fun isLiveObservation(observation: PriceObservationEntity): Boolean =
+        observation.evidenceType.equals("live", ignoreCase = true) &&
+            !isArchiveBackedObservation(observation)
+
     private fun isEligibleObservationForHistory(observation: PriceObservationEntity): Boolean {
-        val archiveBacked = observation.evidenceType.equals("archive", ignoreCase = true) ||
-            parseHttpUri(observation.sourceUrl)?.host.equals("web.archive.org", ignoreCase = true)
+        val archiveBacked = isArchiveBackedObservation(observation)
         val merchantUrl = if (archiveBacked) {
             // Derive the merchant from the archived target itself. sourcePageUrl is only
             // supplementary legacy metadata and must not redirect seller validation to a
@@ -564,41 +575,64 @@ class ProductRepository(
         val currentEntities = productDao.getAllProductsSnapshot().toMutableList()
         val groups = groupOnlineShoppingResults(eligible)
         for (group in groups) {
+            val trustedOffers = group.offers.filterNot { it.isSuspiciousPrice }
+            val hasTrustedOffer = trustedOffers.isNotEmpty()
+            // Never let a group made only of suspicious offers replace the merchant URL or
+            // current-store identity of an existing product. Such links could later be reused
+            // by the free-history action and attach a capture from the wrong listing.
             val bestOffer = group.cheapestOffer
-            val storeId = canonicalStoreId(bestOffer.storeName, bestOffer.sourceUrl)
             val existingProduct = currentEntities.firstOrNull {
                 onlineProductIdentityKey(it.title) == group.identityKey
+            }
+            val storeId = if (hasTrustedOffer) {
+                canonicalStoreId(bestOffer.storeName, bestOffer.sourceUrl)
+            } else {
+                existingProduct?.currentStoreId ?: "unknown_store"
             }
             val productId = existingProduct?.id
                 ?: stableOnlineId("online_product_", group.identityKey)
             // Keep the persisted title and representative image from the same provider listing.
             val displayTitle = group.title
-            val hasTrustedOffer = group.offers.any { !it.isSuspiciousPrice }
             val currentMinimum = if (hasTrustedOffer) group.minPrice else existingProduct?.currentPrice ?: 0.0
-            val highestToday = group.offers.maxOfOrNull { offer ->
+            val trustedHighestToday = trustedOffers.maxOfOrNull { offer ->
                 offer.price / (offer.wheelSetCount ?: 1)
-            } ?: currentMinimum
+            }
+            val highestToday = trustedHighestToday
+                ?: existingProduct?.athMaxPrice
+                ?: currentMinimum
+            val safeStoreId = if (hasTrustedOffer) storeId else existingProduct?.currentStoreId ?: "unknown_store"
+            val safeStoreUrl = if (hasTrustedOffer) bestOffer.sourceUrl else existingProduct?.storeUrl.orEmpty()
+            val safeMinStore = if (hasTrustedOffer) bestOffer.storeName else existingProduct?.athMinStore.orEmpty()
+            val safeGoogleProductId = if (hasTrustedOffer) {
+                trustedOffers.firstNotNullOfOrNull { it.googleProductId } ?: existingProduct?.googleProductId
+            } else {
+                existingProduct?.googleProductId
+            }
             val productEntity = if (existingProduct != null) {
                 existingProduct.copy(
-                    title = displayTitle,
-                    brand = existingProduct.brand.takeIf { it.isNotBlank() }
-                        ?: inferProductBrand(displayTitle),
-                    category = if (existingProduct.category == ProductCategory.ALL.name) {
+                    // Un untrusted-only batch cannot rewrite the saved product's identifying UI data.
+                    title = if (hasTrustedOffer) displayTitle else existingProduct.title,
+                    brand = if (hasTrustedOffer && existingProduct.brand.isBlank()) {
+                        inferProductBrand(displayTitle)
+                    } else existingProduct.brand,
+                    category = if (hasTrustedOffer && existingProduct.category == ProductCategory.ALL.name) {
                         inferProductCategory(displayTitle, searchQuery).name
                     } else existingProduct.category,
                     currentPrice = currentMinimum,
-                    athMinPrice = if (existingProduct.athMinPrice > 0.0) existingProduct.athMinPrice else currentMinimum,
-                    athMinDate = existingProduct.athMinDate.ifBlank { "Historial en construcción" },
-                    athMinStore = bestOffer.storeName,
-                    athMaxPrice = maxOf(existingProduct.athMaxPrice, highestToday),
-                    currentStoreId = storeId,
-                    storeUrl = bestOffer.sourceUrl,
-                    imageUrl = group.representativeImageUrl.takeIf { it.isNotBlank() }
-                        ?: existingProduct.imageUrl.takeIf { existingProduct.title.equals(displayTitle, ignoreCase = true) },
+                    athMinPrice = if (hasTrustedOffer && existingProduct.athMinPrice <= 0.0) currentMinimum else existingProduct.athMinPrice,
+                    athMinDate = if (hasTrustedOffer) existingProduct.athMinDate.ifBlank { "Historial en construcción" }
+                        else existingProduct.athMinDate,
+                    athMinStore = safeMinStore,
+                    athMaxPrice = if (hasTrustedOffer) maxOf(existingProduct.athMaxPrice, trustedHighestToday ?: currentMinimum)
+                        else existingProduct.athMaxPrice,
+                    currentStoreId = safeStoreId,
+                    storeUrl = safeStoreUrl,
+                    imageUrl = if (hasTrustedOffer) {
+                        group.representativeImageUrl.takeIf { it.isNotBlank() }
+                            ?: existingProduct.imageUrl.takeIf { existingProduct.title.equals(displayTitle, ignoreCase = true) }
+                    } else existingProduct.imageUrl,
                     isPriceVerified = hasTrustedOffer || existingProduct.isPriceVerified,
-                    googleProductId = bestOffer.googleProductId
-                        ?: group.offers.firstNotNullOfOrNull { it.googleProductId }
-                        ?: existingProduct.googleProductId
+                    googleProductId = safeGoogleProductId
                 )
             } else {
                 ProductEntity(
@@ -607,21 +641,20 @@ class ProductRepository(
                     brand = inferProductBrand(displayTitle),
                     category = inferProductCategory(displayTitle, searchQuery).name,
                     currentPrice = currentMinimum,
-                    athMinPrice = currentMinimum,
+                    athMinPrice = if (hasTrustedOffer) currentMinimum else 0.0,
                     athMinDate = "Historial en construcción",
-                    athMinStore = bestOffer.storeName,
-                    athMaxPrice = highestToday,
+                    athMinStore = safeMinStore,
+                    athMaxPrice = if (hasTrustedOffer) highestToday else 0.0,
                     avg90dPrice = 0.0,
                     officialPvp = 0.0,
-                    currentStoreId = storeId,
-                    storeUrl = bestOffer.sourceUrl,
+                    currentStoreId = safeStoreId,
+                    storeUrl = safeStoreUrl,
                     ean = "",
-                    imageUrl = group.representativeImageUrl.takeIf { it.isNotBlank() },
+                    imageUrl = group.representativeImageUrl.takeIf { hasTrustedOffer && it.isNotBlank() },
                     rating = 0.0,
                     reviewCount = 0,
-                    isPriceVerified = group.offers.any { !it.isSuspiciousPrice },
-                    googleProductId = bestOffer.googleProductId
-                        ?: group.offers.firstNotNullOfOrNull { it.googleProductId }
+                    isPriceVerified = hasTrustedOffer,
+                    googleProductId = safeGoogleProductId
                 )
             }
             productDao.insert(productEntity)
@@ -680,8 +713,7 @@ class ProductRepository(
         if (!originalUri.scheme.equals("https", ignoreCase = true)) return 0
         val originalHost = normalizeHost(originalUri.host.orEmpty())
         if (originalHost == "web.archive.org" || originalHost == "archive.org" ||
-            originalHost == "google.com" || originalHost == "google.es" ||
-            originalHost.endsWith(".google.com") || originalHost.endsWith(".google.es") ||
+            isGoogleShoppingUrl(originalUrl) || originalHost.startsWith("google.") ||
             originalHost == "bing.com" || originalHost.endsWith(".bing.com")
         ) return 0
 
@@ -690,9 +722,50 @@ class ProductRepository(
         // Archive metadata has its own provenance checks below. Requiring a verified *current*
         // quote here hid valid old prices for products whose live offer was absent or suspicious.
         // This still requires an existing matching product row and never changes its live price.
-        val product = products.firstOrNull {
+        // Titles alone are not unique: the same model may have multiple saved retailer listings.
+        // Prefer an exact merchant URL; when duplicate title rows remain ambiguous, do not attach
+        // historical prices to an arbitrary product.
+        val matchingProducts = products.filter {
             onlineProductIdentityKey(it.title) == identity
-        } ?: return 0
+        }
+        val originalUrlKey = normalizedProductPageKey(originalUrl) ?: return 0
+        val originalPathKey = normalizedProductPagePathKey(originalUrl) ?: return 0
+        val verifiedUrlMatches = matchingProducts.filter { candidate ->
+            normalizedProductPageKey(candidate.storeUrl) == originalUrlKey ||
+                priceObservationDao.getVerifiedLiveObservationsForProduct(candidate.id).any { observation ->
+                    normalizedProductPageKey(observation.sourceUrl) == originalUrlKey ||
+                        normalizedProductPageKey(observation.sourcePageUrl) == originalUrlKey
+                }
+        }
+        val product = when {
+            verifiedUrlMatches.size == 1 -> verifiedUrlMatches.single()
+            verifiedUrlMatches.size > 1 -> return 0
+            else -> {
+                // Query or fragment values can identify a purchasable variant. Do not fall back
+                // to a title/host match when the same page path has a conflicting variant key.
+                val conflictingPageVariant = matchingProducts.any { candidate ->
+                    normalizedProductPagePathKey(candidate.storeUrl) == originalPathKey &&
+                        normalizedProductPageKey(candidate.storeUrl) != originalUrlKey
+                }
+                if (conflictingPageVariant) return 0
+
+                if (matchingProducts.size == 1) {
+                    matchingProducts.single()
+                } else {
+                    val originalHost = normalizeHost(originalUri.host.orEmpty())
+                    matchingProducts.filter { candidate ->
+                        parseHttpUri(candidate.storeUrl)?.host
+                            ?.let(::normalizeHost) == originalHost
+                    }.singleOrNull() ?: return 0
+                }
+            }
+        }
+        // Without an actual verified live quote, accept archive history only for the product's
+        // own direct URL. This permits old prices before a live search without letting any same-
+        // title archive URL populate an unverified product from another seller or variant.
+        val hasVerifiedLiveQuote = priceObservationDao.getLatestVerified(product.id) != null
+        if (!hasVerifiedLiveQuote && normalizedProductPageKey(product.storeUrl) != originalUrlKey) return 0
+
         val now = System.currentTimeMillis()
         val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)
         val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
@@ -814,9 +887,43 @@ class ProductRepository(
                 evidenceType = "google_insights",
                 sourcePageUrl = sourceUrl
             )
-            if (saveDailyObservation(observation)) inserted++
+            val (dayStart, dayEnd) = localDayBounds(observation.observedAt)
+            if (priceObservationDao.saveGoogleInsightObservationIfLower(
+                    observation = observation,
+                    dayStart = dayStart,
+                    dayEnd = dayEnd
+                )
+            ) inserted++
         }
         return inserted
+    }
+
+    /**
+     * Applies the exact same trust and product-identity filters for UI comparison and persistence.
+     * Suspicious-only merchant groups stay visible as diagnostics but do not become verified prices.
+     */
+    fun filterProductComparisonOffers(
+        offers: List<SerpApiShoppingResult>,
+        expectedTitle: String
+    ): List<SerpApiShoppingResult> {
+        if (expectedTitle.isBlank()) return emptyList()
+        val targetIsAccessory = isAccessorySearchQuery(expectedTitle) || isAccessoryListing(expectedTitle)
+        val expectedIdentity = onlineProductIdentityKey(expectedTitle)
+        return filterOnlineSearchResults(offers, expectedTitle)
+            .filterNot {
+                it.isSecondHand || it.isRentalOrMonthly ||
+                    it.isFitmentUnverified || it.isCategoryUnverified ||
+                    (!targetIsAccessory &&
+                        (it.isAccessoryOffer || isAccessoryListing(it.title)) &&
+                        onlineProductIdentityKey(it.title) != expectedIdentity)
+            }
+            .filter { isEligibleSeller(it.storeName, it.sourceUrl) && isEligibleHistoryTitle(it.title) }
+            .groupBy { canonicalStoreId(it.storeName, it.sourceUrl) }
+            .values
+            .mapNotNull { rows ->
+                rows.filterNot { it.isSuspiciousPrice }.minByOrNull { it.price }
+                    ?: rows.minByOrNull { it.price }
+            }
     }
 
     /**
@@ -834,15 +941,7 @@ class ProductRepository(
         if (expectedTitle.isBlank() || onlineProductIdentityKey(product.title) != onlineProductIdentityKey(expectedTitle)) {
             return 0
         }
-        val valid = filterOnlineSearchResults(offers, expectedTitle)
-            .filterNot { it.isSecondHand || it.isRentalOrMonthly }
-            .filter { isEligibleSeller(it.storeName, it.sourceUrl) && isEligibleHistoryTitle(it.title) }
-            .groupBy { canonicalStoreId(it.storeName, it.sourceUrl) }
-            .values
-            .mapNotNull { rows ->
-                rows.filterNot { it.isSuspiciousPrice }.minByOrNull { it.price }
-                    ?: rows.minByOrNull { it.price }
-            }
+        val valid = filterProductComparisonOffers(offers, expectedTitle)
         if (valid.isEmpty()) return 0
 
         var savedCount = 0
@@ -869,9 +968,13 @@ class ProductRepository(
             )
             if (saveDailyObservation(observation)) savedCount++
         }
-        if (savedCount > 0) {
+        // A saved row can still be an unverified diagnostic offer. It must not switch the
+        // parent product to "verified" unless at least one trusted comparison quote was saved.
+        val savedTrustedOffer = valid.any { !it.isSuspiciousPrice }
+        if (savedCount > 0 && savedTrustedOffer) {
             productDao.updatePriceVerification(productId, true)
-            val googleId = valid.firstNotNullOfOrNull { it.googleProductId }
+            val googleId = valid.filterNot { it.isSuspiciousPrice }
+                .firstNotNullOfOrNull { it.googleProductId }
             if (!googleId.isNullOrBlank() && product.googleProductId != googleId) {
                 productDao.insert(product.copy(googleProductId = googleId))
             }
@@ -881,22 +984,12 @@ class ProductRepository(
 
     /** Resolve a persisted online product when a grouped result card is tapped. */
     suspend fun awaitProductForOnlineIdentity(identityKey: String): Product {
-        // Wait until Room has emitted the saved observation as well as the product row. That way
-        // opening a result immediately after a search shows the first point instead of a transient
-        // empty-history state caused by Room flows emitting on separate table invalidations.
+        // A product may legitimately have no verified price or history yet. Resolve the saved
+        // row as soon as Room exposes it instead of waiting forever for a price point.
         return allProductsStream.first { products ->
-            products.any { product ->
-                onlineProductIdentityKey(product.title) == identityKey &&
-                    product.isPriceVerified &&
-                    product.priceHistory.isNotEmpty()
-            }
-        }.first { product ->
-            onlineProductIdentityKey(product.title) == identityKey &&
-                product.isPriceVerified &&
-                product.priceHistory.isNotEmpty()
-        }
+            products.any { product -> onlineProductIdentityKey(product.title) == identityKey }
+        }.first { product -> onlineProductIdentityKey(product.title) == identityKey }
     }
-
     /**
      * Save one verified row per product/merchant/local day. Only replace an existing row when
      * the new search is newer, or has a lower price at the exact same timestamp.
@@ -985,8 +1078,11 @@ class ProductRepository(
     private fun isMerchantDestinationConsistent(storeName: String, sourceUrl: String): Boolean {
         val host = parseHttpUri(sourceUrl)?.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
         if (host.isBlank()) return false
+        if (isGoogleShoppingUrl(sourceUrl)) return true
+        // A lookalike such as google.com.attacker.example or google.attacker.example is
+        // not an intermediary; do not let it bypass retailer/source consistency checks.
         if (host.startsWith("google.") || host.endsWith(".google.com") || host.endsWith(".google.es")) {
-            return true
+            return false
         }
 
         val knownStore = Store.ALL_STORES.firstOrNull { store ->
@@ -1161,7 +1257,7 @@ class ProductRepository(
 
     private fun canonicalStoreId(storeName: String, sourceUrl: String): String {
         val host = parseHttpUri(sourceUrl)?.host?.let(::normalizeHost).orEmpty()
-        val googleHost = host.startsWith("google.") || host.endsWith(".google.com") || host.endsWith(".google.es")
+        val googleHost = isGoogleShoppingUrl("https://$host")
         if (host.isNotBlank() && !googleHost) {
             Store.ALL_STORES.firstOrNull { store ->
                 val knownHost = normalizeHost(store.domain.substringBefore('/'))
@@ -1366,7 +1462,7 @@ class ProductRepository(
         }.sortedBy { it.observedAt }
         // Only current search observations establish the live price. Historical-provider points
         // remain visible on the chart but can never replace the current quote.
-        val liveHistory = sortedHistory.filter { it.evidenceType == "live" }
+        val liveHistory = sortedHistory.filter(::isLiveObservation)
         // Current price/store must always come from a live provider observation, never a Wayback
         // snapshot, even when an archived snapshot was captured later in the same calendar day.
         val latestLiveDayStart = liveHistory.lastOrNull()?.let { localDayBounds(it.observedAt).first }
@@ -1379,7 +1475,7 @@ class ProductRepository(
             .groupBy { localDayBounds(it.observedAt).first }
             .values
             .mapNotNull { dayOffers ->
-                val liveOffers = dayOffers.filter { it.evidenceType == "live" }
+                val liveOffers = dayOffers.filter(::isLiveObservation)
                 (liveOffers.ifEmpty { dayOffers }).minByOrNull { it.price }
             }
             .sortedBy { localDayBounds(it.observedAt).first }
@@ -1569,7 +1665,41 @@ class ProductRepository(
         }
     }
 
-    private fun normalizeHost(host: String): String = host.lowercase().removePrefix("www.")
+    private fun normalizedProductPageKey(value: String): String? {
+        val uri = parseHttpUri(value) ?: return null
+        if (!uri.scheme.equals("https", ignoreCase = true) || uri.host.isNullOrBlank()) return null
+        val pathKey = normalizedProductPagePathKey(value) ?: return null
+        val trackingKeys = setOf(
+            "gclid", "dclid", "fbclid", "msclkid", "yclid", "gbraid", "wbraid",
+            "mc_cid", "mc_eid", "_ga", "_gl", "ref_src", "igshid"
+        )
+        // Remove only known tracking parameters. Preserve variant, SKU, capacity, colour and
+        // model selectors because they can identify different purchasable products.
+        val meaningfulQuery = uri.rawQuery.orEmpty()
+            .split('&')
+            .filter { it.isNotEmpty() }
+            .filterNot { parameter ->
+                val rawKey = parameter.substringBefore('=')
+                val decodedKey = runCatching {
+                    java.net.URLDecoder.decode(rawKey.replace("+", "%2B"), "UTF-8")
+                }.getOrDefault(rawKey).lowercase(Locale.ROOT)
+                decodedKey.startsWith("utm_") || decodedKey in trackingKeys
+            }
+            .sorted()
+            .joinToString("&")
+        val querySuffix = if (meaningfulQuery.isEmpty()) "" else "?$meaningfulQuery"
+        val fragmentSuffix = uri.rawFragment?.let { "#$it" }.orEmpty()
+        return pathKey + querySuffix + fragmentSuffix
+    }
+
+    private fun normalizedProductPagePathKey(value: String): String? {
+        val uri = parseHttpUri(value) ?: return null
+        if (!uri.scheme.equals("https", ignoreCase = true) || uri.host.isNullOrBlank()) return null
+        val portSuffix = if (uri.port == -1 || uri.port == 443) "" else ":${uri.port}"
+        return normalizeHost(uri.host.orEmpty()) + portSuffix + normalizePath(uri)
+    }
+
+    private fun normalizeHost(host: String): String = host.lowercase(Locale.ROOT).removePrefix("www.")
 
     private fun normalizePath(uri: URI): String = uri.path.orEmpty().trimEnd('/').ifEmpty { "/" }
 

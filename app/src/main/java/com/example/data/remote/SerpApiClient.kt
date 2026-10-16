@@ -335,7 +335,7 @@ class SerpApiClient(
                 listOf('$', '£', '¥', '₹').any { priceText.contains(it) } ||
                     listOf("USD", "GBP", "CAD", "AUD", "NZD", "JPY", "INR", "CHF")
                         .any { currency -> priceText.contains(currency, ignoreCase = true) }
-            if (explicitlyForeignCurrency) {
+            if (explicitlyForeignCurrency || hasExplicitNonEurCurrency(item)) {
                 rejectedForPriceOrCurrency++
                 recordDiscard(item, title, "Sin precio válido: moneda extranjera")
                 return@mapNotNull null
@@ -556,7 +556,7 @@ class SerpApiClient(
                 ?.toString()
                 ?.toDoubleOrNull()
                 ?.takeIf { it.isFinite() && it > 0.0 }
-            if (hasExplicitForeignCurrency(priceText)) {
+            if (hasExplicitForeignCurrency(priceText) || hasExplicitNonEurCurrency(item)) {
                 rejectedForPriceOrCurrency++
                 recordDiscard(item, title, "Sin precio válido: moneda extranjera")
                 return@mapNotNull null
@@ -810,7 +810,9 @@ class SerpApiClient(
             ) return@mapNotNull null
 
             val priceText = store.optString("price")
-            if (hasExplicitForeignCurrency(priceText)) return@mapNotNull null
+            if (hasExplicitForeignCurrency(priceText) || hasExplicitNonEurCurrency(store)) {
+                return@mapNotNull null
+            }
             val extractedPrice = store.opt("extracted_price")
                 ?.takeIf { it !is JSONObject && it !is JSONArray }
                 ?.toString()
@@ -1094,6 +1096,22 @@ class SerpApiClient(
         listOf(36.toChar(), '£', '¥', '₹').any { value.contains(it) } ||
             listOf("USD", "GBP", "CAD", "AUD", "NZD", "JPY", "INR", "CHF")
                 .any { currency -> value.contains(currency, ignoreCase = true) }
+
+    /** Reject a structured currency field that contradicts the Spanish/EUR search context. */
+    private fun hasExplicitNonEurCurrency(item: JSONObject): Boolean {
+        val currency = listOf(
+            "currency", "currency_code", "currencyCode", "price_currency", "priceCurrency"
+        ).firstNotNullOfOrNull { key ->
+            item.optString(key).trim().takeIf { it.isNotBlank() && it != "null" }
+        } ?: return false
+
+        val normalized = currency.uppercase(Locale.ROOT)
+        val codes = Regex("""\b[A-Z]{3}\b""").findAll(normalized)
+            .map { it.value }
+            .toSet()
+        if (codes.isNotEmpty()) return codes != setOf("EUR")
+        return !(normalized in setOf("EURO", "EUROS") || currency.contains('€'))
+    }
 
     private fun parsePrice(raw: Any?): Double? {
         if (raw == null || raw == JSONObject.NULL) return null
@@ -1584,7 +1602,7 @@ class SerpApiClient(
             .replace(Regex("\\s+"), " ")
 
     private fun storeIdForHost(host: String, merchantName: String = ""): String {
-        if (host == "google.com" || host.endsWith(".google.com")) {
+        if (isGoogleShoppingUrl("https://$host")) {
             val merchant = normalize(merchantName)
             val knownStoreId = when {
                 "amazon" in merchant -> "amazon_es"
@@ -1611,6 +1629,8 @@ class SerpApiClient(
                 "lenovo" in merchant -> "lenovo_store"
                 "dell" in merchant -> "dell_store"
                 "hp store" in merchant -> "hp_store"
+                "anker" in merchant -> "anker_store"
+                "ugreen" in merchant -> "ugreen_store"
                 else -> null
             }
             if (knownStoreId != null) return knownStoreId

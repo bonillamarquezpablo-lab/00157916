@@ -35,6 +35,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -103,6 +104,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         const val TRACKED_REFRESH_COOLDOWN_MS = 24L * 60L * 60L * 1000L
         const val MAX_TRACKED_REFRESH_PER_TAP = 10
         const val MAX_ARCHIVE_PAGES_PER_SEARCH = 2
+        const val MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS = 20_000L
     }
 
     private val database = AppDatabase.getInstance(application)
@@ -834,8 +836,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             expectedTitle = product.title,
             observedAt = now
         )
-        val safeOffers = repository.filterOnlineSearchResults(details.offers, product.title)
-            .filterNot { it.isSecondHand || it.isRentalOrMonthly }
+        val safeOffers = repository.filterProductComparisonOffers(details.offers, product.title)
         val savedHistory = repository.recordGooglePriceInsightsHistory(
             productId = product.id,
             expectedTitle = product.title,
@@ -954,7 +955,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             val currentDestination = product.storeUrl.ifBlank { product.currentStore.officialUrl }
             buildFreeArchiveCandidate(product.title, product.currentStore.name, currentDestination)?.let(::add)
         }.distinctBy {
-            it.title.trim().lowercase(Locale.ROOT) + "|" + (it.merchantDomain ?: it.directUrl ?: "unknown")
+            // Different direct product URLs on one merchant domain may represent distinct variants.
+            // Deduplicate exact URLs first; use the domain only for domain-only discovery candidates.
+            it.title.trim().lowercase(Locale.ROOT) + "|" + (it.directUrl ?: it.merchantDomain ?: "unknown")
         }.take(MAX_ARCHIVE_PAGES_PER_SEARCH)
 
         if (candidates.isEmpty()) {
@@ -1285,22 +1288,32 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 var checkedCount = 0
                 var foundCount = 0
                 var skippedCount = 0
+                var timedOutCount = 0
                 val archiveDates = mutableListOf<Long>()
                 for (candidate in candidates) {
-                    val attempts = mutableListOf<com.example.data.remote.WaybackBackfillResult>()
-                    if (candidate.directUrl != null) {
-                        attempts += waybackPriceHistoryClient.fetchHistory(
-                            originalUrl = candidate.directUrl,
-                            expectedTitle = candidate.title
-                        )
+                    // Bound each candidate's direct + merchant-domain lookup so slow public
+                    // archive responses cannot leave the detail sheet spinning indefinitely.
+                    val attempts = withTimeoutOrNull(MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS) {
+                        val results = mutableListOf<com.example.data.remote.WaybackBackfillResult>()
+                        if (candidate.directUrl != null) {
+                            results += waybackPriceHistoryClient.fetchHistory(
+                                originalUrl = candidate.directUrl,
+                                expectedTitle = candidate.title
+                            )
+                        }
+                        // If the exact URL has no usable old prices (or only a Google Shopping link was
+                        // provided), try a bounded, product-term-filtered lookup on the known merchant.
+                        if (candidate.merchantDomain != null && results.none { it.quotes.isNotEmpty() }) {
+                            results += waybackPriceHistoryClient.fetchHistoryByMerchantDomain(
+                                domain = candidate.merchantDomain,
+                                expectedTitle = candidate.title
+                            )
+                        }
+                        results
                     }
-                    // If the exact URL has no usable old prices (or only a Google Shopping link was
-                    // provided), try a bounded, product-term-filtered lookup on the known merchant.
-                    if (candidate.merchantDomain != null && attempts.none { it.quotes.isNotEmpty() }) {
-                        attempts += waybackPriceHistoryClient.fetchHistoryByMerchantDomain(
-                            domain = candidate.merchantDomain,
-                            expectedTitle = candidate.title
-                        )
+                    if (attempts == null) {
+                        timedOutCount++
+                        continue
                     }
 
                     if (attempts.isNotEmpty() && attempts.all { it.skippedRecently }) {
@@ -1355,7 +1368,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
                 val notice = when {
                     skippedCount == candidates.size ->
-                        "Estas consultas gratuitas ya se comprobaron recientemente. Se evita repetirlas durante 30 días para no sobrecargar Internet Archive."
+                        "Estas consultas gratuitas ya se comprobaron recientemente. La caché evita repetirlas mientras siga vigente, según si había precios útiles o si la consulta falló."
                     savedCount > 0 -> {
                         val oldest = archiveDates.minOrNull()?.let { timestamp ->
                             SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(timestamp))
@@ -1368,6 +1381,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         "Se encontraron capturas con precios previos, pero no se pudieron vincular a la ficha del producto o ya existían esos registros diarios."
                     checkedCount > 0 ->
                         "Se consultaron $checkedCount capturas gratuitas, pero ninguna expuso un precio EUR verificable para el producto exacto. No se han rellenado datos ausentes."
+                    timedOutCount > 0 ->
+                        "La consulta del archivo agotó el límite de tiempo para $timedOutCount tienda(s). No se ha gastado cuota de SerpApi; puedes volver a intentarlo más tarde."
                     else ->
                         "No se recuperó histórico gratuito: puede que el comercio no esté archivado o que no publique el precio en metadatos verificables. No se ha gastado cuota de SerpApi."
                 }

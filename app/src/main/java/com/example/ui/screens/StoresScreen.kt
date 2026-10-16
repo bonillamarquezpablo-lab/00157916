@@ -52,6 +52,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Store
+import com.example.security.openExternalHttpsUrl
 
 @Composable
 fun StoresScreen(
@@ -303,9 +304,7 @@ fun StoresScreen(
                         if (store.hasOfficialSite) {
                             OutlinedButton(
                                 onClick = {
-                                    val url = store.officialUrl
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                    context.startActivity(intent)
+                                    openExternalHttpsUrl(context, store.officialUrl)
                                 },
                                 modifier = Modifier
                                     .weight(1f)

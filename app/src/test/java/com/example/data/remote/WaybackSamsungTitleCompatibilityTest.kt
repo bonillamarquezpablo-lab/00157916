@@ -23,7 +23,7 @@ class WaybackSamsungTitleCompatibilityTest {
         """.trimIndent()
         val quote = client.parseArchivedPrice(
             html = html,
-            expectedTitle = "OLED Samsung TQ48S95HAEXXC 48 4K Smart TV",
+            expectedTitle = "OLED Samsung TQ48S95HAEXXC 48 Smart TV",
             originalUrl = "https://www.samsung.com/es/tvs/oled-tv/tq48s95haexxc/",
             snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://www.samsung.com/es/tvs/oled-tv/tq48s95haexxc/",
             observedAt = 1_735_732_800_000L

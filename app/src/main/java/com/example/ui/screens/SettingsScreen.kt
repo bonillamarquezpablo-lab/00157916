@@ -1,8 +1,6 @@
 package com.example.ui.screens
 
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import android.util.Patterns
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement

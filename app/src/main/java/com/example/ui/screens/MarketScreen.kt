@@ -443,7 +443,16 @@ fun MarketScreen(
                                     modifier = Modifier.size(14.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text(uiState.sortOption.label, fontSize = 12.sp)
+                                Text(
+                                    text = when {
+                                        uiState.showInAppMinimumsFilter && uiState.sortOption == SortOption.PRICE_LOW_HIGH ->
+                                            "Mínimo observado: menor a mayor"
+                                        uiState.showInAppMinimumsFilter && uiState.sortOption == SortOption.PRICE_HIGH_LOW ->
+                                            "Mínimo observado: mayor a menor"
+                                        else -> uiState.sortOption.label
+                                    },
+                                    fontSize = 12.sp
+                                )
                             }
                         },
                         modifier = Modifier.testTag("sort_filter_chip")

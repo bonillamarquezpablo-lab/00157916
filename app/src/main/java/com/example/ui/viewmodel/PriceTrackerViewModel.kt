@@ -104,7 +104,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     private companion object {
         const val TRACKED_REFRESH_COOLDOWN_MS = 24L * 60L * 60L * 1000L
         const val MAX_TRACKED_REFRESH_PER_TAP = 10
-        const val MAX_ARCHIVE_PAGES_PER_SEARCH = 2
+        const val MAX_ARCHIVE_PAGES_PER_SEARCH = 5
         const val MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS = 20_000L
     }
 

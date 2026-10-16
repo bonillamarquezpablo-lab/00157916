@@ -397,7 +397,7 @@ class WaybackPriceHistoryClient(
             "dyson.es" -> setOf("dyson")
             "lenovo.com" -> setOf("lenovo")
             "dell.com" -> setOf("dell")
-            "hp.com" -> setOf("hp"),
+            "hp.com" -> setOf("hp")
             "eshop.fujifilm-x.com" -> setOf("fujifilm", "fuji", "eshop", "camera", "cameras", "camara", "camaras")
             else -> setOf(normalizedDomain.substringBefore('.'))
         }

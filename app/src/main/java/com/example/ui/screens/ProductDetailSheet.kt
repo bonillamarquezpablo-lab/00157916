@@ -607,8 +607,7 @@ fun ProductDetailSheet(
                         sourceUrl = product.storeUrl
                     )
                     val catalogOnlyGoogleLink = extractDirectRetailerUrl(product.storeUrl) == null &&
-                        isGoogleShoppingUrl(product.storeUrl) &&
-                        !product.googleProductId.isNullOrBlank()
+                        isGoogleShoppingUrl(product.storeUrl)
                     val destination = exactRetailerUrl
                         ?: if (catalogOnlyGoogleLink) null else
                             knownRetailer?.searchUrlFor(product.title)

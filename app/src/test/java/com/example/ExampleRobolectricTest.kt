@@ -1431,6 +1431,40 @@ class ExampleRobolectricTest {
             assertEquals(0, saved)
             assertTrue(database.productDao().getAllProductsSnapshot().isEmpty())
             assertEquals(0, database.priceObservationDao().getVerifiedObservationCount())
+
+            // The Google Product API comparison path must enforce the same fitment gate;
+            // otherwise a result excluded from live search could still enter the price history.
+            val savedProduct = ProductEntity(
+                id = "rial-milano-wheel-comparison",
+                title = "RIAL Milano llanta",
+                brand = "RIAL",
+                category = "SPORTS",
+                currentPrice = 0.0,
+                athMinPrice = 0.0,
+                athMinDate = "",
+                athMinStore = "",
+                athMaxPrice = 0.0,
+                avg90dPrice = 0.0,
+                officialPvp = 0.0,
+                currentStoreId = "Tienda de llantas",
+                storeUrl = "https://shop.example.test/rial-milano",
+                ean = "",
+                isPriceVerified = false
+            )
+            database.productDao().insert(savedProduct)
+            assertEquals(
+                "Fitment-unverified wheels must not become persisted comparison offers",
+                0,
+                repository.recordProductComparisonOffers(
+                    productId = savedProduct.id,
+                    expectedTitle = savedProduct.title,
+                    offers = listOf(result.copy(isFitmentUnverified = true))
+                )
+            )
+            assertEquals(
+                0,
+                database.priceObservationDao().getObservationCount(savedProduct.id)
+            )
         } finally {
             database.close()
         }

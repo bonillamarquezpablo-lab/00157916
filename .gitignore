@@ -16,3 +16,7 @@
 local.properties
 .env
 debug.keystore
+
+# Never commit private signing material.
+*.jks
+*.keystore

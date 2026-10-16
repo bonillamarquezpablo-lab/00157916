@@ -44,6 +44,17 @@ interface PriceObservationDao {
     @Query("SELECT * FROM price_observations WHERE isVerified = 1 ORDER BY observedAt ASC")
     fun observeAllVerified(): Flow<List<PriceObservationEntity>>
 
+    /** Verified live sources recorded for one product; used to safely associate other merchant URLs. */
+    @Query(
+        "SELECT * FROM price_observations " +
+            "WHERE productId = :productId AND isVerified = 1 " +
+            "AND lower(evidenceType) = 'live' " +
+            "AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' " +
+            "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
+            "ORDER BY observedAt DESC"
+    )
+    suspend fun getVerifiedLiveObservationsForProduct(productId: String): List<PriceObservationEntity>
+
     /** Recent price-alert candidates must be live quotes, never past archive imports. */
     @Query(
         "SELECT * FROM price_observations " +

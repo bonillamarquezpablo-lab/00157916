@@ -954,13 +954,21 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         // Archived snapshots are independent evidence; a product URL is sufficient to look for
         // them. Do not require or fabricate a current price to perform this free lookup.
         val offerCandidates = product.offers.mapNotNull { offer ->
-            val destination = offer.url.ifBlank {
-                if (offer.store.id == product.currentStore.id) product.storeUrl
-                else offer.store.officialUrl
+            val directOfferUrl = offer.url.takeIf {
+                !isGoogleShoppingUrl(it) && waybackPriceHistoryClient.isEligibleDirectUrl(it)
             }
+            val destination = directOfferUrl
+                ?: offer.store.officialUrl.takeIf { it.isNotBlank() }
+                ?: offer.url.takeIf { it.isNotBlank() }
+                ?: if (offer.store.id == product.currentStore.id) product.storeUrl else ""
             buildFreeArchiveCandidate(product.title, offer.store.name, destination)
         }
-        val currentDestination = product.storeUrl.ifBlank { product.currentStore.officialUrl }
+        val directCurrentUrl = product.storeUrl.takeIf {
+            !isGoogleShoppingUrl(it) && waybackPriceHistoryClient.isEligibleDirectUrl(it)
+        }
+        val currentDestination = directCurrentUrl
+            ?: product.currentStore.officialUrl.takeIf { it.isNotBlank() }
+            ?: product.storeUrl
         val currentProductCandidate = buildFreeArchiveCandidate(
             product.title,
             product.currentStore.name,

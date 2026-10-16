@@ -71,7 +71,7 @@ class WaybackPriceHistoryClient(
         if (!isEligibleDirectUrl(originalUrl) || expectedTitle.isBlank()) {
             return@withContext WaybackBackfillResult()
         }
-        val attempt = attemptKey("url|$originalUrl|$expectedTitle")
+        val attempt = attemptKey("archive-v2|url|$originalUrl|$expectedTitle")
         if (wasAttemptedRecently(attempt, now)) {
             return@withContext WaybackBackfillResult(skippedRecently = true)
         }
@@ -96,7 +96,7 @@ class WaybackPriceHistoryClient(
         if (expectedTitle.isBlank()) return@withContext WaybackBackfillResult()
         val cdxUrl = buildDomainCdxUrl(normalizedDomain, expectedTitle, now, lookbackDays)
             ?: return@withContext WaybackBackfillResult()
-        val attempt = attemptKey("domain|$normalizedDomain|$expectedTitle")
+        val attempt = attemptKey("archive-v2|domain|$normalizedDomain|$expectedTitle")
         if (wasAttemptedRecently(attempt, now)) {
             return@withContext WaybackBackfillResult(skippedRecently = true)
         }
@@ -274,7 +274,9 @@ class WaybackPriceHistoryClient(
             "xiaomi" to "mi.com",
             "lenovo" to "lenovo.com",
             "dell" to "dell.com",
-            "hp" to "hp.com"
+            "hp" to "hp.com",
+            "fujifilm" to "eshop.fujifilm-x.com",
+            "fujifilm x gfx eshop" to "eshop.fujifilm-x.com"
         )
         val match = aliases.entries.firstOrNull { (label, _) ->
             normalized == label || normalized.contains(label)
@@ -314,7 +316,9 @@ class WaybackPriceHistoryClient(
             "dyson" to ("Dyson" to "dyson.es"),
             "lenovo" to ("Lenovo" to "lenovo.com"),
             "dell" to ("Dell" to "dell.com"),
-            "hp" to ("HP" to "hp.com")
+            "hp" to ("HP" to "hp.com"),
+            "fujifilm" to ("FUJIFILM X | GFX eShop" to "eshop.fujifilm-x.com"),
+            "instax" to ("FUJIFILM X | GFX eShop" to "eshop.fujifilm-x.com")
         )
         val match = brands.firstOrNull { (brand, _) ->
             Regex("""\b${Regex.escape(brand)}\b""").containsMatchIn(normalized)
@@ -393,7 +397,8 @@ class WaybackPriceHistoryClient(
             "dyson.es" -> setOf("dyson")
             "lenovo.com" -> setOf("lenovo")
             "dell.com" -> setOf("dell")
-            "hp.com" -> setOf("hp")
+            "hp.com" -> setOf("hp"),
+            "eshop.fujifilm-x.com" -> setOf("fujifilm", "fuji", "eshop", "camera", "cameras", "camara", "camaras")
             else -> setOf(normalizedDomain.substringBefore('.'))
         }
         val textTokens = tokens.filter { token ->
@@ -533,6 +538,7 @@ class WaybackPriceHistoryClient(
 
         val pageTitle = readMeta(html, setOf("og:title"))
             ?: readMeta(html, setOf("twitter:title"))
+            ?: readItempropValue(html, "name")
             ?: Regex("""(?is)<title[^>]*>(.*?)</title>""").find(html)?.groupValues?.getOrNull(1)?.let(::decodeHtml)
 
         // Prefer the page's explicit product price metadata in a stable priority order.
@@ -541,11 +547,12 @@ class WaybackPriceHistoryClient(
             "product:price:amount", "og:price:amount", "price", "product:price"
         ).firstNotNullOfOrNull { key ->
             readMeta(html, setOf(key))?.let(::parsePositivePrice)
-        }
+        } ?: readItempropValue(html, "price")?.let(::parsePositivePrice)
         val metaCurrency = listOf(
             "product:price:currency", "og:price:currency", "pricecurrency"
         ).firstNotNullOfOrNull { key -> readMeta(html, setOf(key)) }
-            ?.uppercase(Locale.ROOT)
+            ?: readItempropValue(html, "priceCurrency")
+                ?.uppercase(Locale.ROOT)
 
         fun isValidCandidate(candidate: Triple<String, Double, String>): Boolean =
             candidate.third.equals("EUR", ignoreCase = true) &&
@@ -643,6 +650,37 @@ class WaybackPriceHistoryClient(
             val key = (attributes["property"] ?: attributes["name"] ?: attributes["itemprop"])
                 ?.lowercase(Locale.ROOT)
             if (key in normalizedNames) attributes["content"]?.takeIf { it.isNotBlank() }?.let { return it }
+        }
+        return null
+    }
+
+    /**
+     * Read an explicit Schema.org microdata property without scraping arbitrary visible prices.
+     * This supports archived product pages that use itemprop attributes instead of JSON-LD/meta tags.
+     */
+    private fun readItempropValue(html: String, propertyName: String): String? {
+        val target = propertyName.lowercase(Locale.ROOT)
+        val openingTag = Regex("""(?is)<([a-z][a-z0-9]*)\b[^>]*\bitemprop\s*=\s*["']([^"']+)["'][^>]*>""")
+        val voidTags = setOf("meta", "link", "img", "input", "br", "hr", "area", "base", "embed", "source", "track", "wbr")
+        for (match in openingTag.findAll(html)) {
+            val properties = match.groupValues[2].lowercase(Locale.ROOT).split(Regex("\\s+"))
+            if (target !in properties) continue
+            val tagName = match.groupValues[1].lowercase(Locale.ROOT)
+            val attributes = Regex("""(?is)([a-z_:.-]+)\s*=\s*["'](.*?)["']""")
+                .findAll(match.value)
+                .associate { it.groupValues[1].lowercase(Locale.ROOT) to decodeHtml(it.groupValues[2]).trim() }
+            val attributeValue = sequenceOf("content", "value", "data-price")
+                .mapNotNull { key -> attributes[key]?.takeIf { it.isNotBlank() } }
+                .firstOrNull()
+            if (attributeValue != null) return attributeValue
+            if (tagName in voidTags) continue
+            val closing = Regex("""(?is)</\s*${Regex.escape(tagName)}\s*>""")
+                .find(html, match.range.last + 1) ?: continue
+            val text = html.substring(match.range.last + 1, closing.range.first)
+                .replace(Regex("""(?is)<[^>]+>"""), " ")
+                .replace(Regex("\\s+"), " ")
+                .trim()
+            if (text.isNotBlank()) return decodeHtml(text)
         }
         return null
     }

@@ -226,6 +226,14 @@ class WaybackPriceHistoryClientTest {
         assertEquals("douglas.es", client.resolveMerchantDomain("Douglas"))
         assertEquals("amazon.es", client.resolveMerchantDomain("Amazon España"))
         assertNull("Generic search-engine labels must not be treated as stores", client.resolveMerchantDomain("Google Shopping"))
+        assertEquals(
+            "eshop.fujifilm-x.com",
+            client.resolveMerchantDomain("Fujifilm X | GFX eShop", "https://www.google.com/search?q=instax")
+        )
+        assertEquals(
+            "FUJIFILM X | GFX eShop" to "eshop.fujifilm-x.com",
+            client.resolveBrandMerchant("Cámara Fujifilm Instax Mini 41")
+        )
 
         val url = client.buildDomainCdxUrl(
             domain = "notino.es",
@@ -317,8 +325,48 @@ class WaybackPriceHistoryClientTest {
         assertTrue(nikePathFilter.contains("max"))
         assertFalse(nikePathFilter.contains("zapatillas"))
         assertFalse("The host brand itself usually is not in product URL paths", nikePathFilter.contains("nike"))
+
+        val fujiUrl = client.buildDomainCdxUrl(
+            domain = "eshop.fujifilm-x.com",
+            expectedTitle = "Cámara Fujifilm Instax Mini 41",
+            now = 1_800_000_000_000L
+        )
+        val fujiPathFilter = fujiUrl?.queryParameterValues("filter").orEmpty()
+            .firstOrNull { (it ?: "").startsWith("original:") } ?: ""
+        assertTrue("The official eShop archive lookup should search product-specific URL terms", fujiPathFilter.contains("instax"))
+        assertTrue(fujiPathFilter.contains("mini"))
+        assertFalse("The FUJIFILM brand name is not usually part of its product slug", fujiPathFilter.contains("fujifilm"))
     }
 
+
+    @Test
+    fun acceptsVerifiedSchemaOrgMicrodataWhenArchivedPageHasNoJsonLd() {
+        val client = newClient()
+        val html = """
+            <html><head><title>Ficha de producto</title></head><body>
+              <div itemscope itemtype="https://schema.org/Product">
+                <h1 itemprop="name">Anker Prime 27K Power Bank</h1>
+                <div itemprop="offers" itemscope itemtype="https://schema.org/Offer">
+                  <meta itemprop="priceCurrency" content="EUR" />
+                  <span itemprop="price">89,99 €</span>
+                </div>
+              </div>
+            </body></html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "Anker Prime 27K Power Bank",
+            originalUrl = "https://shop.example/products/anker-prime-27k",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/products/anker-prime-27k",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("Explicit Schema.org itemprop price and EUR currency should be accepted", quote)
+        assertEquals(89.99, quote!!.price, 0.001)
+        assertEquals("EUR", quote.currency)
+        assertEquals("Anker Prime 27K Power Bank", quote.productTitle)
+    }
 
     @Test
     fun explicitProductPriceMetadataTakesPrecedenceOverConflictingJsonLdOffers() {

@@ -375,7 +375,12 @@ class WaybackPriceHistoryClient(
             token.any(Char::isDigit) && token.any(Char::isLetter) &&
                 !Regex("""^\d+(?:[.,]\d+)?(?:gb|tb|mb|mah|wh|hz|w|mm|cm|inch|inches|pulgadas?)$""")
                     .containsMatchIn(token)
-        }
+        }.toMutableList()
+        // Samsung TV pages may use the stable family (e.g. S95H) instead of the full
+        // regional SKU (TQ48S95HAEXXC / QE48S95HAEXXC). Search both forms.
+        Regex("""(?i)\b(?:tq|qe)\d{2}(s\d{2}[a-z])""").findAll(normalizeTitle(expectedTitle))
+            .map { it.groupValues[1].lowercase(Locale.ROOT) }
+            .forEach { coreModel -> if (coreModel !in modelTokens) modelTokens.add(0, coreModel) }
         val hostBrandTerms = when (normalizedDomain) {
             "apple.com" -> setOf("apple")
             "samsung.com" -> setOf("samsung", "galaxy")
@@ -653,8 +658,8 @@ class WaybackPriceHistoryClient(
     }
 
     private fun isMatchingProductTitle(expected: String, archived: String): Boolean {
-        val e = normalizeTitle(expected)
-        val a = normalizeTitle(archived)
+        val e = canonicalizeArchiveTitle(normalizeTitle(expected))
+        val a = canonicalizeArchiveTitle(normalizeTitle(archived))
         if (e.isBlank() || a.isBlank()) return false
 
         // Normalize product identity first so known equivalent model spellings (such as
@@ -676,6 +681,10 @@ class WaybackPriceHistoryClient(
         return overlap.size >= minOf(2, expectedTokens.size) &&
             overlap.size.toDouble() / expectedTokens.size >= 0.72
     }
+
+    private fun canonicalizeArchiveTitle(value: String): String =
+        value.replace(Regex("""\b(?:tq|qe)(?=\d{2}s\d{2}[a-z])"""), "tv")
+            .replace(Regex("""\b(?:2k|4k|8k|uhd|fhd|fullhd)\b"""), " ")
 
     /**
      * Variant-defining tokens that must survive a fuzzy title match. Mixed alphanumeric model

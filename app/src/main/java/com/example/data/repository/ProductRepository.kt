@@ -862,7 +862,13 @@ class ProductRepository(
                 evidenceType = "google_insights",
                 sourcePageUrl = sourceUrl
             )
-            if (saveDailyObservation(observation)) inserted++
+            val (dayStart, dayEnd) = localDayBounds(observation.observedAt)
+            if (priceObservationDao.saveGoogleInsightObservationIfLower(
+                    observation = observation,
+                    dayStart = dayStart,
+                    dayEnd = dayEnd
+                )
+            ) inserted++
         }
         return inserted
     }

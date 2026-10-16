@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.StoreOffer
 import com.example.data.model.Store
 import com.example.data.remote.extractDirectRetailerUrl
+import com.example.data.remote.isGoogleShoppingUrl
 import com.example.security.openExternalHttpsUrl
 import com.example.security.safeExternalHttpsUrl
 
@@ -102,10 +103,12 @@ fun StoreComparisonView(
             val knownStore = Store.findKnownByName(offer.store.name, offer.url)
             val storeSearchDestination = knownStore?.takeIf { productTitle.isNotBlank() }
                 ?.searchUrlFor(productTitle)
+            val googleOnlyLink = isGoogleShoppingUrl(offer.url) && directDestination == null
+            val sellerHomepage = if (googleOnlyLink) Store.homepageFromSellerLabel(offer.store.name) else null
             val actionDestination = directDestination
                 ?: storeSearchDestination
-                ?: offer.url.takeIf { it.isNotBlank() }
-                ?: knownStore?.officialUrl
+                ?: if (!isGoogleShoppingUrl(offer.url)) offer.url.takeIf { it.isNotBlank() }
+                else sellerHomepage ?: knownStore?.officialUrl
             val safeActionDestination = safeExternalHttpsUrl(actionDestination)
 
             Surface(
@@ -180,6 +183,8 @@ fun StoreComparisonView(
                                 text = when {
                                     directDestination != null -> "Enlace directo a ${knownStore?.name ?: offer.store.name}"
                                     storeSearchDestination != null -> "Precio de ${offer.linkType} · buscar en ${knownStore?.name ?: offer.store.name}"
+                                    sellerHomepage != null -> "Abrir la web de ${offer.store.name}; la ficha directa no llegó"
+                                    googleOnlyLink -> "Enlace de tienda no disponible; no se abre una página genérica de Google"
                                     else -> "Enlace: ${offer.linkType}"
                                 },
                                 fontSize = 10.sp,

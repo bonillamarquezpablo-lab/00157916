@@ -58,7 +58,7 @@ class SerpApiVariantMismatchTest {
             report.results.any { it.title == "Nike P 6000 Hombre" }
         )
         assertFalse(report.results.any { it.title.contains("talla 44", ignoreCase = true) })
-        assertEquals(1, report.rejectedAsIrrelevant)
+        assertEquals(2, report.rejectedAsIrrelevant)
     }
 
     @Test
@@ -228,6 +228,13 @@ class SerpApiVariantMismatchTest {
                       "extracted_price": 134.99,
                       "link": "https://shop.example/wheel-kit",
                       "source": "Tienda de herramientas"
+                    },
+                    {
+                      "title": "BGS technic Juego de llaves de impacto y llaves de tubo neumáticas",
+                      "price": "149,99 €",
+                      "extracted_price": 149.99,
+                      "link": "https://shop.example/impact-socket-set",
+                      "source": "Tienda de herramientas"
                     }
                   ]
                 }
@@ -241,6 +248,7 @@ class SerpApiVariantMismatchTest {
         val batteryKit = report.results.single { it.title.contains("SundpeyPRO") }
         assertFalse(batteryKit.isAccessoryOffer)
         assertTrue(report.results.any { it.title.contains("JBM 52165") })
+        assertTrue(report.results.none { it.title.contains("BGS technic") })
         assertEquals(1, report.rejectedAsIrrelevant)
     }
 

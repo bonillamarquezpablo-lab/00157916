@@ -756,6 +756,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             SerpApiRequestProduct(id = product.id, title = product.title, brand = product.brand, ean = product.ean)
         }
         val attemptedIds = linkedSetOf<String>()
+        val respondedIds = linkedSetOf<String>()
         val batch = serpApiClient.searchProducts(
             token = token,
             products = requests,
@@ -766,6 +767,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 attemptedIds += requested.id
             },
             onQuerySucceeded = { requested ->
+                respondedIds += requested.id
                 priceRefreshPreferences.edit()
                     .putLong("tracked_response_${requested.id}", System.currentTimeMillis())
                     .apply()
@@ -773,18 +775,22 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         )
         val validProductCount = if (batch.quotes.isNotEmpty()) repository.recordSerpApiQuotes(batch.quotes) else 0
         val quoteProductIds = batch.quotes.map { it.productId }.toSet()
-        val unmatched = targets.filter { it.id !in quoteProductIds }
-        val unmatchedNote = if (unmatched.isNotEmpty()) {
-            " Sin oferta válida o coincidencia segura para: ${unmatched.joinToString { it.title }}. Se conservan los precios e historial existentes."
+        val unmatched = targets.count { it.id in respondedIds && it.id !in quoteProductIds }
+        val failed = targets.count { it.id !in respondedIds }
+        val unmatchedNote = if (unmatched > 0) {
+            " SerpApi respondió, pero no encontró una oferta segura para $unmatched producto(s); se conservan sus precios e historial."
         } else {
             ""
         }
-        val partial = if (batch.failedQueries > 0) " Fallaron ${batch.failedQueries} consultas." else ""
-        val noOfferNote = if (batch.queriesWithoutMatches > 0) " SerpApi respondió sin ofertas coincidentes para ${batch.queriesWithoutMatches} producto(s)." else ""
+        val failedNote = if (failed > 0) {
+            " No hubo respuesta válida de SerpApi para $failed producto(s); esos productos pueden reintentarse sin esperar 24 h."
+        } else {
+            ""
+        }
         val after = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
         if (after != null) _uiState.value = _uiState.value.copy(serpApiAccountStatus = quotaMessage(after))
         val quotaNote = after?.let { " ${it.quotaSummary()}" }.orEmpty()
-        val message = "Actualizar guardados terminado: se encontraron ofertas válidas para $validProductCount de ${attemptedIds.size} producto(s); búsquedas lanzadas: ${attemptedIds.size}.$unmatchedNote$partial$noOfferNote$quotaNote"
+        val message = "Actualizar guardados terminado: se encontraron ofertas válidas para $validProductCount de ${attemptedIds.size} producto(s); búsquedas lanzadas: ${attemptedIds.size}.$unmatchedNote$failedNote$quotaNote"
         _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
         showSnackbar(message)
     }

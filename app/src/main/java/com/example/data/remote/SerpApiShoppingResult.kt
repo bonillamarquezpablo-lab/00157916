@@ -375,11 +375,24 @@ private val PRIMARY_IMPACT_WRENCH_LISTING_PATTERN = Regex(
 private val IMPACT_WRENCH_ACCESSORY_TERMS = Regex(
     """\b(baterias?|batteries|cargadores?|chargers?|fundas?|carcasas?|recambios?|repuestos?|accesorios?)\b"""
 )
+private val IMPACT_WRENCH_SOCKET_SET_PATTERN = Regex(
+    """\b(?:juego\s+de\s+(?:llaves?|vasos?|dados?)\s+(?:de\s+impacto|de\s+tubo)|llaves?\s+de\s+tubo|vasos?\s+de\s+impacto|impact\s+sockets?|socket\s+set)\b"""
+)
+
+private val EXPLICIT_IMPACT_WRENCH_TOOL_PATTERN = Regex(
+    """\b(?:pistolas?\s+(?:de\s+)?impacto|llaves?\s+(?:de\s+)?impacto\s+(?:neumaticas?|inalambricas?|electricas?|compactas?)|impact\s+wrenches?)\b"""
+)
 
 /** Avoid classifying a primary impact wrench as an accessory just because it includes a charger. */
 internal fun isPrimaryImpactWrenchListing(title: String): Boolean {
     val normalized = normalizeOnlineSearchText(title)
     val toolMatch = PRIMARY_IMPACT_WRENCH_LISTING_PATTERN.find(normalized) ?: return false
+
+    // An impact-socket set is not the powered wrench itself.
+    if (IMPACT_WRENCH_SOCKET_SET_PATTERN.containsMatchIn(normalized) &&
+        !EXPLICIT_IMPACT_WRENCH_TOOL_PATTERN.containsMatchIn(normalized)
+    ) return false
+
     val accessoryMatch = IMPACT_WRENCH_ACCESSORY_TERMS.find(normalized)
     return accessoryMatch == null || toolMatch.range.first < accessoryMatch.range.first
 }

@@ -730,20 +730,16 @@ class ProductRepository(
         }
         val originalUrlKey = normalizedProductPageKey(originalUrl) ?: return 0
         val originalPathKey = normalizedProductPagePathKey(originalUrl) ?: return 0
-        val exactUrlMatches = matchingProducts.filter {
-            normalizedProductPageKey(it.storeUrl) == originalUrlKey
-        }
-        val verifiedOfferUrlMatches = matchingProducts.filter { candidate ->
-            priceObservationDao.getVerifiedLiveObservationsForProduct(candidate.id).any { observation ->
-                normalizedProductPageKey(observation.sourceUrl) == originalUrlKey ||
-                    normalizedProductPageKey(observation.sourcePageUrl) == originalUrlKey
-            }
+        val verifiedUrlMatches = matchingProducts.filter { candidate ->
+            normalizedProductPageKey(candidate.storeUrl) == originalUrlKey ||
+                priceObservationDao.getVerifiedLiveObservationsForProduct(candidate.id).any { observation ->
+                    normalizedProductPageKey(observation.sourceUrl) == originalUrlKey ||
+                        normalizedProductPageKey(observation.sourcePageUrl) == originalUrlKey
+                }
         }
         val product = when {
-            exactUrlMatches.size == 1 -> exactUrlMatches.single()
-            exactUrlMatches.size > 1 -> return 0
-            verifiedOfferUrlMatches.size == 1 -> verifiedOfferUrlMatches.single()
-            verifiedOfferUrlMatches.size > 1 -> return 0
+            verifiedUrlMatches.size == 1 -> verifiedUrlMatches.single()
+            verifiedUrlMatches.size > 1 -> return 0
             else -> {
                 // Query or fragment values can identify a purchasable variant. Do not fall back
                 // to a title/host match when the same page path has a conflicting variant key.

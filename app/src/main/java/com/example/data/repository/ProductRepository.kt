@@ -19,6 +19,7 @@ import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.groupOnlineShoppingResults
+import com.example.data.remote.extractDirectRetailerUrl
 import com.example.data.remote.isIrrelevantMultiProductBundle
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.linkTypeForUrl
@@ -50,6 +51,17 @@ import java.util.Date
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
+
+/**
+ * Prefer the actual merchant product URL for saved catalogue navigation.
+ * Google Shopping URLs remain untouched on PriceObservationEntity as evidence;
+ * this helper only chooses where the catalogue's purchase button should open.
+ */
+internal fun productNavigationUrlForOffer(offer: SerpApiShoppingResult): String {
+    extractDirectRetailerUrl(offer.sourceUrl)?.let { return it }
+    val knownStore = Store.findKnownByName(offer.storeName, offer.sourceUrl)
+    return knownStore?.searchUrlFor(offer.title) ?: offer.sourceUrl
+}
 
 data class UrlAnalysisResult(
     val queryOrUrl: String,
@@ -601,7 +613,7 @@ class ProductRepository(
                 ?: existingProduct?.athMaxPrice
                 ?: currentMinimum
             val safeStoreId = if (hasTrustedOffer) storeId else existingProduct?.currentStoreId ?: "unknown_store"
-            val safeStoreUrl = if (hasTrustedOffer) bestOffer.sourceUrl else existingProduct?.storeUrl.orEmpty()
+            val safeStoreUrl = if (hasTrustedOffer) productNavigationUrlForOffer(bestOffer) else existingProduct?.storeUrl.orEmpty()
             val safeMinStore = if (hasTrustedOffer) bestOffer.storeName else existingProduct?.athMinStore.orEmpty()
             val safeGoogleProductId = if (hasTrustedOffer) {
                 trustedOffers.firstNotNullOfOrNull { it.googleProductId } ?: existingProduct?.googleProductId

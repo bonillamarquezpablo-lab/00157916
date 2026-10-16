@@ -8,6 +8,7 @@ import com.example.data.model.Product
 import com.example.data.model.Store
 import com.example.data.model.VerdictLevel
 import com.example.data.repository.SpanishMarketData
+import com.example.data.repository.productNavigationUrlForOffer
 import com.example.ui.components.ChartRange
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
@@ -22,6 +23,28 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ExampleUnitTest {
+    @Test
+    fun savedCatalogueLinkUsesKnownRetailerInsteadOfGenericGoogleShoppingSearch() {
+        val title = "Anker Prime 27K Power Bank"
+        val googleUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=Anker+Prime+27K+Power+Bank"
+        val offer = SerpApiShoppingResult(
+            title = title,
+            price = 99.99,
+            storeName = "Anker",
+            sourceUrl = googleUrl,
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals(Store.ANKER_STORE.searchUrlFor(title), productNavigationUrlForOffer(offer))
+        assertFalse(productNavigationUrlForOffer(offer).contains("google.", ignoreCase = true))
+
+        val directOffer = offer.copy(sourceUrl = "https://www.anker.com/products/anker-prime-power-bank")
+        assertEquals(directOffer.sourceUrl, productNavigationUrlForOffer(directOffer))
+
+        val unknownSellerOffer = offer.copy(storeName = "Tienda sin identificar")
+        assertEquals(googleUrl, productNavigationUrlForOffer(unknownSellerOffer))
+    }
+
     @Test
     fun freeArchiveLookupPrioritizesProductUrlBeforeCheaperOfferUrls() {
         val productUrl = FreeArchiveCandidate(

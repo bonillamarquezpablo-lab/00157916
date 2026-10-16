@@ -19,7 +19,7 @@ data class DealVerdict(
     val explanation: String,
     val iconName: String,
     val color: Color,
-    val confidenceScore: Int = 100 // Porcentaje de fiabilidad matemática
+    val confidenceScore: Int = 0 // Sin cálculo explícito de confianza, no se atribuye un porcentaje.
 ) {
     companion object {
         fun unverified(): DealVerdict = DealVerdict(
@@ -96,9 +96,9 @@ data class DealVerdict(
                     val savingsVsAvg = avg90dPrice - currentPrice
                     DealVerdict(
                         level = VerdictLevel.FAIR_DISCOUNT,
-                        title = "Descuento Real Comprobado",
-                        badgeText = "OFERTA REAL",
-                        explanation = "Ahorras ${String.format("%.2f", savingsVsAvg)} € respecto al precio medio de los últimos 3 meses (${String.format("%.2f", avg90dPrice)} €). Sin inflado artificial.",
+                        title = "Precio por debajo de la media observada",
+                        badgeText = "POR DEBAJO DE LA MEDIA",
+                        explanation = "El precio observado está ${String.format("%.2f", savingsVsAvg)} € por debajo de la media disponible (${String.format("%.2f", avg90dPrice)} €). Esto no confirma por sí solo el precio final, el stock ni la ausencia de prácticas promocionales engañosas.",
                         iconName = "ThumbUp",
                         color = Color(0xFF0284C7)
                     )

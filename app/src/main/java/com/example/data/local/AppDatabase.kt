@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TrackedProductEntity::class,
         PriceObservationEntity::class
     ],
-    version = 5,
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -100,6 +100,64 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Records whether an observation links directly to a merchant or via Google Shopping. */
+        val MIGRATION_5_6: Migration = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE `price_observations` ADD COLUMN `linkType` TEXT NOT NULL DEFAULT 'directo'"
+                )
+                database.execSQL(
+                    "UPDATE `price_observations` SET `linkType` = 'Google Shopping' " +
+                        "WHERE lower(`sourceUrl`) LIKE '%://google.%' " +
+                        "OR lower(`sourceUrl`) LIKE '%://%.google.%'"
+                )
+            }
+        }
+
+        /** Keeps existing products and history while adding the Google Shopping catalog ID. */
+        val MIGRATION_6_7: Migration = object : Migration(6, 7) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE `products` ADD COLUMN `googleProductId` TEXT DEFAULT NULL"
+                )
+            }
+        }
+
+        /**
+         * Separates the time a price was acquired from the historical observation date and
+         * marks archive-backed rows explicitly so old demo/legacy live rows remain excluded.
+         */
+        val MIGRATION_7_8: Migration = object : Migration(7, 8) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE price_observations ADD COLUMN collectedAt INTEGER NOT NULL DEFAULT 0"
+                )
+                database.execSQL(
+                    "UPDATE price_observations SET collectedAt = observedAt WHERE collectedAt = 0"
+                )
+                database.execSQL(
+                    "ALTER TABLE price_observations ADD COLUMN evidenceType TEXT NOT NULL DEFAULT 'live'"
+                )
+                database.execSQL(
+                    "ALTER TABLE price_observations ADD COLUMN sourcePageUrl TEXT NOT NULL DEFAULT ''"
+                )
+            }
+        }
+
+        /**
+         * Marks rows as archive-backed only when their stored source URL is itself an
+         * Internet Archive snapshot. No observations or product rows are deleted.
+         */
+        val MIGRATION_8_9: Migration = object : Migration(8, 9) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "UPDATE price_observations SET evidenceType = 'archive' WHERE " +
+                        "lower(sourceUrl) LIKE 'https://web.archive.org/web/%' OR " +
+                        "lower(sourceUrl) LIKE 'http://web.archive.org/web/%'"
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -110,7 +168,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "minimo_spanish_market.db"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                     .build()
                 INSTANCE = instance
                 instance

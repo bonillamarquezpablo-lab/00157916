@@ -532,11 +532,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 val tracked = withTimeout(10_000L) { repository.trackedProductsStream.first() }
                 val eligible = tracked
                     .filter { product ->
-                        val lastAttempt = priceRefreshPreferences.getLong("tracked_attempt_${product.id}", 0L)
+                        val lastAttempt = priceRefreshPreferences.getLong("tracked_response_${product.id}", 0L)
                         lastAttempt <= 0L || now - lastAttempt >= TRACKED_REFRESH_COOLDOWN_MS
                     }
                     .sortedWith(
-                        compareBy<Product> { priceRefreshPreferences.getLong("tracked_attempt_${it.id}", 0L) }
+                        compareBy<Product> { priceRefreshPreferences.getLong("tracked_response_${it.id}", 0L) }
                             .thenBy { it.title.lowercase(Locale.ROOT) }
                     )
                 if (eligible.isEmpty()) {
@@ -764,24 +764,27 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             },
             onQueryStarted = { requested ->
                 attemptedIds += requested.id
+            },
+            onQuerySucceeded = { requested ->
                 priceRefreshPreferences.edit()
-                    .putLong("tracked_attempt_${requested.id}", System.currentTimeMillis())
-                    .commit()
+                    .putLong("tracked_response_${requested.id}", System.currentTimeMillis())
+                    .apply()
             }
         )
         val validProductCount = if (batch.quotes.isNotEmpty()) repository.recordSerpApiQuotes(batch.quotes) else 0
         val quoteProductIds = batch.quotes.map { it.productId }.toSet()
         val unmatched = targets.filter { it.id !in quoteProductIds }
         val unmatchedNote = if (unmatched.isNotEmpty()) {
-            " Sin coincidencia segura para: ${unmatched.joinToString { it.title }}. Sus precios e historial no se han cambiado."
+            " Sin oferta válida o coincidencia segura para: ${unmatched.joinToString { it.title }}. Se conservan los precios e historial existentes."
         } else {
             ""
         }
         val partial = if (batch.failedQueries > 0) " Fallaron ${batch.failedQueries} consultas." else ""
+        val noOfferNote = if (batch.queriesWithoutMatches > 0) " SerpApi respondió sin ofertas coincidentes para ${batch.queriesWithoutMatches} producto(s)." else ""
         val after = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
         if (after != null) _uiState.value = _uiState.value.copy(serpApiAccountStatus = quotaMessage(after))
         val quotaNote = after?.let { " ${it.quotaSummary()}" }.orEmpty()
-        val message = "Actualizar guardados terminado: se encontraron ofertas válidas para $validProductCount de ${attemptedIds.size} producto(s); búsquedas lanzadas: ${attemptedIds.size}.$unmatchedNote$partial$quotaNote"
+        val message = "Actualizar guardados terminado: se encontraron ofertas válidas para $validProductCount de ${attemptedIds.size} producto(s); búsquedas lanzadas: ${attemptedIds.size}.$unmatchedNote$partial$noOfferNote$quotaNote"
         _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
         showSnackbar(message)
     }

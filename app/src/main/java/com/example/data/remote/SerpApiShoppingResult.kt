@@ -20,6 +20,7 @@ private val ONLINE_PRODUCT_TYPES = listOf(
     "camera" to Regex("""\b(camaras?|cameras?)\b"""),
     "microphone" to Regex("""\b(microfonos?|microphones?)\b"""),
     "speaker" to Regex("""\b(altavoces?|speakers?|soundbar|barra de sonido)\b"""),
+    "impact_wrench" to Regex("""\b(pistolas?\s+(?:de\s+)?impacto|llaves?\s+(?:de\s+)?impacto|impact\s+wrenches?)\b"""),
     "console" to Regex("""\b(consolas?|playstation|xbox|nintendo switch)\b""")
 )
 private val ONLINE_MODEL_CODE = Regex("""\b[a-z]{1,8}\d[a-z0-9]{1,12}\b""")
@@ -149,7 +150,9 @@ data class SerpApiShoppingResult(
 
     /** True for accessory listings that belong at the end of a main-product search. */
     val isAccessoryOffer: Boolean
-        get() = !isBicycleTireListing(title) && ACCESSORY_LISTING_PATTERN.containsMatchIn(title)
+        get() = !isBicycleTireListing(title) &&
+            ACCESSORY_LISTING_PATTERN.containsMatchIn(title) &&
+            !isPrimaryImpactWrenchListing(title)
 
     val isRentalOrMonthly: Boolean
         get() = Regex(
@@ -364,6 +367,22 @@ internal fun isBicycleDrivetrainComponentTitle(title: String): Boolean {
 private val ACCESSORY_LISTING_PATTERN = Regex(
     """(?i)\b(p[oó]ster(?:es)?|poster(?:s)?|funda(?:s)?|carcasa(?:s)?|cases?|covers?|cargador(?:es)?|chargers?|charging|mop\s+kit|protectores?|protector(?:es)?|screen\s+protector|protector\s+de\s+pantalla|cristal(?:es)?\s+templado|cables?|adaptadores?|hubs?|filtros?|recambios?|repuestos?|soportes?)\b"""
 )
+
+private val PRIMARY_IMPACT_WRENCH_LISTING_PATTERN = Regex(
+    """\b(?:pistolas?\s+(?:de\s+)?impacto|llaves?\s+(?:de\s+)?impacto|impact\s+wrenches?|pistolas?\s+neumaticas?\s+para\s+rueda|llaves?\s+neumaticas?\s+para\s+rueda)\b"""
+)
+
+private val IMPACT_WRENCH_ACCESSORY_TERMS = Regex(
+    """\b(baterias?|batteries|cargadores?|chargers?|fundas?|carcasas?|recambios?|repuestos?|accesorios?)\b"""
+)
+
+/** Avoid classifying a primary impact wrench as an accessory just because it includes a charger. */
+internal fun isPrimaryImpactWrenchListing(title: String): Boolean {
+    val normalized = normalizeOnlineSearchText(title)
+    val toolMatch = PRIMARY_IMPACT_WRENCH_LISTING_PATTERN.find(normalized) ?: return false
+    val accessoryMatch = IMPACT_WRENCH_ACCESSORY_TERMS.find(normalized)
+    return accessoryMatch == null || toolMatch.range.first < accessoryMatch.range.first
+}
 
 /** Accessory queries are intentional accessory searches and should not be re-labelled as accessories. */
 fun isAccessorySearchQuery(query: String): Boolean =

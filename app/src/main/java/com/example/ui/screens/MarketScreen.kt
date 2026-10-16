@@ -469,7 +469,7 @@ fun MarketScreen(
                     )
                 }
                 Text(
-                    "Solo fichas seguidas (marcador verde «Siguiendo») · manual · máximo 10 por pulsación · no repite consultas antes de 24 h",
+                    "Solo fichas seguidas · máximo 10 por pulsación · espera 24 h tras respuesta de SerpApi; los fallos de conexión no bloquean reintentos",
                     modifier = Modifier.padding(horizontal = 4.dp),
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

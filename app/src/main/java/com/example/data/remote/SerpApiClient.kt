@@ -20,6 +20,10 @@ import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 import kotlin.math.ceil
 
+private val IMPACT_WRENCH_QUERY_PATTERN = Regex(
+    """\b(?:pistolas?\s+(?:de\s+)?impacto|llaves?\s+(?:de\s+)?impacto|impact\s+wrenches?)\b"""
+)
+
 data class SerpApiRequestProduct(
     val id: String,
     val title: String,
@@ -862,7 +866,8 @@ class SerpApiClient(
         token: String,
         products: List<SerpApiRequestProduct>,
         onStage: suspend (String) -> Unit = {},
-        onQueryStarted: suspend (SerpApiRequestProduct) -> Unit = {}
+        onQueryStarted: suspend (SerpApiRequestProduct) -> Unit = {},
+        onQuerySucceeded: suspend (SerpApiRequestProduct) -> Unit = {}
     ): SerpApiBatchResult = withContext(Dispatchers.IO) {
         val apiKey = token.trim()
         require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
@@ -889,6 +894,8 @@ class SerpApiClient(
             try {
                 onQueryStarted(product)
                 val json = executeSearch(apiKey, product.queryTerm)
+                // A valid provider response consumed a search attempt; DNS/connection failures do not.
+                onQuerySucceeded(product)
                 val productQuotes = parseQuotes(json, product)
                 if (productQuotes.isEmpty()) {
                     queriesWithoutMatches++
@@ -907,7 +914,7 @@ class SerpApiClient(
             if (index < requested.lastIndex) delay(INTER_REQUEST_DELAY_MS)
         }
 
-        if (quotes.isEmpty() && failedQueries > 0) {
+        if (quotes.isEmpty() && failedQueries == requested.size) {
             val failureDetail = when (val failure = firstFailure) {
                 is SerpApiException -> failure.message ?: "Error devuelto por SerpApi."
                 is java.net.SocketTimeoutException -> "Se agotó el tiempo de espera al conectar con SerpApi."
@@ -1446,6 +1453,12 @@ class SerpApiClient(
     }.getOrDefault(false)
 
     private fun isPlausibleProductMatch(requested: String, returned: String): Boolean {
+        // Spanish "pistola/llave de impacto" is a category query: accept equivalent wrench titles,
+        // but reject listings that only mention a wrench as an accessory.
+        if (IMPACT_WRENCH_QUERY_PATTERN.containsMatchIn(normalize(requested))) {
+            return isPrimaryImpactWrenchListing(returned)
+        }
+
         // "Teclado Hall"/"teclado efecto Hall" is a technology search, not a literal
         // two-word product name. Match Hall/HE/TMR keyboards without accepting "Hall of Fame".
         if (isHallEffectKeyboardSearch(requested)) return isHallEffectKeyboardResult(returned)

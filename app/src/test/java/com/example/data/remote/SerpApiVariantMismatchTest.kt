@@ -200,4 +200,48 @@ class SerpApiVariantMismatchTest {
         assertEquals(99.99, report.results.single().price, 0.001)
     }
 
+    @Test
+    fun impactWrenchSearchKeepsEquivalentToolsAndDoesNotMisclassifyBatteryKitsAsAccessories() {
+        val client = SerpApiClient()
+        val report = client.parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "shopping_results": [
+                    {
+                      "title": "SundpeyPRO 2000Nm Llave de Impacto Inalámbrica 3/4 Kit con 2 Baterías 4.0Ah y Cargador Rápido",
+                      "price": "139,99 €",
+                      "extracted_price": 139.99,
+                      "link": "https://shop.example/impact-wrench",
+                      "source": "Tienda de herramientas"
+                    },
+                    {
+                      "title": "JBM 52165 Pistola de Impacto Media Pulgada",
+                      "price": "106,72 €",
+                      "extracted_price": 106.72,
+                      "link": "https://shop.example/jbm-impact",
+                      "source": "Tienda de herramientas"
+                    },
+                    {
+                      "title": "Kit Extracción de Ruedas + Pistola + Vasos",
+                      "price": "134,99 €",
+                      "extracted_price": 134.99,
+                      "link": "https://shop.example/wheel-kit",
+                      "source": "Tienda de herramientas"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "pistola de impacto",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals(2, report.results.size)
+        val batteryKit = report.results.single { it.title.contains("SundpeyPRO") }
+        assertFalse(batteryKit.isAccessoryOffer)
+        assertTrue(report.results.any { it.title.contains("JBM 52165") })
+        assertEquals(1, report.rejectedAsIrrelevant)
+    }
+
 }

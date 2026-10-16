@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.StoreOffer
@@ -126,11 +127,12 @@ fun StoreComparisonView(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        // Store color dot
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Box(
                             modifier = Modifier
                                 .size(10.dp)
@@ -138,35 +140,41 @@ fun StoreComparisonView(
                                 .background(offer.store.brandColor)
                         )
                         Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = offer.store.name,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                if (isBestCurrent) {
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(Color(0xFF059669))
-                                            .padding(horizontal = 5.dp, vertical = 1.dp)
-                                    ) {
-                                        Text(
-                                            text = "MENOR PRECIO EN ESTA CONSULTA",
-                                            color = Color.White,
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.ExtraBold
-                                        )
-                                    }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Text(
+                                text = offer.store.name,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (isBestCurrent) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(Color(0xFF059669))
+                                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "MENOR PRECIO EN ESTA CONSULTA",
+                                        color = Color.White,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                             }
                             Text(
                                 text = "${offer.shippingInfo} • ${if (offer.inStock) "Disponibilidad indicada" else "Stock por confirmar"}",
                                 fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = when {
@@ -175,25 +183,31 @@ fun StoreComparisonView(
                                     else -> "Enlace: ${offer.linkType}"
                                 },
                                 fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
 
+                    Spacer(modifier = Modifier.width(10.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
                                 text = "${String.format("%.2f", offer.price)} €",
                                 fontWeight = FontWeight.ExtraBold,
                                 fontSize = 15.sp,
-                                color = if (isBestCurrent) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
+                                color = if (isBestCurrent) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                softWrap = false
                             )
                             if (isAtHistoricalMin) {
                                 Text(
                                     text = "Mínimo observado",
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF059669)
+                                    color = Color(0xFF059669),
+                                    maxLines = 1
                                 )
                             }
                         }

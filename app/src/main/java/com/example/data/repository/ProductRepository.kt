@@ -45,6 +45,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -201,20 +202,25 @@ class ProductRepository(
         trackedDao.getAllTracked(),
         priceObservationDao.observeAllVerified()
     ) { productEntities, storeEntities, trackedEntities, observations ->
-        val stores = storeEntities.map { it.toDomainStore() }.ifEmpty { Store.ALL_STORES }
-        val trackingMap = trackedEntities.associateBy { it.productId }
-        val observationsByProduct = observations.groupBy { it.productId }
+        // Room can emit repeatedly while a batch of tracked prices is being saved. Building
+        // hundreds of rich Product models (including their complete histories and offers) must
+        // not run on Android's main thread for each intermediate database emission.
+        withContext(Dispatchers.Default) {
+            val stores = storeEntities.map { it.toDomainStore() }.ifEmpty { Store.ALL_STORES }
+            val trackingMap = trackedEntities.associateBy { it.productId }
+            val observationsByProduct = observations.groupBy { it.productId }
 
-        productEntities.map { entity ->
-            val product = entity.toDomainProduct(
-                stores = stores,
-                verifiedObservations = observationsByProduct[entity.id].orEmpty()
-            )
-            val trackingInfo = trackingMap[product.id]
-            product.copy(
-                isTracked = trackingInfo != null,
-                alertTargetPrice = trackingInfo?.targetAlertPrice
-            )
+            productEntities.map { entity ->
+                val product = entity.toDomainProduct(
+                    stores = stores,
+                    verifiedObservations = observationsByProduct[entity.id].orEmpty()
+                )
+                val trackingInfo = trackingMap[product.id]
+                product.copy(
+                    isTracked = trackingInfo != null,
+                    alertTargetPrice = trackingInfo?.targetAlertPrice
+                )
+            }
         }
     }.onEach { currentProducts ->
         _latestProducts.value = currentProducts

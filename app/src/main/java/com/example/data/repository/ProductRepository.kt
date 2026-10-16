@@ -889,9 +889,15 @@ class ProductRepository(
         ) return 0
 
         val product = productDao.getProductById(productId) ?: return 0
-        if (!product.isPriceVerified ||
-            onlineProductIdentityKey(product.title) != onlineProductIdentityKey(expectedTitle)
+        val storedCatalogId = product.googleProductId?.takeIf { it.isNotBlank() }
+            ?: Regex("""/shopping/product/([0-9]{5,})""", RegexOption.IGNORE_CASE)
+                .find(product.storeUrl)?.groupValues?.get(1)
+        if (onlineProductIdentityKey(product.title) != onlineProductIdentityKey(expectedTitle) ||
+            (storedCatalogId != null && storedCatalogId != googleCatalogId)
         ) return 0
+        // Do not require a verified live quote here: this call imports historical evidence before
+        // current offers are persisted. Product title/catalog identity are validated separately,
+        // and google_insights rows never verify or replace the current price.
 
         val now = System.currentTimeMillis()
         val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)

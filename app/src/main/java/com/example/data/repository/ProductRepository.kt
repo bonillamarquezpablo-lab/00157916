@@ -790,11 +790,19 @@ class ProductRepository(
                 }
             }
         }
-        // Without a verified live quote, archive history may only be attached to the exact
-        // merchant URL already stored on this product. A matching title alone is not enough:
-        // do not import another seller's old price into an unverified product row.
+        // Without a verified live quote, normally require the exact merchant URL already
+        // saved on this product. Search results sometimes retain only a Google Shopping link;
+        // in that case allow an archive capture only when the product identity is unique.
+        // The archived capture still has to match the supplied original URL, merchant, title,
+        // currency, price and capture timestamp in the checks below.
         val hasVerifiedLiveQuote = priceObservationDao.getLatestVerified(product.id) != null
-        if (!hasVerifiedLiveQuote && normalizedProductPageKey(product.storeUrl) != originalUrlKey) return 0
+        val savedProductUrlMatchesArchive = normalizedProductPageKey(product.storeUrl) == originalUrlKey
+        val uniqueProductHasGoogleShoppingFallback =
+            matchingProducts.size == 1 && isGoogleShoppingUrl(product.storeUrl)
+        if (!hasVerifiedLiveQuote &&
+            !savedProductUrlMatchesArchive &&
+            !uniqueProductHasGoogleShoppingFallback
+        ) return 0
 
         val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
         // Product identity and variant ambiguity were checked above. Let one product accumulate

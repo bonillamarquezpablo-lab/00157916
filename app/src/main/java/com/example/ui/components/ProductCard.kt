@@ -53,6 +53,7 @@ import java.util.Date
 import java.util.Locale
 import com.example.data.model.Product
 import com.example.data.model.Store
+import com.example.data.model.summarizeInAppObservedPrices
 import com.example.security.openExternalHttpsUrl
 
 @Composable
@@ -64,6 +65,8 @@ fun ProductCard(
 ) {
     val context = LocalContext.current
     var showStoreComparison by remember { mutableStateOf(false) }
+    val inAppMinimum = remember(product.priceHistory) { summarizeInAppObservedPrices(product.priceHistory) }
+    var showInAppMinimumDetails by remember { mutableStateOf(false) }
 
     Card(
         modifier = modifier
@@ -327,6 +330,34 @@ fun ProductCard(
                     )
                 }
             }
+
+            // Separate Mínimo's own collected prices from imported third-party history.
+            OutlinedButton(
+                onClick = { showInAppMinimumDetails = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("in_app_minimum_button_${product.id}"),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.TrendingDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(15.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                val lowest = inAppMinimum.lowestPoint
+                Text(
+                    text = when {
+                        lowest == null -> "Mínimo observado por Mínimo: sin datos propios"
+                        inAppMinimum.observationCount == 1 ->
+                            "Primer precio observado por Mínimo: ${String.format(Locale("es", "ES"), "%.2f", lowest.price)} €"
+                        else ->
+                            "Mínimo observado por Mínimo: ${String.format(Locale("es", "ES"), "%.2f", lowest.price)} €"
+                    },
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 11.sp
+                )
+            }
         }
     }
 
@@ -380,6 +411,47 @@ fun ProductCard(
             },
             confirmButton = {
                 TextButton(onClick = { showStoreComparison = false }) {
+                    Text("Cerrar")
+                }
+            }
+        )
+    }
+
+
+    if (showInAppMinimumDetails) {
+        AlertDialog(
+            onDismissRequest = { showInAppMinimumDetails = false },
+            title = { Text("Mínimo precio observado en Mínimo") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val lowest = inAppMinimum.lowestPoint
+                    if (lowest == null) {
+                        Text("Mínimo todavía no tiene un precio directo guardado para este producto.")
+                    } else {
+                        Text(
+                            text = "${String.format(Locale("es", "ES"), "%.2f", lowest.price)} €",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text("Fecha: ${lowest.dateLabel} · Comercio: ${lowest.storeName}")
+                        Text("Puntos propios válidos: ${inAppMinimum.observationCount}.")
+                        Text(
+                            if (inAppMinimum.observationCount == 1) {
+                                "Por ahora solo existe una observación propia. Es el primer precio registrado, no una prueba de mínimo histórico."
+                            } else {
+                                "Es el precio más bajo entre los puntos que Mínimo ha consultado y guardado."
+                            }
+                        )
+                    }
+                    Text(
+                        "Este cálculo excluye capturas de Internet Archive y el histórico externo de Google price_insights; esos datos se distinguen del seguimiento propio de Mínimo.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showInAppMinimumDetails = false }) {
                     Text("Cerrar")
                 }
             }

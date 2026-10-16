@@ -978,4 +978,72 @@ class ExampleRobolectricTest {
         }
     }
 
+    @Test
+    fun `invalid Google search redirect and future observations are never persisted`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val now = System.currentTimeMillis()
+            database.productDao().insert(
+                ProductEntity(
+                    id = "online_product_sony_wh1000xm5",
+                    title = "Sony WH-1000XM5 Wireless Headphones",
+                    brand = "Sony",
+                    category = "AUDIO",
+                    currentPrice = 249.99,
+                    athMinPrice = 249.99,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "Amazon.es",
+                    athMaxPrice = 249.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "amazon_es",
+                    storeUrl = "https://www.amazon.es/dp/SONYTEST",
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val valid = com.example.data.remote.SerpApiShoppingResult(
+                title = "Sony WH-1000XM5 Wireless Headphones",
+                price = 249.99,
+                storeName = "Amazon.es",
+                sourceUrl = "https://www.amazon.es/dp/SONYTEST",
+                observedAt = now
+            )
+            val googleSearchFallback = valid.copy(
+                sourceUrl = "https://www.google.com/search?q=Sony+WH-1000XM5"
+            )
+            val futureDated = valid.copy(observedAt = now + 60L * 60L * 1000L)
+            val accepted = repository.filterOnlineSearchResults(
+                listOf(valid, googleSearchFallback, futureDated),
+                "Sony WH-1000XM5"
+            )
+            assertEquals("Only direct HTTPS retailer offers with plausible timestamps survive", 1, accepted.size)
+            assertEquals(valid.sourceUrl, accepted.single().sourceUrl)
+
+            val inserted = repository.recordOnlineSearchResults(
+                listOf(valid, googleSearchFallback, futureDated),
+                "GOOGLE_SHOPPING",
+                "Sony WH-1000XM5"
+            )
+            assertEquals("A valid direct retailer offer should be stored once", 1, inserted)
+            val saved = database.priceObservationDao().getAllVerifiedSnapshot()
+            assertEquals(1, saved.size)
+            assertEquals(valid.sourceUrl, saved.single().sourceUrl)
+            assertTrue(saved.single().observedAt <= System.currentTimeMillis())
+        } finally {
+            database.close()
+        }
+    }
+
 }

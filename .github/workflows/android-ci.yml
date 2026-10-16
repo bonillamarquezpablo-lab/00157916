@@ -1,6 +1,19 @@
 name: Mínimo - comprobaciones de solicitudes de cambio
 
 on:
+  push:
+    branches:
+      - fix/archive-history-integrity-20261016
+    paths:
+      - "app/**"
+      - "gradle/**"
+      - "*.gradle.kts"
+      - "gradle.properties"
+      - ".github/workflows/**"
+      - "tools/**"
+      - ".gitignore"
+      - "SECURITY.md"
+      - ".github/dependabot.yml"
   pull_request:
     branches:
       - main

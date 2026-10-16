@@ -13,6 +13,8 @@ import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.isIrrelevantMultiProductBundle
 import com.example.data.remote.onlineProductIdentityKey
+import com.example.ui.viewmodel.PriceTrackerViewModel.FreeArchiveCandidate
+import com.example.ui.viewmodel.prioritizeFreeArchiveCandidates
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -20,6 +22,37 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ExampleUnitTest {
+    @Test
+    fun freeArchiveLookupPrioritizesProductUrlBeforeCheaperOfferUrls() {
+        val productUrl = FreeArchiveCandidate(
+            title = "Sony WH-1000XM5",
+            storeName = "Sony",
+            directUrl = "https://www.sony.es/product/wh1000xm5",
+            merchantDomain = "sony.es"
+        )
+        val cheaperOfferOne = FreeArchiveCandidate(
+            title = "Sony WH-1000XM5",
+            storeName = "Tienda barata A",
+            directUrl = "https://shop-a.example/sony-wh1000xm5",
+            merchantDomain = "shop-a.example"
+        )
+        val cheaperOfferTwo = FreeArchiveCandidate(
+            title = "Sony WH-1000XM5",
+            storeName = "Tienda barata B",
+            directUrl = "https://shop-b.example/sony-wh1000xm5",
+            merchantDomain = "shop-b.example"
+        )
+
+        val prioritized = prioritizeFreeArchiveCandidates(
+            currentProductCandidate = productUrl,
+            offerCandidates = listOf(cheaperOfferOne, cheaperOfferTwo),
+            maxCandidates = 2
+        )
+
+        assertEquals(listOf(productUrl, cheaperOfferOne), prioritized)
+        assertEquals(productUrl.directUrl, prioritized.first().directUrl)
+    }
+
     @Test
     fun groupedOnlineSearchCombinesRetailersButKeepsModelsVariantsAndAccessoriesSeparate() {
         fun result(title: String, price: Double, store: String) = SerpApiShoppingResult(

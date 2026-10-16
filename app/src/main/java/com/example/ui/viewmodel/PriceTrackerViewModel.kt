@@ -944,21 +944,26 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
         // Archived snapshots are independent evidence; a product URL is sufficient to look for
         // them. Do not require or fabricate a current price to perform this free lookup.
-        val candidates = buildList {
-            product.offers.forEach { offer ->
-                val destination = offer.url.ifBlank {
-                    if (offer.store.id == product.currentStore.id) product.storeUrl
-                    else offer.store.officialUrl
-                }
-                buildFreeArchiveCandidate(product.title, offer.store.name, destination)?.let(::add)
+        val offerCandidates = product.offers.mapNotNull { offer ->
+            val destination = offer.url.ifBlank {
+                if (offer.store.id == product.currentStore.id) product.storeUrl
+                else offer.store.officialUrl
             }
-            val currentDestination = product.storeUrl.ifBlank { product.currentStore.officialUrl }
-            buildFreeArchiveCandidate(product.title, product.currentStore.name, currentDestination)?.let(::add)
-        }.distinctBy {
-            // Different direct product URLs on one merchant domain may represent distinct variants.
-            // Deduplicate exact URLs first; use the domain only for domain-only discovery candidates.
-            it.title.trim().lowercase(Locale.ROOT) + "|" + (it.directUrl ?: it.merchantDomain ?: "unknown")
-        }.take(MAX_ARCHIVE_PAGES_PER_SEARCH)
+            buildFreeArchiveCandidate(product.title, offer.store.name, destination)
+        }
+        val currentDestination = product.storeUrl.ifBlank { product.currentStore.officialUrl }
+        val currentProductCandidate = buildFreeArchiveCandidate(
+            product.title,
+            product.currentStore.name,
+            currentDestination
+        )
+        // The exact product URL is the strongest archive target. Put it first so the
+        // bounded candidate limit cannot discard it behind cheaper cross-store offers.
+        val candidates = prioritizeFreeArchiveCandidates(
+            currentProductCandidate = currentProductCandidate,
+            offerCandidates = offerCandidates,
+            maxCandidates = MAX_ARCHIVE_PAGES_PER_SEARCH
+        )
 
         if (candidates.isEmpty()) {
             _uiState.value = current.copy(
@@ -1194,7 +1199,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
      * Free Wayback lookup runs after live search results are displayed. The current offer price is
      * used only to prioritize ordinary search candidates; archived quotes are persisted separately.
      */
-    private data class FreeArchiveCandidate(
+    internal data class FreeArchiveCandidate(
         val title: String,
         val storeName: String,
         val directUrl: String?,
@@ -1550,4 +1555,22 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     private fun showSnackbar(msg: String) {
         _uiState.value = _uiState.value.copy(snackbarMessage = msg)
     }
+}
+
+
+/**
+ * Prioritize the product's own URL before merchant offers when the archive lookup is bounded.
+ * Exact URL deduplication preserves the first candidate, so the strongest source remains first.
+ */
+internal fun prioritizeFreeArchiveCandidates(
+    currentProductCandidate: PriceTrackerViewModel.FreeArchiveCandidate?,
+    offerCandidates: List<PriceTrackerViewModel.FreeArchiveCandidate>,
+    maxCandidates: Int
+): List<PriceTrackerViewModel.FreeArchiveCandidate> {
+    if (maxCandidates <= 0) return emptyList()
+    return (listOfNotNull(currentProductCandidate) + offerCandidates)
+        .distinctBy {
+            it.title.trim().lowercase(Locale.ROOT) + "|" + (it.directUrl ?: it.merchantDomain ?: "unknown")
+        }
+        .take(maxCandidates)
 }

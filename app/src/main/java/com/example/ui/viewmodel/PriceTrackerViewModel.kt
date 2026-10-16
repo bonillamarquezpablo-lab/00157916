@@ -22,6 +22,7 @@ import com.example.data.model.ProductCategory
 import com.example.data.model.Store
 import com.example.data.model.hasComparableInAppMinimum
 import com.example.data.model.summarizeInAppObservedPrices
+import com.example.data.model.sortByObservedMinimum
 import com.example.data.repository.ProductRepository
 import com.example.notifications.PriceAlertScheduler
 import com.example.data.repository.UrlAnalysisResult
@@ -230,11 +231,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     )
                     SortOption.PRICE_LOW_HIGH -> {
                         if (filters.showInAppMinimumsFilter) {
-                            list.sortedWith(
-                                compareBy<Product> {
-                                    inAppMinimumsByProductId[it.id]?.lowestPoint?.price
-                                        ?: Double.POSITIVE_INFINITY
-                                }.thenBy { it.title.lowercase(Locale.ROOT) }
+                            sortByObservedMinimum(
+                                items = list,
+                                ascending = true,
+                                minimumPrice = { inAppMinimumsByProductId[it.id]?.lowestPoint?.price },
+                                tieBreaker = { it.title }
                             )
                         } else {
                             list.sortedWith(
@@ -246,11 +247,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }
                     SortOption.PRICE_HIGH_LOW -> {
                         if (filters.showInAppMinimumsFilter) {
-                            list.sortedWith(
-                                compareByDescending<Product> {
-                                    inAppMinimumsByProductId[it.id]?.lowestPoint?.price
-                                        ?: Double.NEGATIVE_INFINITY
-                                }.thenBy { it.title.lowercase(Locale.ROOT) }
+                            sortByObservedMinimum(
+                                items = list,
+                                ascending = false,
+                                minimumPrice = { inAppMinimumsByProductId[it.id]?.lowestPoint?.price },
+                                tieBreaker = { it.title }
                             )
                         } else {
                             list.sortedWith(

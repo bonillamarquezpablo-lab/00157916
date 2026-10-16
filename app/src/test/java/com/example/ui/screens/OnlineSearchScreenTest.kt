@@ -126,7 +126,7 @@ class OnlineSearchScreenTest {
         composeRule.onNodeWithText("Ver tiendas y enlaces directos").performClick()
         assertEquals(
             "A catalog-only Google URL with a product ID should route to the in-app comparison flow",
-            result.let { groupOnlineSearchResults(listOf(it)).single().identityKey },
+            result.let { groupOnlineShoppingResults(listOf(it)).single().identityKey },
             openedProductIdentity
         )
     }

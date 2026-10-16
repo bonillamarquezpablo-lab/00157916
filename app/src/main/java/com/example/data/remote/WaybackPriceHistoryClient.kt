@@ -102,7 +102,7 @@ class WaybackPriceHistoryClient(
         queryCdxAndFetchPrices(cdxUrl, expectedTitle, attempt, now)
     }
 
-    private fun wasAttemptedRecently(key: String, now: Long): Boolean {
+    internal fun wasAttemptedRecently(key: String, now: Long): Boolean {
         val lastAttempt = preferences.getLong(key, 0L)
         if (lastAttempt <= 0L || now < lastAttempt) return false
         // Empty searches should be retried sooner than useful archived histories.

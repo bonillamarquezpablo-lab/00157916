@@ -434,6 +434,11 @@ fun OnlineSearchScreen(
                             name = purchaseOffer.storeName,
                             sourceUrl = purchaseOffer.sourceUrl
                         )
+                        val sellerHomepage = if (purchaseOffer.isGoogleShoppingProductLink) {
+                            Store.homepageFromSellerLabel(purchaseOffer.storeName)
+                        } else {
+                            null
+                        }
 
                         when {
                             directDestination != null -> openStoreUrl(
@@ -453,11 +458,12 @@ fun OnlineSearchScreen(
                             }
                             shouldOpenProductDetailsForCatalogOffer(purchaseOffer, canOpenProductDetail) ->
                                 onOpenProduct(group.identityKey)
-                            else -> openStoreUrl(
-                                context,
-                                purchaseOffer.sourceUrl,
-                                preferAmazonApp = false
-                            )
+                            sellerHomepage != null -> openStoreUrl(context, sellerHomepage, preferAmazonApp = false)
+                            !purchaseOffer.isGoogleShoppingProductLink ->
+                                openStoreUrl(context, purchaseOffer.sourceUrl, preferAmazonApp = false)
+                            // Do not send people to the same generic Google Shopping page again.
+                            // The button is disabled below when no seller-specific destination exists.
+                            else -> Unit
                         }
                     }
                 )
@@ -487,7 +493,11 @@ private fun ShoppingResultCard(
         name = purchaseOffer.storeName,
         sourceUrl = purchaseOffer.sourceUrl
     )
-    val canOpenRetailer = directRetailerUrl != null || knownRetailer != null
+    val sellerHomepage = if (purchaseOffer.isGoogleShoppingProductLink) {
+        Store.homepageFromSellerLabel(purchaseOffer.storeName)
+    } else null
+    val canOpenRetailer = directRetailerUrl != null || knownRetailer != null ||
+        sellerHomepage != null || !purchaseOffer.isGoogleShoppingProductLink
     val routeToProductDetails = shouldOpenProductDetailsForCatalogOffer(
         purchaseOffer,
         canOpenProductDetail = onOpenProduct != null
@@ -631,7 +641,11 @@ private fun ShoppingResultCard(
             if (best.primeEligible) {
                 Text("Entrega Prime disponible en la oferta más barata", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
             }
-            OutlinedButton(onClick = onOpenBestOffer, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = onOpenBestOffer,
+                enabled = canOpenRetailer || routeToProductDetails,
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Text(
                     when {
                         (categoryUnverified || fitmentUnverified) && !canOpenRetailer && purchaseOffer.isGoogleShoppingProductLink -> "Revisar variante en Google Shopping"
@@ -643,8 +657,10 @@ private fun ShoppingResultCard(
                             "Revisar oferta sin verificar en Google Shopping"
                         !hasTrustedPrice && knownRetailer != null && directRetailerUrl == null -> "Buscar oferta sin verificar en ${knownRetailer.name}"
                         !hasTrustedPrice -> "Revisar oferta sin verificar · ${purchaseOffer.storeName}"
+                        purchaseOffer.isGoogleShoppingProductLink && directRetailerUrl == null && sellerHomepage != null ->
+                            "Abrir web de ${purchaseOffer.storeName} (ficha directa no disponible)"
                         purchaseOffer.isGoogleShoppingProductLink && directRetailerUrl == null ->
-                            "Abrir Google Shopping (sin enlace directo)"
+                            "Enlace de tienda no disponible"
                         else -> "Abrir oferta directa · ${purchaseOffer.storeName}"
                     }
                 )

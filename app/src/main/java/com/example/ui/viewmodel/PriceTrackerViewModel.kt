@@ -20,6 +20,7 @@ import com.example.data.remote.extractGoogleShoppingProductId
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.Store
+import com.example.data.model.summarizeInAppObservedPrices
 import com.example.data.repository.ProductRepository
 import com.example.notifications.PriceAlertScheduler
 import com.example.data.repository.UrlAnalysisResult
@@ -69,6 +70,7 @@ data class TrackerUiState(
     val searchQuery: String = "",
     val selectedCategory: ProductCategory = ProductCategory.ALL,
     val onlyAthFilter: Boolean = false,
+    val showInAppMinimumsFilter: Boolean = false,
     val selectedStoreName: String? = null,
     val sortOption: SortOption = SortOption.BEST_ATH_DISCOUNT,
     val selectedProduct: Product? = null,
@@ -105,6 +107,7 @@ private data class ProductFilterOptions(
     val searchQuery: String,
     val selectedCategory: ProductCategory,
     val onlyAthFilter: Boolean,
+    val showInAppMinimumsFilter: Boolean,
     val selectedStoreName: String?,
     val sortOption: SortOption
 )
@@ -162,6 +165,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             searchQuery = state.searchQuery,
             selectedCategory = state.selectedCategory,
             onlyAthFilter = state.onlyAthFilter,
+            showInAppMinimumsFilter = state.showInAppMinimumsFilter,
             selectedStoreName = state.selectedStoreName,
             sortOption = state.sortOption
         )
@@ -198,6 +202,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 if (filters.onlyAthFilter) product.isAtAth else true
             }
             .filter { product ->
+                // Show only products with at least one dated price actually collected by Mínimo.
+                if (filters.showInAppMinimumsFilter) {
+                    summarizeInAppObservedPrices(product.priceHistory).lowestPoint != null
+                } else true
+            }
+            .filter { product ->
                 // Store filter
                 if (filters.selectedStoreName != null) {
                     product.currentStore.name.contains(filters.selectedStoreName, ignoreCase = true) ||
@@ -205,8 +215,15 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 } else true
             }
             .let { list ->
-                // Sorting
-                when (filters.sortOption) {
+                // The Mínimo-observed view sorts by its own lowest captured quote, not a provider's ATH.
+                if (filters.showInAppMinimumsFilter) {
+                    list.sortedWith(
+                        compareBy<Product> {
+                            summarizeInAppObservedPrices(it.priceHistory).lowestPoint?.price
+                                ?: Double.POSITIVE_INFINITY
+                        }.thenBy { it.title.lowercase(Locale.ROOT) }
+                    )
+                } else when (filters.sortOption) {
                     SortOption.BEST_ATH_DISCOUNT -> list.sortedWith(
                         compareByDescending<Product> { it.isPriceVerified }
                             .thenByDescending { it.realSavingsPercent }
@@ -1537,7 +1554,21 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun onToggleOnlyAth() {
-        _uiState.value = _uiState.value.copy(onlyAthFilter = !_uiState.value.onlyAthFilter)
+        val current = _uiState.value
+        val onlyAth = !current.onlyAthFilter
+        _uiState.value = current.copy(
+            onlyAthFilter = onlyAth,
+            showInAppMinimumsFilter = if (onlyAth) false else current.showInAppMinimumsFilter
+        )
+    }
+
+    fun onToggleInAppMinimums() {
+        val current = _uiState.value
+        val showMinimums = !current.showInAppMinimumsFilter
+        _uiState.value = current.copy(
+            showInAppMinimumsFilter = showMinimums,
+            onlyAthFilter = if (showMinimums) false else current.onlyAthFilter
+        )
     }
 
     fun onStoreFilterSelect(storeName: String?) {

@@ -30,9 +30,13 @@ interface PriceObservationDao {
     )
     fun observeVerifiedHistory(productId: String): Flow<List<PriceObservationEntity>>
 
+    /** Latest validated live quote; archived snapshots never represent the current price. */
     @Query(
         "SELECT * FROM price_observations " +
             "WHERE productId = :productId AND isVerified = 1 " +
+            "AND lower(evidenceType) = 'live' " +
+            "AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' " +
+            "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
             "ORDER BY observedAt DESC LIMIT 1"
     )
     suspend fun getLatestVerified(productId: String): PriceObservationEntity?
@@ -40,7 +44,15 @@ interface PriceObservationDao {
     @Query("SELECT * FROM price_observations WHERE isVerified = 1 ORDER BY observedAt ASC")
     fun observeAllVerified(): Flow<List<PriceObservationEntity>>
 
-    @Query("SELECT * FROM price_observations WHERE productId = :productId AND isVerified = 1 AND observedAt >= :since ORDER BY price ASC")
+    /** Recent price-alert candidates must be live quotes, never past archive imports. */
+    @Query(
+        "SELECT * FROM price_observations " +
+            "WHERE productId = :productId AND isVerified = 1 AND observedAt >= :since " +
+            "AND lower(evidenceType) = 'live' " +
+            "AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' " +
+            "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
+            "ORDER BY price ASC"
+    )
     suspend fun getVerifiedSince(productId: String, since: Long): List<PriceObservationEntity>
 
     @Query("SELECT COUNT(*) FROM price_observations WHERE isVerified = 1")

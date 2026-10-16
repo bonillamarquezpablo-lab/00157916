@@ -1185,7 +1185,7 @@ class ProductRepository(
 
     private fun canonicalStoreId(storeName: String, sourceUrl: String): String {
         val host = parseHttpUri(sourceUrl)?.host?.let(::normalizeHost).orEmpty()
-        val googleHost = host.startsWith("google.") || host.endsWith(".google.com") || host.endsWith(".google.es")
+        val googleHost = isGoogleShoppingUrl("https://$host")
         if (host.isNotBlank() && !googleHost) {
             Store.ALL_STORES.firstOrNull { store ->
                 val knownHost = normalizeHost(store.domain.substringBefore('/'))

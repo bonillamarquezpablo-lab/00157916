@@ -42,7 +42,7 @@ import org.robolectric.annotation.Config
 class ExampleRobolectricTest {
 
     @Test
-    fun `Room startup removes legacy mock rows and keeps only real online products`() = runBlocking<Unit> {
+    fun `Room startup preserves all locally persisted data while hiding demo rows from the UI`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,
@@ -94,7 +94,7 @@ class ExampleRobolectricTest {
                         physicalStoresInSpain = true,
                         storeCountApprox = 1,
                         headquartersInSpain = "España",
-                        description = "Legacy row for cleanup test"
+                        description = "Persisted row for startup safety test"
                     )
                 )
             )
@@ -133,39 +133,32 @@ class ExampleRobolectricTest {
                 )
             )
 
-            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
             val repository = ProductRepository(
                 storeDao = database.storeDao(),
                 productDao = database.productDao(),
                 trackedDao = database.trackedProductDao(),
                 priceObservationDao = database.priceObservationDao(),
-                externalScope = scope
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
             )
 
+            // It is safe to hide legacy/demo rows from the rendered catalogue without deleting them.
             val products: List<Product> = withTimeout<List<Product>>(10_000) {
                 repository.allProductsStream.first { rows -> rows.any { it.id == "online_product_redmi17" } }
             }
-            assertEquals("Only the user-searched product with a real observation may remain", 1, products.size)
+            assertEquals(1, products.size)
             assertEquals("online_product_redmi17", products.single().id)
-            assertTrue("The real online price must remain verified", products.single().isPriceVerified)
-            assertEquals(1, products.single().priceHistory.size)
+            assertTrue("The real online observation should remain visible", products.single().isPriceVerified)
 
-            withTimeout(10_000) {
-                while (
-                    database.productDao().getProductCount() != 1 ||
-                    database.storeDao().getStoreCount() != 0 ||
-                    database.priceObservationDao().getObservationCount("demo_iphone_17_pro_max") != 0 ||
-                    database.trackedProductDao().getAllTracked().first().isNotEmpty()
-                ) kotlinx.coroutines.delay(10)
-            }
-            assertEquals(0, database.priceObservationDao().getObservationCount("demo_iphone_17_pro_max"))
-            assertEquals(1, database.priceObservationDao().getObservationCount("online_product_redmi17"))
-            assertTrue("Legacy mock tracking must be purged", database.trackedProductDao().getAllTracked().first().isEmpty())
-            assertEquals("Room's static store rows must also be empty", 0, database.storeDao().getStoreCount())
-            assertTrue(
-                "A real verified observation must repair a stale product verification flag",
-                database.productDao().getProductById("online_product_redmi17")?.isPriceVerified == true
-            )
+            // Opening the repository must not mutate products, prices, watchlist, or store metadata.
+            assertEquals("Both persisted product rows must remain", 2, database.productDao().getProductCount())
+            assertEquals("The legacy demo observation must not be deleted at startup", 1,
+                database.priceObservationDao().getObservationCount("demo_iphone_17_pro_max"))
+            assertEquals("The real product history must remain", 1,
+                database.priceObservationDao().getObservationCount("online_product_redmi17"))
+            assertNotNull("The local tracking entry must be retained", database.trackedProductDao().getById("demo_iphone_17_pro_max"))
+            assertEquals("Existing store metadata must be retained", 1, database.storeDao().getStoreCount())
+            assertEquals("Startup must not rewrite product verification flags", false,
+                database.productDao().getProductById("online_product_redmi17")?.isPriceVerified)
         } finally {
             database.close()
         }

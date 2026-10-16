@@ -1312,7 +1312,7 @@ class ExampleRobolectricTest {
         ).allowMainThreadQueries().build()
         try {
             val title = "Anker Prime 27K Power Bank"
-            val storedVariantUrl = "https://shop.example/products/anker-prime-27k?variant=512"
+            val storedVariantUrl = "https://shop.example/products/anker-prime-27k?variant=512&color=black&utm_source=affiliate"
             val archivedVariantUrl = "https://shop.example/products/anker-prime-27k?variant=256"
             database.productDao().insert(
                 ProductEntity(
@@ -1369,6 +1369,28 @@ class ExampleRobolectricTest {
             assertTrue(
                 "A rejected variant mismatch must not persist an observation",
                 database.priceObservationDao().observeVerifiedHistory("anker_variant_512").first().isEmpty()
+            )
+
+            // Equivalent URLs with reordered parameters and a known tracking key must still match.
+            val equivalentVariantUrl = "https://shop.example/products/anker-prime-27k?color=black&variant=512"
+            val validQuote = quote.copy(
+                price = 89.99,
+                originalUrl = equivalentVariantUrl,
+                snapshotUrl = "https://web.archive.org/web/" + archiveTimestamp + "id_/" + equivalentVariantUrl
+            )
+            assertEquals(
+                "Query ordering and tracking parameters must not prevent valid history from being attached",
+                1,
+                repository.recordArchivedPriceHistory(
+                    expectedTitle = title,
+                    originalUrl = equivalentVariantUrl,
+                    storeName = "Tienda directa",
+                    quotes = listOf(validQuote)
+                )
+            )
+            assertEquals(
+                1,
+                database.priceObservationDao().observeVerifiedHistory("anker_variant_512").first().size
             )
         } finally {
             database.close()

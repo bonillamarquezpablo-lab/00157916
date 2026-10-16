@@ -1,6 +1,7 @@
 package com.example.data.remote
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -108,8 +109,26 @@ class WaybackPriceHistoryClient(
         // Empty searches should be retried sooner than useful archived histories.
         // Legacy cache entries without this flag are treated as negative results.
         val hadQuotes = preferences.getBoolean("${key}_has_quotes", false)
-        val retryInterval = if (hadQuotes) RETRY_INTERVAL_MS else NEGATIVE_RETRY_INTERVAL_MS
+        val failed = preferences.getBoolean("${key}_failed", false)
+        val retryInterval = when {
+            hadQuotes -> RETRY_INTERVAL_MS
+            failed -> FAILURE_RETRY_INTERVAL_MS
+            else -> NEGATIVE_RETRY_INTERVAL_MS
+        }
         return now - lastAttempt < retryInterval
+    }
+
+    private fun rememberAttempt(
+        key: String,
+        now: Long,
+        hasQuotes: Boolean,
+        failed: Boolean
+    ) {
+        preferences.edit()
+            .putLong(key, now)
+            .putBoolean("${key}_has_quotes", hasQuotes)
+            .putBoolean("${key}_failed", failed)
+            .apply()
     }
 
     private suspend fun queryCdxAndFetchPrices(
@@ -121,12 +140,21 @@ class WaybackPriceHistoryClient(
         val request = Request.Builder().url(cdxUrl).header("User-Agent", USER_AGENT).get().build()
         val captures = try {
             http.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return WaybackBackfillResult()
+                if (!response.isSuccessful) {
+                    rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
+                    return WaybackBackfillResult()
+                }
                 val body = readBodyLimited(response.body, MAX_CDX_BODY_BYTES)
-                    ?: return WaybackBackfillResult()
+                if (body == null) {
+                    rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
+                    return WaybackBackfillResult()
+                }
                 parseCaptureIndex(body)
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
+            rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
             return WaybackBackfillResult()
         }
 
@@ -148,6 +176,8 @@ class WaybackPriceHistoryClient(
                                     readBodyLimited(response.body, MAX_SNAPSHOT_BODY_BYTES)
                                 } else null
                             }
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
                         } catch (_: Exception) {
                             null
                         } ?: return@withPermit SnapshotFetch(false, null)
@@ -170,10 +200,13 @@ class WaybackPriceHistoryClient(
         val quotes = fetched.mapNotNull { it.quote }
             .sortedBy { it.observedAt }
             .distinctBy { Triple(it.originalUrl, it.observedAt, it.price) }
-        preferences.edit()
-            .putLong(cacheKey, now)
-            .putBoolean("${cacheKey}_has_quotes", quotes.isNotEmpty())
-            .apply()
+        val allSnapshotsFailed = captures.isNotEmpty() && fetched.none { it.fetched }
+        rememberAttempt(
+            cacheKey,
+            now,
+            hasQuotes = quotes.isNotEmpty(),
+            failed = quotes.isEmpty() && allSnapshotsFailed
+        )
         return WaybackBackfillResult(
             quotes = quotes,
             capturesFound = captures.size,
@@ -772,6 +805,7 @@ class WaybackPriceHistoryClient(
         private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L
         const val NEGATIVE_RETRY_INTERVAL_MS = 7L * 24L * 60L * 60L * 1000L
+        const val FAILURE_RETRY_INTERVAL_MS = 30L * 60L * 1000L
         private const val MAX_CDX_BODY_BYTES = 256 * 1024
         private const val MAX_SNAPSHOT_BODY_BYTES = 2 * 1024 * 1024
         const val DAY_MS = 24L * 60L * 60L * 1000L

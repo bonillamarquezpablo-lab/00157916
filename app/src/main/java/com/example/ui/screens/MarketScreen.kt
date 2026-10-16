@@ -455,7 +455,17 @@ fun MarketScreen(
                     ) {
                         SortOption.values().forEach { option ->
                             DropdownMenuItem(
-                                text = { Text(option.label) },
+                                text = {
+                                    Text(
+                                        when {
+                                            uiState.showInAppMinimumsFilter && option == SortOption.PRICE_LOW_HIGH ->
+                                                "Mínimo observado: menor a mayor"
+                                            uiState.showInAppMinimumsFilter && option == SortOption.PRICE_HIGH_LOW ->
+                                                "Mínimo observado: mayor a menor"
+                                            else -> option.label
+                                        }
+                                    )
+                                },
                                 onClick = {
                                     onSortChange(option)
                                     showSortMenu = false

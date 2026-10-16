@@ -28,9 +28,11 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -145,24 +147,36 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     val spanishStores: StateFlow<List<Store>> = repository.storesWithSavedPricesStream
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Filtered products flow
+    // Keep UI-only status changes (network progress, snackbars, dialogs) from re-filtering and
+    // re-sorting the entire catalogue. Only actual filter/sort changes invalidate this snapshot.
+    private val productFilterOptions = _uiState.map { state ->
+        ProductFilterOptions(
+            searchQuery = filters.searchQuery,
+            selectedCategory = filters.selectedCategory,
+            onlyAthFilter = filters.onlyAthFilter,
+            selectedStoreName = filters.selectedStoreName,
+            sortOption = filters.sortOption
+        )
+    }.distinctUntilChanged()
+
     val filteredProducts: StateFlow<List<Product>> = combine(
         repository.allProductsStream,
-        _uiState
-    ) { allProducts, state ->
-        allProducts
+        productFilterOptions
+    ) { allProducts, filters ->
+        withContext(Dispatchers.Default) {
+            allProducts
             // Keep demo catalogue rows out of Mercado. Genuine price observations and user-followed
             // products remain visible; an unverified followed item still clearly shows no price.
             .filter { product -> product.isPriceVerified || product.isTracked }
             .filter { product ->
                 // Category filter
-                (state.selectedCategory == ProductCategory.ALL || product.category == state.selectedCategory)
+                (filters.selectedCategory == ProductCategory.ALL || product.category == filters.selectedCategory)
             }
             .filter { product ->
                 // Search query
-                if (state.searchQuery.isBlank()) true
+                if (filters.searchQuery.isBlank()) true
                 else {
-                    val query = state.searchQuery.trim().lowercase()
+                    val query = filters.searchQuery.trim().lowercase()
                     product.title.lowercase().contains(query) ||
                     product.brand.lowercase().contains(query) ||
                     product.ean.contains(query) ||
@@ -173,18 +187,18 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             }
             .filter { product ->
                 // Only ATH filter
-                if (state.onlyAthFilter) product.isAtAth else true
+                if (filters.onlyAthFilter) product.isAtAth else true
             }
             .filter { product ->
                 // Store filter
-                if (state.selectedStoreName != null) {
-                    product.currentStore.name.contains(state.selectedStoreName, ignoreCase = true) ||
-                    product.offers.any { it.store.name.contains(state.selectedStoreName, ignoreCase = true) }
+                if (filters.selectedStoreName != null) {
+                    product.currentStore.name.contains(filters.selectedStoreName, ignoreCase = true) ||
+                    product.offers.any { it.store.name.contains(filters.selectedStoreName, ignoreCase = true) }
                 } else true
             }
             .let { list ->
                 // Sorting
-                when (state.sortOption) {
+                when (filters.sortOption) {
                     SortOption.BEST_ATH_DISCOUNT -> list.sortedWith(
                         compareByDescending<Product> { it.isPriceVerified }
                             .thenByDescending { it.realSavingsPercent }
@@ -213,6 +227,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     )
                 }
             }
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val trackedProducts: StateFlow<List<Product>> = repository.trackedProductsStream
@@ -985,7 +1000,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         if (candidates.isEmpty()) {
             _uiState.value = current.copy(
                 isSearchingFreeHistory = false,
-                freeHistoryStatus = "No hay una URL directa o una tienda identificable para buscar capturas gratuitas. No se ha gastado cuota."
+                freeHistoryProductId = product.id,
+                freeHistoryStatus = "No hay una página de producto o tienda verificable para buscar capturas. No se ha gastado cuota. Prueba «Comparar tiendas» para consultar el catálogo de Google (consume una búsqueda) o vuelve a intentarlo con una oferta que tenga enlace directo."
             )
             return
         }

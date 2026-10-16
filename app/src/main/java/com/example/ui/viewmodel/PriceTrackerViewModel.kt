@@ -626,12 +626,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         val googleProductId = product.googleProductId?.takeIf { it.isNotBlank() }
             ?: extractGoogleShoppingProductId(product.storeUrl)
             ?: product.offers.firstNotNullOfOrNull { extractGoogleShoppingProductId(it.url) }
-        if (googleProductId.isNullOrBlank()) {
-            val message = "Esta ficha todavía no tiene un ID de catálogo de Google Shopping. Repite la búsqueda online del producto para obtenerlo; no se ha gastado cuota."
-            _uiState.value = current.copy(serpApiActionStatus = message)
-            showSnackbar(message)
-            return
-        }
         val lastAttempt = priceRefreshPreferences.getLong("compare_stores_attempt_${product.id}", 0L)
         if (lastAttempt > 0L && System.currentTimeMillis() - lastAttempt < TRACKED_REFRESH_COOLDOWN_MS) {
             val message = "Las tiendas de este producto se consultaron hace menos de 24 horas. No se ha repetido la búsqueda ni gastado cuota."
@@ -825,12 +819,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         val productId = product.googleProductId?.takeIf { it.isNotBlank() }
             ?: extractGoogleShoppingProductId(product.storeUrl)
             ?: product.offers.firstNotNullOfOrNull { extractGoogleShoppingProductId(it.url) }
-        if (productId.isNullOrBlank()) {
-            _uiState.value = _uiState.value.copy(
-                serpApiActionStatus = "No se ha podido identificar el producto de Google Shopping. No se ha gastado cuota ni modificado el historial."
-            )
-            return
-        }
+
         val token = serpApiTokenStore.read()
         if (token.isNullOrBlank()) {
             _uiState.value = _uiState.value.copy(
@@ -864,37 +853,57 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             .putLong("compare_stores_attempt_${product.id}", now)
             .commit()
         _uiState.value = _uiState.value.copy(serpApiActionStatus = "Consultando las tiendas de ${product.title}…")
-        val details = serpApiClient.searchGoogleProductDetails(
-            token = token,
-            productId = productId,
-            expectedTitle = product.title,
-            observedAt = now
-        )
-        val safeOffers = repository.filterProductComparisonOffers(details.offers, product.title)
-        val savedHistory = repository.recordGooglePriceInsightsHistory(
-            productId = product.id,
-            expectedTitle = product.title,
-            googleCatalogId = productId,
-            insights = details.priceInsights
-        )
-        val savedOffers = if (safeOffers.isNotEmpty()) {
-            repository.recordProductComparisonOffers(product.id, product.title, safeOffers)
-        } else 0
 
-        // Refresh the open detail sheet whenever current offers or Google historical points
-        // exist. Historical source rows remain separate and never replace the current live price.
-        if (details.priceInsights.isNotEmpty() || safeOffers.any { !it.isSuspiciousPrice }) {
+        // Use the catalog endpoint when the saved item has a Google product ID. If the item
+        // came from a saved-price/watchlist row without that ID, make one normal Shopping
+        // query instead of forcing the user to repeat the search manually.
+        val details = if (productId != null) {
+            serpApiClient.searchGoogleProductDetails(
+                token = token,
+                productId = productId,
+                expectedTitle = product.title,
+                observedAt = now
+            )
+        } else {
+            null
+        }
+        val keywordReport = if (details == null) {
+            serpApiClient.searchOnlineWithDiagnostics(token, product.title)
+        } else {
+            null
+        }
+        val candidateOffers = details?.offers ?: keywordReport?.results.orEmpty()
+        val safeOffers = repository.filterProductComparisonOffers(candidateOffers, product.title)
+        val savedHistory = if (productId != null && details != null) {
+            repository.recordGooglePriceInsightsHistory(
+                productId = product.id,
+                expectedTitle = product.title,
+                googleCatalogId = productId,
+                insights = details.priceInsights
+            )
+        } else {
+            0
+        }
+        val savedOffers = if (safeOffers.isNotEmpty()) {
+            withContext(Dispatchers.IO) {
+                repository.recordProductComparisonOffers(product.id, product.title, safeOffers)
+            }
+        } else {
+            0
+        }
+
+        // Wait for Room to emit the updated saved product so the open detail sheet reflects
+        // the new current quote, not just the comparison rows.
+        if (savedOffers > 0 || savedHistory > 0) {
             val updated = runCatching {
                 withTimeout(8_000L) {
                     repository.allProductsStream.first { products ->
                         products.any { candidate ->
                             candidate.id == product.id && (
-                                (safeOffers.any { !it.isSuspiciousPrice } &&
-                                    (candidate.priceObservedAt ?: 0L) >= now) ||
-                                (details.priceInsights.isNotEmpty() &&
-                                    candidate.priceHistory.any {
-                                        it.eventLabel?.contains("price_insights", ignoreCase = true) == true
-                                    })
+                                (savedOffers > 0 && (candidate.priceObservedAt ?: 0L) >= now) ||
+                                (savedHistory > 0 && candidate.priceHistory.any {
+                                    it.eventLabel?.contains("price_insights", ignoreCase = true) == true
+                                })
                             )
                         }
                     }.first { it.id == product.id }
@@ -906,15 +915,19 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         }
 
         val offerNote = if (safeOffers.isNotEmpty()) {
-            "${safeOffers.size} oferta(s) actuales válidas; $savedOffers observación(es) nuevas o actualizadas."
+            "${safeOffers.size} oferta(s) actuales válidas; ${savedOffers} observación(es) nuevas o actualizadas."
         } else {
-            "Google no devolvió ofertas actuales utilizables."
+            "No se encontraron ofertas actuales que coincidieran con seguridad; se conserva el precio anterior."
         }
         val historyNote = when {
-            savedHistory > 0 -> "Se han guardado $savedHistory puntos históricos reales devueltos por Google."
-            details.priceInsights.isNotEmpty() -> "Google devolvió historial, pero esos puntos ya estaban guardados o no superaron la validación."
-            details.priceHistoryAvailable -> "Google indica que hay una serie histórica, pero no se pudieron interpretar puntos fechados en euros."
-            else -> "Google no publica una serie histórica para este producto."
+            savedHistory > 0 -> "Se han guardado ${savedHistory} puntos históricos reales devueltos por Google."
+            details?.priceInsights?.isNotEmpty() == true ->
+                "Google devolvió historial, pero los puntos ya existían o no superaron la validación."
+            details?.priceHistoryAvailable == true ->
+                "Google indica que hay serie histórica, pero no devolvió puntos fechados en euros que se puedan validar."
+            productId == null ->
+                "La ficha no tenía ID de catálogo; se ha hecho una búsqueda por nombre. Para recuperar la serie histórica de Google, la respuesta debe incluir un ID de producto."
+            else -> "Google no publica una serie histórica verificable para este producto."
         }
         val message = "Comparación completada: $offerNote $historyNote No se repetirá antes de 24 horas."
         _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
@@ -922,7 +935,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         val after = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
         if (after != null) _uiState.value = _uiState.value.copy(serpApiAccountStatus = quotaMessage(after))
     }
-
     fun onOnlineSearchQueryChange(query: String) {
         _uiState.value = _uiState.value.copy(
             onlineSearchQuery = query,

@@ -541,7 +541,7 @@ class ProductRepository(
         // from Shopping titles. Treat Mate/Pura/Nova/P/Y phone families as devices, not as
         // cheap accessory listings, so a 5 € case cannot become the price of the handset.
         val huaweiPhone = Regex(
-            """\bhuawei\s+(mate\s+[x\d]|mate\s?\d|pura\s?\d|nova\s?\d|p\s?\d{1,2}|y\s?\d{1,2})\b"""
+            """\bhuawei\s+(mate\s*x?\s*\d+|pura\s*\d+|nova\s*\d+|p\s*\d{1,2}|y\s*\d{1,2})\b"""
         ).containsMatchIn(normalized)
         if ((smartphone || huaweiPhone) && price < 45.0) return false
 

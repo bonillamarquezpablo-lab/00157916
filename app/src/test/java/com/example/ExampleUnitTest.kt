@@ -69,6 +69,7 @@ class ExampleUnitTest {
         )
         assertEquals(VerdictLevel.ATH_RECORD, verdict.level)
         assertTrue(verdict.badgeText.contains("MÍNIMO OBSERVADO"))
+        assertEquals("Confidence must not be fabricated when no confidence model ran", 0, verdict.confidenceScore)
     }
 
     @Test
@@ -133,6 +134,19 @@ class ExampleUnitTest {
         )
         assertEquals(VerdictLevel.INFLATED_FAKE_DEAL, verdict.level)
         assertTrue(verdict.badgeText.contains("OJO"))
+    }
+
+    @Test
+    fun discountVerdictDoesNotClaimRetailerPriceOrStockIsConfirmed() {
+        val verdict = DealVerdict.analyze(
+            currentPrice = 90.0,
+            athMinPrice = 80.0,
+            avg90dPrice = 100.0,
+            athMaxPrice = 120.0
+        )
+        assertEquals(VerdictLevel.FAIR_DISCOUNT, verdict.level)
+        assertTrue(verdict.badgeText.contains("MEDIA"))
+        assertTrue(verdict.explanation.contains("no confirma", ignoreCase = true))
     }
 
     @Test

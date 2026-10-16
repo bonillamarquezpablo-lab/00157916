@@ -76,7 +76,7 @@ class OnlineSearchScreenTest {
         searchList.performScrollToNode(hasText(rejectedOffer.title))
         composeRule.onNodeWithText(rejectedOffer.title).assertIsDisplayed()
         composeRule.onNodeWithText(rejectedOffer.priceLabel).assertIsDisplayed()
-        composeRule.onNodeWithText(rejectedOffer.reason).assertIsDisplayed()
+        composeRule.onNodeWithText("Motivo: ${rejectedOffer.reason}").assertIsDisplayed()
         composeRule.onNodeWithText(rejectedOffer.provider).assertIsDisplayed()
 
         searchList.performScrollToNode(hasText("Ocultar descartados"))

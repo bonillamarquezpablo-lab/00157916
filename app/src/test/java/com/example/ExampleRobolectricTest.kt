@@ -3400,4 +3400,67 @@ class ExampleRobolectricTest {
         }
     }
 
+    @Test
+    fun suspiciousOnlyProductComparisonDoesNotVerifyCurrentProductPrice() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val product = ProductEntity(
+                id = "anker-comparison-suspicious-only",
+                title = "Anker Prime 27K Power Bank",
+                brand = "Anker",
+                category = "ACCESSORIES",
+                currentPrice = 0.0,
+                athMinPrice = 0.0,
+                athMinDate = "",
+                athMinStore = "",
+                athMaxPrice = 0.0,
+                avg90dPrice = 0.0,
+                officialPvp = 0.0,
+                currentStoreId = "unknown_store",
+                storeUrl = "",
+                ean = "",
+                isPriceVerified = false
+            )
+            database.productDao().insert(product)
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val suspicious = SerpApiShoppingResult(
+                title = product.title,
+                price = 1.99,
+                storeName = "Vendedor desconocido",
+                sourceUrl = "https://seller.example.test/anker-prime-27k",
+                observedAt = System.currentTimeMillis(),
+                condition = "new",
+                isSuspiciousPrice = true,
+                googleProductId = "123456789"
+            )
+
+            assertEquals(
+                1,
+                repository.recordProductComparisonOffers(
+                    productId = product.id,
+                    expectedTitle = product.title,
+                    offers = listOf(suspicious)
+                )
+            )
+            val refreshed = database.productDao().getProductById(product.id)!!
+            assertFalse("An unverified diagnostic offer must not verify the current price", refreshed.isPriceVerified)
+            assertTrue(
+                database.priceObservationDao().observeVerifiedHistory(product.id).first().isEmpty()
+            )
+            assertEquals("Suspicious catalogue IDs must not be attached to the product", null, refreshed.googleProductId)
+        } finally {
+            database.close()
+        }
+    }
+
 }

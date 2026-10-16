@@ -1568,7 +1568,14 @@ internal fun prioritizeFreeArchiveCandidates(
     maxCandidates: Int
 ): List<PriceTrackerViewModel.FreeArchiveCandidate> {
     if (maxCandidates <= 0) return emptyList()
-    return (listOfNotNull(currentProductCandidate) + offerCandidates)
+    // A homepage fallback is weaker than an actual offer product page. Only prioritize the
+    // product candidate when it contains an eligible direct URL; otherwise keep offers first.
+    val orderedCandidates = if (currentProductCandidate?.directUrl != null) {
+        listOf(currentProductCandidate) + offerCandidates
+    } else {
+        offerCandidates + listOfNotNull(currentProductCandidate)
+    }
+    return orderedCandidates
         .distinctBy {
             it.title.trim().lowercase(Locale.ROOT) + "|" + (it.directUrl ?: it.merchantDomain ?: "unknown")
         }

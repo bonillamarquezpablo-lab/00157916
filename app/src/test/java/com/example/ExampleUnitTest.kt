@@ -51,6 +51,19 @@ class ExampleUnitTest {
 
         assertEquals(listOf(productUrl, cheaperOfferOne), prioritized)
         assertEquals(productUrl.directUrl, prioritized.first().directUrl)
+
+        val homepageFallback = FreeArchiveCandidate(
+            title = "Sony WH-1000XM5",
+            storeName = "Sony",
+            directUrl = null,
+            merchantDomain = "sony.es"
+        )
+        val offerPagesStayAheadOfHomepage = prioritizeFreeArchiveCandidates(
+            currentProductCandidate = homepageFallback,
+            offerCandidates = listOf(cheaperOfferOne, cheaperOfferTwo),
+            maxCandidates = 2
+        )
+        assertEquals(listOf(cheaperOfferOne, cheaperOfferTwo), offerPagesStayAheadOfHomepage)
     }
 
     @Test

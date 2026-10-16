@@ -565,20 +565,39 @@ class ProductRepository(
         val currentEntities = productDao.getAllProductsSnapshot().toMutableList()
         val groups = groupOnlineShoppingResults(eligible)
         for (group in groups) {
+            val trustedOffers = group.offers.filterNot { it.isSuspiciousPrice }
+            val hasTrustedOffer = trustedOffers.isNotEmpty()
+            // Never let a group made only of suspicious offers replace the merchant URL or
+            // current-store identity of an existing product. Such links could later be reused
+            // by the free-history action and attach a capture from the wrong listing.
             val bestOffer = group.cheapestOffer
-            val storeId = canonicalStoreId(bestOffer.storeName, bestOffer.sourceUrl)
             val existingProduct = currentEntities.firstOrNull {
                 onlineProductIdentityKey(it.title) == group.identityKey
+            }
+            val storeId = if (hasTrustedOffer) {
+                canonicalStoreId(bestOffer.storeName, bestOffer.sourceUrl)
+            } else {
+                existingProduct?.currentStoreId ?: "unknown_store"
             }
             val productId = existingProduct?.id
                 ?: stableOnlineId("online_product_", group.identityKey)
             // Keep the persisted title and representative image from the same provider listing.
             val displayTitle = group.title
-            val hasTrustedOffer = group.offers.any { !it.isSuspiciousPrice }
             val currentMinimum = if (hasTrustedOffer) group.minPrice else existingProduct?.currentPrice ?: 0.0
-            val highestToday = group.offers.maxOfOrNull { offer ->
+            val trustedHighestToday = trustedOffers.maxOfOrNull { offer ->
                 offer.price / (offer.wheelSetCount ?: 1)
-            } ?: currentMinimum
+            }
+            val highestToday = trustedHighestToday
+                ?: existingProduct?.athMaxPrice
+                ?: currentMinimum
+            val safeStoreId = if (hasTrustedOffer) storeId else existingProduct?.currentStoreId ?: "unknown_store"
+            val safeStoreUrl = if (hasTrustedOffer) bestOffer.sourceUrl else existingProduct?.storeUrl.orEmpty()
+            val safeMinStore = if (hasTrustedOffer) bestOffer.storeName else existingProduct?.athMinStore.orEmpty()
+            val safeGoogleProductId = if (hasTrustedOffer) {
+                trustedOffers.firstNotNullOfOrNull { it.googleProductId } ?: existingProduct?.googleProductId
+            } else {
+                existingProduct?.googleProductId
+            }
             val productEntity = if (existingProduct != null) {
                 existingProduct.copy(
                     title = displayTitle,
@@ -588,18 +607,17 @@ class ProductRepository(
                         inferProductCategory(displayTitle, searchQuery).name
                     } else existingProduct.category,
                     currentPrice = currentMinimum,
-                    athMinPrice = if (existingProduct.athMinPrice > 0.0) existingProduct.athMinPrice else currentMinimum,
+                    athMinPrice = if (hasTrustedOffer && existingProduct.athMinPrice <= 0.0) currentMinimum else existingProduct.athMinPrice,
                     athMinDate = existingProduct.athMinDate.ifBlank { "Historial en construcción" },
-                    athMinStore = bestOffer.storeName,
-                    athMaxPrice = maxOf(existingProduct.athMaxPrice, highestToday),
-                    currentStoreId = storeId,
-                    storeUrl = bestOffer.sourceUrl,
+                    athMinStore = safeMinStore,
+                    athMaxPrice = if (hasTrustedOffer) maxOf(existingProduct.athMaxPrice, trustedHighestToday ?: currentMinimum)
+                        else existingProduct.athMaxPrice,
+                    currentStoreId = safeStoreId,
+                    storeUrl = safeStoreUrl,
                     imageUrl = group.representativeImageUrl.takeIf { it.isNotBlank() }
                         ?: existingProduct.imageUrl.takeIf { existingProduct.title.equals(displayTitle, ignoreCase = true) },
                     isPriceVerified = hasTrustedOffer || existingProduct.isPriceVerified,
-                    googleProductId = bestOffer.googleProductId
-                        ?: group.offers.firstNotNullOfOrNull { it.googleProductId }
-                        ?: existingProduct.googleProductId
+                    googleProductId = safeGoogleProductId
                 )
             } else {
                 ProductEntity(
@@ -608,21 +626,20 @@ class ProductRepository(
                     brand = inferProductBrand(displayTitle),
                     category = inferProductCategory(displayTitle, searchQuery).name,
                     currentPrice = currentMinimum,
-                    athMinPrice = currentMinimum,
+                    athMinPrice = if (hasTrustedOffer) currentMinimum else 0.0,
                     athMinDate = "Historial en construcción",
-                    athMinStore = bestOffer.storeName,
-                    athMaxPrice = highestToday,
+                    athMinStore = safeMinStore,
+                    athMaxPrice = if (hasTrustedOffer) highestToday else 0.0,
                     avg90dPrice = 0.0,
                     officialPvp = 0.0,
-                    currentStoreId = storeId,
-                    storeUrl = bestOffer.sourceUrl,
+                    currentStoreId = safeStoreId,
+                    storeUrl = safeStoreUrl,
                     ean = "",
-                    imageUrl = group.representativeImageUrl.takeIf { it.isNotBlank() },
+                    imageUrl = group.representativeImageUrl.takeIf { hasTrustedOffer && it.isNotBlank() },
                     rating = 0.0,
                     reviewCount = 0,
-                    isPriceVerified = group.offers.any { !it.isSuspiciousPrice },
-                    googleProductId = bestOffer.googleProductId
-                        ?: group.offers.firstNotNullOfOrNull { it.googleProductId }
+                    isPriceVerified = hasTrustedOffer,
+                    googleProductId = safeGoogleProductId
                 )
             }
             productDao.insert(productEntity)

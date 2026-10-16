@@ -1104,7 +1104,7 @@ class SerpApiClient(
         } ?: return false
 
         val normalized = currency.uppercase(Locale.ROOT)
-        val codes = Regex("""\\b[A-Z]{3}\\b""").findAll(normalized)
+        val codes = Regex("""\b[A-Z]{3}\b""").findAll(normalized)
             .map { it.value }
             .toSet()
         if (codes.isNotEmpty()) return codes != setOf("EUR")

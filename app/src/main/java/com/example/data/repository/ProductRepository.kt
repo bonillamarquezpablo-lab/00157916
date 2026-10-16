@@ -232,7 +232,7 @@ class ProductRepository(
             val title = titleById[quote.productId].orEmpty()
             quote.productId.isNotBlank() &&
                 quote.price.isFinite() && quote.price > 0.0 && quote.price <= MAX_HISTORY_PRICE_EUR &&
-                quote.currency == "EUR" &&
+                isEuroCurrency(quote.currency) &&
                 quote.observedAt >= HISTORY_START_TIMESTAMP &&
                 isEligibleHistoryTitle(title) &&
                 !isPromotionalBulkListing(title, "") &&
@@ -452,6 +452,9 @@ class ProductRepository(
         observation.evidenceType.equals("live", ignoreCase = true) &&
             !isArchiveBackedObservation(observation)
 
+    /** Accept canonical EUR values and legacy/provider values with casing or whitespace differences. */
+    private fun isEuroCurrency(currency: String): Boolean = currency.trim().equals("EUR", ignoreCase = true)
+
     private fun isEligibleObservationForHistory(observation: PriceObservationEntity): Boolean {
         val archiveBacked = isArchiveBackedObservation(observation)
         val merchantUrl = if (archiveBacked) {
@@ -484,7 +487,7 @@ class ProductRepository(
 
         return observation.isVerified &&
             observation.productId.isNotBlank() &&
-            observation.currency == "EUR" &&
+            isEuroCurrency(observation.currency) &&
             observation.price.isFinite() &&
             observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
             parseHttpUri(observation.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
@@ -790,7 +793,7 @@ class ProductRepository(
                 } ?: continue
             if (kotlin.math.abs(snapshotTimestamp - quote.observedAt) > 1_000L) continue
             if (!quote.originalUrl.trimEnd('/').equals(originalUrl.trimEnd('/'), ignoreCase = true)) continue
-            if (quote.currency != "EUR" ||
+            if (!isEuroCurrency(quote.currency) ||
                 !quote.price.isFinite() ||
                 quote.price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR ||
                 quote.observedAt < earliestAllowed ||
@@ -857,7 +860,7 @@ class ProductRepository(
         val sourceUrl = "https://www.google.com/shopping/product/$googleCatalogId"
         var inserted = 0
         for (quote in insights.distinctBy { Triple(it.storeName.lowercase(Locale.ROOT), it.observedAt, it.price) }) {
-            if (quote.currency != "EUR" ||
+            if (!isEuroCurrency(quote.currency) ||
                 !isSafeCatalogTitleMatch(quote.productTitle, product.title) ||
                 quote.observedAt < earliestAllowed ||
                 quote.observedAt >= now ||

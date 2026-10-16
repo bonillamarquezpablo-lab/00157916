@@ -31,7 +31,7 @@ import java.util.TimeZone
 class FreeArchiveHistoryPersistenceTest {
 
     @Test
-    fun archivedPricesAreVisibleWithoutVerifyingCurrentPriceAndImportsAreDeduplicated() = runBlocking<Unit> {
+    fun archivedPricesWithNonCanonicalEuroCurrencyRemainVisibleAndDeduplicated() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,
@@ -108,7 +108,7 @@ class FreeArchiveHistoryPersistenceTest {
             val quote = ArchivedPriceQuote(
                 observedAt = archivedAt,
                 price = 89.99,
-                currency = "EUR",
+                currency = " eur ",
                 productTitle = title,
                 originalUrl = originalUrl,
                 snapshotUrl = snapshotUrl

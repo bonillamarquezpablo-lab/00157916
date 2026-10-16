@@ -124,12 +124,14 @@ jobs:
 
       - name: Compilar APK de prueba
         timeout-minutes: 20
-        env:
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
-          VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))
-          VERSION_NAME="1.5.${GITHUB_RUN_NUMBER}"
+          # Keep the test build aligned with the user's current 1.5.901 line.
+          # versionCode 1902 is intentionally greater than a 1.5.901 build using
+          # versionCode 901; the temporary test certificate still prevents upgrading
+          # an installation signed with the stable release key.
+          VERSION_CODE=1902
+          VERSION_NAME="1.5.902"
           echo "Building Mínimo ${VERSION_NAME} (versionCode ${VERSION_CODE})"
           gradle :app:assembleDebug --stacktrace -PVERSION_CODE="${VERSION_CODE}" -PVERSION_NAME="${VERSION_NAME}"
 

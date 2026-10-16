@@ -675,7 +675,8 @@ class WaybackPriceHistoryClient(
     }
 
     private fun canonicalizeArchiveTitle(value: String): String =
-        value.replace(Regex("""\\b(?:tq|qe)(?=\\d{2,}[a-z0-9])"""), "tvmodel")
+        value.replace(Regex("""\\btq(?=\\d{2,}[a-z0-9])"""), "")
+            .replace(Regex("""\\bqe(?=\\d{2,}[a-z0-9])"""), "")
             .replace(Regex("""\\b(?:2k|4k|8k|uhd|fhd|fullhd)\\b"""), " ")
 
     /**

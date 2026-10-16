@@ -1,5 +1,7 @@
 package com.example.data.model
 
+import java.util.Calendar
+
 /**
  * Conservative summary of a chart series. A single dated quote is a first record,
  * not enough evidence to claim a comparable historical minimum.
@@ -40,7 +42,8 @@ fun summarizePriceHistory(points: List<PricePoint>): PriceHistorySummary {
 /**
  * Minimum among prices actually captured by Mínimo. Third-party historical insights and
  * archived snapshots are excluded: they are useful context, but Mínimo did not observe them
- * on their original dates. Unlike a historical claim, this can return a single first observation.
+ * on their original dates. The count represents distinct local calendar days, not raw quotes.
+ * A single day can still be displayed as a first observation on an individual product card.
  */
 data class InAppObservedMinimum(
     val observationCount: Int,
@@ -49,7 +52,8 @@ data class InAppObservedMinimum(
 
 /**
  * Summarizes only live observations made by the app's price collection flow.
- * A single result is displayed as a first recorded price, not as a historical record.
+ * Multiple prices on the same local date count as one observation day; the day's lowest
+ * valid quote represents that day for calculating Mínimo's observed minimum.
  */
 fun summarizeInAppObservedPrices(points: List<PricePoint>): InAppObservedMinimum {
     val appObservedPoints = sanitizePriceHistory(
@@ -63,9 +67,34 @@ fun summarizeInAppObservedPrices(points: List<PricePoint>): InAppObservedMinimum
                 linkType.contains("historial google shopping", ignoreCase = true)
         }
     )
+    val dailyPoints = appObservedPoints
+        .groupBy { localDayStart(it.timestamp) }
+        .values
+        .mapNotNull { dayPoints -> dayPoints.minByOrNull { it.price } }
+        .sortedBy { localDayStart(it.timestamp) }
+
     return InAppObservedMinimum(
-        observationCount = appObservedPoints.size,
-        lowestPoint = appObservedPoints.minByOrNull { it.price }
+        observationCount = dailyPoints.size,
+        lowestPoint = dailyPoints.minByOrNull { it.price }
     )
 }
+
+/**
+ * True only when Mínimo has captured usable prices on at least two distinct local dates.
+ * Callers supply the product's verified observation history; imported archives and Google
+ * price-insights history are excluded by summarizeInAppObservedPrices.
+ */
+fun hasComparableInAppMinimum(points: List<PricePoint>): Boolean {
+    val summary = summarizeInAppObservedPrices(points)
+    return summary.observationCount >= 2 && summary.lowestPoint != null
+}
+
+private fun localDayStart(timestamp: Long): Long =
+    Calendar.getInstance().apply {
+        timeInMillis = timestamp
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
 

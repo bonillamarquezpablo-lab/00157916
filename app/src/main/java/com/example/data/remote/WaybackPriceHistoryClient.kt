@@ -418,7 +418,7 @@ class WaybackPriceHistoryClient(
         val start = (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
         val from = formatUtc(start, "yyyyMMdd")
         val to = formatUtc(now, "yyyyMMdd")
-        val urlPattern = "(?i)" + requiredLookaheads.joinToString("") + ".*"
+        val urlPattern = "(?i)(?:" + requiredLookaheads.joinToString("|") + ").*"
         return HttpUrl.Builder()
             .scheme("https")
             .host("web.archive.org")

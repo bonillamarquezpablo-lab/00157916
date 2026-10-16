@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Only the private crash-report folder can be shared from this provider. -->
+    <files-path
+        name="private_crash_reports"
+        path="crash-reports/" />
+</paths>

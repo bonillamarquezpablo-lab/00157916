@@ -394,9 +394,12 @@ fun OnlineSearchScreen(
             }
             items(visibleGroups, key = { it.stableKey }) { displayGroup ->
                 val group = displayGroup.group
+                val canOpenProductDetail = group.offers.none {
+                    it.isFitmentUnverified || it.isCategoryUnverified
+                }
                 ShoppingResultCard(
                     group = group,
-                    onOpenProduct = if (group.offers.all { it.isFitmentUnverified || it.isCategoryUnverified }) {
+                    onOpenProduct = if (!canOpenProductDetail) {
                         null
                     } else {
                         { onOpenProduct(group.identityKey) }
@@ -408,17 +411,35 @@ fun OnlineSearchScreen(
                             name = purchaseOffer.storeName,
                             sourceUrl = purchaseOffer.sourceUrl
                         )
-                        // When Google exposes only a catalog page, route to the identified
-                        // retailer's own search page instead of a generic Google search.
-                        val destination = directDestination
-                            ?: knownStore?.searchUrlFor(purchaseOffer.title)
-                            ?: purchaseOffer.sourceUrl
-                        openStoreUrl(
-                            context,
-                            destination,
-                            preferAmazonApp = purchaseOffer.isAmazonOffer &&
-                                destination.contains("amazon.es", ignoreCase = true)
-                        )
+
+                        when {
+                            directDestination != null -> openStoreUrl(
+                                context,
+                                directDestination,
+                                preferAmazonApp = purchaseOffer.isAmazonOffer &&
+                                    directDestination.contains("amazon.es", ignoreCase = true)
+                            )
+                            knownStore != null -> {
+                                val storeDestination = knownStore.searchUrlFor(purchaseOffer.title)
+                                openStoreUrl(
+                                    context,
+                                    storeDestination,
+                                    preferAmazonApp = purchaseOffer.isAmazonOffer &&
+                                        storeDestination.contains("amazon.es", ignoreCase = true)
+                                )
+                            }
+                            canOpenProductDetail && !purchaseOffer.googleProductId.isNullOrBlank() -> {
+                                // The catalog page is not a retailer URL. Open the saved product
+                                // so the user can explicitly run the quota-confirmed store-offers
+                                // action instead of being silently sent back to a Google result.
+                                onOpenProduct(group.identityKey)
+                            }
+                            else -> openStoreUrl(
+                                context,
+                                purchaseOffer.sourceUrl,
+                                preferAmazonApp = false
+                            )
+                        }
                     }
                 )
             }
@@ -589,11 +610,16 @@ private fun ShoppingResultCard(
                         (categoryUnverified || fitmentUnverified) && !canOpenRetailer && purchaseOffer.isGoogleShoppingProductLink -> "Revisar variante en Google Shopping"
                         (categoryUnverified || fitmentUnverified) && knownRetailer != null && directRetailerUrl == null -> "Buscar variante en ${knownRetailer.name}"
                         (categoryUnverified || fitmentUnverified) -> "Revisar variante · " + purchaseOffer.storeName
-                        !hasTrustedPrice && !canOpenRetailer && purchaseOffer.isGoogleShoppingProductLink -> "Revisar oferta sin verificar en Google Shopping"
+                        purchaseOffer.isGoogleShoppingProductLink && knownRetailer != null && directRetailerUrl == null -> "Buscar en ${knownRetailer.name}"
+                        purchaseOffer.isGoogleShoppingProductLink && directRetailerUrl == null &&
+                            onOpenProduct != null && !purchaseOffer.googleProductId.isNullOrBlank() ->
+                            "Ver tiendas y enlaces directos"
+                        !hasTrustedPrice && !canOpenRetailer && purchaseOffer.isGoogleShoppingProductLink ->
+                            "Revisar oferta sin verificar en Google Shopping"
                         !hasTrustedPrice && knownRetailer != null && directRetailerUrl == null -> "Buscar oferta sin verificar en ${knownRetailer.name}"
                         !hasTrustedPrice -> "Revisar oferta sin verificar · ${purchaseOffer.storeName}"
-                        purchaseOffer.isGoogleShoppingProductLink && knownRetailer != null && directRetailerUrl == null -> "Buscar en ${knownRetailer.name}"
-                        purchaseOffer.isGoogleShoppingProductLink && directRetailerUrl == null -> "Abrir en Google Shopping"
+                        purchaseOffer.isGoogleShoppingProductLink && directRetailerUrl == null ->
+                            "Abrir Google Shopping (sin enlace directo)"
                         else -> "Abrir oferta directa · ${purchaseOffer.storeName}"
                     }
                 )

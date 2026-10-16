@@ -86,6 +86,51 @@ class OnlineSearchScreenTest {
 
 
     @Test
+    fun catalogOnlyGoogleLinkOpensProductDetailsWhenMerchantUrlIsMissing() {
+        var openedProductIdentity: String? = null
+        val query = "Anker Prime 27K Power Bank"
+        val result = SerpApiShoppingResult(
+            title = query,
+            price = 89.99,
+            storeName = "Google Shopping",
+            sourceUrl = "https://www.google.com/shopping/product/123456789",
+            observedAt = 1_800_000_000_000L,
+            googleProductId = "123456789"
+        )
+
+        composeRule.setContent {
+            val state = TrackerUiState(
+                onlineSearchQuery = query,
+                onlineSearchResults = listOf(result),
+                onlineSearchProvider = OnlineSearchProvider.GOOGLE_SHOPPING
+            )
+            MaterialTheme {
+                OnlineSearchScreen(
+                    state = state,
+                    onQueryChange = {},
+                    onSearch = {},
+                    onAmazonSearch = {},
+                    onForceRefresh = {},
+                    onAmazonOnlyChange = {},
+                    onShowSecondHandChange = {},
+                    onToggleDiscarded = {},
+                    onOpenSettings = {},
+                    onOpenProduct = { openedProductIdentity = it },
+                    modifier = Modifier.testTag("online-search-list")
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Ver tiendas y enlaces directos").assertIsDisplayed()
+        composeRule.onNodeWithText("Ver tiendas y enlaces directos").performClick()
+        assertEquals(
+            "A catalog-only Google URL with a product ID should route to the in-app comparison flow",
+            result.let { groupOnlineSearchResults(listOf(it)).single().identityKey },
+            openedProductIdentity
+        )
+    }
+
+    @Test
     fun secondHandOffersJoinTheSamePriceOrderWhenEnabled() {
         // Model-first searches still contain an explicit diameter + PCD and must share one price order.
         val query = "RIAL Milano 14\" 5x100"

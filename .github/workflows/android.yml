@@ -21,6 +21,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Descargar el proyecto
@@ -59,6 +60,7 @@ jobs:
           fi
 
       - name: Probar el arranque en emulador Android
+        timeout-minutes: 15
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 36

@@ -641,5 +641,95 @@ class FreeArchiveHistoryPersistenceTest {
             database.close()
         }
     }
+ 
+    @Test
+    fun archiveHistoryCanUseTheSavedMerchantsOfficialUrlWhenTheProductLinkIsGoogleShopping() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        val title = "Cámara Fujifilm Instax Mini 41"
+        val merchantName = "FUJIFILM X | GFX eShop"
+        val googleUrl = "https://www.google.com/search?q=Fujifilm+Instax+Mini+41"
+        val originalUrl = "https://eshop.fujifilm-x.com/es/products/instax-mini-41-black.html"
+        val timestampFormat = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val rawTimestamp = timestampFormat.format(Date(System.currentTimeMillis() - 60L * 24L * 60L * 60L * 1000L))
+        val archivedAt = timestampFormat.parse(rawTimestamp)!!.time
+        val snapshotUrl = "https://web.archive.org/web/${rawTimestamp}id_/${originalUrl}"
+
+        try {
+            database.productDao().insert(
+                ProductEntity(
+                    id = "fujifilm-instax-mini-41-test",
+                    title = title,
+                    brand = "Fujifilm",
+                    category = "ELECTRONICS",
+                    currentPrice = 0.0,
+                    athMinPrice = 0.0,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = merchantName,
+                    athMaxPrice = 0.0,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "online_store_fujifilm_test",
+                    storeUrl = googleUrl,
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val quote = ArchivedPriceQuote(
+                observedAt = archivedAt,
+                price = 89.99,
+                currency = "EUR",
+                productTitle = title,
+                originalUrl = originalUrl,
+                snapshotUrl = snapshotUrl
+            )
+
+            assertEquals(
+                "Archive history from the saved merchant's official domain should be accepted even when the saved link is Google Shopping",
+                1,
+                repository.recordArchivedPriceHistory(title, originalUrl, merchantName, listOf(quote))
+            )
+
+            val differentSellerUrl = "https://www.amazon.es/dp/B0FUJIFILMTEST"
+            val differentSellerQuote = quote.copy(
+                originalUrl = differentSellerUrl,
+                snapshotUrl = "https://web.archive.org/web/${rawTimestamp}id_/${differentSellerUrl}"
+            )
+            assertEquals(
+                "The same unverified product must still reject archived prices from a different seller",
+                0,
+                repository.recordArchivedPriceHistory(title, differentSellerUrl, "Amazon.es", listOf(differentSellerQuote))
+            )
+
+            val product = withTimeout(10_000L) {
+                repository.allProductsStream.first { rows ->
+                    rows.any { row ->
+                        row.id == "fujifilm-instax-mini-41-test" &&
+                            row.priceHistory.any { it.eventLabel.equals("Internet Archive", ignoreCase = true) }
+                    }
+                }.first { it.id == "fujifilm-instax-mini-41-test" }
+            }
+            assertFalse("Archive history must never verify the current price", product.isPriceVerified)
+            assertEquals("Archive history must not fabricate a current price", 0.0, product.currentPrice, 0.001)
+            assertEquals(1, product.priceHistory.size)
+            assertEquals(89.99, product.priceHistory.single().price, 0.001)
+            assertEquals(archivedAt, product.priceHistory.single().timestamp)
+        } finally {
+            database.close()
+        }
+    }
 
 }

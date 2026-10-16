@@ -772,15 +772,20 @@ class ProductRepository(
                 }
             }
         }
-        // Without an actual verified live quote, accept archive history only for the product's
-        // own direct URL. This permits old prices before a live search without letting any same-
-        // title archive URL populate an unverified product from another seller or variant.
+        val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
+        // Before the first verified live quote, accept a different URL only when it is still
+        // the same saved merchant. This covers catalogue rows whose purchase link is a Google
+        // Shopping/search redirect, while refusing a same-title archive from another seller.
         val hasVerifiedLiveQuote = priceObservationDao.getLatestVerified(product.id) != null
-        if (!hasVerifiedLiveQuote && normalizedProductPageKey(product.storeUrl) != originalUrlKey) return 0
+        val isSameSavedMerchant = archiveUrlMatchesSavedMerchant(product, merchantName, originalUrl)
+        if (
+            !hasVerifiedLiveQuote &&
+            normalizedProductPageKey(product.storeUrl) != originalUrlKey &&
+            !isSameSavedMerchant
+        ) return 0
 
         val now = System.currentTimeMillis()
         val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)
-        val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
         if (!isEligibleHistoryTitle(expectedTitle) ||
             isPromotionalBulkListing(expectedTitle, "") ||
             !isEligibleSeller(merchantName, originalUrl)
@@ -1266,6 +1271,70 @@ class ProductRepository(
             .replace(Regex("[^a-z0-9]+"), " ")
             .trim()
             .replace(Regex("\\s+"), " ")
+
+    /**
+     * Confirms that an archived product URL belongs to the merchant already saved on this
+     * catalogue row. The store ID handles configured retailers; a narrow official-domain
+     * allowlist handles brand e-shops not included in Store.ALL_STORES (e.g. FUJIFILM X eShop).
+     */
+    private fun archiveUrlMatchesSavedMerchant(
+        product: ProductEntity,
+        archiveStoreName: String,
+        originalUrl: String
+    ): Boolean {
+        if (archiveStoreName.isBlank()) return false
+        val archiveUri = parseHttpUri(originalUrl) ?: return false
+        if (!archiveUri.scheme.equals("https", ignoreCase = true)) return false
+        val host = normalizeHost(archiveUri.host.orEmpty())
+        val savedName = normalizedProductTitle(product.athMinStore)
+        val archivedName = normalizedProductTitle(archiveStoreName)
+        if (savedName.isBlank() || savedName != archivedName) return false
+
+        val archiveStoreId = canonicalStoreId(archiveStoreName, originalUrl)
+        if (product.currentStoreId.isNotBlank() &&
+            product.currentStoreId != "unknown_store" &&
+            product.currentStoreId == archiveStoreId
+        ) return true
+
+        val knownStore = Store.ALL_STORES.firstOrNull {
+            normalizedProductTitle(it.name) == savedName
+        }
+        val configuredDomain = knownStore?.domain?.substringBefore('/')?.let(::normalizeHost)
+        if (!configuredDomain.isNullOrBlank() &&
+            (host == configuredDomain || host.endsWith(".$configuredDomain"))
+        ) return true
+
+        // These are the official merchant domains used by the free brand-store archive fallback.
+        // Match whole DNS suffixes only; lookalike domains such as fujifilm-x.example.com do not pass.
+        val officialDomains = when (savedName) {
+            "new balance" -> setOf("newbalance.es")
+            "apple", "apple store" -> setOf("apple.com")
+            "samsung" -> setOf("samsung.com")
+            "nike" -> setOf("nike.com")
+            "adidas" -> setOf("adidas.com")
+            "puma" -> setOf("puma.com")
+            "asics" -> setOf("asics.com")
+            "reebok" -> setOf("reebok.eu")
+            "converse" -> setOf("converse.com")
+            "vans" -> setOf("vans.com")
+            "anker" -> setOf("anker.com")
+            "ugreen" -> setOf("ugreen.com")
+            "baseus" -> setOf("baseus.com")
+            "sony" -> setOf("sony.es")
+            "xiaomi" -> setOf("mi.com")
+            "jbl" -> setOf("jbl.com")
+            "logitech" -> setOf("logitech.com")
+            "dyson" -> setOf("dyson.es")
+            "lenovo" -> setOf("lenovo.com")
+            "dell" -> setOf("dell.com")
+            "hp" -> setOf("hp.com")
+            "fujifilm x gfx eshop", "fujifilm" -> setOf("fujifilm-x.com")
+            else -> emptySet()
+        }
+        return officialDomains.any { domain ->
+            host == domain || host.endsWith(".$domain")
+        }
+    }
 
     private fun canonicalStoreId(storeName: String, sourceUrl: String): String {
         val host = parseHttpUri(sourceUrl)?.host?.let(::normalizeHost).orEmpty()

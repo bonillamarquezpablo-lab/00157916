@@ -648,24 +648,28 @@ class WaybackPriceHistoryClient(
     }
 
     private fun isMatchingProductTitle(expected: String, archived: String): Boolean {
-        val e = canonicalizeArchiveTitle(normalizeTitle(expected))
-        val a = canonicalizeArchiveTitle(normalizeTitle(archived))
+        val expectedNormalized = normalizeTitle(expected)
+        val archivedNormalized = normalizeTitle(archived)
+        if (expectedNormalized.isBlank() || archivedNormalized.isBlank()) return false
+
+        // Samsung's regional TV SKUs can begin with TQ or QE for the same model family.
+        // Compare the model core directly first; the diagonal remains part of the code (48 != 55).
+        val expectedSamsungModel = samsungTvModelCore(expectedNormalized)
+        val archivedSamsungModel = samsungTvModelCore(archivedNormalized)
+        if (expectedSamsungModel != null && archivedSamsungModel != null) {
+            return expectedSamsungModel == archivedSamsungModel
+        }
+
+        val e = canonicalizeArchiveTitle(expectedNormalized)
+        val a = canonicalizeArchiveTitle(archivedNormalized)
         if (e.isBlank() || a.isBlank()) return false
 
-        // Normalize product identity first so known equivalent model spellings (such as
-        // Sony WH-1000XM5 vs WH1000XM5) are not rejected solely because punctuation differs.
-        // Samsung TVs can use TQ/QE regional prefixes for the same core model across archived
-        // retailer pages. Resolution labels (4K/8K) are descriptive, not model identifiers.
         val sameIdentity = onlineProductIdentityKey(e) == onlineProductIdentityKey(a)
-
-        // Never let a high overlap of generic words override a different model, size, year,
-        // or capacity. For example, "Anker Prime 20K Power Bank" must not match a 27K listing.
-        // Merge common unit spellings first so "512 GB" and "512GB" compare consistently.
         val expectedVariants = requiredVariantTokens(e)
         val archivedVariants = requiredVariantTokens(a)
         if (!sameIdentity && !archivedVariants.containsAll(expectedVariants)) return false
-
         if (sameIdentity) return true
+
         val expectedTokens = meaningfulTokens(e)
         val archivedTokens = meaningfulTokens(a)
         if (expectedTokens.isEmpty() || archivedTokens.isEmpty()) return false
@@ -674,7 +678,15 @@ class WaybackPriceHistoryClient(
             overlap.size.toDouble() / expectedTokens.size >= 0.72
     }
 
-        private fun canonicalizeArchiveTitle(value: String): String =
+    private fun samsungTvModelCore(normalizedTitle: String): String? {
+        if (!Regex("""\bsamsung\b""").containsMatchIn(normalizedTitle)) return null
+        return Regex("""\b(?:tq|qe)?(\d{2}[a-z][a-z0-9]{5,})\b""")
+            .find(normalizedTitle)
+            ?.groupValues
+            ?.getOrNull(1)
+    }
+
+    private fun canonicalizeArchiveTitle(value: String): String =
         value.replace(Regex("""\btq(?=\d{2,}[a-z0-9])"""), "")
             .replace(Regex("""\bqe(?=\d{2,}[a-z0-9])"""), "")
             // Preserve diagonal value while equating "48 inch" and "48"; 48 still differs from 55.

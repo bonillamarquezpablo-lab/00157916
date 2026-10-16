@@ -340,6 +340,14 @@ fun OnlineSearchScreen(
                 }
             }
             if (state.showOnlineSearchDiscarded) {
+                item {
+                    Text(
+                        "Un descarte no significa necesariamente que el anuncio sea malo: Mínimo lo oculta si el modelo, la variante, el precio o el enlace no encaja con la búsqueda. Revisa el motivo antes de descartarlo por completo.",
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 items(
                     count = state.onlineSearchDiscardedOffers.size,
                     key = { index -> "discarded-${state.onlineSearchDiscardedOffers[index].provider}-${index}" }
@@ -360,9 +368,9 @@ fun OnlineSearchScreen(
                                 style = MaterialTheme.typography.bodyMedium
                             )
                             Text(
-                                rejected.reason,
+                                "Motivo: ${rejected.reason}",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
                                 rejected.provider,

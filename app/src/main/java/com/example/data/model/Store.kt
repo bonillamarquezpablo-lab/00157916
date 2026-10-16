@@ -1,9 +1,18 @@
 package com.example.data.model
 
 import androidx.compose.ui.graphics.Color
-import java.net.URLEncoder
 import java.net.URI
+import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.text.Normalizer
+import java.util.Locale
+
+private fun normalizeStoreIdentifier(value: String): String =
+    Normalizer.normalize(value.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+        .replace(Regex("\\p{Mn}+"), "")
+        .replace(Regex("[^a-z0-9]+"), " ")
+        .trim()
+        .replace(Regex("\\s+"), " ")
 
 /**
  * Retailer directory entry. Being listed does not mean that Mínimo can retrieve its
@@ -47,6 +56,8 @@ data class Store(
             "la_manzanita" -> "https://lamanzanita.es/"
             "nike_store" -> "https://www.nike.com/es/"
             "powerplanet" -> "https://www.powerplanetonline.com/"
+            "anker_store" -> "https://www.anker.com/eu-en"
+            "ugreen_store" -> "https://eu.ugreen.com/es-es"
             "apple_store" -> "https://www.apple.com/es/store"
             "samsung_store" -> "https://www.samsung.com/es/"
             "google_store" -> "https://store.google.com/es/"
@@ -61,8 +72,13 @@ data class Store(
             "backmarket" -> "https://www.backmarket.es/"
             "ldlc" -> "https://www.ldlc.com/es-es/"
             else -> {
+                // Never manufacture a clickable "official" URL for an unknown/intermediary seller.
                 val host = domain.substringBefore("/")
-                "https://${if (host.startsWith("www.")) host else "www.$host"}/"
+                if (!hasOfficialSite || host.isBlank() || host.endsWith(".invalid")) {
+                    ""
+                } else {
+                    "https://" + (if (host.startsWith("www.")) host else "www.$host") + "/"
+                }
             }
         }
 
@@ -72,7 +88,7 @@ data class Store(
             "amazon.es", "pccomponentes.com", "mediamarkt.es", "elcorteingles.es",
             "fnac.es", "decathlon.es", "sprinter.es", "lamanzanita.es", "nike.com",
             "ikea.com", "backmarket.es", "samsung.com", "store.google.com",
-            "lenovo.com", "hp.com", "coolmod.com"
+            "lenovo.com", "hp.com", "coolmod.com", "anker.com", "ugreen.com", "eu.ugreen.com"
         )
 
     /**
@@ -98,6 +114,10 @@ data class Store(
             "lenovo.com" -> "https://www.lenovo.com/es/es/search?text=$encoded"
             "hp.com" -> "https://www.hp.com/es-es/shop/Search.aspx?keyword=$encoded"
             "coolmod.com" -> "https://www.coolmod.com/?s=$encoded"
+            // If Shopping only provides a Google catalog link, use the manufacturer's own
+            // on-site search instead of sending the user back to a generic Google results page.
+            "anker.com" -> "https://www.anker.com/eu-en/search?q=$encoded"
+            "ugreen.com", "eu.ugreen.com" -> "https://eu.ugreen.com/es-es/search?q=$encoded"
             else -> officialUrl
         }
     }
@@ -128,6 +148,8 @@ data class Store(
         val LA_MANZANITA = Store("la_manzanita", "La Manzanita", "lamanzanita.es", Color(0xFF475569), category = "Telefonía & Móviles", physicalStores = true)
         val NIKE_STORE = Store("nike_store", "Nike", "nike.com/es", Color(0xFF111111), category = "Deportes & Calzado", physicalStores = true)
         val POWERPLANET = Store("powerplanet", "Powerplanetonline", "powerplanetonline.com", Color(0xFF0284C7), category = "Telefonía & Electrónica", physicalStores = false)
+        val ANKER_STORE = Store("anker_store", "Anker", "anker.com/eu-en", Color(0xFF00A887), category = "Cargadores & Baterías", physicalStores = false)
+        val UGREEN_STORE = Store("ugreen_store", "UGREEN", "eu.ugreen.com/es-es", Color(0xFF008C67), category = "Cargadores & Accesorios", physicalStores = false)
 
         val APPLE_STORE = Store("apple_store", "Apple Store España", "apple.com/es/store", Color(0xFF3A3A3C), category = "Móviles & Informática")
         val SAMSUNG_STORE = Store("samsung_store", "Samsung Shop España", "samsung.com/es", Color(0xFF1428A0), category = "Móviles & Electrónica")
@@ -147,7 +169,7 @@ data class Store(
             AMAZON_ES, PC_COMPONENTES, MEDIA_MARKT, EL_CORTE_INGLES, CARREFOUR, FNAC,
             ALCAMPO, LEROY_MERLIN, DECATHLON, WORTEN, MIRAVIA, GAME, EROSKI,
             CONFORAMA, BAUHAUS, IKEA, LIDL, ALIEXPRESS_PLAZA, SPRINTER, LA_MANZANITA, NIKE_STORE, POWERPLANET,
-            APPLE_STORE, SAMSUNG_STORE, GOOGLE_STORE, XIAOMI_STORE, LENOVO_STORE,
+            ANKER_STORE, UGREEN_STORE, APPLE_STORE, SAMSUNG_STORE, GOOGLE_STORE, XIAOMI_STORE, LENOVO_STORE,
             DELL_STORE, HP_STORE, NEOBYTE, COOLMOD, ALTERNATE, TRADEINN, BACKMARKET, LDLC
         )
 
@@ -156,30 +178,73 @@ data class Store(
          * unknown seller for Amazon, which could send a user to the wrong shop.
          */
         fun findKnownByName(name: String, sourceUrl: String = ""): Store? {
-            val normalizedName = name.trim().lowercase()
-            val sourceHost = runCatching { URI(sourceUrl).host?.lowercase()?.removePrefix("www.") }
-                .getOrNull()
-                .orEmpty()
+            val normalizedName = normalizeStoreIdentifier(name)
+            val sourceHost = runCatching {
+                URI(sourceUrl).host?.lowercase(Locale.ROOT)?.removePrefix("www.")
+            }.getOrNull().orEmpty()
             return ALL_STORES.firstOrNull { store ->
-                val storeName = store.name.lowercase()
-                val storeId = store.id.replace('_', ' ').lowercase()
-                val storeHost = store.domain.substringBefore("/").removePrefix("www.").lowercase()
-                (normalizedName.isNotBlank() &&
-                    (normalizedName == storeName ||
-                        normalizedName.contains(storeName) ||
-                        storeName.contains(normalizedName) ||
+                val storeName = normalizeStoreIdentifier(store.name)
+                val storeId = normalizeStoreIdentifier(store.id.replace('_', ' '))
+                val storeHost = store.domain.substringBefore("/").removePrefix("www.")
+                    .lowercase(Locale.ROOT)
+                val nameMatches = normalizedName.isNotBlank() && (
+                    normalizedName == storeName ||
                         normalizedName == storeId ||
-                        normalizedName.contains(storeId))) ||
-                    (sourceHost.isNotBlank() &&
-                        (sourceHost == storeHost || sourceHost.endsWith(".$storeHost")))
+                        (normalizedName.length >= 4 && (
+                            normalizedName.startsWith("$storeName ") ||
+                                normalizedName.endsWith(" $storeName") ||
+                                normalizedName.contains(" $storeName ") ||
+                                storeName.startsWith("$normalizedName ")
+                            ))
+                    )
+                val hostMatches = sourceHost.isNotBlank() &&
+                    (sourceHost == storeHost || sourceHost.endsWith(".$storeHost"))
+                nameMatches || hostMatches
             }
         }
 
-        fun findByName(name: String): Store = findKnownByName(name)
-            ?: ALL_STORES.firstOrNull {
-                it.id.equals(name, ignoreCase = true) ||
-                    it.domain.contains(name, ignoreCase = true)
+        /**
+         * Legacy lookup used for current-store IDs in older catalog rows. Unknown sellers must
+         * remain explicitly unknown instead of silently being displayed as Amazon.
+         */
+        fun findByName(name: String): Store {
+            findKnownByName(name)?.let { return it }
+
+            // Some repository rows keep a generated ID such as "retailer_anker_com".
+            // Recover the domain when possible so a newer known retailer still resolves correctly.
+            val candidateDomain = name.trim()
+                .removePrefix("retailer_")
+                .replace(Regex("_([a-z]{2,3})$"), ".$1")
+            if (candidateDomain.isNotBlank()) {
+                findKnownByName(
+                    name = candidateDomain,
+                    sourceUrl = "https://$candidateDomain"
+                )?.let { return it }
             }
-            ?: AMAZON_ES
+
+            val cleanName = name.trim()
+                .removePrefix("retailer_")
+                .replace('_', ' ')
+                .replace(Regex("\\s+"), " ")
+                .ifBlank { "Tienda desconocida" }
+            val safeId = cleanName.lowercase()
+                .replace(Regex("[^a-z0-9]+"), "_")
+                .trim('_')
+                .ifBlank { "unknown_store" }
+            val plausibleDomain = candidateDomain.takeIf {
+                Regex("""(?i)^(?:[a-z0-9-]+\.)+[a-z]{2,63}$""").matches(it)
+            }
+            return Store(
+                id = safeId,
+                name = cleanName,
+                domain = plausibleDomain ?: "unknown.invalid",
+                brandColor = Color(0xFF64748B),
+                isVerifiedSpanish = false,
+                category = "Tienda sin verificar",
+                physicalStores = false,
+                hasLivePriceIntegration = false,
+                hasOfficialSite = plausibleDomain != null
+            )
+        }
     }
 }

@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Store
+import androidx.compose.material.icons.filled.TrendingDown
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -74,6 +75,7 @@ fun MarketScreen(
     onSearchChange: (String) -> Unit,
     onCategorySelect: (ProductCategory) -> Unit,
     onToggleOnlyAth: () -> Unit,
+    onToggleInAppMinimums: () -> Unit,
     onStoreFilterSelect: (String?) -> Unit,
     onSortChange: (SortOption) -> Unit,
     onProductClick: (Product) -> Unit,
@@ -348,6 +350,30 @@ fun MarketScreen(
                     modifier = Modifier.testTag("filter_only_ath")
                 )
 
+                // Independent view of prices observed by Mínimo in its own product queries.
+                FilterChip(
+                    selected = uiState.showInAppMinimumsFilter,
+                    onClick = onToggleInAppMinimums,
+                    label = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.TrendingDown,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = if (uiState.showInAppMinimumsFilter) Color(0xFF047857)
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Mínimos observados por Mínimo", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Color(0xFF10B981).copy(alpha = 0.2f),
+                        selectedLabelColor = Color(0xFF047857)
+                    ),
+                    modifier = Modifier.testTag("filter_in_app_minimums")
+                )
+
                 // Store Filter Dropdown
                 Box {
                     FilterChip(
@@ -535,13 +561,17 @@ fun MarketScreen(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "Tu Mercado está vacío",
+                            text = if (uiState.showInAppMinimumsFilter) {
+                                "Aún no hay mínimos observados por Mínimo"
+                            } else "Tu Mercado está vacío",
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Pulsa la lupa, busca un producto real y Mínimo lo añadirá automáticamente a este escaparate.",
+                            text = if (uiState.showInAppMinimumsFilter) {
+                                "Cuando Mínimo guarde precios válidos en tus búsquedas, aparecerán aquí ordenados por el precio más bajo observado."
+                            } else "Pulsa la lupa, busca un producto real y Mínimo lo añadirá automáticamente a este escaparate.",
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

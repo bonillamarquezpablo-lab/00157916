@@ -718,9 +718,17 @@ class ProductRepository(
         val exactUrlMatches = matchingProducts.filter {
             normalizedProductPageKey(it.storeUrl) == originalUrlKey
         }
+        val verifiedOfferUrlMatches = matchingProducts.filter { candidate ->
+            priceObservationDao.getVerifiedLiveObservationsForProduct(candidate.id).any { observation ->
+                normalizedProductPageKey(observation.sourceUrl) == originalUrlKey ||
+                    normalizedProductPageKey(observation.sourcePageUrl) == originalUrlKey
+            }
+        }
         val product = when {
             exactUrlMatches.size == 1 -> exactUrlMatches.single()
             exactUrlMatches.size > 1 -> return 0
+            verifiedOfferUrlMatches.size == 1 -> verifiedOfferUrlMatches.single()
+            verifiedOfferUrlMatches.size > 1 -> return 0
             else -> {
                 // Query or fragment values can identify a purchasable variant. Do not fall back
                 // to a title/host match when the same page path has a conflicting variant key.
@@ -741,6 +749,12 @@ class ProductRepository(
                 }
             }
         }
+        // Without an actual verified live quote, accept archive history only for the product's
+        // own direct URL. This permits old prices before a live search without letting any same-
+        // title archive URL populate an unverified product from another seller or variant.
+        val hasVerifiedLiveQuote = priceObservationDao.getLatestVerified(product.id) != null
+        if (!hasVerifiedLiveQuote && normalizedProductPageKey(product.storeUrl) != originalUrlKey) return 0
+
         val now = System.currentTimeMillis()
         val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)
         val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }

@@ -3271,4 +3271,63 @@ class ExampleRobolectricTest {
         }
     }
 
+    @Test
+    fun standaloneAccessoryCannotBecomeTheMainProductComparisonPrice() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val title = "Sony WH-1000XM5 Wireless Headphones"
+            val product = ProductEntity(
+                id = "sony-wh1000xm5-accessory-isolation",
+                title = title,
+                brand = "Sony",
+                category = "TV_AUDIO",
+                currentPrice = 199.99,
+                athMinPrice = 199.99,
+                athMinDate = "",
+                athMinStore = "Tienda anterior",
+                athMaxPrice = 199.99,
+                avg90dPrice = 0.0,
+                officialPvp = 0.0,
+                currentStoreId = "shop",
+                storeUrl = "https://shop.example.test/sony-wh1000xm5",
+                ean = "",
+                isPriceVerified = false
+            )
+            database.productDao().insert(product)
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val accessory = SerpApiShoppingResult(
+                title = "Funda para Sony WH-1000XM5 Auriculares",
+                price = 5.99,
+                storeName = "Tienda",
+                sourceUrl = "https://shop.example.test/funda-sony-wh1000xm5",
+                observedAt = System.currentTimeMillis(),
+                condition = "new"
+            )
+
+            assertEquals(
+                "A standalone case must not be saved as the headphone's live comparison price",
+                0,
+                repository.recordProductComparisonOffers(
+                    productId = product.id,
+                    expectedTitle = title,
+                    offers = listOf(accessory)
+                )
+            )
+            assertEquals(0, database.priceObservationDao().getObservationCount(product.id))
+            assertFalse(database.productDao().getProductById(product.id)!!.isPriceVerified)
+        } finally {
+            database.close()
+        }
+    }
+
 }

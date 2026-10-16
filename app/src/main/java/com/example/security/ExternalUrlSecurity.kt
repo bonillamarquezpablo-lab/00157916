@@ -28,6 +28,12 @@ internal fun safeExternalHttpsUrl(value: String?): String? {
 
     val host = uri.host.lowercase(Locale.ROOT).trimEnd('.')
     if (host == "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return null
+    if (host == "localhost" || !host.contains('.')) return null
+
+    // Result links are retailer web pages, not raw IP endpoints. Blocking IP literals also
+    // prevents untrusted offers from opening router/admin panels or local network services.
+    if (host.contains(':') || IPV4_LITERAL.matches(host)) return null
+    if (host.endsWith(".test") || host.endsWith(".example") || host.endsWith(".invalid")) return null
 
     return runCatching { uri.toASCIIString() }.getOrNull()
 }
@@ -45,4 +51,5 @@ internal fun openExternalHttpsUrl(context: Context, value: String?): Boolean {
     }
 }
 
+private val IPV4_LITERAL = Regex("""\\d{1,3}(?:\\.\\d{1,3}){3}""")
 private const val MAX_EXTERNAL_URL_LENGTH = 4096

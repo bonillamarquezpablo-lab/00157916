@@ -3,6 +3,7 @@ package com.example
 import com.example.data.model.PricePoint
 import com.example.data.model.hasComparableInAppMinimum
 import com.example.data.model.summarizeInAppObservedPrices
+import com.example.data.model.sortByObservedMinimum
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -81,5 +82,33 @@ class InAppObservedPriceMinimumTest {
         assertTrue(hasComparableInAppMinimum(twoDays))
         assertEquals("The minimum is computed from the lowest quote of each distinct day", 10.00,
             summary.lowestPoint?.price ?: -1.0, 0.001)
+    }
+
+    @Test
+    fun minimumSortingHonorsAscendingAndDescendingAndKeepsMissingDataLast() {
+        data class Item(val name: String, val minimum: Double?)
+
+        val items = listOf(
+            Item("medio", 10.00),
+            Item("sin datos", null),
+            Item("mayor", 20.00),
+            Item("menor", 5.00)
+        )
+
+        val ascending = sortByObservedMinimum(
+            items = items,
+            ascending = true,
+            minimumPrice = { it.minimum },
+            tieBreaker = { it.name }
+        )
+        assertEquals(listOf("menor", "medio", "mayor", "sin datos"), ascending.map { it.name })
+
+        val descending = sortByObservedMinimum(
+            items = items,
+            ascending = false,
+            minimumPrice = { it.minimum },
+            tieBreaker = { it.name }
+        )
+        assertEquals(listOf("mayor", "medio", "menor", "sin datos"), descending.map { it.name })
     }
 }

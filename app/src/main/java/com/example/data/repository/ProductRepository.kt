@@ -257,7 +257,9 @@ class ProductRepository(
                 result.observedAt <= System.currentTimeMillis() + MAX_FUTURE_OBSERVATION_SKEW_MS &&
                 result.price.isFinite() &&
                 result.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
-                result.currency.equals("EUR", ignoreCase = true) &&
+                // SerpApiShoppingResult is produced by the Spain-specific Shopping client and
+                // does not carry an independent currency field; currency is validated in the
+                // quote path where the provider actually supplies it.
                 uri?.scheme.equals("https", ignoreCase = true) &&
                 !pointsToSearchInsteadOfMerchant &&
                 isEligibleHistoryTitle(result.title) &&

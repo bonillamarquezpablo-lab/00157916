@@ -1484,7 +1484,8 @@ class ExampleRobolectricTest {
                   {"name":"Amazon.es","title":"Sony WH-1000XM5","price":"309,00 €","extracted_price":309.00,"link":"https://www.google.com/shopping/product/987654321?gl=es"},
                   {"name":"Wallapop","title":"Sony WH-1000XM5","price":"120,00 €","extracted_price":120.00,"link":"https://es.wallapop.com/item/sony","condition":"used"},
                   {"name":"Tienda cuotas","title":"Sony WH-1000XM5 19,99 €/mes","price":"19,99 €","extracted_price":19.99,"link":"https://shop.example.test/monthly"},
-                  {"name":"Foreign Shop","title":"Sony WH-1000XM5","price":"$250.00","extracted_price":250.00,"link":"https://shop.example.test/usd"}
+                  {"name":"Foreign Shop","title":"Sony WH-1000XM5","price":"$250.00","extracted_price":250.00,"link":"https://shop.example.test/usd"},
+                  {"name":"Structured Foreign Shop","title":"Sony WH-1000XM5","price":"99.99","extracted_price":99.99,"currency":"USD","link":"https://shop.example.test/structured-usd"}
                 ]
               }
             }

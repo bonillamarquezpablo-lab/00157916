@@ -403,13 +403,18 @@ class WaybackPriceHistoryClient(
         // hundreds of unrelated URLs. Match a model code plus a distinct path term when both
         // exist. If a title only gives a model code, use that exact code; generic brand/category
         // words must not make a model URL impossible to discover.
-        val requiredLookaheads = when {
-            // Model-coded products are already distinctive. Don't require a secondary word like
-            // "wireless" that retailers may omit from the URL slug.
-            modelTokens.isNotEmpty() -> listOf("(?=.*${urlTokenPattern(modelTokens.first())})")
-            textTokens.size >= 2 -> textTokens.take(2).map { "(?=.*${urlTokenPattern(it)})" }
-            else -> return null
+        // A model code is the strongest URL hint, but some shops use a short generic
+        // slug and keep the SKU only in page metadata. Search by either the model code OR
+        // a pair of title terms, then let parseArchivedPrice validate the full product title
+        // and a single explicit EUR price before accepting any capture.
+        val modelAlternatives = modelTokens.take(2).map { token ->
+            "(?=.*${urlTokenPattern(token)})"
         }
+        val textAlternatives = if (textTokens.size >= 2) {
+            listOf("(?=.*${urlTokenPattern(textTokens[0])})(?=.*${urlTokenPattern(textTokens[1])})")
+        } else emptyList()
+        val requiredLookaheads = (modelAlternatives + textAlternatives).distinct()
+        if (requiredLookaheads.isEmpty()) return null
         val start = (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
         val from = formatUtc(start, "yyyyMMdd")
         val to = formatUtc(now, "yyyyMMdd")

@@ -339,4 +339,66 @@ class FreeArchiveHistoryPersistenceTest {
         }
     }
 
+    @Test
+    fun archivedSnapshotsNeverQualifyAsLatestLivePriceOrPriceAlertCandidates() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val dao = database.priceObservationDao()
+            val now = System.currentTimeMillis()
+            dao.insert(
+                PriceObservationEntity(
+                    productId = "archive-alert-isolation",
+                    storeId = "shop",
+                    price = 10.00,
+                    currency = "EUR",
+                    observedAt = now - 1_000L,
+                    sourceUrl = "https://web.archive.org/web/20251010120000id_/https://shop.example/product",
+                    sourceName = "Internet Archive",
+                    isVerified = true,
+                    productTitle = "Test product",
+                    storeName = "Shop",
+                    sourceType = "Internet Archive",
+                    linkType = "Archivo histórico",
+                    collectedAt = now,
+                    evidenceType = "archive",
+                    sourcePageUrl = "https://shop.example/product"
+                )
+            )
+            dao.insert(
+                PriceObservationEntity(
+                    productId = "archive-alert-isolation",
+                    storeId = "shop",
+                    price = 19.99,
+                    currency = "EUR",
+                    observedAt = now - 5_000L,
+                    sourceUrl = "https://shop.example/product",
+                    sourceName = "Google Shopping",
+                    isVerified = true,
+                    productTitle = "Test product",
+                    storeName = "Shop",
+                    sourceType = "Google Shopping",
+                    linkType = "directo",
+                    collectedAt = now,
+                    evidenceType = "live"
+                )
+            )
+
+            assertEquals(
+                "The newest archived timestamp must not replace the latest live quote",
+                "live",
+                dao.getLatestVerified("archive-alert-isolation")?.evidenceType
+            )
+            val alertCandidates = dao.getVerifiedSince("archive-alert-isolation", now - 60_000L)
+            assertEquals(1, alertCandidates.size)
+            assertTrue(alertCandidates.all { it.evidenceType == "live" })
+            assertEquals(19.99, alertCandidates.single().price, 0.001)
+        } finally {
+            database.close()
+        }
+    }
+
 }

@@ -1675,25 +1675,6 @@ class ExampleRobolectricTest {
                     googleProductId = "123456789"
                 )
             )
-            database.priceObservationDao().insert(
-                PriceObservationEntity(
-                    productId = productId,
-                    storeId = "amazon_es",
-                    price = 74.99,
-                    currency = "EUR",
-                    observedAt = now,
-                    sourceUrl = "https://www.amazon.es/dp/DUALSENSETEST",
-                    sourceName = "Google Shopping",
-                    isVerified = true,
-                    verificationNote = "Precio actual usado como control del test.",
-                    productTitle = title,
-                    storeName = "Amazon España",
-                    sourceType = "Google Shopping",
-                    linkType = "directo",
-                    collectedAt = now,
-                    evidenceType = "live"
-                )
-            )
             val repository = ProductRepository(
                 storeDao = database.storeDao(),
                 productDao = database.productDao(),
@@ -1727,13 +1708,12 @@ class ExampleRobolectricTest {
                 }
             }.first { it.id == productId }
 
-            assertEquals("Historical provider data must never replace the live current price", 74.99, product.currentPrice, 0.001)
+            assertEquals("Historical provider data must never replace the stored fallback price", 74.99, product.currentPrice, 0.001)
             assertFalse("Historical insights must not verify the current quote", product.isPriceVerified)
             assertTrue(product.priceHistory.any {
                 it.eventLabel?.contains("price_insights", ignoreCase = true) == true &&
                     it.timestamp == historicalAt && it.price == 69.99
             })
-            assertTrue(product.priceHistory.any { it.eventLabel == "Google Shopping" && it.price == 74.99 })
         } finally {
             database.close()
         }

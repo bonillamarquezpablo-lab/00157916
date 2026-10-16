@@ -796,7 +796,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     .apply()
             }
         )
-        val validProductCount = if (batch.quotes.isNotEmpty()) repository.recordSerpApiQuotes(batch.quotes) else 0
+        val validProductCount = if (batch.quotes.isNotEmpty()) {
+            withContext(Dispatchers.IO) { repository.recordSerpApiQuotes(batch.quotes) }
+        } else 0
         val quoteProductIds = batch.quotes.map { it.productId }.toSet()
         val unmatched = targets.count { it.id in respondedIds && it.id !in quoteProductIds }
         val failed = targets.count { it.id !in respondedIds }
@@ -1380,12 +1382,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     quotes.map { it.observedAt }.let(archiveDates::addAll)
 
                     for ((archiveUrl, urlQuotes) in quotes.groupBy { it.originalUrl }) {
-                        val newlySaved = repository.recordArchivedPriceHistory(
-                            expectedTitle = candidate.title,
-                            originalUrl = archiveUrl,
-                            storeName = candidate.storeName,
-                            quotes = urlQuotes
-                        )
+                        val newlySaved = withContext(Dispatchers.IO) {
+                            repository.recordArchivedPriceHistory(
+                                expectedTitle = candidate.title,
+                                originalUrl = archiveUrl,
+                                storeName = candidate.storeName,
+                                quotes = urlQuotes
+                            )
+                        }
                         savedCount += newlySaved
                     }
 

@@ -1325,7 +1325,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         if (candidate.directUrl != null) {
                             results += waybackPriceHistoryClient.fetchHistory(
                                 originalUrl = candidate.directUrl,
-                                expectedTitle = candidate.title
+                                expectedTitle = candidate.title,
+                                forceRefresh = targetProductId != null
                             )
                         }
                         // If the exact URL has no usable old prices (or only a Google Shopping link was
@@ -1333,7 +1334,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         if (candidate.merchantDomain != null && results.none { it.quotes.isNotEmpty() }) {
                             results += waybackPriceHistoryClient.fetchHistoryByMerchantDomain(
                                 domain = candidate.merchantDomain,
-                                expectedTitle = candidate.title
+                                expectedTitle = candidate.title,
+                                forceRefresh = targetProductId != null
                             )
                         }
                         results

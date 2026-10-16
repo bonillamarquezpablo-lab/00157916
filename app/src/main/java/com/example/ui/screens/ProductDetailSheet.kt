@@ -338,7 +338,7 @@ fun ProductDetailSheet(
 
                         // Do not infer a historical low from a single query.
                         Column(horizontalAlignment = Alignment.End) {
-                            if (product.hasSufficientHistory) {
+                            if (product.priceHistory.isNotEmpty()) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Box(
                                         modifier = Modifier
@@ -348,7 +348,12 @@ fun ProductDetailSheet(
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = "MÍNIMO OBSERVADO",
+                                        text = when {
+                                            product.hasSufficientHistory -> "MÍNIMO OBSERVADO"
+                                            product.hasObservedHistoricalRange -> "MÍNIMO EN DATOS DISPONIBLES"
+                                            product.priceHistory.size > 1 -> "MENOR PRECIO REGISTRADO"
+                                            else -> "PRIMER PRECIO HISTÓRICO"
+                                        },
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color(0xFF059669)
@@ -358,7 +363,7 @@ fun ProductDetailSheet(
                                     text = "${String.format("%.2f", product.athMinPrice)} €",
                                     fontWeight = FontWeight.Black,
                                     fontSize = 20.sp,
-                                    color = Color(0xFF059669)
+                                    color = if (product.hasSufficientHistory) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
                                     text = "${product.athMinDate} en ${product.athMinStore}",
@@ -387,15 +392,15 @@ fun ProductDetailSheet(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    if (product.hasSufficientHistory || product.officialPvp > 0.0) {
+                    if (product.hasRecentHistoricalAverage || product.officialPvp > 0.0) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            if (product.hasSufficientHistory) {
+                            if (product.hasRecentHistoricalAverage) {
                                 Column {
                                     Text(
-                                        text = "Media de 90 días",
+                                        text = "Media observada · 90 días",
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )

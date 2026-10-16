@@ -66,13 +66,14 @@ class WaybackPriceHistoryClient(
         originalUrl: String,
         expectedTitle: String,
         now: Long = System.currentTimeMillis(),
-        lookbackDays: Int = DEFAULT_LOOKBACK_DAYS
+        lookbackDays: Int = DEFAULT_LOOKBACK_DAYS,
+        forceRefresh: Boolean = false
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
         if (!isEligibleDirectUrl(originalUrl) || expectedTitle.isBlank()) {
             return@withContext WaybackBackfillResult()
         }
         val attempt = attemptKey("archive-v2|url|$originalUrl|$expectedTitle")
-        if (wasAttemptedRecently(attempt, now)) {
+        if (!forceRefresh && wasAttemptedRecently(attempt, now)) {
             return@withContext WaybackBackfillResult(skippedRecently = true)
         }
         val cdxUrl = buildCdxUrl(originalUrl, now, lookbackDays)
@@ -89,7 +90,8 @@ class WaybackPriceHistoryClient(
         domain: String,
         expectedTitle: String,
         now: Long = System.currentTimeMillis(),
-        lookbackDays: Int = DEFAULT_LOOKBACK_DAYS
+        lookbackDays: Int = DEFAULT_LOOKBACK_DAYS,
+        forceRefresh: Boolean = false
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
         val normalizedDomain = normalizeMerchantDomain(domain)
             ?: return@withContext WaybackBackfillResult()
@@ -97,7 +99,7 @@ class WaybackPriceHistoryClient(
         val cdxUrl = buildDomainCdxUrl(normalizedDomain, expectedTitle, now, lookbackDays)
             ?: return@withContext WaybackBackfillResult()
         val attempt = attemptKey("archive-v2|domain|$normalizedDomain|$expectedTitle")
-        if (wasAttemptedRecently(attempt, now)) {
+        if (!forceRefresh && wasAttemptedRecently(attempt, now)) {
             return@withContext WaybackBackfillResult(skippedRecently = true)
         }
         queryCdxAndFetchPrices(cdxUrl, expectedTitle, attempt, now)

@@ -40,21 +40,43 @@ data class Product(
     /** Provider which supplied the latest saved observation, e.g. Google Shopping or Amazon.es. */
     val priceSource: String = ""
 ) {
+    /** Three or more dated observations span at least 90 days, regardless of today's quote. */
+    val hasObservedHistoricalRange: Boolean
+        get() {
+            val now = System.currentTimeMillis()
+            val timestamps = priceHistory.map { it.timestamp }
+                .filter { it in 1L..now }
+                .distinct()
+                .sorted()
+            return timestamps.size >= MIN_HISTORY_POINTS &&
+                timestamps.last() - timestamps.first() >= NINETY_DAYS_MS
+        }
+
+    /** Enough dated observations are available to calculate an observed 90-day average. */
+    val hasRecentHistoricalAverage: Boolean
+        get() {
+            val now = System.currentTimeMillis()
+            val since = now - NINETY_DAYS_MS
+            return priceHistory.map { it.timestamp }
+                .filter { it in since..now }
+                .distinct()
+                .size >= MIN_HISTORY_POINTS
+        }
+
     /**
-     * Historical conclusions require at least three distinct snapshots spanning 90 days,
-     * including three observations within the latest 90-day window and a recent last query.
-     * One live price can be shown immediately, but is not enough to establish a historical low.
+     * A deal verdict needs current-price verification plus a long-enough, recent series.
+     * Archive history by itself must never imply a current deal or a current minimum.
      */
     val hasSufficientHistory: Boolean
         get() {
-            if (!isPriceVerified) return false
-            val timestamps = priceHistory.map { it.timestamp }.distinct().sorted()
-            if (timestamps.size < MIN_HISTORY_POINTS) return false
+            if (!isPriceVerified || !hasObservedHistoricalRange) return false
+            val timestamps = priceHistory.map { it.timestamp }
+                .filter { it > 0L }
+                .distinct()
+                .sorted()
             val now = System.currentTimeMillis()
-            val ninetyDays = 90L * 24L * 60L * 60L * 1000L
-            val recentPoints = timestamps.count { it >= now - ninetyDays && it <= now }
-            return timestamps.last() - timestamps.first() >= ninetyDays &&
-                recentPoints >= MIN_HISTORY_POINTS &&
+            val recentPoints = timestamps.count { it >= now - NINETY_DAYS_MS && it <= now }
+            return recentPoints >= MIN_HISTORY_POINTS &&
                 now - timestamps.last() <= MAX_PRICE_AGE_FOR_HISTORICAL_CLAIMS
         }
 
@@ -142,6 +164,7 @@ data class Product(
         const val MIN_HISTORY_POINTS = 3
         const val HOUR_MS = 60L * 60L * 1000L
         const val DAY_MS = 24L * HOUR_MS
+        const val NINETY_DAYS_MS = 90L * DAY_MS
         const val PRICE_FRESHNESS_WINDOW_MS = DAY_MS
         const val FUTURE_TIMESTAMP_TOLERANCE_MS = 5L * 60L * 1000L
         const val MAX_PRICE_AGE_FOR_HISTORICAL_CLAIMS = 7L * DAY_MS

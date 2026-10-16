@@ -143,6 +143,21 @@ internal fun buildOnlineSearchDisplayGroups(
     }
 }
 
+/**
+ * If Google supplies only a catalog page, open Mínimo's quota-confirmed comparison flow when
+ * the seller is unknown. Never present a generic Google catalog URL as a direct store link.
+ */
+internal fun shouldOpenProductDetailsForCatalogOffer(
+    offer: SerpApiShoppingResult,
+    canOpenProductDetail: Boolean
+): Boolean {
+    if (!canOpenProductDetail || !offer.isGoogleShoppingProductLink) return false
+    if (extractDirectRetailerUrl(offer.sourceUrl) != null || offer.googleProductId.isNullOrBlank()) {
+        return false
+    }
+    return Store.findKnownByName(offer.storeName, offer.sourceUrl) == null
+}
+
 @Composable
 fun OnlineSearchScreen(
     state: TrackerUiState,
@@ -419,13 +434,6 @@ fun OnlineSearchScreen(
                                 preferAmazonApp = purchaseOffer.isAmazonOffer &&
                                     directDestination.contains("amazon.es", ignoreCase = true)
                             )
-                            purchaseOffer.isGoogleShoppingProductLink &&
-                                canOpenProductDetail && !purchaseOffer.googleProductId.isNullOrBlank() -> {
-                                // A catalog ID can retrieve retailer links through the quota-confirmed
-                                // comparison flow. Don't route back to Google or a generic store search
-                                // when that path is available.
-                                onOpenProduct(group.identityKey)
-                            }
                             knownStore != null -> {
                                 val storeDestination = knownStore.searchUrlFor(purchaseOffer.title)
                                 openStoreUrl(
@@ -435,6 +443,8 @@ fun OnlineSearchScreen(
                                         storeDestination.contains("amazon.es", ignoreCase = true)
                                 )
                             }
+                            shouldOpenProductDetailsForCatalogOffer(purchaseOffer, canOpenProductDetail) ->
+                                onOpenProduct(group.identityKey)
                             else -> openStoreUrl(
                                 context,
                                 purchaseOffer.sourceUrl,
@@ -470,6 +480,10 @@ private fun ShoppingResultCard(
         sourceUrl = purchaseOffer.sourceUrl
     )
     val canOpenRetailer = directRetailerUrl != null || knownRetailer != null
+    val routeToProductDetails = shouldOpenProductDetailsForCatalogOffer(
+        purchaseOffer,
+        canOpenProductDetail = onOpenProduct != null
+    )
     val fitmentUnverified = group.offers.all { it.isFitmentUnverified }
     val categoryUnverified = group.offers.all { it.isCategoryUnverified }
     val wheelSetCount = group.wheelSetCount
@@ -611,9 +625,7 @@ private fun ShoppingResultCard(
                         (categoryUnverified || fitmentUnverified) && !canOpenRetailer && purchaseOffer.isGoogleShoppingProductLink -> "Revisar variante en Google Shopping"
                         (categoryUnverified || fitmentUnverified) && knownRetailer != null && directRetailerUrl == null -> "Buscar variante en ${knownRetailer.name}"
                         (categoryUnverified || fitmentUnverified) -> "Revisar variante · " + purchaseOffer.storeName
-                        purchaseOffer.isGoogleShoppingProductLink && directRetailerUrl == null &&
-                            onOpenProduct != null && !purchaseOffer.googleProductId.isNullOrBlank() ->
-                            "Ver tiendas y enlaces directos"
+                        routeToProductDetails -> "Ver tiendas y enlaces directos"
                         purchaseOffer.isGoogleShoppingProductLink && knownRetailer != null && directRetailerUrl == null -> "Buscar en ${knownRetailer.name}"
                         !hasTrustedPrice && !canOpenRetailer && purchaseOffer.isGoogleShoppingProductLink ->
                             "Revisar oferta sin verificar en Google Shopping"

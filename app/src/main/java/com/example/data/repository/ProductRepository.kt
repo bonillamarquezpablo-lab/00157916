@@ -773,17 +773,9 @@ class ProductRepository(
             }
         }
         val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
-        // Before the first verified live quote, accept a different URL only when it is still
-        // the same saved merchant. This covers catalogue rows whose purchase link is a Google
-        // Shopping/search redirect, while refusing a same-title archive from another seller.
-        val hasVerifiedLiveQuote = priceObservationDao.getLatestVerified(product.id) != null
-        val isSameSavedMerchant = archiveUrlMatchesSavedMerchant(product, merchantName, originalUrl)
-        if (
-            !hasVerifiedLiveQuote &&
-            normalizedProductPageKey(product.storeUrl) != originalUrlKey &&
-            !isSameSavedMerchant
-        ) return 0
-
+        // Product identity and variant ambiguity were checked above. Let one product accumulate
+        // separately keyed historical observations from multiple eligible retailers; each quote
+        // still has to match its own archived URL, merchant, title, EUR price and capture time.
         val now = System.currentTimeMillis()
         val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)
         if (!isEligibleHistoryTitle(expectedTitle) ||
@@ -1565,7 +1557,6 @@ class ProductRepository(
         val maxObservation = snapshotHistory.maxByOrNull { it.price }
         // Require both the explicit product flag and a provider-backed observation.
         val priceIsVerified = isPriceVerified && latestObservation != null
-        val effectiveHistory = if (priceIsVerified) snapshotHistory else emptyList()
         val effectiveStore = if (priceIsVerified) {
             observationStore(latestObservation!!, stores)
         } else {
@@ -1574,19 +1565,24 @@ class ProductRepository(
         val now = System.currentTimeMillis()
         val ninetyDaysMs = 90L * 24L * 60L * 60L * 1000L
         val ninetyDaysAgo = now - ninetyDaysMs
-        val lastNinetyDays = effectiveHistory.filter { it.observedAt >= ninetyDaysAgo }
+        // Historical observations remain useful without today's quote, but never replace it.
+        val lastNinetyDays = snapshotHistory.filter {
+            it.observedAt >= ninetyDaysAgo && it.observedAt <= now
+        }
         val uniqueTimestamps = snapshotHistory.map { localDayBounds(it.observedAt).first }.distinct().sorted()
+        val hasObservedHistoricalRange = uniqueTimestamps.size >= 3 &&
+            uniqueTimestamps.last() - uniqueTimestamps.first() >= ninetyDaysMs
+        val hasRecentHistoricalAverage = lastNinetyDays
+            .map { localDayBounds(it.observedAt).first }.distinct().size >= 3
         val hasSufficientHistory = priceIsVerified &&
-            uniqueTimestamps.size >= 3 &&
-            uniqueTimestamps.last() - uniqueTimestamps.first() >= ninetyDaysMs &&
-            lastNinetyDays.map { it.observedAt }.distinct().size >= 3 &&
+            hasObservedHistoricalRange &&
+            hasRecentHistoricalAverage &&
             now - (liveHistory.maxOfOrNull { it.observedAt } ?: 0L) <= 7L * 24L * 60L * 60L * 1000L
         val current = if (priceIsVerified) latestObservation!!.price else currentPrice
-        // These bounds describe the actual saved daily series; the 90-day average remains
-        // unavailable until enough dates have accumulated.
+        // Historical bounds come only from saved observations; missing dates are never interpolated.
         val lowest = minObservation?.price ?: current
         val highest = maxObservation?.price ?: current
-        val average = if (hasSufficientHistory) lastNinetyDays.map { it.price }.average() else 0.0
+        val average = if (hasRecentHistoricalAverage) lastNinetyDays.map { it.price }.average() else 0.0
         val latestOffers = if (priceIsVerified) {
             latestBatch.distinctBy { "${it.storeId}|${it.sourceUrl}" }.map { observation ->
                 StoreOffer(
@@ -1622,8 +1618,8 @@ class ProductRepository(
             category = ProductCategory.values().firstOrNull { it.name == category } ?: ProductCategory.ALL,
             currentPrice = current,
             athMinPrice = lowest,
-            athMinDate = if (hasSufficientHistory) dateFormatter.format(Date(minObservation!!.observedAt)) else "Historial en construcción",
-            athMinStore = if (hasSufficientHistory) observationStore(minObservation!!, stores).name else "",
+            athMinDate = minObservation?.let { dateFormatter.format(Date(it.observedAt)) } ?: "Historial en construcción",
+            athMinStore = minObservation?.let { observationStore(it, stores).name }.orEmpty(),
             athMaxPrice = highest,
             avg90dPrice = average,
             officialPvp = if (priceIsVerified) 0.0 else officialPvp,

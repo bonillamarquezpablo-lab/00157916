@@ -131,8 +131,8 @@ class FreeArchiveHistoryPersistenceTest {
                 snapshotUrl = "https://web.archive.org/web/${rawTimestamp}id_/${alternateSellerUrl}"
             )
             assertEquals(
-                "An unverified product may not accept history from another seller URL",
-                0,
+                "The same validated product may accumulate historical offers from another eligible seller",
+                1,
                 repository.recordArchivedPriceHistory(
                     title,
                     alternateSellerUrl,
@@ -155,6 +155,9 @@ class FreeArchiveHistoryPersistenceTest {
             assertEquals("Internet Archive", product.priceHistory.single().eventLabel)
             assertEquals(89.99, product.priceHistory.single().price, 0.001)
             assertEquals(archivedAt, product.priceHistory.single().timestamp)
+            assertEquals("The archived observation must set the lowest recorded price", 89.99, product.athMinPrice, 0.001)
+            assertTrue("The date of a real archived minimum must not remain hidden when current price is unverified", product.athMinDate != "Historial en construcción")
+            assertTrue("The recorded historical merchant must remain visible", product.athMinStore.isNotBlank())
             assertTrue("Historical points are available even without a verified live quote", product.priceHistory.isNotEmpty())
         } finally {
             database.close()

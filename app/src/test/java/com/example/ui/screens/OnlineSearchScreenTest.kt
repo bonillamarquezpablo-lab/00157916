@@ -16,11 +16,11 @@ import androidx.compose.ui.platform.testTag
 import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiShoppingResult
-import com.example.data.remote.groupOnlineShoppingResults
 import com.example.ui.viewmodel.OnlineSearchProvider
 import com.example.ui.viewmodel.TrackerUiState
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -87,11 +87,9 @@ class OnlineSearchScreenTest {
 
 
     @Test
-    fun catalogOnlyGoogleLinkOpensProductDetailsWhenMerchantUrlIsMissing() {
-        var openedProductIdentity: String? = null
-        val query = "Anker Prime 27K Power Bank"
-        val result = SerpApiShoppingResult(
-            title = query,
+    fun catalogOnlyGoogleLinkUsesInAppComparisonWhenNoMerchantUrlIsKnown() {
+        val offer = SerpApiShoppingResult(
+            title = "Anker Prime 27K Power Bank",
             price = 89.99,
             storeName = "Google Shopping",
             sourceUrl = "https://www.google.com/shopping/product/123456789",
@@ -99,37 +97,15 @@ class OnlineSearchScreenTest {
             googleProductId = "123456789"
         )
 
-        composeRule.setContent {
-            val state = TrackerUiState(
-                onlineSearchQuery = query,
-                onlineSearchResults = listOf(result),
-                onlineSearchProvider = OnlineSearchProvider.GOOGLE_SHOPPING
+        assertTrue(shouldOpenProductDetailsForCatalogOffer(offer, canOpenProductDetail = true))
+        assertFalse(shouldOpenProductDetailsForCatalogOffer(offer, canOpenProductDetail = false))
+        assertFalse(shouldOpenProductDetailsForCatalogOffer(offer.copy(googleProductId = null), true))
+        assertFalse(shouldOpenProductDetailsForCatalogOffer(offer.copy(storeName = "Anker"), true))
+        assertFalse(
+            shouldOpenProductDetailsForCatalogOffer(
+                offer.copy(sourceUrl = "https://www.anker.com/products/anker-prime-27k"),
+                true
             )
-            MaterialTheme {
-                OnlineSearchScreen(
-                    state = state,
-                    onQueryChange = {},
-                    onSearch = {},
-                    onAmazonSearch = {},
-                    onForceRefresh = {},
-                    onAmazonOnlyChange = {},
-                    onShowSecondHandChange = {},
-                    onToggleDiscarded = {},
-                    onOpenSettings = {},
-                    onOpenProduct = { openedProductIdentity = it },
-                    modifier = Modifier.testTag("online-search-list")
-                )
-            }
-        }
-
-        val searchList = composeRule.onNodeWithTag("online-search-list")
-        searchList.performScrollToNode(hasText("Ver tiendas y enlaces directos"))
-        composeRule.onNodeWithText("Ver tiendas y enlaces directos").assertIsDisplayed()
-        composeRule.onNodeWithText("Ver tiendas y enlaces directos").performClick()
-        assertEquals(
-            "A catalog-only Google URL with a product ID should route to the in-app comparison flow",
-            result.let { groupOnlineShoppingResults(listOf(it)).single().identityKey },
-            openedProductIdentity
         )
     }
 

@@ -1,11 +1,9 @@
 package com.example
 
 import android.app.Application
-import android.content.ContentValues
+import android.content.Context
 import android.os.Build
-import android.os.Environment
 import android.os.Process
-import android.provider.MediaStore
 import android.util.Log
 import java.io.File
 import java.io.IOException
@@ -16,11 +14,36 @@ import java.util.Date
 import java.util.Locale
 import kotlin.system.exitProcess
 
+private const val CRASH_REPORTS_DIRECTORY = "crash-reports"
+private const val MAX_STORED_CRASH_REPORTS = 5
+private const val MAX_STACK_CHARS = 180_000
+private const val MAX_REPORT_CHARS = 200_000
+
+/** Returns the newest private crash report, if one exists. */
+internal fun latestCrashReportFile(context: Context): File? =
+    File(context.filesDir, CRASH_REPORTS_DIRECTORY)
+        .listFiles()
+        ?.asSequence()
+        ?.filter { it.isFile && it.name.startsWith("Minimo-crash-") && it.extension == "txt" }
+        ?.maxByOrNull { it.lastModified() }
+
+/** Keep diagnostic storage bounded; cleanup failures must never mask the original crash. */
+private fun trimOldCrashReports(directory: File, newest: File) {
+    runCatching {
+        directory.listFiles()
+            ?.filter { it.isFile && it.name.startsWith("Minimo-crash-") && it.extension == "txt" }
+            ?.filterNot { it == newest }
+            ?.sortedByDescending { it.lastModified() }
+            ?.drop(MAX_STORED_CRASH_REPORTS - 1)
+            ?.forEach { old -> runCatching { old.delete() } }
+    }
+}
+
 /**
  * Captures fatal runtime exceptions before Android's default handler terminates the process.
  *
- * On Android 10+, the report is written to the public Downloads collection without requesting
- * broad storage permissions. If that fails, a private app-specific fallback is used.
+ * Reports are kept in private app storage and are never exported automatically. The user can
+ * explicitly share the latest report from Settings when diagnostics are needed.
  */
 class MinimoApplication : Application() {
     override fun onCreate() {
@@ -69,41 +92,21 @@ class MinimoApplication : Application() {
                 appendLine("Dispositivo: ${Build.MANUFACTURER} ${Build.MODEL}")
                 appendLine("Hilo: ${thread.name}")
                 appendLine()
-                append(stack)
-            }
+                // Bound the stack trace to prevent unbounded diagnostic storage.
+                append(stack.take(MAX_STACK_CHARS))
+            }.take(MAX_REPORT_CHARS)
+
             val stamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())
             val fileName = "Minimo-crash-$stamp.txt"
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                var insertedUri: android.net.Uri? = null
-                try {
-                    val values = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                        put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                    }
-                    val outputUri = app.contentResolver.insert(
-                        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                        values
-                    ) ?: throw IOException("Android no creó el archivo en Descargas.")
-                    insertedUri = outputUri
-                    val output = app.contentResolver.openOutputStream(outputUri, "w")
-                        ?: throw IOException("Android no abrió el archivo de diagnóstico.")
-                    output.use { it.write(report.toByteArray(Charsets.UTF_8)) }
-                    return "Descargas/$fileName"
-                } catch (failure: Exception) {
-                    insertedUri?.let { orphan ->
-                        runCatching { app.contentResolver.delete(orphan, null, null) }
-                    }
-                    Log.e(TAG, "Writing to public Downloads failed; using app-specific storage.", failure)
-                }
+            val directory = File(app.filesDir, CRASH_REPORTS_DIRECTORY)
+            if (!directory.isDirectory && !directory.mkdirs()) {
+                throw IOException("No se pudo crear el almacenamiento privado de diagnósticos.")
             }
 
-            val directory = app.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
-                ?: app.filesDir
-            val fallback = File(directory, fileName)
-            fallback.writeText(report, Charsets.UTF_8)
-            return fallback.absolutePath
+            val reportFile = File(directory, fileName)
+            reportFile.writeText(report, Charsets.UTF_8)
+            trimOldCrashReports(directory, reportFile)
+            return reportFile.absolutePath
         }
 
         private fun terminateProcess(): Nothing {

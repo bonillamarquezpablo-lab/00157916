@@ -394,7 +394,7 @@ fun OnlineSearchScreen(
             }
             items(visibleGroups, key = { it.stableKey }) { displayGroup ->
                 val group = displayGroup.group
-                val canOpenProductDetail = group.offers.none {
+                val canOpenProductDetail = !group.offers.all {
                     it.isFitmentUnverified || it.isCategoryUnverified
                 }
                 ShoppingResultCard(

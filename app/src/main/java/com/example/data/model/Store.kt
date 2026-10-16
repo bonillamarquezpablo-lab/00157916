@@ -126,6 +126,26 @@ data class Store(
         get() = domain.substringBefore("/").removePrefix("www.").lowercase()
 
     companion object {
+        /**
+         * Safe fallback when Google names a seller with its domain but provides no product URL.
+         * It opens only that seller's HTTPS homepage, never a made-up product path or a Google page.
+         */
+        fun homepageFromSellerLabel(value: String): String? {
+            val host = value.trim().lowercase(Locale.ROOT)
+                .removePrefix("https://")
+                .removePrefix("http://")
+                .removePrefix("www.")
+                .substringBefore('/')
+            if (!Regex("""^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9-]+)*\.[a-z]{2,63}$""")
+                    .matches(host)
+            ) return null
+            if (host == "google.com" || host == "google.es" ||
+                host.endsWith(".google.com") || host.endsWith(".google.es") ||
+                host == "example.com" || host.endsWith(".example")
+            ) return null
+            return "https://$host/"
+        }
+
         val AMAZON_ES = Store("amazon_es", "Amazon España", "amazon.es", Color(0xFFFF9900), category = "Marketplace", physicalStores = false)
         val PC_COMPONENTES = Store("pccomponentes", "PcComponentes", "pccomponentes.com", Color(0xFFFF6000), category = "Informática & Gaming")
         val MEDIA_MARKT = Store("mediamarkt", "MediaMarkt España", "mediamarkt.es", Color(0xFFDF0000), category = "Electrónica & Hogar")

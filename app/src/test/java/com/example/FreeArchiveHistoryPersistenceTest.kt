@@ -401,4 +401,67 @@ class FreeArchiveHistoryPersistenceTest {
         }
     }
 
+    @Test
+    fun googleHistoricalInsightCannotReplaceOrBlockLiveObservationOnSameDay() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val dao = database.priceObservationDao()
+            val now = System.currentTimeMillis()
+            val dayStart = now - 60_000L
+            val dayEnd = now + 60_000L
+            val insight = PriceObservationEntity(
+                productId = "insight-live-isolation",
+                storeId = "shop",
+                price = 79.99,
+                currency = "EUR",
+                observedAt = now - 20_000L,
+                sourceUrl = "https://www.google.com/shopping/product/123456789",
+                sourceName = "Google Product API · price_insights",
+                isVerified = true,
+                productTitle = "Test product",
+                storeName = "Shop",
+                sourceType = "Google Product API · price_insights",
+                linkType = "Historial Google Shopping",
+                collectedAt = now,
+                evidenceType = "google_insights",
+                sourcePageUrl = "https://www.google.com/shopping/product/123456789"
+            )
+            assertTrue(dao.saveGoogleInsightObservationIfLower(insight, dayStart, dayEnd))
+
+            val live = PriceObservationEntity(
+                productId = "insight-live-isolation",
+                storeId = "shop",
+                price = 99.99,
+                currency = "EUR",
+                observedAt = now - 10_000L,
+                sourceUrl = "https://shop.example/product",
+                sourceName = "Google Shopping",
+                isVerified = true,
+                productTitle = "Test product",
+                storeName = "Shop",
+                sourceType = "Google Shopping",
+                linkType = "directo",
+                collectedAt = now,
+                evidenceType = "live"
+            )
+            assertTrue(dao.saveDailyObservationIfNewer(live, dayStart, dayEnd))
+
+            val lowerInsight = insight.copy(price = 69.99, observedAt = now - 30_000L)
+            assertTrue(dao.saveGoogleInsightObservationIfLower(lowerInsight, dayStart, dayEnd))
+
+            val all = dao.observeVerifiedHistory("insight-live-isolation").first()
+            assertEquals("Live and historical insight rows must remain separate", 2, all.size)
+            assertEquals(69.99, all.single { it.evidenceType == "google_insights" }.price, 0.001)
+            assertEquals(99.99, all.single { it.evidenceType == "live" }.price, 0.001)
+            assertEquals("live", dao.getLatestVerified("insight-live-isolation")?.evidenceType)
+            assertEquals(1, dao.getVerifiedSince("insight-live-isolation", now - 60_000L).size)
+        } finally {
+            database.close()
+        }
+    }
+
 }

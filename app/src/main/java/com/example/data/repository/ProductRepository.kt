@@ -874,25 +874,17 @@ class ProductRepository(
     }
 
     /**
-     * Save a single Google Product API response against the already-identified product row.
-     * No new catalogue product is created and no observation is saved if the product was not
-     * safely identified by the API parser.
+     * Applies the exact same trust and product-identity filters for UI comparison and persistence.
+     * Suspicious-only merchant groups stay visible as diagnostics but do not become verified prices.
      */
-    suspend fun recordProductComparisonOffers(
-        productId: String,
-        expectedTitle: String,
-        offers: List<SerpApiShoppingResult>
-    ): Int {
-        startupCleanupCompleted.await()
-        val product = productDao.getProductById(productId) ?: return 0
-        if (expectedTitle.isBlank() || onlineProductIdentityKey(product.title) != onlineProductIdentityKey(expectedTitle)) {
-            return 0
-        }
+    fun filterProductComparisonOffers(
+        offers: List<SerpApiShoppingResult>,
+        expectedTitle: String
+    ): List<SerpApiShoppingResult> {
+        if (expectedTitle.isBlank()) return emptyList()
         val targetIsAccessory = isAccessorySearchQuery(expectedTitle) || isAccessoryListing(expectedTitle)
         val expectedIdentity = onlineProductIdentityKey(expectedTitle)
-        val valid = filterOnlineSearchResults(offers, expectedTitle)
-            // Uncertain wheel fitment/category results and standalone accessories must never
-            // become verified comparison-history observations for the main product.
+        return filterOnlineSearchResults(offers, expectedTitle)
             .filterNot {
                 it.isSecondHand || it.isRentalOrMonthly ||
                     it.isFitmentUnverified || it.isCategoryUnverified ||
@@ -907,6 +899,24 @@ class ProductRepository(
                 rows.filterNot { it.isSuspiciousPrice }.minByOrNull { it.price }
                     ?: rows.minByOrNull { it.price }
             }
+    }
+
+    /**
+     * Save a single Google Product API response against the already-identified product row.
+     * No new catalogue product is created and no observation is saved if the product was not
+     * safely identified by the API parser.
+     */
+    suspend fun recordProductComparisonOffers(
+        productId: String,
+        expectedTitle: String,
+        offers: List<SerpApiShoppingResult>
+    ): Int {
+        startupCleanupCompleted.await()
+        val product = productDao.getProductById(productId) ?: return 0
+        if (expectedTitle.isBlank() || onlineProductIdentityKey(product.title) != onlineProductIdentityKey(expectedTitle)) {
+            return 0
+        }
+        val valid = filterProductComparisonOffers(offers, expectedTitle)
         if (valid.isEmpty()) return 0
 
         var savedCount = 0

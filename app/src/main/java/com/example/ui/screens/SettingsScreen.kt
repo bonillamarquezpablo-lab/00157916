@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.content.Context
+import android.content.Intent
 import android.util.Patterns
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.filled.Launch
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SettingsSuggest
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -47,12 +49,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.FileProvider
 import com.example.security.openExternalHttpsUrl
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.BuildConfig
+import com.example.latestCrashReportFile
 import com.example.data.remote.SerpApiTokenStore
 
 private const val PROFILE_PREFS = "minimo_user_profile"
@@ -575,7 +579,7 @@ fun SettingsScreen(
                     Text("Seguridad de las conexiones", modifier = Modifier.padding(start = 10.dp), fontWeight = FontWeight.Bold)
                 }
                 Text(
-                    "Las claves de acceso no deben guardarse dentro del APK ni subirse al repositorio. La integración de precios se conectará mediante un servicio seguro cuando tengamos autorización y credenciales.",
+                    "La clave personal de SerpApi se cifra en este dispositivo con Android Keystore. Para una versión pública multiusuario necesitaremos un servidor seguro; nunca publiques la clave dentro del APK ni en GitHub.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -589,6 +593,38 @@ fun SettingsScreen(
                             "  No hay ninguna clave de proveedor guardada"
                         },
                         style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+
+        SectionTitle("Diagnóstico privado", "Informes de errores")
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.elevatedCardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    "Los informes de cierre se guardan en el almacenamiento privado de Mínimo. No se envían ni se comparten automáticamente.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                val latestReport = remember(context) { latestCrashReportFile(context) }
+                OutlinedButton(
+                    onClick = { shareCrashReport(context, latestReport) },
+                    enabled = latestReport != null,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text(
+                        if (latestReport == null) "No hay informes de errores" else "Compartir último informe",
+                        modifier = Modifier.padding(start = 8.dp)
                     )
                 }
             }
@@ -639,6 +675,30 @@ private fun InfoLine(label: String, value: String) {
     ) {
         Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         Text(value, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+private fun shareCrashReport(context: Context, report: java.io.File?) {
+    if (report == null || !report.isFile) return
+
+    runCatching {
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            report
+        )
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Informe de error de Mínimo")
+            putExtra(
+                Intent.EXTRA_TEXT,
+                "Este informe contiene detalles técnicos del cierre. Revísalo antes de compartirlo."
+            )
+            putExtra(Intent.EXTRA_STREAM, uri)
+            clipData = android.content.ClipData.newUri(context.contentResolver, report.name, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(sendIntent, "Compartir informe de error"))
     }
 }
 

@@ -93,13 +93,19 @@ internal fun buildOnlineSearchDisplayGroups(
     } else {
         emptyList()
     }
+    val replacementParts = if (treatAccessoriesSeparately) {
+        filtered.filter { it.isReplacementPartOffer }
+    } else {
+        emptyList()
+    }
     val mainProductOffers = if (treatAccessoriesSeparately) {
-        filtered.filterNot { it.isAccessoryOffer }
+        filtered.filterNot { it.isAccessoryOffer || it.isReplacementPartOffer }
     } else {
         filtered
     }
 
     val mainDisplayGroups = mutableListOf<OnlineSearchDisplayGroup>()
+    val replacementPartDisplayGroups = mutableListOf<OnlineSearchDisplayGroup>()
     val accessoryDisplayGroups = mutableListOf<OnlineSearchDisplayGroup>()
     fun appendGroups(
         destination: MutableList<OnlineSearchDisplayGroup>,
@@ -125,21 +131,23 @@ internal fun buildOnlineSearchDisplayGroups(
     appendGroups(mainDisplayGroups, "second-hand", secondHandOffers.filterNot { it.isFitmentUnverified })
     appendGroups(mainDisplayGroups, "second-hand-fitment-unconfirmed", secondHandOffers.filter { it.isFitmentUnverified })
 
-    // Accessories remain visible but never take priority over the searched-for main product.
+    // Replacement parts and convenience accessories are visible but kept out of the main
+    // product's price ranking so a cheap motor, battery or case cannot look like the whole item.
+    appendGroups(replacementPartDisplayGroups, "replacement-part", replacementParts)
     appendGroups(accessoryDisplayGroups, "accessory", accessories)
     val priceOrder = compareBy<OnlineSearchDisplayGroup> { it.group.minPrice }
         .thenBy { it.group.title.lowercase(Locale.ROOT) }
         .thenBy { it.stableKey }
     val sortedMain = mainDisplayGroups.sortedWith(priceOrder)
+    val sortedReplacementParts = replacementPartDisplayGroups.sortedWith(priceOrder)
     val sortedAccessories = accessoryDisplayGroups.sortedWith(priceOrder)
     val isWheelFitmentSearch = isWheelFitmentQuery(query)
     // For wheel-fitment searches, used wheels and new wheels are comparable offers: show them
-    // together in one price order when the opt-in filter is enabled. Keep accessory prioritization
-    // for other product searches so unrelated low-cost accessories do not outrank the main product.
+    // together in one price order when the opt-in filter is enabled.
     return if (isWheelFitmentSearch) {
-        (sortedMain + sortedAccessories).sortedWith(priceOrder)
+        (sortedMain + sortedReplacementParts + sortedAccessories).sortedWith(priceOrder)
     } else {
-        sortedMain + sortedAccessories
+        sortedMain + sortedReplacementParts + sortedAccessories
     }
 }
 
@@ -499,12 +507,16 @@ private fun ShoppingResultCard(
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (group.offers.all { it.isSecondHand } ||
-                group.offers.all { it.isAccessoryOffer } || fitmentUnverified ||
-                categoryUnverified || wheelSetCount != null
+                group.offers.all { it.isAccessoryOffer } ||
+                group.offers.all { it.isReplacementPartOffer } ||
+                fitmentUnverified || categoryUnverified || wheelSetCount != null
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (group.offers.all { it.isSecondHand }) {
                         ResultKindBadge("Segunda mano", accessory = false)
+                    }
+                    if (group.offers.all { it.isReplacementPartOffer }) {
+                        ResultKindBadge("Recambio", accessory = false)
                     }
                     if (group.offers.all { it.isAccessoryOffer }) {
                         ResultKindBadge("Accesorio", accessory = true)

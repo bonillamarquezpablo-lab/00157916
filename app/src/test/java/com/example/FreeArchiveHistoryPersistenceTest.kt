@@ -132,8 +132,8 @@ class FreeArchiveHistoryPersistenceTest {
                 snapshotUrl = "https://web.archive.org/web/${rawTimestamp}id_/${alternateSellerUrl}"
             )
             assertEquals(
-                "The same validated product may accumulate historical offers from another eligible seller",
-                1,
+                "A product without a verified live quote must not import another seller's archived history",
+                0,
                 repository.recordArchivedPriceHistory(
                     title,
                     alternateSellerUrl,

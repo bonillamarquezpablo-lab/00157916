@@ -3,8 +3,10 @@
     <cloud-backup>
         <!-- The matching Android Keystore key is device-bound and cannot be restored elsewhere. -->
         <exclude domain="sharedpref" path="minimo_serpapi_secret.xml" />
+        <exclude domain="file" path="crash-reports/" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="minimo_serpapi_secret.xml" />
+        <exclude domain="file" path="crash-reports/" />
     </device-transfer>
 </data-extraction-rules>

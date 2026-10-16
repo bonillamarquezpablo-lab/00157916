@@ -866,7 +866,12 @@ class ProductRepository(
             return 0
         }
         val valid = filterOnlineSearchResults(offers, expectedTitle)
-            .filterNot { it.isSecondHand || it.isRentalOrMonthly }
+            // Uncertain wheel fitment/category results may remain visible for inspection, but
+            // must never become verified comparison-history observations.
+            .filterNot {
+                it.isSecondHand || it.isRentalOrMonthly ||
+                    it.isFitmentUnverified || it.isCategoryUnverified
+            }
             .filter { isEligibleSeller(it.storeName, it.sourceUrl) && isEligibleHistoryTitle(it.title) }
             .groupBy { canonicalStoreId(it.storeName, it.sourceUrl) }
             .values

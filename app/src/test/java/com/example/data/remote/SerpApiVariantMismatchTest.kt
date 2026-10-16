@@ -148,4 +148,56 @@ class SerpApiVariantMismatchTest {
         assertTrue(ugreen.searchUrlFor("UGREEN Nexode 100W").startsWith("https://eu.ugreen.com/es-es/search?q="))
     }
 
+    @Test
+    fun rejectsStructuredForeignCurrencyWhenPriceLabelHasNoCurrencySymbol() {
+        val client = SerpApiClient()
+        val report = client.parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "shopping_results": [{
+                    "title": "Anker Prime 27K Power Bank",
+                    "price": "99.99",
+                    "extracted_price": 99.99,
+                    "currency": "USD",
+                    "source": "Tienda",
+                    "link": "https://shop.example/anker-prime"
+                  }]
+                }
+                """.trimIndent()
+            ),
+            query = "Anker Prime 27K Power Bank",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertTrue("A numeric USD amount must not be treated as EUR when its label omits '$'", report.results.isEmpty())
+        assertEquals(1, report.rejectedForPriceOrCurrency)
+    }
+
+    @Test
+    fun acceptsStructuredEurCurrencyWhenPriceLabelOmitsSymbol() {
+        val client = SerpApiClient()
+        val report = client.parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "shopping_results": [{
+                    "title": "Anker Prime 27K Power Bank",
+                    "price": "99.99",
+                    "extracted_price": 99.99,
+                    "currency": "EUR",
+                    "source": "Tienda",
+                    "link": "https://shop.example/anker-prime"
+                  }]
+                }
+                """.trimIndent()
+            ),
+            query = "Anker Prime 27K Power Bank",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals(1, report.results.size)
+        assertEquals(99.99, report.results.single().price, 0.001)
+    }
+
 }

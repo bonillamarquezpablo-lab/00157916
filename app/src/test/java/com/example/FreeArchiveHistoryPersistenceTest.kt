@@ -480,4 +480,66 @@ class FreeArchiveHistoryPersistenceTest {
         }
     }
 
+    @Test
+    fun legacyArchiveUrlMislabelledLiveCannotVerifyCurrentPrice() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            database.productDao().insert(
+                ProductEntity(
+                    id = "legacy-archive-live-label",
+                    title = "Sony WH-1000XM5",
+                    brand = "Sony",
+                    category = "TV_AUDIO",
+                    currentPrice = 199.99,
+                    athMinPrice = 199.99,
+                    athMinDate = "",
+                    athMinStore = "",
+                    athMaxPrice = 199.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "shop",
+                    storeUrl = "https://shop.example/sony-wh1000xm5",
+                    ean = "",
+                    isPriceVerified = true
+                )
+            )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "legacy-archive-live-label",
+                    storeId = "shop",
+                    price = 89.99,
+                    currency = "EUR",
+                    observedAt = System.currentTimeMillis(),
+                    sourceUrl = "https://web.archive.org/web/20251010120000id_/https://shop.example/sony-wh1000xm5",
+                    sourceName = "Legacy migrated row",
+                    isVerified = true,
+                    productTitle = "Sony WH-1000XM5",
+                    storeName = "Shop",
+                    sourceType = "Internet Archive",
+                    linkType = "Archivo histórico",
+                    collectedAt = System.currentTimeMillis(),
+                    evidenceType = "live"
+                )
+            )
+
+            database.productDao().markProductsWithVerifiedObservations()
+
+            assertFalse(
+                "A legacy row with an archive URL must not mark the product's current price verified",
+                database.productDao().getProductById("legacy-archive-live-label")!!.isPriceVerified
+            )
+            assertEquals(
+                "Archive URLs must not qualify as the latest current quote",
+                null,
+                database.priceObservationDao().getLatestVerified("legacy-archive-live-label")
+            )
+        } finally {
+            database.close()
+        }
+    }
+
 }

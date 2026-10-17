@@ -1,0 +1,121 @@
+name: Mínimo - APK de recuperación de catálogo
+
+on:
+  push:
+    branches:
+      - fix/restore-catalog-prices-20261017
+      - integration/unified-search-game-stability-20261017
+    paths:
+      - "app/**"
+      - "gradle/**"
+      - "*.gradle.kts"
+      - "gradle.properties"
+      - ".github/workflows/android-recovery-build.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: minimo-recovery-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/fix/restore-catalog-prices-20261017' || github.ref == 'refs/heads/integration/unified-search-game-stability-20261017'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Preparar Java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Preparar Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Preparar Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+
+      - name: Instalar componentes Android
+        run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
+
+      - name: Ejecutar pruebas unitarias
+        timeout-minutes: 20
+        run: gradle :app:testDebugUnitTest --stacktrace
+
+      - name: Mostrar detalle de las pruebas fallidas
+        if: failure()
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          reports=(app/build/test-results/testDebugUnitTest/*.xml)
+          if [ "${#reports[@]}" -eq 0 ]; then
+            echo "No se generaron informes XML de pruebas unitarias."
+          else
+            for report in "${reports[@]}"; do
+              echo "::group::${report}"
+              cat "${report}"
+              echo "::endgroup::"
+            done
+          fi
+
+      - name: Compilar pruebas instrumentadas
+        run: gradle :app:compileDebugAndroidTestKotlin --stacktrace
+
+      - name: Restaurar clave de firma estable
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEBUG_KEYSTORE_BASE64:-}" ]; then
+            echo "::error::Falta el secreto DEBUG_KEYSTORE_BASE64."
+            exit 1
+          fi
+          printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 --decode > debug.keystore
+          keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey >/dev/null
+
+      - name: Compilar APK instalable sobre la versión anterior
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          VERSION_CODE=$((4000 + GITHUB_RUN_NUMBER))
+          VERSION_NAME="1.6.1021"
+          gradle :app:assembleDebug --stacktrace -PVERSION_CODE="$VERSION_CODE" -PVERSION_NAME="$VERSION_NAME"
+
+      - name: Verificar paquete, versión y firma estable
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          VERSION_CODE=$((4000 + GITHUB_RUN_NUMBER))
+          VERSION_NAME="1.6.1021"
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          test -s "$APK"
+          BADGING="$("$AAPT" dump badging "$APK")"
+          printf '%s\\n' "$BADGING" | grep -F "package: name='com.aistudio.preciominimo.esrxvt' versionCode='${VERSION_CODE}' versionName='${VERSION_NAME}'"
+          SIGNATURE="$("$APKSIGNER" verify --verbose --print-certs "$APK")"
+          ACTUAL_CERT="$(printf '%s\\n' "$SIGNATURE" | sed -n 's/.*certificate SHA-256 digest: //p' | head -n 1 | tr -d ': ' | tr '[:lower:]' '[:upper:]')"
+          EXPECTED_CERT="F631A8C0A194008E77A312A78775E95837DBC66DF635EAE9B966E5C294ADD450"
+          test "$ACTUAL_CERT" = "$EXPECTED_CERT"
+          echo "APK verificado: paquete, versión y certificado correctos."
+
+      - name: Guardar el APK
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: minimo-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7

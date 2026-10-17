@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- The matching Android Keystore key is device-bound and cannot be restored elsewhere. -->
+        <exclude domain="sharedpref" path="minimo_serpapi_secret.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="minimo_serpapi_secret.xml" />
+    </device-transfer>
+</data-extraction-rules>

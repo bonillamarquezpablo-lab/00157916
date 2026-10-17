@@ -1,0 +1,44 @@
+*.iml
+.gradle
+.kotlin
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+.env
+debug.keystore
+# Local credentials, personal environment and signing material — never commit.
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+key.properties
+secrets.properties
+credentials.json
+google-services.json
+# Generated archives and installable packages can accidentally bundle local data.
+*.zip
+*.apk
+# Other credential stores and local signing formats.
+*.p8
+*.asc
+id_rsa
+id_ed25519
+.npmrc
+.pypirc
+service-account.json
+firebase-adminsdk.json

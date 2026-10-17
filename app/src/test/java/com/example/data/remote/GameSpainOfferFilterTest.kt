@@ -42,7 +42,7 @@ class GameSpainOfferFilterTest {
             observedAt = System.currentTimeMillis()
         )
         val lookalike = amazon.copy(
-            storeName = "GAME",
+            storeName = "Tienda online",
             sourceUrl = "https://game.es.example.com/producto"
         )
 

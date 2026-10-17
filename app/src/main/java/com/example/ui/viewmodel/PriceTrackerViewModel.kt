@@ -1249,13 +1249,29 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         sourceUrl: String
     ): FreeArchiveCandidate? {
         if (title.isBlank()) return null
-        val directUrl = sourceUrl.takeIf {
-            !isGoogleShoppingUrl(it) && waybackPriceHistoryClient.isEligibleDirectUrl(it)
-        }
         val resolvedDomain = waybackPriceHistoryClient.resolveMerchantDomain(
             storeName = storeName,
             sourceUrl = sourceUrl
         )
+        // A Google Shopping link can embed the final retailer URL. Only accept the extracted
+        // destination when its host matches the retailer identified by name/source; never trust
+        // an arbitrary Google redirect to a different shop.
+        val extractedUrl = extractDirectRetailerUrl(sourceUrl)
+        val directUrl = extractedUrl?.takeIf { candidateUrl ->
+            if (!waybackPriceHistoryClient.isEligibleDirectUrl(candidateUrl)) {
+                false
+            } else if (!isGoogleShoppingUrl(sourceUrl)) {
+                true
+            } else {
+                val expectedDomain = resolvedDomain ?: return@takeIf false
+                val actualHost = runCatching {
+                    java.net.URI(candidateUrl).host.orEmpty()
+                        .lowercase(Locale.ROOT)
+                        .removePrefix("www.")
+                }.getOrDefault("")
+                actualHost == expectedDomain || actualHost.endsWith(".$expectedDomain")
+            }
+        }
         // Some Google Shopping rows expose only Google's intermediate URL and label the source
         // as "Google Shopping", omitting the seller. If that happens, make a bounded fallback
         // to a recognized brand's own website; the archived page still needs an exact title and

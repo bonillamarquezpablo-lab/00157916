@@ -1498,7 +1498,8 @@ class ProductRepository(
         // handled separately for display below, so they cannot change the low/average/deal claims.
         // Properly provenance-labelled archive and Google insight rows retain their independent path.
         val sortedHistory = verifiedObservations.filter { observation ->
-            val eligibleDate = observation.evidenceType in setOf("archive", "google_insights") ||
+            val eligibleDate = isArchiveBackedObservation(observation) ||
+                observation.evidenceType.equals("google_insights", ignoreCase = true) ||
                 observation.observedAt >= HISTORY_START_TIMESTAMP
             eligibleDate && isEligibleObservationForHistory(observation)
         }.sortedBy { it.observedAt }

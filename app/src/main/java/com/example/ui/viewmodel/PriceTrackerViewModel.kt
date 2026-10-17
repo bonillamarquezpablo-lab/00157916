@@ -1055,7 +1055,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         )
         viewModelScope.launch {
             try {
-                withTimeout(26_000L) {
+                withTimeout(35_000L) {
+                    // Keep a bounded total timeout, but leave enough room for the 12-second HTTP
+                    // call plus the free account/quota check and CPU/Room work on slower devices.
+                    // The request itself remains bounded by OkHttp's 12-second call timeout.
                     // Cache lookup comes first: saved results remain usable even if the quota is empty
                     // or the API key was removed after the previous search.
                     val cached = withContext(Dispatchers.IO) {

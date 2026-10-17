@@ -8,6 +8,7 @@ import com.example.data.local.AppDatabase
 import com.example.data.remote.OnlineSearchCache
 import com.example.data.remote.WaybackPriceHistoryClient
 import com.example.data.remote.isGoogleShoppingUrl
+import com.example.data.remote.extractDirectRetailerUrl
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.SerpApiAccountInfo

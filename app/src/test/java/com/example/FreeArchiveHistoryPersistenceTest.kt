@@ -642,4 +642,83 @@ class FreeArchiveHistoryPersistenceTest {
         }
     }
 
+
+    @Test
+    fun plausibleLegacySavedPriceIsShownAsPendingRevalidationNotAsCurrent() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        val title = "Anker Prime 27K Power Bank"
+        val productId = "legacy-saved-price-recovery"
+        val savedAt = System.currentTimeMillis() - 45L * 24L * 60L * 60L * 1000L
+
+        try {
+            database.productDao().insert(
+                ProductEntity(
+                    id = productId,
+                    title = title,
+                    brand = "Anker",
+                    category = "HOME_APPLIANCES",
+                    currentPrice = 499.99,
+                    athMinPrice = 499.99,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "PcComponentes",
+                    athMaxPrice = 499.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "pccomponentes",
+                    storeUrl = "https://www.pccomponentes.com/anker-prime-27k",
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = productId,
+                    storeId = "pccomponentes",
+                    price = 89.99,
+                    currency = "EUR",
+                    observedAt = savedAt,
+                    sourceUrl = "https://www.pccomponentes.com/anker-prime-27k",
+                    sourceName = "Legacy saved quote",
+                    isVerified = false,
+                    verificationNote = "Legacy record awaiting revalidation",
+                    productTitle = title,
+                    storeName = "PcComponentes",
+                    sourceType = "Legacy saved price",
+                    linkType = "directo",
+                    collectedAt = System.currentTimeMillis(),
+                    evidenceType = "live"
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+
+            val product = withTimeout(10_000L) {
+                repository.allProductsStream.first { rows ->
+                    rows.any { it.id == productId && it.savedHistoricalPrice == 89.99 }
+                }.first { it.id == productId }
+            }
+
+            assertEquals(89.99, product.savedHistoricalPrice!!, 0.001)
+            assertEquals(savedAt, product.savedHistoricalPriceObservedAt)
+            assertFalse("Legacy record must not become a verified current price", product.isPriceVerified)
+            assertEquals(
+                com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION,
+                product.priceDisplayStatus
+            )
+            assertTrue("Recovery must not overwrite the catalogue's placeholder/current field", product.currentPrice == 499.99)
+            assertTrue("Unverified legacy record must not feed deal history", product.priceHistory.isEmpty())
+        } finally {
+            database.close()
+        }
+    }
+
 }

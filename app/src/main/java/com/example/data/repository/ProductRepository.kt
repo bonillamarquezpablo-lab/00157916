@@ -1534,6 +1534,12 @@ class ProductRepository(
                 linkType = observation.linkType
             )
         }
+        val savedHistoricalObservation = if (!priceIsVerified) {
+            val verifiedArchived = snapshotHistory.filter(::isHistoricalDisplayObservation)
+            val savedLegacyLive = verifiedObservations.filter(::isPrePolicySavedLiveObservation)
+            (verifiedArchived + savedLegacyLive).maxByOrNull { it.observedAt }
+        } else null
+
         return Product(
             id = id,
             title = title,
@@ -1570,18 +1576,23 @@ class ProductRepository(
                 .orEmpty(),
             // A verified archive/insight point is real saved history, not a current quote.
             // Keep it separate from currentPrice so it cannot affect offer sorting or deal logic.
-            savedHistoricalPrice = snapshotHistory.lastOrNull()
-                ?.takeIf { !priceIsVerified && isHistoricalDisplayObservation(it) }
-                ?.price,
-            savedHistoricalPriceObservedAt = snapshotHistory.lastOrNull()
-                ?.takeIf { !priceIsVerified && isHistoricalDisplayObservation(it) }
-                ?.observedAt,
-            savedHistoricalPriceSource = snapshotHistory.lastOrNull()
-                ?.takeIf { !priceIsVerified && isHistoricalDisplayObservation(it) }
+            savedHistoricalPrice = savedHistoricalObservation?.price,
+            savedHistoricalPriceObservedAt = savedHistoricalObservation?.observedAt,
+            savedHistoricalPriceSource = savedHistoricalObservation
                 ?.let { it.sourceType.ifBlank { it.sourceName } }
                 .orEmpty()
         )
     }
+
+    /**
+     * Older verified live quotes are excluded from the new chart/deal policy cutoff, but remain
+     * valid saved evidence. Expose the latest one as a stale quote so a code-policy boundary does
+     * not make previously stored prices disappear; never use it as a current deal.
+     */
+    private fun isPrePolicySavedLiveObservation(observation: PriceObservationEntity): Boolean =
+        isLiveObservation(observation) &&
+            observation.observedAt in 1L until HISTORY_START_TIMESTAMP &&
+            isEligibleObservationForHistory(observation)
 
     private fun isHistoricalDisplayObservation(observation: PriceObservationEntity): Boolean {
         val evidenceType = observation.evidenceType.lowercase(Locale.ROOT)

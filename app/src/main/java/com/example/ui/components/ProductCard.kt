@@ -1,15 +1,4 @@
-                        val savedSource = if (!product.isPriceVerified && product.savedHistoricalPrice != null) {
-                            product.savedHistoricalPriceSource.ifBlank { "historial archivado" }
-                        } else product.priceSource.ifBlank { "buscador online" }
-                        Text(
-                            text = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION) {
-                                "Última fuente guardada: $savedSource · precio antiguo, no confirmado como actual."
-                            } else {
-                                "Fuente: $savedSource · confirma el precio final y el stock."
-                            },
-                            fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )package com.example.ui.components
+package com.example.ui.components
 
 import android.content.Intent
 import android.net.Uri
@@ -228,17 +217,11 @@ fun ProductCard(
             ) {
                 Column {
                     Row(verticalAlignment = Alignment.Bottom) {
-                        val displayedSavedPrice = when (product.priceDisplayStatus) {
-                            com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT -> product.currentPrice
-                            com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION ->
-                                if (!product.isPriceVerified) product.savedHistoricalPrice ?: product.currentPrice else product.currentPrice
-                            com.example.data.model.PriceDisplayStatus.DEMONSTRATION -> null
-                        }
                         Text(
-                            text = displayedSavedPrice?.let { "${String.format("%.2f", it)} €" } ?: "Precio no disponible",
+                            text = if (product.priceDisplayStatus != com.example.data.model.PriceDisplayStatus.DEMONSTRATION) "${String.format("%.2f", product.currentPrice)} €" else "Precio no disponible",
                             fontWeight = FontWeight.Black,
-                            fontSize = if (displayedSavedPrice != null) 22.sp else 15.sp,
-                            color = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
+                            fontSize = if (product.priceDisplayStatus != com.example.data.model.PriceDisplayStatus.DEMONSTRATION) 22.sp else 15.sp,
+                            color = if (product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
                         if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.officialPvp > product.currentPrice) {
@@ -270,9 +253,7 @@ fun ProductCard(
                     }
                     if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION) {
                         Text(
-                            text = if (!product.isPriceVerified && product.savedHistoricalPrice != null) {
-                                "Precio histórico guardado · ${product.savedHistoricalPriceObservedAt?.let { SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(it)) } ?: "fecha desconocida"} · no es una oferta actual"
-                            } else product.priceFreshnessLabel,
+                            text = product.priceFreshnessLabel,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.tertiary

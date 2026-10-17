@@ -648,46 +648,52 @@ class WaybackPriceHistoryClient(
     }
 
     private fun isMatchingProductTitle(expected: String, archived: String): Boolean {
-        // First preserve strict variant matching across retail title variants.
-        val e = canonicalizeArchiveTitle(normalizeTitle(expected))
-        val a = canonicalizeArchiveTitle(normalizeTitle(archived))
+        val e = normalizeTitle(expected)
+        val a = normalizeTitle(archived)
         if (e.isBlank() || a.isBlank()) return false
 
-        val sameIdentity = onlineProductIdentityKey(e) == onlineProductIdentityKey(a)
+        // Titles from Samsung's regional catalogues use TQ/QE prefixes for the same EU TV
+        // model. Compare the exact compact model code and diagonal before fuzzy text matching.
+        if (Regex("""\\bsamsung\\b""").containsMatchIn(e) &&
+            Regex("""\\bsamsung\\b""").containsMatchIn(a)) {
+            fun samsungModel(value: String): String? =
+                Regex("""\\b(?:tq|qe)(\\d{2}[a-z0-9]{5,})\\b""")
+                    .find(value)?.groupValues?.getOrNull(1)
+                    ?: Regex("""\\b(\\d{2}[a-z0-9]{5,})\\b""")
+                        .find(value)?.groupValues?.getOrNull(1)
 
-        // Model codes, diagonals, storage and capacities must match exactly after canonicalization.
-        val expectedVariants = requiredVariantTokens(e)
-        val archivedVariants = requiredVariantTokens(a)
-        if (!sameIdentity && !archivedVariants.containsAll(expectedVariants)) return false
-        if (sameIdentity) return true
+            fun diagonal(value: String): String? =
+                Regex("""\\b(\\d{2})\\s*(?:inch|inches|pulgadas)?\\b""")
+                    .find(value)?.groupValues?.getOrNull(1)
 
-        // Samsung regional TV identifiers may encode the exact same panel/model with a regional
-        // prefix (TQ/QE). Compare these only after removing that prefix and retain the two-digit
-        // diagonal as a mandatory marker, so 48-inch and 55-inch products cannot cross-match.
-        if (Regex("""\bsamsung\b""").containsMatchIn(e) &&
-            Regex("""\bsamsung\b""").containsMatchIn(a)) {
-            val expectedSamsungModel = Regex("""\b(?:tq|qe)?(\d{2}[a-z0-9]{5,})\b""")
-                .find(e)?.groupValues?.getOrNull(1)
-            val archivedSamsungModel = Regex("""\b(?:tq|qe)?(\d{2}[a-z0-9]{5,})\b""")
-                .find(a)?.groupValues?.getOrNull(1)
-            val expectedDiagonal = Regex("""\b(\d{2})\s*(?:inch|inches|pulgadas)?\b""")
-                .find(e)?.groupValues?.getOrNull(1)
-            val archivedDiagonal = Regex("""\b(\d{2})\s*(?:inch|inches|pulgadas)?\b""")
-                .find(a)?.groupValues?.getOrNull(1)
-            if (expectedSamsungModel != null && archivedSamsungModel != null &&
-                expectedSamsungModel == archivedSamsungModel &&
+            val expectedModel = samsungModel(e)
+            val archivedModel = samsungModel(a)
+            val expectedDiagonal = diagonal(e)
+            val archivedDiagonal = diagonal(a)
+            if (expectedModel != null && archivedModel != null &&
+                expectedModel == archivedModel &&
                 expectedDiagonal != null && archivedDiagonal != null &&
                 expectedDiagonal == archivedDiagonal) return true
         }
 
-        val expectedTokens = meaningfulTokens(e)
-        val archivedTokens = meaningfulTokens(a)
+        val canonicalExpected = canonicalizeArchiveTitle(e)
+        val canonicalArchived = canonicalizeArchiveTitle(a)
+        val sameIdentity =
+            onlineProductIdentityKey(canonicalExpected) == onlineProductIdentityKey(canonicalArchived)
+
+        // Variant-defining numeric/model tokens must not conflict or silently disappear.
+        val expectedVariants = requiredVariantTokens(canonicalExpected)
+        val archivedVariants = requiredVariantTokens(canonicalArchived)
+        if (!sameIdentity && !archivedVariants.containsAll(expectedVariants)) return false
+        if (sameIdentity) return true
+
+        val expectedTokens = meaningfulTokens(canonicalExpected)
+        val archivedTokens = meaningfulTokens(canonicalArchived)
         if (expectedTokens.isEmpty() || archivedTokens.isEmpty()) return false
         val overlap = expectedTokens.intersect(archivedTokens)
         return overlap.size >= minOf(2, expectedTokens.size) &&
             overlap.size.toDouble() / expectedTokens.size >= 0.72
     }
-
     private fun canonicalizeArchiveTitle(normalizedTitle: String): String {
         // These regional prefixes are only interchangeable for Samsung model identifiers.
         if (!Regex("""\bsamsung\b""").containsMatchIn(normalizedTitle)) return normalizedTitle

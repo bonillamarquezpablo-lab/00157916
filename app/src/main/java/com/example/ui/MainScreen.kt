@@ -315,6 +315,7 @@ fun MainScreen(
                         onSearchChange = viewModel::onSearchQueryChange,
                         onCategorySelect = viewModel::onCategorySelect,
                         onToggleOnlyAth = viewModel::onToggleOnlyAth,
+                        onToggleOnlyHistoricalMinimum = viewModel::onToggleOnlyHistoricalMinimum,
                         onStoreFilterSelect = viewModel::onStoreFilterSelect,
                         onSortChange = viewModel::onSortOptionChange,
                         onProductClick = viewModel::onSelectProduct,

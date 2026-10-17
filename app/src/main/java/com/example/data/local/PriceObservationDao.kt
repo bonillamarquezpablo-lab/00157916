@@ -47,7 +47,7 @@ interface PriceObservationDao {
             "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
             "AND upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 " +
             "AND trim(productTitle) <> '' AND trim(storeName) <> '' " +
-            "AND observedAt > 0 AND observedAt <= :nowMillis " +
+            "AND observedAt > 0 AND observedAt <= :nowMillis + 300000 " +
             "ORDER BY observedAt DESC LIMIT 1"
     )
     suspend fun getLatestVerified(
@@ -68,7 +68,7 @@ interface PriceObservationDao {
             "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
             "AND upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 " +
             "AND trim(productTitle) <> '' AND trim(storeName) <> '' " +
-            "AND observedAt > 0 AND observedAt <= :nowMillis " +
+            "AND observedAt > 0 AND observedAt <= :nowMillis + 300000 " +
             "ORDER BY observedAt DESC"
     )
     suspend fun getVerifiedLiveObservationsForProduct(
@@ -80,7 +80,7 @@ interface PriceObservationDao {
     @Query(
         "SELECT * FROM price_observations " +
             "WHERE productId = :productId AND isVerified = 1 AND observedAt >= :since " +
-            "AND observedAt <= :nowMillis " +
+            "AND observedAt <= :nowMillis + 300000 " +
             "AND lower(evidenceType) = 'live' " +
             "AND lower(sourceUrl) LIKE 'https://%' " +
             "AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' " +
@@ -102,7 +102,7 @@ interface PriceObservationDao {
             "AND upper(trim(currency)) = 'EUR' " +
             "AND price >= 0.5 AND price <= 10000.0 " +
             "AND trim(productTitle) <> '' AND trim(storeName) <> '' " +
-            "AND observedAt > 0 AND observedAt <= :nowMillis"
+            "AND observedAt > 0 AND observedAt <= :nowMillis + 300000"
     )
     suspend fun getVerifiedObservationCount(
         nowMillis: Long = System.currentTimeMillis()

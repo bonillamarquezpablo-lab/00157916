@@ -30,7 +30,20 @@ object PriceBadgeClassifier {
         hasValidAverage: Boolean,
         isSavedPendingRevalidation: Boolean = false
     ): PriceBadgeState {
+        val validPriorPrices = priorObservedPrices.filter { it.isFinite() && it > 0.0 }
+        val hasUsableCurrentPrice = currentPrice.isFinite() && currentPrice > 0.0
+
+        // A saved-but-stale quote may still be identified as the lowest recorded point,
+        // but it must remain visibly marked as pending and must never look like a live deal.
         if (isSavedPendingRevalidation) {
+            val savedMinimum = validPriorPrices.minOrNull()
+            if (hasUsableCurrentPrice && savedMinimum != null && currentPrice <= savedMinimum) {
+                return PriceBadgeState(
+                    PriceBadgeType.HISTORICAL_MINIMUM,
+                    "MÍNIMO OBSERVADO · PENDIENTE",
+                    "La última cotización guardada iguala o mejora el mínimo de las observaciones válidas que conserva Mínimo. Necesita revalidación y no debe interpretarse como una oferta actual."
+                )
+            }
             return PriceBadgeState(
                 PriceBadgeType.SAVED_PENDING_REVALIDATION,
                 "PRECIO GUARDADO · PENDIENTE",
@@ -38,7 +51,7 @@ object PriceBadgeClassifier {
             )
         }
 
-        if (!isPriceVerified || !currentPrice.isFinite() || currentPrice <= 0.0) {
+        if (!isPriceVerified || !hasUsableCurrentPrice) {
             return PriceBadgeState(
                 PriceBadgeType.UNVERIFIED,
                 "PRECIO NO VERIFICADO",
@@ -46,7 +59,6 @@ object PriceBadgeClassifier {
             )
         }
 
-        val validPriorPrices = priorObservedPrices.filter { it.isFinite() && it > 0.0 }
         if (validPriorPrices.isEmpty()) {
             return PriceBadgeState(
                 PriceBadgeType.FIRST_OBSERVATION,
@@ -55,23 +67,28 @@ object PriceBadgeClassifier {
             )
         }
 
-        // A lower quote is not enough to claim a historical minimum: the model's
-        // hasValidAverage flag is true only when current price and 90-day live coverage
-        // have both been validated. Use the same evidence gate for the minimum badge.
+        val historicalMinimum = validPriorPrices.minOrNull()!!
+        if (currentPrice <= historicalMinimum) {
+            return if (hasValidAverage && averagePrice.isFinite() && averagePrice > 0.0) {
+                PriceBadgeState(
+                    PriceBadgeType.HISTORICAL_MINIMUM,
+                    "🔥 MÍNIMO OBSERVADO",
+                    "El precio iguala o mejora el mínimo de las observaciones anteriores dentro de un historial verificado de al menos 90 días."
+                )
+            } else {
+                PriceBadgeState(
+                    PriceBadgeType.HISTORICAL_MINIMUM,
+                    "🔥 MÍNIMO OBSERVADO",
+                    "El precio actual iguala o mejora el más bajo de los precios en vivo verificados que conserva Mínimo. El historial aún no cubre 90 días: este resultado describe solo el periodo observado, no un mínimo histórico de largo plazo."
+                )
+            }
+        }
+
         if (!hasValidAverage || !averagePrice.isFinite() || averagePrice <= 0.0) {
             return PriceBadgeState(
                 PriceBadgeType.HISTORY_IN_PROGRESS,
                 "HISTORIAL EN CONSTRUCCIÓN",
-                "Hay precios observados, pero aún no hay cobertura verificada suficiente para confirmar un mínimo o comparar la media."
-            )
-        }
-
-        val historicalMinimum = validPriorPrices.minOrNull()!!
-        if (currentPrice <= historicalMinimum) {
-            return PriceBadgeState(
-                PriceBadgeType.HISTORICAL_MINIMUM,
-                "🔥 MÍNIMO OBSERVADO",
-                "El precio iguala o mejora el mínimo de las observaciones anteriores dentro de un historial verificado de al menos 90 días."
+                "Hay precios observados, pero aún no hay cobertura verificada suficiente para comparar la media."
             )
         }
 

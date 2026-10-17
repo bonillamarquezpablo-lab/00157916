@@ -88,7 +88,9 @@ data class Product(
                 currentPrice = currentPrice,
                 priorObservedPrices = priorPrices,
                 averagePrice = avg90dPrice,
-                hasValidAverage = isPriceFresh && hasSufficientHistory
+                hasValidAverage = isPriceFresh && hasSufficientHistory,
+                isSavedPendingRevalidation =
+                    priceDisplayStatus == PriceDisplayStatus.SAVED_PENDING_REVALIDATION
             )
         }
 

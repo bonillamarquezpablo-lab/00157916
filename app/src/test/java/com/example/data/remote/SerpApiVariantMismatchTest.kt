@@ -15,6 +15,17 @@ import org.robolectric.annotation.Config
 class SerpApiVariantMismatchTest {
 
     @Test
+    fun googleShoppingUrlDetectionRejectsLookalikeDomains() {
+        assertTrue(isGoogleShoppingUrl("https://www.google.com/shopping/product/123456"))
+        assertTrue(isGoogleShoppingUrl("https://www.google.es/search?tbm=shop"))
+        assertTrue(isGoogleShoppingUrl("https://shopping.google.co.uk/"))
+
+        assertFalse(isGoogleShoppingUrl("https://google.com.attacker.example/search"))
+        assertFalse(isGoogleShoppingUrl("https://google.attacker.example/search"))
+        assertFalse(isGoogleShoppingUrl("https://www.notgoogle.com/shopping"))
+    }
+
+    @Test
     fun rejectsWrongShoeSizeWhenQueryOmitsTheWordTallaButKeepsTheRequestedSize() {
         val client = SerpApiClient()
         val report = client.parseShoppingResultsDetailed(

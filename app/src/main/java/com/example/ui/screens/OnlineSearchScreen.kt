@@ -159,33 +159,26 @@ fun OnlineSearchScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    // Grouping, relevance checks and sorting can be CPU-heavy on the tablet. Keep them
-    // off the UI thread so the search progress indicator and navigation stay responsive.
-    val groupedResults = produceState(
-        initialValue = emptyList<OnlineSearchDisplayGroup>() to emptyList<OnlineSearchDisplayGroup>(),
+    // Grouping and sorting can be CPU-heavy on a tablet. Do the work off the UI thread,
+    // and build only the currently requested view (all sellers or Amazon-only). Building both
+    // lists for every search doubled CPU work and allocations even when one list was never shown.
+    val visibleGroupsState = produceState(
+        initialValue = emptyList<OnlineSearchDisplayGroup>(),
         state.onlineSearchResults,
         state.onlineSearchQuery,
-        state.onlineSearchShowSecondHand
+        state.onlineSearchShowSecondHand,
+        state.onlineSearchAmazonOnly
     ) {
         value = withContext(Dispatchers.Default) {
-            val all = buildOnlineSearchDisplayGroups(
+            buildOnlineSearchDisplayGroups(
                 results = state.onlineSearchResults,
                 query = state.onlineSearchQuery,
                 showSecondHand = state.onlineSearchShowSecondHand,
-                amazonOnly = false
+                amazonOnly = state.onlineSearchAmazonOnly
             )
-            val amazon = buildOnlineSearchDisplayGroups(
-                results = state.onlineSearchResults,
-                query = state.onlineSearchQuery,
-                showSecondHand = state.onlineSearchShowSecondHand,
-                amazonOnly = true
-            )
-            all to amazon
         }
     }
-    val allGroups = groupedResults.value.first
-    val amazonGroups = groupedResults.value.second
-    val visibleGroups = if (state.onlineSearchAmazonOnly) amazonGroups else allGroups
+    val visibleGroups = visibleGroupsState.value
     // Store selection is a local view filter over the common Google Shopping response.
     // GAME is not queried separately; it appears only when Shopping reports that merchant.
     val selectedStoreKey = remember(state.onlineSearchQuery, state.onlineSearchProvider) {

@@ -2217,7 +2217,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `missing shopping links receive a Google Shopping fallback instead of being rejected`() {
+    fun `missing shopping links use the known retailer search page instead of Google`() {
         val report = SerpApiClient().parseShoppingResultsDetailed(
             root = JSONObject(
                 """
@@ -2240,8 +2240,39 @@ class ExampleRobolectricTest {
 
         assertEquals(1, report.results.size)
         val result = report.results.single()
-        assertTrue(result.sourceUrl.startsWith("https://www.google.com/search?"))
-        assertEquals("Google Shopping", result.linkType)
+        assertTrue(result.sourceUrl.startsWith("https://www.fnac.es/SearchResult/ResultList.aspx?Search="))
+        assertEquals("Búsqueda en tienda", result.linkType)
+        assertEquals("Fnac", result.storeName)
+        assertEquals(0, report.rejectedForLink)
+    }
+
+    @Test
+    fun `Google Shopping intermediary for a known brand falls back to its store search`() {
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "search_metadata": {"status": "Success"},
+                  "shopping_results": [
+                    {
+                      "title": "Anker Prime 27K Power Bank",
+                      "price": "129,99 €",
+                      "extracted_price": 129.99,
+                      "source": "Anker",
+                      "link": "https://www.google.com/search?tbm=shop&q=Anker+Prime"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "Anker Prime 27K",
+            observedAt = 123L
+        )
+
+        assertEquals(1, report.results.size)
+        val result = report.results.single()
+        assertTrue(result.sourceUrl.startsWith("https://www.anker.com/eu-en/search?q="))
+        assertEquals("Búsqueda en tienda", result.linkType)
         assertEquals(0, report.rejectedForLink)
     }
 

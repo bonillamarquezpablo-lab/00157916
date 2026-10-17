@@ -327,8 +327,20 @@ fun extractDirectRetailerUrl(sourceUrl: String): String? {
     return current.takeIf { !isGoogleShoppingUrl(it) }
 }
 
-fun linkTypeForUrl(sourceUrl: String): String =
-    if (isGoogleShoppingUrl(sourceUrl)) "Google Shopping" else "directo"
+fun linkTypeForUrl(sourceUrl: String): String {
+    if (isGoogleShoppingUrl(sourceUrl)) return "Google Shopping"
+    val uri = runCatching { URI(sourceUrl) }.getOrNull() ?: return "directo"
+    val path = uri.path.orEmpty()
+    val queryKeys = uri.rawQuery.orEmpty()
+        .split('&')
+        .map { it.substringBefore('=').lowercase(Locale.ROOT) }
+    val searchPath = Regex("""(?i)(?:^|/)(?:search|searchresult|s|w)(?:/|$)""")
+        .containsMatchIn(path)
+    val searchQuery = queryKeys.any {
+        it in setOf("q", "query", "search", "searchvalue", "text", "keyword", "ntt", "k")
+    }
+    return if (searchPath || searchQuery) "Búsqueda en tienda" else "directo"
+}
 
 fun isSecondHandCondition(condition: String): Boolean = Regex(
     """(?i)\b(used|second[\s_-]*hand|pre[\s_-]*owned|usad[oa]s?|seminuev[oa]s?|refurbished|reacondicionad[oa]s?|renewed|open[\s_-]*box)\b"""

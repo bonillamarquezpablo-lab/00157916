@@ -591,23 +591,30 @@ class SerpApiClient(
                 return@mapNotNull null
             }
 
-            // Link destination type is recorded separately; an intermediate Google Shopping page
-            // is valid for an otherwise eligible offer.
+            // Prefer a real seller product URL extracted from Google redirects. If the provider
+            // only gives a Google Shopping URL, use the known seller's own search page when
+            // possible so tapping an Anker/Fnac/Amazon offer does not send the user back to Google.
+            // Unknown sellers retain the explicit Google Shopping fallback instead of inventing
+            // an unverified merchant destination.
             val candidateUrls = sequenceOf(
                 item.optString("link_clean"),
                 item.optString("link"),
                 item.optString("product_link")
             ).filter(::isNavigableHttpUrl).toList()
-            // Google may wrap the retailer's real product URL in an /url or /aclk redirect.
-            // Prefer that destination; retain a clearly labeled Google Shopping link only when
-            // the provider supplies no direct destination at all.
-            val url = candidateUrls.firstNotNullOfOrNull(::extractDirectRetailerUrl)
-                ?: candidateUrls.firstOrNull()
+            val providerSource = item.optString("source").trim()
+                .takeIf { it.isNotBlank() && it != "null" }
+            val directRetailerUrl = candidateUrls.firstNotNullOfOrNull(::extractDirectRetailerUrl)
+            val fallbackProviderUrl = candidateUrls.firstOrNull()
+            val knownStore = providerSource?.let { storeName ->
+                Store.findKnownByName(storeName, directRetailerUrl ?: fallbackProviderUrl.orEmpty())
+            }
+            val url = directRetailerUrl
+                ?: knownStore?.takeIf { it.supportsProductSearch }?.searchUrlFor(title)
+                ?: fallbackProviderUrl
                 ?: googleShoppingSearchUrl(title)
             val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()
-            val source = item.optString("source").trim()
-                .takeIf { it.isNotBlank() && it != "null" } ?: humanizeHost(host)
+            val source = providerSource ?: humanizeHost(host)
             val thumbnail = item.optString("thumbnail").takeIf { isHttpsUrl(it) }.orEmpty()
             val delivery = sequenceOf(item.optString("delivery"), item.optString("shipping"))
                 .firstOrNull { it.isNotBlank() && it != "null" }.orEmpty()

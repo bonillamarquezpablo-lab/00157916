@@ -820,11 +820,19 @@ class ExampleRobolectricTest {
                     )
                 )
 
-                assertEquals(1, migratedDatabase.priceObservationDao().getVerifiedObservationCount())
+                assertEquals(
+                    "The migrated rows remain stored but incomplete legacy metadata cannot qualify as a current price",
+                    2,
+                    migratedDatabase.priceObservationDao().getObservationCount("sample-product")
+                )
+                assertEquals(0, migratedDatabase.priceObservationDao().getVerifiedObservationCount())
+                val storedRows = migratedDatabase.priceObservationDao().observeAllStored().first()
+                    .filter { it.productId == "sample-product" }
+                assertEquals(2, storedRows.size)
+                assertTrue("The legacy verified flag and source row must be preserved for diagnosis",
+                    storedRows.any { it.isVerified && it.price == 42.50 })
                 val latestVerified = migratedDatabase.priceObservationDao().getLatestVerified("sample-product")
-                assertNotNull(latestVerified)
-                assertEquals(42.50, latestVerified?.price ?: 0.0, 0.001)
-                assertEquals("Google Shopping", latestVerified?.linkType)
+                assertEquals(null, latestVerified)
             }
         } finally {
             migratedDatabase.close()
@@ -2594,7 +2602,10 @@ class ExampleRobolectricTest {
             val secondHistoryDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT)
                 .format(java.util.Date(productWithDailyHistory.priceHistory[1].timestamp))
             assertTrue("Daily history points must come from distinct calendar dates", firstHistoryDate != secondHistoryDate)
-            assertEquals(4, database.priceObservationDao().getVerifiedObservationCount())
+            assertEquals(
+                4,
+                database.priceObservationDao().getVerifiedObservationCount(nowMillis = nextDay)
+            )
         } finally {
             database.close()
         }

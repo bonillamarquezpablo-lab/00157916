@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
@@ -213,7 +214,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     )
                 }
             }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val trackedProducts: StateFlow<List<Product>> = repository.trackedProductsStream
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -1090,11 +1092,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         showOnlineSearchDiscarded = false,
                         onlineSearchStatus = status
                     )
-                    startFreeArchiveBackfill(safeCachedResults, query, provider)
+                    // Historical archive scans are user-triggered from a product detail sheet.
+                    // Do not start a second crawl automatically during every online search.
                     return@launch
                 }
 
-                val token = serpApiTokenStore.read()
+                val token = withContext(Dispatchers.IO) { serpApiTokenStore.read() }
                 if (token.isNullOrBlank()) {
                     val message = serpApiTokenStore.lastReadErrorMessage()
                         ?: "Para mostrar precios dentro de Mínimo, guarda tu clave de SerpApi en Ajustes. También puedes abrir Amazon con tu sesión iniciada."
@@ -1173,7 +1176,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     showOnlineSearchDiscarded = false,
                     onlineSearchStatus = message
                 )
-                startFreeArchiveBackfill(results, query, provider)
+                // Keep the paid/live search responsive. Historical lookups remain available
+                // via the explicit free-history action in each product detail sheet.
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: SerpApiException) {
@@ -1440,7 +1444,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     private fun onlineHistoryNotice(saved: Int, resultCount: Int): String =
         if (saved > 0) {
-            "Precios de esta búsqueda: $saved observaciones nuevas guardadas en Mercado. Son precios observados ahora, no un historial anterior a la búsqueda. Para consultar precios anteriores, abre la ficha y usa «Comparar tiendas»; solo se mostrarán si la fuente devuelve fechas verificables."
+            "Precios de esta búsqueda: $saved observaciones nuevas guardadas en Mercado. Son precios observados ahora, no un historial anterior a la búsqueda. Para buscar precios anteriores gratis, abre la ficha y pulsa «Buscar histórico gratis · Internet Archive»; solo aparecerán si hay capturas con precios verificables."
         } else {
             "Precios de esta búsqueda: no se añadieron observaciones nuevas porque ya estaban registradas hoy o no pasaron los filtros ($resultCount resultados revisados). El historial anterior se muestra por separado cuando existen fechas verificables."
         }

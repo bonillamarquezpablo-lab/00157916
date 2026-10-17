@@ -352,12 +352,21 @@ fun retailerDestinationForOffer(sourceUrl: String, storeName: String, productTit
         if (!isGoogleShoppingUrl(direct)) return direct
     }
     val uri = runCatching { URI(sourceUrl) }.getOrNull()
-    val catalogProduct = uri?.let {
+    val isGoogleCatalogProduct = uri?.let {
         isGoogleShoppingUrl(sourceUrl) && it.path.orEmpty().contains("/shopping/product/")
     } == true
-    if (catalogProduct) return sourceUrl
+    if (isGoogleCatalogProduct) return sourceUrl
+
+    // Only reroute an indirect URL when it is a generic Google search page. A known retailer's
+    // direct product URL is already returned above; other URLs must not be silently replaced.
+    val genericGoogleSearch = uri?.let {
+        isGoogleShoppingUrl(sourceUrl) &&
+            (it.path.orEmpty() == "/search" || it.path.orEmpty().startsWith("/search/"))
+    } == true
     val store = Store.findKnownByName(storeName, sourceUrl)
-    if (store?.supportsProductSearch == true) return store.searchUrlFor(productTitle)
+    if (genericGoogleSearch && store?.supportsProductSearch == true) {
+        return store.searchUrlFor(productTitle)
+    }
     return sourceUrl.takeIf { it.isNotBlank() }
 }
 

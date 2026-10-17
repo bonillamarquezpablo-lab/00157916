@@ -53,6 +53,22 @@ jobs:
         timeout-minutes: 20
         run: gradle :app:testDebugUnitTest --stacktrace
 
+      - name: Mostrar detalle de las pruebas fallidas
+        if: failure()
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          reports=(app/build/test-results/testDebugUnitTest/*.xml)
+          if [ "${#reports[@]}" -eq 0 ]; then
+            echo "No se generaron informes XML de pruebas unitarias."
+          else
+            for report in "${reports[@]}"; do
+              echo "::group::${report}"
+              cat "${report}"
+              echo "::endgroup::"
+            done
+          fi
+
       - name: Compilar pruebas instrumentadas
         run: gradle :app:compileDebugAndroidTestKotlin --stacktrace
 

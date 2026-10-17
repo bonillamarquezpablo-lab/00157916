@@ -187,7 +187,7 @@ class ProductRepository(
         productDao.getAllProducts(),
         storeDao.getAllStores(),
         trackedDao.getAllTracked(),
-        priceObservationDao.observeAllVerified()
+        priceObservationDao.observeAllStored()
     ) { productEntities, storeEntities, trackedEntities, observations ->
         val stores = storeEntities.map { it.toDomainStore() }.ifEmpty { Store.ALL_STORES }
         val trackingMap = trackedEntities.associateBy { it.productId }
@@ -196,7 +196,7 @@ class ProductRepository(
         productEntities.map { entity ->
             val product = entity.toDomainProduct(
                 stores = stores,
-                verifiedObservations = observationsByProduct[entity.id].orEmpty()
+                allObservations = observationsByProduct[entity.id].orEmpty()
             )
             val trackingInfo = trackingMap[product.id]
             product.copy(
@@ -1450,8 +1450,11 @@ class ProductRepository(
 
     private fun ProductEntity.toDomainProduct(
         stores: List<Store>,
-        verifiedObservations: List<PriceObservationEntity>
+        allObservations: List<PriceObservationEntity>
     ): Product {
+        // Only source-verified observations participate in calculations or current-price status.
+        // Legacy rows are retained separately for display as saved/pending, never as current offers.
+        val verifiedObservations = allObservations.filter { it.isVerified }
         // Only post-policy live rows enter calculated history. Older verified live quotes are
         // handled separately for display below, so they cannot change the low/average/deal claims.
         // Properly provenance-labelled archive and Google insight rows retain their independent path.
@@ -1537,7 +1540,20 @@ class ProductRepository(
         val savedHistoricalObservation = if (!priceIsVerified) {
             val verifiedArchived = snapshotHistory.filter(::isHistoricalDisplayObservation)
             val savedLegacyLive = verifiedObservations.filter(::isPrePolicySavedLiveObservation)
-            (verifiedArchived + savedLegacyLive).maxByOrNull { it.observedAt }
+            val recoverableStoredRows = allObservations.filter { observation ->
+                observation.currency.trim().equals("EUR", ignoreCase = true) &&
+                    observation.price.isFinite() &&
+                    observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
+                    observation.observedAt in 1L..System.currentTimeMillis() &&
+                    observation.productTitle.isNotBlank() &&
+                    isEligibleHistoryTitle(observation.productTitle) &&
+                    isSafeCatalogTitleMatch(observation.productTitle, title) &&
+                    !isPromotionalBulkListing(observation.productTitle, "") &&
+                    parseHttpUri(observation.sourceUrl) != null &&
+                    !observation.sourceUrl.contains("google.com/search", ignoreCase = true) &&
+                    !observation.sourceUrl.contains("web.archive.org", ignoreCase = true)
+            }
+            (verifiedArchived + savedLegacyLive + recoverableStoredRows).maxByOrNull { it.observedAt }
         } else null
 
         return Product(

@@ -189,45 +189,61 @@ fun OnlineSearchScreen(
     }
     fun storeKey(offer: SerpApiShoppingResult): String = onlineOfferStoreKey(offer)
 
-    val storeChoices = remember(
-        visibleGroups,
-        state.onlineSearchResults,
-        state.onlineSearchQuery,
-        state.onlineSearchAmazonOnly,
-        state.onlineSearchShowSecondHand,
-        state.onlineSearchProvider
+    // These transformations can touch every offer and merchant. Keep them off the
+    // Compose/UI thread so filter taps and scrolling remain responsive on large responses.
+    val storeChoicesState = produceState(
+        initialValue = emptyList<StoreFilterChoice>(),
+        visibleGroups
     ) {
-        visibleGroups.flatMap { it.group.offers }
-            .distinctBy(::storeKey)
-            .map { offer ->
-                val known = Store.findKnownByName(offer.storeName, offer.sourceUrl)
-                StoreFilterChoice(
-                    key = storeKey(offer),
-                    label = known?.name ?: offer.storeName.trim()
-                )
-            }
-            .sortedBy { it.label.lowercase(Locale.ROOT) }
+        value = withContext(Dispatchers.Default) {
+            visibleGroups.flatMap { it.group.offers }
+                .distinctBy(::storeKey)
+                .map { offer ->
+                    val known = Store.findKnownByName(offer.storeName, offer.sourceUrl)
+                    StoreFilterChoice(
+                        key = storeKey(offer),
+                        label = known?.name ?: offer.storeName.trim()
+                    )
+                }
+                .sortedBy { it.label.lowercase(Locale.ROOT) }
+        }
     }
-    val filteredGroups = remember(
+    val storeChoices = storeChoicesState.value
+
+    val filteredGroupsState = produceState(
+        initialValue = visibleGroups,
         visibleGroups,
-        state.onlineSearchResults,
-        state.onlineSearchQuery,
-        state.onlineSearchAmazonOnly,
-        state.onlineSearchShowSecondHand,
         selectedStoreKey.value
     ) {
-        visibleGroups.mapNotNull { displayGroup ->
-            val offers = displayGroup.group.offers.filter { offer ->
-                selectedStoreKey.value == null || storeKey(offer) == selectedStoreKey.value
+        val selectedKey = selectedStoreKey.value
+        value = withContext(Dispatchers.Default) {
+            if (selectedKey == null) {
+                visibleGroups
+            } else {
+                visibleGroups.mapNotNull { displayGroup ->
+                    val offers = displayGroup.group.offers.filter { offer ->
+                        storeKey(offer) == selectedKey
+                    }
+                    if (offers.isEmpty()) null
+                    else displayGroup.copy(group = displayGroup.group.copy(offers = offers))
+                }.sortedBy { it.group.minPrice }
             }
-            if (offers.isEmpty()) null
-            else displayGroup.copy(group = displayGroup.group.copy(offers = offers))
-        }.sortedBy { it.group.minPrice }
+        }
     }
-    // Model choices are based on the full provider result, not the active retailer filter.
-    val familyBuckets = remember(visibleGroups, state.onlineSearchQuery) {
-        buildConsoleModelBuckets(state.onlineSearchQuery, visibleGroups.map { it.group })
+    val filteredGroups = filteredGroupsState.value
+
+    // Family bucket classification can scan all grouped titles; do not perform it during composition.
+    // Model choices stay independent of the selected individual store filter.
+    val familyBucketsState = produceState(
+        initialValue = emptyList<ConsoleModelBucket>(),
+        visibleGroups,
+        state.onlineSearchQuery
+    ) {
+        value = withContext(Dispatchers.Default) {
+            buildConsoleModelBuckets(state.onlineSearchQuery, visibleGroups.map { it.group })
+        }
     }
+    val familyBuckets = familyBucketsState.value
     val selectedBucket = familyBuckets.firstOrNull { it.key == selectedConsoleModelKey.value }
     val showConsoleModelPicker =
         isConsoleFamilyOverviewQuery(state.onlineSearchQuery) && familyBuckets.isNotEmpty()

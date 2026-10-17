@@ -177,7 +177,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     val query = state.searchQuery.trim().lowercase()
                     product.title.lowercase().contains(query) ||
                     product.brand.lowercase().contains(query) ||
-                    product.ean.contains(query) ||
+                    (product.isEanVerified && product.ean.contains(query)) ||
                     product.category.displayName.lowercase().contains(query) ||
                     product.currentStore.name.lowercase().contains(query) ||
                     product.currentStore.domain.lowercase().contains(query)
@@ -766,7 +766,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         }
         val targets = requestedTargets.take(minOf(requestedTargets.size, capacity, MAX_TRACKED_REFRESH_PER_TAP))
         val requests = targets.map { product ->
-            SerpApiRequestProduct(id = product.id, title = product.title, brand = product.brand, ean = product.ean)
+            SerpApiRequestProduct(id = product.id, title = product.title, brand = product.brand, ean = product.ean.takeIf { product.isEanVerified }.orEmpty())
         }
         val attemptedIds = linkedSetOf<String>()
         val batch = serpApiClient.searchProducts(

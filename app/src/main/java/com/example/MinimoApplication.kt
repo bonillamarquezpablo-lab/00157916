@@ -18,6 +18,12 @@ class MinimoApplication : Application() {
                 MinimoUncaughtExceptionHandler(this, previous)
             )
         }
+        // Android's exit history also covers cases that bypass the uncaught-exception handler,
+        // including ANRs and user-requested force-stops. Reports remain local and redacted.
+        runCatching { ProcessExitDiagnostics(this).captureLatestPreviousExit() }
+            .onFailure {
+                Log.e(TAG, "Could not inspect the previous process exit (${it.javaClass.name}).")
+            }
     }
 
     private class MinimoUncaughtExceptionHandler(

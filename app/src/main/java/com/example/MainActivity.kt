@@ -38,20 +38,37 @@ import com.example.ui.viewmodel.PriceTrackerViewModel
 class MainActivity : ComponentActivity() {
     private val viewModel: PriceTrackerViewModel by viewModels()
     private lateinit var crashStore: CrashReportStore
+    private lateinit var processExitDiagnostics: ProcessExitDiagnostics
     private var pendingCrashReport by mutableStateOf<String?>(null)
     private var showMissingCrashReport by mutableStateOf(false)
 
+    private fun readLatestReport(): String? =
+        crashStore.readLast() ?: processExitDiagnostics.readLast()
+
+    /** Clear only the report the user is viewing, then reveal another queued diagnostic if present. */
+    private fun dismissDisplayedReport() {
+        val displayed = pendingCrashReport
+        val fatalReport = crashStore.readLast()
+        if (fatalReport != null && displayed == fatalReport) {
+            crashStore.clear()
+        } else {
+            processExitDiagnostics.clear()
+        }
+        pendingCrashReport = readLatestReport()
+    }
+
     override fun onResume() {
         super.onResume()
-        if (::crashStore.isInitialized && pendingCrashReport == null) {
-            crashStore.readLast()?.let { pendingCrashReport = it }
+        if (::crashStore.isInitialized && ::processExitDiagnostics.isInitialized && pendingCrashReport == null) {
+            readLatestReport()?.let { pendingCrashReport = it }
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         crashStore = CrashReportStore(applicationContext)
-        pendingCrashReport = crashStore.readLast()
+        processExitDiagnostics = ProcessExitDiagnostics(applicationContext)
+        pendingCrashReport = readLatestReport()
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
@@ -59,7 +76,7 @@ class MainActivity : ComponentActivity() {
                     MainScreen(
                         viewModel = viewModel,
                         onOpenCrashReport = {
-                            val report = crashStore.readLast()
+                            val report = readLatestReport()
                             if (report.isNullOrBlank()) {
                                 showMissingCrashReport = true
                             } else {
@@ -75,9 +92,9 @@ class MainActivity : ComponentActivity() {
                             title = { Text("Informes de cierre") },
                             text = {
                                 Text(
-                                    "No hay ningún informe de excepción fatal guardado. " +
-                                        "Este registro no detecta las detenciones manuales desde Ajustes de Android " +
-                                        "ni todos los bloqueos ANR."
+                                    "No hay ningún informe del cierre anterior disponible. " +
+                                        "Android 11 o posterior puede informar de algunos cierres forzados y bloqueos ANR; " +
+                                        "no todos los cierres dejan un registro recuperable."
                                 )
                             },
                             confirmButton = {
@@ -92,7 +109,15 @@ class MainActivity : ComponentActivity() {
                     if (report != null) {
                         AlertDialog(
                             onDismissRequest = { /* The user chooses whether to keep or clear the report. */ },
-                            title = { Text("Mínimo se cerró inesperadamente") },
+                            title = {
+                                Text(
+                                    if (report.startsWith("Mínimo — informe local de cierre inesperado")) {
+                                        "Mínimo se cerró inesperadamente"
+                                    } else {
+                                        "Diagnóstico del cierre anterior"
+                                    }
+                                )
+                            },
                             text = {
                                 Column(
                                     modifier = Modifier
@@ -120,9 +145,11 @@ class MainActivity : ComponentActivity() {
                                                 ClipData.newPlainText("Informe de cierre de Mínimo", report)
                                             )
                                         }.onSuccess {
-                                            Toast.makeText(this@MainActivity, "Informe copiado", Toast.LENGTH_SHORT).show()
-                                            crashStore.clear()
-                                            pendingCrashReport = null
+                                            Toast.makeText(
+                                                this@MainActivity,
+                                                "Informe copiado; sigue guardado hasta pulsar Continuar",
+                                                Toast.LENGTH_LONG
+                                            ).show()
                                         }.onFailure {
                                             Toast.makeText(this@MainActivity, "No se pudo copiar el informe", Toast.LENGTH_SHORT).show()
                                         }
@@ -147,8 +174,7 @@ class MainActivity : ComponentActivity() {
                             },
                             dismissButton = {
                                 TextButton(onClick = {
-                                    crashStore.clear()
-                                    pendingCrashReport = null
+                                    dismissDisplayedReport()
                                 }) {
                                     Text("Continuar")
                                 }

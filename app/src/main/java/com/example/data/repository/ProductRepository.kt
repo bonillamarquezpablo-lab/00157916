@@ -459,6 +459,15 @@ class ProductRepository(
 
     private fun isEligibleObservationForHistory(observation: PriceObservationEntity): Boolean {
         val archiveBacked = isArchiveBackedObservation(observation)
+        val isHistoricalInsight = observation.evidenceType.equals("google_insights", ignoreCase = true)
+        val now = System.currentTimeMillis()
+        // Live providers may differ from the device clock by a few minutes. Imported history must
+        // always be in the past; malformed future-dated legacy rows remain stored but are ignored.
+        val latestAllowedTimestamp = if (archiveBacked || isHistoricalInsight) {
+            now
+        } else {
+            now + MAX_FUTURE_TIMESTAMP_SKEW_MS
+        }
         val merchantUrl = if (archiveBacked) {
             // Derive the merchant from the archived target itself. sourcePageUrl is only
             // supplementary legacy metadata and must not redirect seller validation to a
@@ -489,6 +498,8 @@ class ProductRepository(
 
         return observation.isVerified &&
             observation.productId.isNotBlank() &&
+            observation.storeId.isNotBlank() &&
+            observation.observedAt in 1L..latestAllowedTimestamp &&
             isEuroCurrency(observation.currency) &&
             observation.price.isFinite() &&
             observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
@@ -1334,6 +1345,7 @@ class ProductRepository(
         }.timeInMillis
         const val MIN_HISTORY_PRICE_EUR = 0.50
         const val MAX_HISTORY_PRICE_EUR = 10000.0
+        const val MAX_FUTURE_TIMESTAMP_SKEW_MS = 5L * 60L * 1000L
         const val MIN_OUTLIER_PRICE_RATIO = 0.20
         const val ACCESSORY_PRICE_RATIO = 0.25
         val TITLE_STOP_WORDS = setOf(

@@ -1630,9 +1630,20 @@ class SerpApiClient(
         }
         if (title.none { it in categoryAliases }) return false
         val requestedBrands = query - broadFamilies - STOP_WORDS
-        // Generic family-only query returns the category; a brand-specific family query also
-        // requires that brand to appear in the listing title.
-        return requestedBrands.all { brand -> title.any { token -> token == brand || token.startsWith(brand) } }
+        // A broad family lookup should not insist that every word of the query is in the
+        // retailer title: Spanish/English spellings and "electric" are often omitted.
+        val familyBrandAliases = mapOf(
+            "xiaomi" to setOf("xiaomi", "mi", "mijia"),
+            "apple" to setOf("apple"),
+            "samsung" to setOf("samsung", "galaxy"),
+            "sony" to setOf("sony"),
+            "lenovo" to setOf("lenovo", "thinkpad", "legion"),
+            "anker" to setOf("anker", "soundcore")
+        )
+        return requestedBrands.all { brand ->
+            val aliases = familyBrandAliases[brand] ?: setOf(brand)
+            title.any { token -> token in aliases || token == brand || token.startsWith(brand) }
+        }
     }
 
     private fun isHallEffectKeyboardSearch(value: String): Boolean {

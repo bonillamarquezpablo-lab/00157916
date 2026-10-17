@@ -1492,6 +1492,11 @@ class ProductRepository(
         // Keep one point per local day AND evidence series. A live quote, Wayback capture and
         // Google historical insight on the same date remain distinct; external points cannot
         // silently replace or strengthen the live series.
+        val daysWithLiveObservation = sortedHistory
+            .asSequence()
+            .filter(::isLiveObservation)
+            .map { localDayBounds(it.observedAt).first }
+            .toSet()
         val snapshotHistory = sortedHistory
             .groupBy { observation ->
                 val series = when {
@@ -1504,6 +1509,13 @@ class ProductRepository(
             }
             .values
             .mapNotNull { seriesOffers -> seriesOffers.minByOrNull { it.price } }
+            // Prefer the live quote for a calendar day that has one. The archived database row
+            // remains intact and can be queried again, but it cannot add a duplicate chart point
+            // or change that day's live-price history.
+            .filter { observation ->
+                isLiveObservation(observation) ||
+                    localDayBounds(observation.observedAt).first !in daysWithLiveObservation
+            }
             .sortedBy { it.observedAt }
         val liveSnapshotHistory = snapshotHistory.filter(::isLiveObservation)
         val latestObservation = latestBatch.minByOrNull { it.price }

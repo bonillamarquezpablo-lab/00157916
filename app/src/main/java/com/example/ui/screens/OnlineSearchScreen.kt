@@ -424,12 +424,12 @@ fun OnlineSearchScreen(
                             FilterChip(
                                 selected = !state.onlineSearchAmazonOnly,
                                 onClick = { onAmazonOnlyChange(false) },
-                                label = { Text("Todos (${allGroups.size})") }
+                                label = { Text("Todas las ofertas") }
                             )
                             FilterChip(
                                 selected = state.onlineSearchAmazonOnly,
                                 onClick = { onAmazonOnlyChange(true) },
-                                label = { Text("Solo Amazon (${amazonGroups.size})") }
+                                label = { Text("Solo Amazon") }
                             )
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

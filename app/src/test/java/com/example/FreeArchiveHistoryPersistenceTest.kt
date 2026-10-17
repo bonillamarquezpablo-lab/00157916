@@ -62,7 +62,7 @@ class FreeArchiveHistoryPersistenceTest {
                     avg90dPrice = 0.0,
                     officialPvp = 0.0,
                     currentStoreId = "pccomponentes",
-                    storeUrl = originalUrl,
+                    storeUrl = "https://www.google.com/shopping/product/123456789?hl=es",
                     ean = "",
                     // Simulate a stale cached flag from an old live quote.
                     isPriceVerified = true
@@ -313,6 +313,75 @@ class FreeArchiveHistoryPersistenceTest {
             assertEquals(1, repository.recordArchivedPriceHistory(title, originalUrl, "PcComponentes", listOf(quote)))
             assertEquals("Do not contaminate the Amazon listing", 0, database.priceObservationDao().getObservationCount("duplicate-amazon"))
             assertEquals("Save history on the matching retailer listing", 1, database.priceObservationDao().getObservationCount("duplicate-pccomponentes"))
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun googleShoppingOnlyHistoryIsRejectedWhenDuplicateProductCardsAreAmbiguous() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        val title = "Anker Prime 27K Power Bank"
+        val googleOnlyUrl = "https://www.google.com/shopping/product/123456789?hl=es"
+        val originalUrl = "https://www.pccomponentes.com/anker-prime-27k"
+        val timestampFormat = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val rawTimestamp = timestampFormat.format(
+            Date(System.currentTimeMillis() - 60L * 24L * 60L * 60L * 1000L)
+        )
+        val archivedAt = timestampFormat.parse(rawTimestamp)!!.time
+        val snapshotUrl = "https://web.archive.org/web/${rawTimestamp}id_/${originalUrl}"
+
+        fun product(id: String, storeId: String) = ProductEntity(
+            id = id,
+            title = title,
+            brand = "Anker",
+            category = "HOME_APPLIANCES",
+            currentPrice = 499.99,
+            athMinPrice = 499.99,
+            athMinDate = "Historial en construcción",
+            athMinStore = storeId,
+            athMaxPrice = 499.99,
+            avg90dPrice = 0.0,
+            officialPvp = 0.0,
+            currentStoreId = storeId,
+            storeUrl = googleOnlyUrl,
+            ean = "",
+            isPriceVerified = false
+        )
+
+        try {
+            database.productDao().insert(product("google-only-duplicate-a", "pccomponentes"))
+            database.productDao().insert(product("google-only-duplicate-b", "amazon_es"))
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val quote = ArchivedPriceQuote(
+                observedAt = archivedAt,
+                price = 89.99,
+                currency = "EUR",
+                productTitle = title,
+                originalUrl = originalUrl,
+                snapshotUrl = snapshotUrl
+            )
+
+            assertEquals(
+                "Two cards with the same title and only Google links must not receive an arbitrary archive match",
+                0,
+                repository.recordArchivedPriceHistory(title, originalUrl, "PcComponentes", listOf(quote))
+            )
+            assertEquals(0, database.priceObservationDao().getObservationCount("google-only-duplicate-a"))
+            assertEquals(0, database.priceObservationDao().getObservationCount("google-only-duplicate-b"))
         } finally {
             database.close()
         }

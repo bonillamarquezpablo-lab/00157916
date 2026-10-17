@@ -1485,6 +1485,11 @@ class SerpApiClient(
             requestedFootwearBrandMatches(requested, returned)
         ) return true
 
+        // A brand + generic product family query is intentionally broad.
+        // Return related models so the user can choose one; exact variant checking remains
+        // in the strict persistence/history filters and in the selected-model search.
+        if (isBroadFamilyOverviewQuery(requested, returned)) return true
+
         val orderedWanted = normalize(requested)
             .replace(Regex("(\\d+)\\s?(gb|tb|mb)\\b"), "$1 $2")
             .split(' ')
@@ -1590,6 +1595,44 @@ class SerpApiClient(
         val compactTitle = normalize(returned).replace(" ", "")
         return compactQuery.length >= 8 && compactTitle.length >= 8 &&
             (compactTitle.contains(compactQuery) || compactQuery.contains(compactTitle))
+    }
+
+    /**
+     * Broad family searches are discovery queries (e.g. "Xiaomi scooter"), not exact-model
+     * price verification. Keep products from the requested family visible for model selection.
+     * This does not weaken the repository's strict model checks before saving price history.
+     */
+    private fun isBroadFamilyOverviewQuery(requested: String, returned: String): Boolean {
+        val query = normalize(requested).split(' ').filter { it.length > 1 && it !in STOP_WORDS }.toSet()
+        if (query.size !in 2..4) return false
+        val broadFamilies = setOf(
+            "scooter", "scooters", "patinete", "patinetes",
+            "movil", "moviles", "telefono", "telefonos", "smartphone", "smartphones",
+            "tablet", "tablets", "portatil", "portatiles", "laptop", "laptops",
+            "auriculares", "headphones", "televisor", "televisores", "tv",
+            "robot", "aspiradora", "aspiradoras", "bicicleta", "bicicletas"
+        )
+        if (query.none { it in broadFamilies }) return false
+        val family = query.firstOrNull { it in broadFamilies } ?: return false
+        val title = normalize(returned).split(' ').filter { it.isNotBlank() }.toSet()
+        val categoryAliases = when (family) {
+            "scooter", "scooters", "patinete", "patinetes" ->
+                setOf("scooter", "scooters", "patinete", "patinetes", "trotinete")
+            "movil", "moviles", "telefono", "telefonos", "smartphone", "smartphones" ->
+                setOf("movil", "moviles", "telefono", "telefonos", "smartphone", "smartphones", "iphone")
+            "tablet", "tablets" -> setOf("tablet", "tablets", "ipad")
+            "portatil", "portatiles", "laptop", "laptops" -> setOf("portatil", "portatiles", "laptop", "notebook")
+            "auriculares", "headphones" -> setOf("auricular", "auriculares", "headphone", "headphones", "earbuds")
+            "televisor", "televisores", "tv" -> setOf("televisor", "televisores", "television", "tv", "oled", "qled")
+            "robot", "aspiradora", "aspiradoras" -> setOf("aspiradora", "aspiradoras", "robot", "vacuum", "roomba")
+            "bicicleta", "bicicletas" -> setOf("bicicleta", "bicicletas", "bike", "bicycle")
+            else -> setOf(family)
+        }
+        if (title.none { it in categoryAliases }) return false
+        val requestedBrands = query - broadFamilies - STOP_WORDS
+        // Generic family-only query returns the category; a brand-specific family query also
+        // requires that brand to appear in the listing title.
+        return requestedBrands.all { brand -> title.any { token -> token == brand || token.startsWith(brand) } }
     }
 
     private fun isHallEffectKeyboardSearch(value: String): Boolean {

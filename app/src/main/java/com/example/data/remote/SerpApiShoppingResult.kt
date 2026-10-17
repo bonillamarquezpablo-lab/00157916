@@ -237,6 +237,46 @@ internal fun isGameSpainOffer(offer: SerpApiShoppingResult): Boolean =
     Store.findKnownByName(offer.storeName, offer.sourceUrl)?.id == Store.GAME.id
 
 /**
+ * Supplement the common search with GAME only for gaming-related queries that did not already
+ * return an identified GAME offer. Unrelated searches do not consume an extra query.
+ */
+internal fun shouldSearchGameSupplement(
+    query: String,
+    existingOffers: List<SerpApiShoppingResult>
+): Boolean {
+    if (existingOffers.any(::isGameSpainOffer)) return false
+    val normalized = Normalizer.normalize(query.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+        .replace(Regex("[^a-z0-9]+"), " ")
+        .trim()
+        .split(" ")
+        .filter { it.isNotBlank() }
+        .toSet()
+    val gamingIntent = setOf(
+        "ps5", "playstation", "xbox", "nintendo", "switch", "consola", "consolas",
+        "console", "consoles", "videojuego", "videojuegos", "juego", "juegos", "gaming",
+        "gamepad", "mando", "mandos", "controller", "controllers", "steam", "deck", "rog", "ally"
+    )
+    return normalized.any { it in gamingIntent }
+}
+
+/** Merge only positively identified GAME offers from the supplemental Shopping query. */
+internal fun mergeGoogleShoppingWithGameSupplement(
+    primaryOffers: List<SerpApiShoppingResult>,
+    supplementalOffers: List<SerpApiShoppingResult>
+): List<SerpApiShoppingResult> {
+    val combined = primaryOffers + supplementalOffers.filter(::isGameSpainOffer)
+    return combined.distinctBy { offer ->
+        val normalizedTitle = Normalizer.normalize(offer.title.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+            .replace(Regex("[^a-z0-9]+"), " ")
+            .trim()
+            .replace(Regex(" +"), " ")
+        val storeKey = Store.findKnownByName(offer.storeName, offer.sourceUrl)?.id
+            ?: offer.storeName.trim().lowercase(Locale.ROOT)
+        normalizedTitle + "|" + storeKey + "|" + String.format(Locale.ROOT, "%.2f", offer.price)
+    }
+}
+
+/**
  * Return a retailer destination if a provider URL is already direct or if a Google redirect
  * embeds the actual destination. Never treats a generic Google Shopping/search page as a seller URL.
  */

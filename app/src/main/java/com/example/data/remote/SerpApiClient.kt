@@ -228,6 +228,24 @@ class SerpApiClient(
     }
 
     /**
+     * Internal supplement for the unified search, never a separate retailer button.
+     * Called only if the general search contains no identified GAME offer and there is
+     * enough remaining quota for an additional Google Shopping request.
+     */
+    suspend fun searchGameSupplementWithDiagnostics(
+        token: String,
+        query: String
+    ): SerpApiShoppingSearchReport = withContext(Dispatchers.IO) {
+        val apiKey = token.trim()
+        require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
+        val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(100)
+        require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
+        val targetedQuery = normalizedQuery + " GAME España"
+        val response = executeSearch(apiKey, targetedQuery)
+        parseShoppingResultsDetailed(response, normalizedQuery).copy(rawResponse = response.toString())
+    }
+
+    /**
      * Search Amazon.es itself, rather than Google Shopping. This still returns a public search
      * snapshot through SerpApi; it cannot see the user's signed-in account or personalized coupons.
      */
@@ -1608,6 +1626,7 @@ class SerpApiClient(
             val merchant = normalize(merchantName)
             val knownStoreId = when {
                 "amazon" in merchant -> "amazon_es"
+                merchant == "game" || merchant == "game es" || "game espana" in merchant -> "game"
                 "pccomponentes" in merchant -> "pccomponentes"
                 "mediamarkt" in merchant -> "mediamarkt"
                 "el corte ingles" in merchant -> "elcorteingles"

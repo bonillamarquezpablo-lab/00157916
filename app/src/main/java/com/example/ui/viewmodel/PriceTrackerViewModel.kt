@@ -10,6 +10,9 @@ import com.example.data.remote.WaybackPriceHistoryClient
 import com.example.data.remote.isGoogleShoppingUrl
 import com.example.data.remote.extractDirectRetailerUrl
 import com.example.data.remote.onlineProductIdentityKey
+import com.example.data.remote.isGameSpainOffer
+import com.example.data.remote.mergeGoogleShoppingWithGameSupplement
+import com.example.data.remote.shouldSearchGameSupplement
 import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.SerpApiAccountInfo
 import com.example.data.remote.SerpApiClient
@@ -123,6 +126,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     private val onlineSearchCache = OnlineSearchCache(application)
     private val waybackPriceHistoryClient = WaybackPriceHistoryClient(application)
     private val onlineDiscardedCache = mutableMapOf<String, List<RejectedOnlineOffer>>()
+
+    private fun searchCacheProviderKey(provider: OnlineSearchProvider): String =
+        if (provider == OnlineSearchProvider.GOOGLE_SHOPPING) {
+            // Do not reuse pre-update general-only snapshots that contain no GAME supplement.
+            "GOOGLE_SHOPPING_UNIFIED_GAME_V1"
+        } else provider.name
 
     private fun onlineSearchCacheKey(provider: OnlineSearchProvider, query: String): String =
         "${provider.name}|${query.trim().lowercase(Locale.ROOT)}"
@@ -998,7 +1007,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             showSnackbar(message)
             return
         }
-        onlineSearchCache.invalidate(current.onlineSearchProvider.name, query)
+        onlineSearchCache.invalidate(searchCacheProviderKey(current.onlineSearchProvider), query)
         startOnlineSearch(current.onlineSearchProvider)
     }
 
@@ -1032,7 +1041,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 // Cache lookup comes first: saved results remain usable even if the quota is empty
                 // or the API key was removed after the previous search.
                 val cached = withContext(Dispatchers.IO) {
-                    onlineSearchCache.read(provider.name, query)
+                    onlineSearchCache.read(searchCacheProviderKey(provider), query)
                 }
                 if (cached != null && (cached.rawResponse != null || cached.results.isNotEmpty())) {
                     // Parsing stored JSON and classifying offers can be CPU-heavy. Keep it off
@@ -1132,14 +1141,54 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     OnlineSearchProvider.AMAZON ->
                         serpApiClient.searchAmazonOnlineWithDiagnostics(token, query)
                 }
-                // The offer safety checks use many title/model rules. Run both passes on a
-                // background dispatcher rather than blocking Compose while results arrive.
+
+                var providerResults = providerReport.results
+                var providerDiscardedOffers = providerReport.discardedOffers
+                var providerRawResultCount = providerReport.rawResultCount
+                var gameSupplementAttempted = false
+                var gameSupplementSucceeded = false
+                var gameSupplementNote = ""
+
+                // GAME is part of this same search flow. Only gaming-related queries with no
+                // identified GAME offer may trigger one optional Shopping supplement.
+                // At least two credits must have remained before the primary request.
+                if (provider == OnlineSearchProvider.GOOGLE_SHOPPING &&
+                    shouldSearchGameSupplement(query, providerResults)
+                ) {
+                    if (accountCapacity(accountInfo) >= 2) {
+                        gameSupplementAttempted = true
+                        try {
+                            val gameReport = serpApiClient.searchGameSupplementWithDiagnostics(token, query)
+                            val identifiedGameOffers = gameReport.results.count(::isGameSpainOffer)
+                            providerResults = mergeGoogleShoppingWithGameSupplement(
+                                primaryOffers = providerResults,
+                                supplementalOffers = gameReport.results
+                            )
+                            providerDiscardedOffers = providerDiscardedOffers + gameReport.discardedOffers
+                            providerRawResultCount += gameReport.rawResultCount
+                            gameSupplementSucceeded = true
+                            gameSupplementNote = if (identifiedGameOffers > 0) {
+                                "Búsqueda unificada: se han añadido $identifiedGameOffers ofertas identificadas como GAME España. La consulta complementaria puede consumir una búsqueda adicional."
+                            } else {
+                                "Se consultó GAME dentro de la búsqueda unificada, pero Google Shopping no devolvió ofertas identificables de esa tienda. No se ha inventado ningún precio."
+                            }
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            // A secondary retailer lookup must never discard valid general results.
+                            gameSupplementNote = "El complemento automático de GAME no respondió; se conservan los resultados generales."
+                        }
+                    } else {
+                        gameSupplementNote = "No se ha consultado GAME por separado porque el saldo disponible solo permite priorizar la búsqueda general."
+                    }
+                }
+
+                // Keep CPU-heavy product relevance filtering off Android's UI thread.
                 val (results, discarded) = withContext(Dispatchers.Default) {
-                    val rawResults = providerReport.results
+                    val rawResults = providerResults
                     val repositoryDiscarded = repository.diagnoseOnlineSearchRejections(rawResults, query)
-                    // Use the same plausibility rules for visible cards, cache entries and Room history.
                     val accepted = repository.filterOnlineSearchResults(rawResults, query)
-                    val rejected = (providerReport.discardedOffers + repositoryDiscarded)
+                    val rejected = (providerDiscardedOffers + repositoryDiscarded)
                         .distinctBy { "${it.provider}|${it.title}|${it.priceLabel}|${it.reason}" }
                     accepted to rejected
                 }
@@ -1149,28 +1198,38 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         repository.recordOnlineSearchResults(results, provider.name, query)
                     }
                 } else 0
-                // Cache the raw provider response for 24 hours so future filters can reclassify it.
-                providerReport.rawResponse?.let { rawResponse ->
+
+                // Cache the merged snapshot only after the supplement succeeds. Otherwise retain
+                // the primary raw response so accepted/rejected offers can be reclassified.
+                if (gameSupplementSucceeded) {
                     withContext(Dispatchers.IO) {
-                        onlineSearchCache.writeRaw(provider.name, query, rawResponse)
+                        onlineSearchCache.write(searchCacheProviderKey(provider), query, providerResults)
+                    }
+                } else {
+                    providerReport.rawResponse?.let { rawResponse ->
+                        withContext(Dispatchers.IO) {
+                            onlineSearchCache.writeRaw(searchCacheProviderKey(provider), query, rawResponse)
+                        }
                     }
                 }
-                val base = if (results.isEmpty() && providerReport.rawResultCount > 0) {
+                val base = if (results.isEmpty() && providerRawResultCount > 0) {
                     providerReport.emptyResultMessage(query)
                 } else {
                     onlineSearchResultMessage(results, provider, query)
                 }
-                // The balance was checked before the query. Skip a second post-search round trip
-                // so results settle sooner; state clearly that this displayed balance is pre-query.
-                val quotaNote = "Saldo comprobado antes de buscar: ${accountInfo.quotaSummary()} Esta consulta puede haber consumido una búsqueda."
+                val quotaNote = if (gameSupplementAttempted) {
+                    "Saldo comprobado antes de buscar: ${accountInfo.quotaSummary()} La búsqueda general y el complemento de GAME pueden consumir hasta dos búsquedas."
+                } else {
+                    "Saldo comprobado antes de buscar: ${accountInfo.quotaSummary()} La búsqueda general puede haber consumido una búsqueda."
+                }
                 val filterNote = onlineFilterNotice(discarded)
                 val historyNote = if (results.isNotEmpty()) {
                     onlineHistoryNotice(savedObservations, results.size)
                 } else ""
-                val message = listOf(base, quotaNote, filterNote, historyNote)
+                val message = listOf(base, quotaNote, gameSupplementNote, filterNote, historyNote)
                     .map { it.trim() }
                     .filter { it.isNotBlank() }
-                    .joinToString("\n\n")
+                    .joinToString("\\n\\n")
                 _uiState.value = _uiState.value.copy(
                     onlineSearchResults = results,
                     onlineSearchDiscardedOffers = discarded,

@@ -1452,12 +1452,14 @@ class ProductRepository(
         stores: List<Store>,
         verifiedObservations: List<PriceObservationEntity>
     ): Product {
-        // The cutoff applies when ingesting new online results, not when reading previously
-        // saved rows. Keep old verified quotes visible after full source/title/price validation;
-        // freshness and the price-display status prevent stale quotes from being called current.
-        val sortedHistory = verifiedObservations
-            .filter(::isEligibleObservationForHistory)
-            .sortedBy { it.observedAt }
+        // Only post-policy live rows enter calculated history. Older verified live quotes are
+        // handled separately for display below, so they cannot change the low/average/deal claims.
+        // Properly provenance-labelled archive and Google insight rows retain their independent path.
+        val sortedHistory = verifiedObservations.filter { observation ->
+            val eligibleDate = observation.evidenceType in setOf("archive", "google_insights") ||
+                observation.observedAt >= HISTORY_START_TIMESTAMP
+            eligibleDate && isEligibleObservationForHistory(observation)
+        }.sortedBy { it.observedAt }
         // Only current search observations establish the live price. Historical-provider points
         // remain visible on the chart but can never replace the current quote.
         val liveHistory = sortedHistory.filter(::isLiveObservation)
@@ -1533,7 +1535,9 @@ class ProductRepository(
             )
         }
         val savedHistoricalObservation = if (!priceIsVerified) {
-            snapshotHistory.filter(::isHistoricalDisplayObservation).maxByOrNull { it.observedAt }
+            val verifiedArchived = snapshotHistory.filter(::isHistoricalDisplayObservation)
+            val savedLegacyLive = verifiedObservations.filter(::isPrePolicySavedLiveObservation)
+            (verifiedArchived + savedLegacyLive).maxByOrNull { it.observedAt }
         } else null
 
         return Product(
@@ -1579,6 +1583,15 @@ class ProductRepository(
                 .orEmpty()
         )
     }
+
+    /**
+     * Previously saved live prices before the policy cutoff stay visible as stale saved quotes.
+     * They are not allowed into the comparison history or to influence minimum/average claims.
+     */
+    private fun isPrePolicySavedLiveObservation(observation: PriceObservationEntity): Boolean =
+        isLiveObservation(observation) &&
+            observation.observedAt in 1L until HISTORY_START_TIMESTAMP &&
+            isEligibleObservationForHistory(observation)
 
     private fun isHistoricalDisplayObservation(observation: PriceObservationEntity): Boolean {
         val evidenceType = observation.evidenceType.lowercase(Locale.ROOT)

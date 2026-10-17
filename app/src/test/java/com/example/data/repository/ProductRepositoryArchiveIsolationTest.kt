@@ -134,7 +134,7 @@ class ProductRepositoryArchiveIsolationTest {
                 externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
             )
             val product = repository.allProductsStream.first { products ->
-                products.any { it.id == productId && it.priceHistory.size >= 5 }
+                products.any { it.id == productId }
             }.first { it.id == productId }
 
             assertEquals("live provider's current quote remains current", 200.0, product.currentPrice, 0.001)

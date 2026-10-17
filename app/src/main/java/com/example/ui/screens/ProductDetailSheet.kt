@@ -1,7 +1,8 @@
 package com.example.ui.screens
 
 import android.content.Intent
-import android.net.Uri
+import com.example.security.safeExternalHttpsUrl
+import com.example.security.openExternalHttpsUrl
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -581,13 +582,12 @@ fun ProductDetailSheet(
                         ?: product.storeUrl
                     OutlinedButton(
                         onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(destination))
-                            context.startActivity(intent)
+                            openExternalHttpsUrl(context, destination)
                         },
                         modifier = Modifier
                             .weight(1f)
                             .height(44.dp),
-                        enabled = true,
+                        enabled = safeExternalHttpsUrl(destination) != null,
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text(

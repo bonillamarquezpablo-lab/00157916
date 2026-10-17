@@ -11,6 +11,7 @@ import java.util.Locale
 internal data class ConsoleModelBucket(
     val key: String,
     val label: String,
+    val searchQuery: String,
     val groups: List<OnlineProductGroup>
 ) {
     val cheapestPrice: Double
@@ -20,6 +21,12 @@ internal data class ConsoleModelBucket(
         get() = groups.flatMap { it.offers }.map { it.storeName.trim().lowercase(Locale.ROOT) }
             .distinct().size
 }
+
+private data class ConsoleModelOption(
+    val key: String,
+    val label: String,
+    val searchQuery: String
+)
 
 private enum class ConsoleFamily { PLAYSTATION_5, XBOX_SERIES, NINTENDO_SWITCH }
 
@@ -113,9 +120,28 @@ private fun modelBucket(family: ConsoleFamily, title: String): Pair<String, Stri
     }
 }
 
+private fun modelOptions(family: ConsoleFamily): List<ConsoleModelOption> = when (family) {
+    ConsoleFamily.PLAYSTATION_5 -> listOf(
+        ConsoleModelOption("ps5-original", "PlayStation 5 estándar (original / Fat)", "PlayStation 5 Fat"),
+        ConsoleModelOption("ps5-slim", "PlayStation 5 Slim", "PlayStation 5 Slim"),
+        ConsoleModelOption("ps5-pro", "PlayStation 5 Pro", "PlayStation 5 Pro")
+    )
+    ConsoleFamily.XBOX_SERIES -> listOf(
+        ConsoleModelOption("xbox-series-s", "Xbox Series S", "Xbox Series S"),
+        ConsoleModelOption("xbox-series-x", "Xbox Series X", "Xbox Series X")
+    )
+    ConsoleFamily.NINTENDO_SWITCH -> listOf(
+        ConsoleModelOption("switch-original", "Nintendo Switch estándar", "Nintendo Switch original"),
+        ConsoleModelOption("switch-lite", "Nintendo Switch Lite", "Nintendo Switch Lite"),
+        ConsoleModelOption("switch-oled", "Nintendo Switch OLED", "Nintendo Switch OLED"),
+        ConsoleModelOption("switch-2", "Nintendo Switch 2", "Nintendo Switch 2")
+    )
+}
+
 /**
- * Build the first model-selection level. Exact capacity/edition groups are deliberately retained
- * below each model: 825 GB, 1 TB, Digital and Disc must never be collapsed into a single price.
+ * Build the first model-selection level. Known models remain selectable even if the broad query
+ * returned no offer for one of them. Empty models have no price and offer an explicit, user-triggered
+ * search for that exact model. Exact capacity/edition groups remain separate below each model.
  */
 internal fun buildConsoleModelBuckets(
     query: String,
@@ -129,27 +155,17 @@ internal fun buildConsoleModelBuckets(
             group.offers.none { it.isAccessoryOffer } &&
             group.offers.none { it.isSecondHand }
     }
-    return candidates.groupBy { modelBucket(family, it.title).first }
-        .mapNotNull { (key, rows) ->
-            val label = modelBucket(family, rows.first().title).second
-            ConsoleModelBucket(key, label, rows.sortedBy { it.minPrice })
-        }
-        .sortedWith(
-            compareBy<ConsoleModelBucket> {
-                when (it.key) {
-                    "ps5-original" -> 0
-                    "ps5-slim" -> 1
-                    "ps5-pro" -> 2
-                    "switch-original" -> 0
-                    "switch-lite" -> 1
-                    "switch-oled" -> 2
-                    "switch-2" -> 3
-                    "xbox-series-s" -> 0
-                    "xbox-series-x" -> 1
-                    else -> 9
-                }
-            }.thenBy { it.label }
+    val grouped = candidates.groupBy { modelBucket(family, it.title).first }
+        .mapValues { (_, rows) -> rows.sortedBy { it.minPrice } }
+
+    return modelOptions(family).map { option ->
+        ConsoleModelBucket(
+            key = option.key,
+            label = option.label,
+            searchQuery = option.searchQuery,
+            groups = grouped[option.key].orEmpty()
         )
+    }
 }
 
 internal fun normalizeConsoleTitleForTest(value: String): String = normalizeFamilyText(value)

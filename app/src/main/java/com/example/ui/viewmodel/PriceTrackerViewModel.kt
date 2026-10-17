@@ -1044,10 +1044,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     val cachedReport = withContext(Dispatchers.Default) {
                         if (cached.rawResponse != null) {
                             val cachedRoot = org.json.JSONObject(cached.rawResponse)
-                            if (provider == OnlineSearchProvider.GOOGLE_SHOPPING) {
-                                serpApiClient.parseShoppingResultsDetailed(cachedRoot, query, cached.savedAt)
-                            } else {
+                            if (provider == OnlineSearchProvider.AMAZON) {
                                 serpApiClient.parseAmazonResultsDetailed(cachedRoot, query, cached.savedAt)
+                            } else {
+                                serpApiClient.parseShoppingResultsDetailed(cachedRoot, query, cached.savedAt)
                             }
                         } else {
                             com.example.data.remote.SerpApiShoppingSearchReport(

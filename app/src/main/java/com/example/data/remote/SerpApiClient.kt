@@ -606,11 +606,18 @@ class SerpApiClient(
                 .takeIf { it.isNotBlank() && it != "null" }
             val directRetailerUrl = candidateUrls.firstNotNullOfOrNull(::extractDirectRetailerUrl)
             val fallbackProviderUrl = candidateUrls.firstOrNull()
+            val isGoogleCatalogProductPage = fallbackProviderUrl?.let { candidate ->
+                isGoogleShoppingUrl(candidate) &&
+                    runCatching { URI(candidate).path.orEmpty().contains("/shopping/product/") }
+                        .getOrDefault(false)
+            } == true
             val knownStore = providerSource?.let { storeName ->
                 Store.findKnownByName(storeName, directRetailerUrl ?: fallbackProviderUrl.orEmpty())
             }
             val url = directRetailerUrl
-                ?: knownStore?.takeIf { it.supportsProductSearch }?.searchUrlFor(title)
+                ?: knownStore?.takeIf {
+                    it.supportsProductSearch && !isGoogleCatalogProductPage
+                }?.searchUrlFor(title)
                 ?: fallbackProviderUrl
                 ?: googleShoppingSearchUrl(title)
             val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }

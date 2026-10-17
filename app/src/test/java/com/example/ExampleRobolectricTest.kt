@@ -1364,14 +1364,16 @@ class ExampleRobolectricTest {
 
             val product = withTimeout<com.example.data.model.Product>(10_000L) {
                 repository.allProductsStream.first { products ->
-                    products.any { it.id == productId && it.savedHistoricalPrice == 79.99 }
+                    products.any { it.id == productId && it.isPriceVerified && it.currentPrice == 79.99 }
                 }.first { it.id == productId }
             }
-            assertFalse("A pre-policy price must not count as a currently verified quote", product.isPriceVerified)
-            assertEquals("A saved database value must not be overwritten by the old catalogue placeholder",
-                999.99, product.currentPrice, 0.001)
-            assertEquals(79.99, product.savedHistoricalPrice!!, 0.001)
-            assertEquals(savedAt, product.savedHistoricalPriceObservedAt)
+            assertTrue("A verified saved quote must remain available to the catalogue", product.isPriceVerified)
+            assertFalse("A quote from before the policy cutoff must not count as fresh", product.isPriceFresh)
+            assertEquals("The real saved observation must replace the catalogue placeholder in the UI model",
+                79.99, product.currentPrice, 0.001)
+            assertEquals(savedAt, product.priceObservedAt)
+            assertTrue("The saved observation should remain in the product history",
+                product.priceHistory.any { it.timestamp == savedAt && it.price == 79.99 })
             assertEquals(
                 com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION,
                 product.priceDisplayStatus

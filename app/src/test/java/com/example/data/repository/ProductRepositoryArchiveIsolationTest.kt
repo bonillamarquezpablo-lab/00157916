@@ -92,7 +92,7 @@ class ProductRepositoryArchiveIsolationTest {
                 PriceObservationEntity(
                     productId = productId,
                     storeId = "sample-store-archive",
-                    price = 5.0,
+                    price = 129.99,
                     currency = "EUR",
                     observedAt = now - 400L * 24L * 60L * 60L * 1000L,
                     sourceUrl = archiveUrl1,
@@ -109,7 +109,7 @@ class ProductRepositoryArchiveIsolationTest {
                 PriceObservationEntity(
                     productId = productId,
                     storeId = "sample-store-archive-2",
-                    price = 7.0,
+                    price = 149.99,
                     currency = "EUR",
                     observedAt = now - 150L * 24L * 60L * 60L * 1000L,
                     sourceUrl = archiveUrl2,
@@ -163,7 +163,7 @@ class ProductRepositoryArchiveIsolationTest {
                 quotes = listOf(
                     ArchivedPriceQuote(
                         observedAt = mismatchedCaptureTime,
-                        price = 19.99,
+                        price = 129.99,
                         currency = "EUR",
                         productTitle = "Apple iPhone 17 Pro Max",
                         originalUrl = "https://shop.example/product/anker-prime",

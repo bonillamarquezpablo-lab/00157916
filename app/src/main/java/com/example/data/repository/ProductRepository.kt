@@ -352,11 +352,12 @@ class ProductRepository(
                 // assigned to one exact diameter and therefore must not enter Mercado/history.
                 isCategoryUnverified = result.isCategoryUnverified ||
                     hasAmbiguousBicycleTireDiameter(searchQuery, result.title),
-                // Keep suspicious offers visible for diagnosis, but never count them as trusted prices.
+                // Keep anomalous offers visible for diagnosis, but exclude them from best-price,
+                // current-price and history calculations. Compare only within the same product identity.
                 isSuspiciousPrice = result.isSuspiciousPrice ||
                     (!result.isFitmentUnverified && !isPlausibleHistoryPrice(result.title, result.price)) ||
-                    (!result.isFitmentUnverified &&
-                        hasComparableReference && median > 0.0 && result.price < median * 0.30)
+                    (!result.isFitmentUnverified && hasComparableReference && median > 0.0 &&
+                        (result.price < median * 0.30 || result.price > median * 3.0))
             )
         }
     }
@@ -420,7 +421,7 @@ class ProductRepository(
                 filtered == null ->
                     "Otro modelo o vendedor no elegible"
                 filtered.isSuspiciousPrice ->
-                    "Precio sospechoso: demasiado bajo frente a ofertas comparables"
+                    "Precio sospechoso: muy alejado de ofertas comparables"
                 !isPlausibleHistoryPrice(result.title, result.price) ->
                     "Precio sospechoso"
                 else -> null

@@ -39,6 +39,8 @@ data class Product(
      * The bundled catalogue remains unverified by default.
      */
     val isPriceVerified: Boolean = false,
+    /** True only when the official reference price has independent source evidence. */
+    val isOfficialPvpVerified: Boolean = false,
     val priceObservedAt: Long? = null,
     /** A product price lookup does not verify the demo rating or review count. */
     val isRatingVerified: Boolean = false,
@@ -159,10 +161,10 @@ data class Product(
         }
 
     val realSavingsAmount: Double
-        get() = if (isPriceFresh) (officialPvp - currentPrice).coerceAtLeast(0.0) else 0.0
+        get() = if (isPriceFresh && isOfficialPvpVerified && officialPvp.isFinite() && officialPvp > 0.0) (officialPvp - currentPrice).coerceAtLeast(0.0) else 0.0
 
     val realSavingsPercent: Int
-        get() = if (isPriceFresh && officialPvp > 0) {
+        get() = if (isPriceFresh && isOfficialPvpVerified && officialPvp.isFinite() && officialPvp > 0.0) {
             (((officialPvp - currentPrice) / officialPvp) * 100).toInt()
         } else 0
 

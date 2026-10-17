@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.PricePoint
 import com.example.data.model.sanitizePriceHistory
 import com.example.data.model.summarizePriceHistory
+import com.example.ui.theme.FloatingSurfaceShape
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -147,9 +148,9 @@ fun PriceHistoryChart(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(16.dp))
+            .clip(FloatingSurfaceShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f))
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), FloatingSurfaceShape)
             .padding(14.dp)
             .testTag("price_history_chart_container")
     ) {

@@ -64,6 +64,7 @@ import com.example.data.model.Store
 import com.example.ui.components.ProductCard
 import com.example.ui.viewmodel.SortOption
 import com.example.ui.viewmodel.TrackerUiState
+import com.example.ui.theme.FloatingSurfaceShape
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -96,9 +97,9 @@ fun MarketScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .clip(RoundedCornerShape(18.dp))
+                    .clip(FloatingSurfaceShape)
                     .background(Color(0xFF0B132B))
-                    .border(1.dp, Color(0xFF10B981).copy(alpha = 0.3f), RoundedCornerShape(18.dp))
+                    .border(1.dp, Color(0xFF10B981).copy(alpha = 0.34f), FloatingSurfaceShape)
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.hero_price_banner),
@@ -119,9 +120,9 @@ fun MarketScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF10B981))
-                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF34D399))
+                                .padding(horizontal = 10.dp, vertical = 5.dp)
                         ) {
                             Text(
                                 text = "CATÁLOGO PERSONAL",

@@ -16,7 +16,6 @@ import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiException
 import com.example.data.remote.SerpApiRequestProduct
 import com.example.data.remote.SerpApiShoppingResult
-import com.example.data.remote.isGameSpainOffer
 import com.example.data.remote.SerpApiTokenStore
 import com.example.data.remote.extractGoogleShoppingProductId
 import com.example.data.model.Product
@@ -43,7 +42,7 @@ import java.util.Locale
 import java.text.SimpleDateFormat
 import java.util.Date
 
-enum class OnlineSearchProvider { GOOGLE_SHOPPING, AMAZON, GAME }
+enum class OnlineSearchProvider { GOOGLE_SHOPPING, AMAZON }
 
 enum class SerpApiActionType { UPDATE_TRACKED, COMPARE_STORES }
 
@@ -938,9 +937,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     fun searchAmazonShopping() = startOnlineSearch(OnlineSearchProvider.AMAZON)
 
-    /** Explicit GAME España search; it is never added automatically to other searches. */
-    fun searchGameShopping() = startOnlineSearch(OnlineSearchProvider.GAME)
-
     /**
      * Search public Internet Archive captures only. This path never reads the SerpApi key,
      * checks quota, or spends a provider search credit.
@@ -1020,7 +1016,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
         val searchingMessage = when (provider) {
             OnlineSearchProvider.AMAZON -> "Consultando resultados públicos de Amazon.es…"
-            OnlineSearchProvider.GAME -> "Buscando precios de GAME España…"
             OnlineSearchProvider.GOOGLE_SHOPPING -> "Buscando ofertas en Google Shopping España…"
         }
         _uiState.value = current.copy(
@@ -1065,30 +1060,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     val cachedResults = cachedReport.results
                     val (safeCachedResults, cachedDiscarded) = withContext(Dispatchers.Default) {
                         val eligible = repository.filterOnlineSearchResults(cachedResults, query)
-                        val safe = if (provider == OnlineSearchProvider.GAME) {
-                            eligible.filter(::isGameSpainOffer)
-                        } else eligible
-                        val gameRejected = if (provider == OnlineSearchProvider.GAME) {
-                            eligible.filterNot(::isGameSpainOffer).map { offer ->
-                                RejectedOnlineOffer(
-                                    title = offer.title,
-                                    priceLabel = String.format(Locale.ROOT, "%.2f €", offer.price),
-                                    reason = "La oferta no pertenece a GAME España",
-                                    provider = offer.storeName
-                                )
-                            }
-                        } else emptyList()
                         val discarded = (cachedReport.discardedOffers +
-                            repository.diagnoseOnlineSearchRejections(cachedResults, query) +
-                            gameRejected)
+                            repository.diagnoseOnlineSearchRejections(cachedResults, query))
                             .distinctBy { it.provider + "|" + it.title + "|" + it.priceLabel + "|" + it.reason }
-                        safe to discarded
+                        eligible to discarded
                     }
                     onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = cachedDiscarded
                     val ageMinutes = ((System.currentTimeMillis() - cached.savedAt) / 60_000L).coerceAtLeast(1L)
-                    val base = if (provider == OnlineSearchProvider.GAME) {
-                        onlineSearchResultMessage(safeCachedResults, provider, query)
-                    } else if (safeCachedResults.isEmpty()) {
+                    val base = if (safeCachedResults.isEmpty()) {
                         cachedReport.emptyResultMessage(query)
                     } else {
                         onlineSearchResultMessage(safeCachedResults, provider, query)
@@ -1152,8 +1131,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         serpApiClient.searchOnlineWithDiagnostics(token, query)
                     OnlineSearchProvider.AMAZON ->
                         serpApiClient.searchAmazonOnlineWithDiagnostics(token, query)
-                    OnlineSearchProvider.GAME ->
-                        serpApiClient.searchGameOnlineWithDiagnostics(token, query)
                 }
                 // The offer safety checks use many title/model rules. Run both passes on a
                 // background dispatcher rather than blocking Compose while results arrive.
@@ -1162,22 +1139,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     val repositoryDiscarded = repository.diagnoseOnlineSearchRejections(rawResults, query)
                     // Use the same plausibility rules for visible cards, cache entries and Room history.
                     val accepted = repository.filterOnlineSearchResults(rawResults, query)
-                    val visible = if (provider == OnlineSearchProvider.GAME) {
-                        accepted.filter(::isGameSpainOffer)
-                    } else accepted
-                    val gameRejected = if (provider == OnlineSearchProvider.GAME) {
-                        accepted.filterNot(::isGameSpainOffer).map { offer ->
-                            RejectedOnlineOffer(
-                                title = offer.title,
-                                priceLabel = String.format(Locale.ROOT, "%.2f €", offer.price),
-                                reason = "La oferta no pertenece a GAME España",
-                                provider = offer.storeName
-                            )
-                        }
-                    } else emptyList()
-                    val rejected = (providerReport.discardedOffers + repositoryDiscarded + gameRejected)
+                    val rejected = (providerReport.discardedOffers + repositoryDiscarded)
                         .distinctBy { "${it.provider}|${it.title}|${it.priceLabel}|${it.reason}" }
-                    visible to rejected
+                    accepted to rejected
                 }
                 onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = discarded
                 val savedObservations = if (results.isNotEmpty()) {
@@ -1191,9 +1155,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         onlineSearchCache.writeRaw(provider.name, query, rawResponse)
                     }
                 }
-                val base = if (provider == OnlineSearchProvider.GAME) {
-                    onlineSearchResultMessage(results, provider, query)
-                } else if (results.isEmpty() && providerReport.rawResultCount > 0) {
+                val base = if (results.isEmpty() && providerReport.rawResultCount > 0) {
                     providerReport.emptyResultMessage(query)
                 } else {
                     onlineSearchResultMessage(results, provider, query)
@@ -1509,14 +1471,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         provider: OnlineSearchProvider,
         query: String
     ): String = when {
-        results.isEmpty() && provider == OnlineSearchProvider.GAME ->
-            "No se encontraron ofertas identificadas como GAME España para «$query». La búsqueda no garantiza que GAME esté indexada en Google Shopping; puedes abrir su catálogo oficial."
         results.isEmpty() && provider == OnlineSearchProvider.AMAZON ->
             "Amazon.es no ha devuelto productos con precio en euros y enlace válido. Prueba con el nombre o modelo completo."
         results.isEmpty() ->
             "No se han encontrado ofertas con precio en euros y enlace seguro. Prueba con otra búsqueda."
-        provider == OnlineSearchProvider.GAME ->
-            "GAME España: ${results.size} ofertas encontradas, ordenadas por precio. Confirma precio final y stock en GAME.es."
         provider == OnlineSearchProvider.AMAZON ->
             "Amazon.es: ${results.size} productos encontrados, ordenados por precio. El precio final y los cupones se confirman en Amazon."
         else ->

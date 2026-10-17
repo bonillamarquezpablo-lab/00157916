@@ -33,6 +33,12 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Escanear credenciales en archivos y en el historial
+        run: python3 tools/secret_scan.py
+
+      - name: Probar el detector de credenciales
+        run: python3 -m unittest discover -s tools -p 'test_*.py'
+
       - name: Preparar Java
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:

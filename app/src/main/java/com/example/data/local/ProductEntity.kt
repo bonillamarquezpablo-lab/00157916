@@ -31,5 +31,11 @@ data class ProductEntity(
     val isPriceVerified: Boolean = false,
     /** Google Shopping catalog ID for the one-search all-retailers product endpoint. */
     @ColumnInfo(defaultValue = "NULL")
-    val googleProductId: String? = null
+    val googleProductId: String? = null,
+    @ColumnInfo(defaultValue = "0")
+    val isOfficialPvpVerified: Boolean = false,
+    @ColumnInfo(defaultValue = "0")
+    val isRatingVerified: Boolean = false,
+    @ColumnInfo(defaultValue = "0")
+    val isEanVerified: Boolean = false
 )

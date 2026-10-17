@@ -1,5 +1,6 @@
 package com.example.data.remote
 
+import com.example.data.model.Store
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay

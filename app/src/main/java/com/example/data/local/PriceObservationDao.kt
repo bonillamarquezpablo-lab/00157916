@@ -14,6 +14,10 @@ import kotlinx.coroutines.flow.Flow
  */
 @Dao
 interface PriceObservationDao {
+    /** All persisted observations, including legacy rows awaiting revalidation. Read-only recovery path. */
+    @Query("SELECT * FROM price_observations ORDER BY observedAt DESC")
+    fun observeAllStored(): Flow<List<PriceObservationEntity>>
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(observation: PriceObservationEntity): Long
 

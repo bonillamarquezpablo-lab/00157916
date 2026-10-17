@@ -20,9 +20,25 @@ interface ProductDao {
     @Query("SELECT * FROM products WHERE id = :productId LIMIT 1")
     suspend fun getProductById(productId: String): ProductEntity?
 
-    /** Reconcile the cached verification flag from source-backed observations. */
-    @Query("UPDATE products SET isPriceVerified = CASE WHEN id IN (SELECT DISTINCT productId FROM price_observations WHERE isVerified = 1 AND lower(evidenceType) = 'live' AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%') THEN 1 ELSE 0 END")
-    suspend fun markProductsWithVerifiedObservations(): Int
+    /**
+     * Reconcile the cached flag only from minimally valid live observations. Full seller/model
+     * provenance is checked in ProductRepository as well; malformed legacy rows remain stored.
+     */
+    @Query(
+        "UPDATE products SET isPriceVerified = CASE WHEN id IN (" +
+            "SELECT DISTINCT productId FROM price_observations " +
+            "WHERE isVerified = 1 AND lower(evidenceType) = 'live' " +
+            "AND lower(trim(sourceUrl)) LIKE 'https://%' " +
+            "AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' " +
+            "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
+            "AND upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 " +
+            "AND trim(productTitle) <> '' AND trim(storeName) <> '' " +
+            "AND observedAt > 0 AND observedAt <= :nowMillis" +
+            ") THEN 1 ELSE 0 END"
+    )
+    suspend fun markProductsWithVerifiedObservations(
+        nowMillis: Long = System.currentTimeMillis()
+    ): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(products: List<ProductEntity>)

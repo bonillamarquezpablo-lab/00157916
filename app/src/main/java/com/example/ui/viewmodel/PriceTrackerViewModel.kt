@@ -1084,7 +1084,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }
                     val cacheNotice = "Resultados guardados hace $ageMinutes min; no se ha consumido otra búsqueda."
                     val savedObservations = if (safeCachedResults.isNotEmpty()) {
-                        withContext(Dispatchers.Default) {
+                        withContext(Dispatchers.IO) {
                             repository.recordOnlineSearchResults(safeCachedResults, provider.name, query)
                         }
                     } else 0
@@ -1161,7 +1161,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     if (accountCapacity(accountInfo) >= 2) {
                         gameSupplementAttempted = true
                         try {
-                            val gameReport = serpApiClient.searchGameSupplementWithDiagnostics(token, query)
+                            val gameReport = withTimeout(12_000L) {
+                                serpApiClient.searchGameSupplementWithDiagnostics(token, query)
+                            }
                             val identifiedGameOffers = gameReport.results.count(::isGameSpainOffer)
                             providerResults = mergeGoogleShoppingWithGameSupplement(
                                 primaryOffers = providerResults,
@@ -1197,8 +1199,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
                 onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = discarded
                 val savedObservations = if (results.isNotEmpty()) {
-                    withContext(Dispatchers.Default) {
-                        repository.recordOnlineSearchResults(results, provider.name, query)
+                    withContext(Dispatchers.IO) {
+                            repository.recordOnlineSearchResults(results, provider.name, query)
                     }
                 } else 0
 

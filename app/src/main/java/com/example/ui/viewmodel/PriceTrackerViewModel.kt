@@ -1145,6 +1145,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 var providerResults = providerReport.results
                 var providerDiscardedOffers = providerReport.discardedOffers
                 var providerRawResultCount = providerReport.rawResultCount
+                var gameSupplementRequired = false
                 var gameSupplementAttempted = false
                 var gameSupplementSucceeded = false
                 var gameSupplementNote = ""
@@ -1155,6 +1156,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 if (provider == OnlineSearchProvider.GOOGLE_SHOPPING &&
                     shouldSearchGameSupplement(query, providerResults)
                 ) {
+                    gameSupplementRequired = true
                     if (accountCapacity(accountInfo) >= 2) {
                         gameSupplementAttempted = true
                         try {
@@ -1205,11 +1207,20 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     withContext(Dispatchers.IO) {
                         onlineSearchCache.write(searchCacheProviderKey(provider), query, providerResults)
                     }
-                } else {
+                } else if (!gameSupplementRequired) {
+                    // Ordinary non-gaming searches and broad searches that already returned GAME
+                    // can cache the provider response as usual.
                     providerReport.rawResponse?.let { rawResponse ->
                         withContext(Dispatchers.IO) {
                             onlineSearchCache.writeRaw(searchCacheProviderKey(provider), query, rawResponse)
                         }
+                    }
+                } else {
+                    // Do not cache a gaming search as complete when its GAME supplement failed
+                    // or could not run due to quota: otherwise a later retry would reuse the
+                    // general-only cache for 24 hours and never retry the missing retailer.
+                    withContext(Dispatchers.IO) {
+                        onlineSearchCache.invalidate(searchCacheProviderKey(provider), query)
                     }
                 }
                 val base = if (results.isEmpty() && providerRawResultCount > 0) {

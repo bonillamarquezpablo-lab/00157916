@@ -112,7 +112,9 @@ fun ProductDetailSheet(
                 it.eventLabel?.contains("price_insights", ignoreCase = true) == true
         }
         .maxByOrNull { it.timestamp }
-    val currentSourceLabel = if (!product.isPriceVerified) {
+    val currentSourceLabel = if (!product.isPriceVerified && product.savedHistoricalPrice != null) {
+        product.savedHistoricalPriceSource.takeIf { it.isNotBlank() } ?: "Historial archivado"
+    } else if (!product.isPriceVerified) {
         "Sin precio actual verificado"
     } else {
         product.priceSource.takeIf { it.isNotBlank() }
@@ -291,7 +293,7 @@ fun ProductDetailSheet(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = "${String.format("%.2f", product.currentPrice)} €",
+                                text = "${String.format("%.2f", if (!product.isPriceVerified && product.savedHistoricalPrice != null) product.savedHistoricalPrice else product.currentPrice)} €",
                                 fontWeight = FontWeight.Black,
                                 fontSize = 20.sp,
                                 color = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
@@ -306,7 +308,9 @@ fun ProductDetailSheet(
                             }
                             if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION) {
                                 Text(
-                                    text = product.priceFreshnessLabel,
+                                    text = if (!product.isPriceVerified && product.savedHistoricalPrice != null) {
+                                        "Precio histórico guardado · ${product.savedHistoricalPriceObservedAt?.let { SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(it)) } ?: "fecha desconocida"} · no es una oferta actual"
+                                    } else product.priceFreshnessLabel,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.tertiary

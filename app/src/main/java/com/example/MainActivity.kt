@@ -26,7 +26,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -38,19 +37,58 @@ import com.example.ui.viewmodel.PriceTrackerViewModel
 
 class MainActivity : ComponentActivity() {
     private val viewModel: PriceTrackerViewModel by viewModels()
+    private lateinit var crashStore: CrashReportStore
+    private var pendingCrashReport by mutableStateOf<String?>(null)
+    private var showMissingCrashReport by mutableStateOf(false)
+
+    override fun onResume() {
+        super.onResume()
+        if (::crashStore.isInitialized && pendingCrashReport == null) {
+            crashStore.readLast()?.let { pendingCrashReport = it }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        crashStore = CrashReportStore(applicationContext)
+        pendingCrashReport = crashStore.readLast()
         enableEdgeToEdge()
         setContent {
-            val crashStore = remember(applicationContext) { CrashReportStore(applicationContext) }
-            var pendingReport by remember { mutableStateOf(crashStore.readLast()) }
-
             MyApplicationTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    MainScreen(viewModel = viewModel)
+                    MainScreen(
+                        viewModel = viewModel,
+                        onOpenCrashReport = {
+                            val report = crashStore.readLast()
+                            if (report.isNullOrBlank()) {
+                                showMissingCrashReport = true
+                            } else {
+                                pendingCrashReport = report
+                                showMissingCrashReport = false
+                            }
+                        }
+                    )
 
-                    val report = pendingReport
+                    if (showMissingCrashReport) {
+                        AlertDialog(
+                            onDismissRequest = { showMissingCrashReport = false },
+                            title = { Text("Informes de cierre") },
+                            text = {
+                                Text(
+                                    "No hay ningún informe de excepción fatal guardado. " +
+                                        "Este registro no detecta las detenciones manuales desde Ajustes de Android " +
+                                        "ni todos los bloqueos ANR."
+                                )
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { showMissingCrashReport = false }) {
+                                    Text("Entendido")
+                                }
+                            }
+                        )
+                    }
+
+                    val report = pendingCrashReport
                     if (report != null) {
                         AlertDialog(
                             onDismissRequest = { /* The user chooses whether to keep or clear the report. */ },
@@ -84,7 +122,7 @@ class MainActivity : ComponentActivity() {
                                         }.onSuccess {
                                             Toast.makeText(this@MainActivity, "Informe copiado", Toast.LENGTH_SHORT).show()
                                             crashStore.clear()
-                                            pendingReport = null
+                                            pendingCrashReport = null
                                         }.onFailure {
                                             Toast.makeText(this@MainActivity, "No se pudo copiar el informe", Toast.LENGTH_SHORT).show()
                                         }
@@ -101,7 +139,7 @@ class MainActivity : ComponentActivity() {
                                             startActivity(Intent.createChooser(sendIntent, "Compartir informe de Mínimo"))
                                         }.onSuccess {
                                             crashStore.clear()
-                                            pendingReport = null
+                                            pendingCrashReport = null
                                         }.onFailure {
                                             Toast.makeText(this@MainActivity, "No se pudo abrir el menú para compartir", Toast.LENGTH_SHORT).show()
                                         }
@@ -113,7 +151,7 @@ class MainActivity : ComponentActivity() {
                             dismissButton = {
                                 TextButton(onClick = {
                                     crashStore.clear()
-                                    pendingReport = null
+                                    pendingCrashReport = null
                                 }) {
                                     Text("Continuar")
                                 }

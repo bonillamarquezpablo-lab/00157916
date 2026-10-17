@@ -3,10 +3,12 @@ package com.example.ui.components
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.example.data.model.PricePoint
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -69,7 +71,7 @@ class PriceHistoryChartTest {
     }
 
     @Test
-    fun archiveSelectorIsNotShownWhenThereAreNoVerifiedCaptures() {
+    fun emptyHistoryShowsHelpfulEmptyStateWithoutArchiveSelector() {
         composeRule.setContent {
             MaterialTheme {
                 PriceHistoryChart(
@@ -83,5 +85,6 @@ class PriceHistoryChartTest {
         composeRule.onNodeWithText("Evolución del precio observado").assertIsDisplayed()
         composeRule.onNodeWithText("Sin datos todavía").assertIsDisplayed()
         composeRule.onNodeWithTag("price_history_chart_container").assertIsDisplayed()
+        assertEquals(0, composeRule.onAllNodesWithText("Wayback").fetchSemanticsNodes().size)
     }
 }

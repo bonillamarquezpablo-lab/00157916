@@ -42,11 +42,18 @@ interface PriceObservationDao {
         "SELECT * FROM price_observations " +
             "WHERE productId = :productId AND isVerified = 1 " +
             "AND lower(evidenceType) = 'live' " +
+            "AND lower(sourceUrl) LIKE 'https://%' " +
             "AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' " +
             "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
+            "AND upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 " +
+            "AND trim(productTitle) <> '' AND trim(storeName) <> '' " +
+            "AND observedAt > 0 AND observedAt <= :nowMillis " +
             "ORDER BY observedAt DESC LIMIT 1"
     )
-    suspend fun getLatestVerified(productId: String): PriceObservationEntity?
+    suspend fun getLatestVerified(
+        productId: String,
+        nowMillis: Long = System.currentTimeMillis()
+    ): PriceObservationEntity?
 
     @Query("SELECT * FROM price_observations WHERE isVerified = 1 AND (NOT (lower(evidenceType) = 'archive' OR lower(sourceUrl) LIKE 'https://web.archive.org/web/%' OR lower(sourceUrl) LIKE 'http://web.archive.org/web/%') OR (upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 AND trim(productTitle) <> '')) ORDER BY observedAt ASC")
     fun observeAllVerified(): Flow<List<PriceObservationEntity>>
@@ -56,25 +63,50 @@ interface PriceObservationDao {
         "SELECT * FROM price_observations " +
             "WHERE productId = :productId AND isVerified = 1 " +
             "AND lower(evidenceType) = 'live' " +
+            "AND lower(sourceUrl) LIKE 'https://%' " +
             "AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' " +
             "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
+            "AND upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 " +
+            "AND trim(productTitle) <> '' AND trim(storeName) <> '' " +
+            "AND observedAt > 0 AND observedAt <= :nowMillis " +
             "ORDER BY observedAt DESC"
     )
-    suspend fun getVerifiedLiveObservationsForProduct(productId: String): List<PriceObservationEntity>
+    suspend fun getVerifiedLiveObservationsForProduct(
+        productId: String,
+        nowMillis: Long = System.currentTimeMillis()
+    ): List<PriceObservationEntity>
 
     /** Recent price-alert candidates must be live quotes, never past archive imports. */
     @Query(
         "SELECT * FROM price_observations " +
             "WHERE productId = :productId AND isVerified = 1 AND observedAt >= :since " +
+            "AND observedAt <= :nowMillis " +
             "AND lower(evidenceType) = 'live' " +
+            "AND lower(sourceUrl) LIKE 'https://%' " +
             "AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' " +
             "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
+            "AND upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 " +
+            "AND trim(productTitle) <> '' AND trim(storeName) <> '' " +
             "ORDER BY price ASC"
     )
-    suspend fun getVerifiedSince(productId: String, since: Long): List<PriceObservationEntity>
+    suspend fun getVerifiedSince(
+        productId: String,
+        since: Long,
+        nowMillis: Long = System.currentTimeMillis()
+    ): List<PriceObservationEntity>
 
-    @Query("SELECT COUNT(*) FROM price_observations WHERE isVerified = 1 AND (NOT (lower(evidenceType) = 'archive' OR lower(sourceUrl) LIKE 'https://web.archive.org/web/%' OR lower(sourceUrl) LIKE 'http://web.archive.org/web/%') OR (upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 AND trim(productTitle) <> ''))")
-    suspend fun getVerifiedObservationCount(): Int
+    @Query(
+        "SELECT COUNT(*) FROM price_observations " +
+            "WHERE isVerified = 1 " +
+            "AND lower(trim(sourceUrl)) LIKE 'https://%' " +
+            "AND upper(trim(currency)) = 'EUR' " +
+            "AND price >= 0.5 AND price <= 10000.0 " +
+            "AND trim(productTitle) <> '' AND trim(storeName) <> '' " +
+            "AND observedAt > 0 AND observedAt <= :nowMillis"
+    )
+    suspend fun getVerifiedObservationCount(
+        nowMillis: Long = System.currentTimeMillis()
+    ): Int
 
     @Query(
         "SELECT * FROM price_observations " +

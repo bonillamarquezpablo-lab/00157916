@@ -2584,13 +2584,14 @@ class ExampleRobolectricTest {
             }
             assertEquals(245.00, refreshedPcComponentes.single { it.storeName == "PcComponentes" }.price, 0.001)
 
-            // A following day's query must be retained as a second dated history point.
-            val nextDay = now + 24L * 60L * 60L * 1000L
-            val tomorrowResults = listOf(
-                results[0].copy(price = 229.99, observedAt = nextDay),
-                results[1].copy(price = 224.99, observedAt = nextDay)
+            // A separate historical day is kept without using a future timestamp: real future
+            // observations are invalid for the price history and must not be used in tests.
+            val secondDay = now - 24L * 60L * 60L * 1000L
+            val secondDayResults = listOf(
+                results[0].copy(price = 229.99, observedAt = secondDay),
+                results[1].copy(price = 224.99, observedAt = secondDay)
             )
-            assertEquals(2, repository.recordOnlineSearchResults(tomorrowResults, "GOOGLE_SHOPPING"))
+            assertEquals(2, repository.recordOnlineSearchResults(secondDayResults, "GOOGLE_SHOPPING"))
             val productWithDailyHistory = withTimeout<List<Product>>(10_000) {
                 repository.allProductsStream.first { rows ->
                     rows.firstOrNull { it.id == sonyProductId }?.priceHistory?.size == 2
@@ -2604,7 +2605,7 @@ class ExampleRobolectricTest {
             assertTrue("Daily history points must come from distinct calendar dates", firstHistoryDate != secondHistoryDate)
             assertEquals(
                 4,
-                database.priceObservationDao().getVerifiedObservationCount(nowMillis = nextDay)
+                database.priceObservationDao().getVerifiedObservationCount(nowMillis = now)
             )
         } finally {
             database.close()

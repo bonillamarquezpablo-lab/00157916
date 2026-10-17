@@ -1397,7 +1397,7 @@ class ProductRepository(
             catalog.firstOrNull { product ->
                 product.title.lowercase().contains(cleaned) ||
                     product.brand.equals(rawInput, ignoreCase = true) ||
-                    product.ean == rawInput ||
+                    (product.isEanVerified && product.ean == rawInput) ||
                     product.id.equals(rawInput, ignoreCase = true)
             }
         }
@@ -1462,7 +1462,10 @@ class ProductRepository(
         reviewCount = reviewCount,
         wasRecentlyInflated = wasRecentlyInflated,
         fakePriorPrice = fakePriorPrice,
-        isPriceVerified = isPriceVerified
+        isPriceVerified = isPriceVerified,
+        isOfficialPvpVerified = isOfficialPvpVerified,
+        isRatingVerified = isRatingVerified,
+        isEanVerified = isEanVerified
     )
 
     private fun ProductEntity.toDomainProduct(
@@ -1610,22 +1613,25 @@ class ProductRepository(
             athMinStore = if (hasSufficientHistory) observationStore(minObservation!!, stores).name else "",
             athMaxPrice = highest,
             avg90dPrice = average,
-            officialPvp = if (priceIsVerified) 0.0 else officialPvp,
+            officialPvp = if (isOfficialPvpVerified) officialPvp else 0.0,
             currentStore = effectiveStore,
             storeUrl = if (priceIsVerified) latestObservation!!.sourceUrl else storeUrl,
             // Price lookup doesn't prove the bundled EAN, rating or review count.
-            ean = if (priceIsVerified) "" else ean,
+            ean = if (isEanVerified) ean else "",
             priceHistory = historyPoints,
             // The latest provider snapshot retains individual sellers; availability and shipping
             // are not inferred from a search result and must be checked at the merchant.
             offers = latestOffers,
             wasRecentlyInflated = if (priceIsVerified) false else wasRecentlyInflated,
             fakePriorPrice = if (priceIsVerified) null else fakePriorPrice,
-            rating = if (priceIsVerified) 0.0 else rating,
-            reviewCount = if (priceIsVerified) 0 else reviewCount,
+            rating = if (isRatingVerified) rating else 0.0,
+            reviewCount = if (isRatingVerified) reviewCount else 0,
             imageResName = imageResName,
             imageUrl = imageUrl.orEmpty(),
             isPriceVerified = priceIsVerified,
+            isOfficialPvpVerified = isOfficialPvpVerified,
+            isRatingVerified = isRatingVerified,
+            isEanVerified = isEanVerified,
             priceObservedAt = latestObservation?.observedAt.takeIf { priceIsVerified },
             googleProductId = googleProductId,
             priceSource = latestObservation

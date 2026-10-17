@@ -485,6 +485,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
                 _uiState.value = _uiState.value.copy(serpApiAccountStatus = message)
                 showSnackbar(message)
+            } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+                val message = "La búsqueda tardó demasiado y se ha detenido para evitar que Mínimo se quede bloqueado. Puedes repetirla; los datos guardados se conservan."
+                _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                showSnackbar(message)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: SerpApiException) {
@@ -1258,10 +1262,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 throw cancelled
             } catch (error: SerpApiException) {
                 val message = error.message ?: "No se pudo completar la búsqueda."
-                _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
-                showSnackbar(message)
-            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
-                val message = "La búsqueda tardó demasiado y se ha detenido para evitar que Mínimo se quede bloqueado. Puedes repetirla; los datos guardados se conservan."
                 _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
                 showSnackbar(message)
             } catch (_: Exception) {

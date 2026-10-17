@@ -364,6 +364,72 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `extreme high outlier stays visible but cannot become the best-price or history candidate`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val timestamp = System.currentTimeMillis()
+            val offers = listOf(999.99, 1_049.99, 1_099.99, 1_149.99, 4_999.99)
+                .mapIndexed { index, price ->
+                    SerpApiShoppingResult(
+                        title = "Samsung Galaxy S26 Ultra 512 GB",
+                        price = price,
+                        storeName = "Tienda ${index + 1}",
+                        sourceUrl = "https://www.google.com/shopping/product/high-$index",
+                        observedAt = timestamp
+                    )
+                }
+
+            val filtered = repository.filterOnlineSearchResults(
+                offers,
+                "Samsung Galaxy S26 Ultra 512 GB"
+            )
+            assertEquals("Outliers stay visible so the user can inspect them", 5, filtered.size)
+            assertTrue(
+                "A price more than three times the median of the same model is marked suspicious",
+                filtered.single { it.price == 4_999.99 }.isSuspiciousPrice
+            )
+            assertTrue(
+                "Normal comparable offers are not flagged by the high-outlier rule",
+                filtered.filter { it.price < 4_999.99 }.none { it.isSuspiciousPrice }
+            )
+            assertEquals(
+                "A suspicious high price must not affect the cheapest trusted offer",
+                999.99,
+                groupOnlineShoppingResults(filtered).single().cheapestOffer.price,
+                0.001
+            )
+            val diagnosis = repository.diagnoseOnlineSearchRejections(
+                offers,
+                "Samsung Galaxy S26 Ultra 512 GB"
+            )
+            assertTrue(
+                "The diagnostic explains the high outlier",
+                diagnosis.any {
+                    it.priceLabel == "4999.99" && it.reason.contains("Precio sospechoso")
+                }
+            )
+            assertEquals(
+                "Diagnosing outliers must not persist observations",
+                0,
+                database.priceObservationDao().getVerifiedObservationCount()
+            )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun `wheel prices compare single rims with four rim sets`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)

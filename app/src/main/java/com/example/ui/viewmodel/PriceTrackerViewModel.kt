@@ -22,6 +22,7 @@ import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.SerpApiTokenStore
 import com.example.data.remote.extractGoogleShoppingProductId
 import com.example.data.model.Product
+import com.example.data.model.PriceBadgeType
 import com.example.data.model.ProductCategory
 import com.example.data.model.Store
 import com.example.data.repository.ProductRepository
@@ -72,6 +73,7 @@ data class TrackerUiState(
     val searchQuery: String = "",
     val selectedCategory: ProductCategory = ProductCategory.ALL,
     val onlyAthFilter: Boolean = false,
+    val onlyHistoricalMinimumFilter: Boolean = false,
     val selectedStoreName: String? = null,
     val sortOption: SortOption = SortOption.BEST_ATH_DISCOUNT,
     val selectedProduct: Product? = null,
@@ -184,8 +186,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
             }
             .filter { product ->
-                // Only ATH filter
+                // ATH (all-time low) is a distinct filter from the evidence-based historical-minimum badge.
                 if (state.onlyAthFilter) product.isAtAth else true
+            }
+            .filter { product ->
+                // Only show products whose current verified quote equals or improves the observed history minimum.
+                if (state.onlyHistoricalMinimumFilter) {
+                    product.priceBadgeState.type == PriceBadgeType.HISTORICAL_MINIMUM
+                } else true
             }
             .filter { product ->
                 // Store filter
@@ -1571,6 +1579,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     fun onToggleOnlyAth() {
         _uiState.value = _uiState.value.copy(onlyAthFilter = !_uiState.value.onlyAthFilter)
+    }
+
+    fun onToggleOnlyHistoricalMinimum() {
+        _uiState.value = _uiState.value.copy(
+            onlyHistoricalMinimumFilter = !_uiState.value.onlyHistoricalMinimumFilter
+        )
     }
 
     fun onStoreFilterSelect(storeName: String?) {

@@ -28,6 +28,33 @@
 - Las actualizaciones de dependencias solo se incorporan cuando compilan y pasan pruebas. No se debe forzar una dependencia que requiera una versión del SDK Android que el entorno de compilación no pueda instalar.
 - Las ramas antiguas o divergentes no se fusionan completas si duplican funciones actuales o podrían revertir migraciones, controles de precio, enlaces seguros o versión/firma de la APK.
 
+## 22 etapas de calidad del catálogo y precios
+
+El estado indica si la capacidad existe en el código de main; “parcial” significa que aún depende de una fuente de datos, validación real o trabajo adicional.
+
+1. **Limpieza segura de observaciones heredadas — parcial.** Se excluyen filas que no cumplen la política actual de precio verificable sin borrar los datos del usuario.
+2. **Identidad exacta de variante — parcial.** Se separan familias y variantes reconocidas; faltan más identificadores EAN/MPN/SKU aportados por fuentes.
+3. **Estado del artículo — implementado en los filtros principales.** Los productos usados/reacondicionados, alquileres, cuotas y lotes no comparables no deben mezclarse con producto nuevo.
+4. **Precios sospechosos — implementado.** Ofertas atípicas pueden seguir visibles para diagnóstico, pero no alimentan el mínimo fiable.
+5. **Procedencia y tipo de enlace — implementado parcialmente.** La interfaz distingue Google Shopping, enlaces directos, capturas archivadas y evidencia histórica externa.
+6. **Motor común de búsqueda — implementado.** Google Shopping es la búsqueda común, con Amazon y el complemento GAME donde proceda.
+7. **Más fuentes de precio autorizadas — pendiente.** El directorio de comercios no se considera un conector.
+8. **Identidad de comercios y dominios — implementado parcialmente.** Hay normalización y rechazo de dominios señuelo; queda ampliar cobertura con pruebas por tienda.
+9. **EAN/GTIN, MPN y SKU — parcial.** Se usan cuando la fuente los aporta y no se inventan cuando faltan.
+10. **Capacidad y especificaciones — parcial.** Se protegen varias variantes comunes; hay que ampliar las pruebas para otros sectores.
+11. **Coste final, envío y stock — pendiente.** No se asume que una oferta incluya envío o disponibilidad confirmada.
+12. **Antigüedad de la oferta — implementado parcialmente.** Los precios guardados antiguos se etiquetan como pendientes de revalidación.
+13. **Historial temporal — implementado con series separadas.** Room conserva observaciones en vivo; Wayback y Google histórico se muestran como series externas distintas.
+14. **Mínimos y medias verificables — implementado con condiciones.** No se proclama mínimo histórico con una sola observación; la evidencia externa no fabrica una media en vivo.
+15. **Imágenes y variante — parcial.** La imagen del proveedor no sustituye una comprobación exacta del modelo.
+16. **Intención y relevancia de búsqueda — implementado parcialmente.** Filtros y familias mejoran la precisión; seguir ampliando pruebas de consultas ambiguas.
+17. **Caché y cuota — implementado.** Se reutilizan resultados recientes y se comprueba la cuota antes de lotes; las llamadas opcionales están acotadas por tiempo.
+18. **Destino comercial — parcial.** Los dominios se validan y hay rutas oficiales para varias tiendas; algunos resultados siguen abriendo una página de Shopping o una búsqueda de la tienda.
+19. **Seguimiento y alertas automáticas — pendiente.** Guardar un objetivo local no equivale a monitorizar precios online.
+20. **Persistencia, migraciones y privacidad — mejorado.** Las migraciones son explícitas, Room no se limpia de forma destructiva y los informes de cierre quedan privados; falta definir exportación/restauración segura de datos.
+21. **Confianza, accesibilidad y estados de UI — en curso.** Se distingue el estado del precio, las series históricas y los resultados descartados; queda probar la fluidez en dispositivos reales.
+22. **QA y publicación — en curso.** CI comprueba el escaneo de secretos, pruebas, compilación de Android y firma del APK; falta validar búsquedas reales y bloqueos en la tablet.
+
 ## 16 mejoras planificadas
 
 - [x] **M01 — Base de integridad y procedencia.** Existe una tabla persistente de observaciones con producto, comercio, precio, moneda, fecha/hora, URL y estado de verificación; queda pendiente alimentarla con un proveedor real.

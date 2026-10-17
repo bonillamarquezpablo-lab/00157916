@@ -103,5 +103,16 @@ class GameSpainOfferFilterTest {
         assertEquals(1, merged.count(::isGameSpainOffer))
         assertEquals(2, merged.size)
     }
+
+    @Test
+    fun googleShoppingUrlDetectionAcceptsGoogleCountryDomainsAndRejectsLookalikes() {
+        assertTrue(isGoogleShoppingUrl("https://www.google.com/shopping/product/123456"))
+        assertTrue(isGoogleShoppingUrl("https://www.google.es/search?tbm=shop"))
+        assertTrue(isGoogleShoppingUrl("https://shopping.google.co.uk/"))
+
+        assertFalse(isGoogleShoppingUrl("https://google.com.attacker.example/search"))
+        assertFalse(isGoogleShoppingUrl("https://google.attacker.example/search"))
+        assertFalse(isGoogleShoppingUrl("https://www.notgoogle.com/shopping"))
+    }
 }
 

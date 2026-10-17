@@ -1161,9 +1161,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     if (accountCapacity(accountInfo) >= 2) {
                         gameSupplementAttempted = true
                         try {
-                            val gameReport = withTimeout(12_000L) {
+                            val gameReport = withTimeoutOrNull(12_000L) {
                                 serpApiClient.searchGameSupplementWithDiagnostics(token, query)
-                            }
+                            } ?: throw java.net.SocketTimeoutException("La consulta complementaria de GAME ha agotado el tiempo límite.")
                             val identifiedGameOffers = gameReport.results.count(::isGameSpainOffer)
                             providerResults = mergeGoogleShoppingWithGameSupplement(
                                 primaryOffers = providerResults,

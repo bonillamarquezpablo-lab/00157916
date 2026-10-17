@@ -19,8 +19,12 @@ class CrashReportStore(context: Context) {
     private val reportFile = File(appContext.filesDir, FILE_NAME)
 
     fun readLast(): String? = runCatching {
-        if (!reportFile.isFile || reportFile.length() !in 1..MAX_REPORT_BYTES.toLong()) return null
-        reportFile.readText(Charsets.UTF_8)
+        if (!reportFile.isFile) return null
+        val length = reportFile.length()
+        // Earlier builds limited UTF-16 characters, not UTF-8 bytes. Accept those oversized
+        // legacy reports (within a strict bound), then normalize them to the current byte limit.
+        if (length !in 1L..MAX_LEGACY_REPORT_BYTES) return null
+        truncateUtf8(reportFile.readText(Charsets.UTF_8), MAX_REPORT_BYTES)
     }.onFailure {
         Log.e(TAG, "Could not read private crash report (${it.javaClass.simpleName}).")
     }.getOrNull()
@@ -51,18 +55,49 @@ class CrashReportStore(context: Context) {
                 current = current.cause
                 causeDepth++
             }
-        }.take(MAX_REPORT_CHARS)
+        }
 
+        val boundedReport = truncateUtf8(report, MAX_REPORT_BYTES)
         reportFile.parentFile?.mkdirs()
         val temporary = File(appContext.filesDir, "$FILE_NAME.tmp")
         FileOutputStream(temporary).use { output ->
-            output.write(report.toByteArray(Charsets.UTF_8))
+            output.write(boundedReport.toByteArray(Charsets.UTF_8))
             output.fd.sync()
         }
         if (!temporary.renameTo(reportFile)) {
             reportFile.writeText(temporary.readText(Charsets.UTF_8), Charsets.UTF_8)
             temporary.delete()
         }
+    }
+
+    /**
+     * Truncates on a UTF-8 code-point boundary. This keeps saved reports readable even when
+     * stack traces contain non-ASCII file names and still enforces the on-disk byte limit.
+     */
+    private fun truncateUtf8(value: String, maxBytes: Int): String {
+        if (value.toByteArray(Charsets.UTF_8).size <= maxBytes) return value
+
+        var low = 0
+        var high = value.length
+        while (low < high) {
+            val probe = (low + high + 1) / 2
+            var end = probe
+            if (end > 0 && end < value.length &&
+                value[end - 1].isHighSurrogate() && value[end].isLowSurrogate()
+            ) {
+                end--
+            }
+            val bytes = value.substring(0, end).toByteArray(Charsets.UTF_8).size
+            if (bytes <= maxBytes) low = probe else high = probe - 1
+        }
+
+        var end = low
+        if (end > 0 && end < value.length &&
+            value[end - 1].isHighSurrogate() && value[end].isLowSurrogate()
+        ) {
+            end--
+        }
+        return value.substring(0, end)
     }
 
     fun clear(): Boolean = runCatching {
@@ -78,5 +113,6 @@ class CrashReportStore(context: Context) {
         const val MAX_FRAMES_PER_CAUSE = 24
         const val MAX_REPORT_CHARS = 48 * 1024
         const val MAX_REPORT_BYTES = 48 * 1024
+        const val MAX_LEGACY_REPORT_BYTES = MAX_REPORT_CHARS * 4L
     }
 }

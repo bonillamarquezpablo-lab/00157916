@@ -375,7 +375,13 @@ class WaybackPriceHistoryClient(
             token.any(Char::isDigit) && token.any(Char::isLetter) &&
                 !Regex("""^\d+(?:[.,]\d+)?(?:gb|tb|mb|mah|wh|hz|w|mm|cm|inch|inches|pulgadas?)$""")
                     .containsMatchIn(token)
-        }
+        }.toMutableList()
+        // Samsung TV URLs may expose a family code such as S95H instead of the complete
+        // regional SKU (TQ48S95HAEXXC / QE48S95HAEXXC). Search that fallback too.
+        Regex("""(?i)\b(?:tq|qe)\d{2}(s\d{2}[a-z])""")
+            .findAll(normalizeTitle(expectedTitle))
+            .map { it.groupValues[1].lowercase(Locale.ROOT) }
+            .forEach { coreModel -> if (coreModel !in modelTokens) modelTokens.add(0, coreModel) }
         val hostBrandTerms = when (normalizedDomain) {
             "apple.com" -> setOf("apple")
             "samsung.com" -> setOf("samsung", "galaxy")
@@ -399,21 +405,21 @@ class WaybackPriceHistoryClient(
         val textTokens = tokens.filter { token ->
             token.any(Char::isLetter) && !token.any(Char::isDigit) && token !in hostBrandTerms
         }
-        // Avoid broad "OR" queries: on a large retailer domain, one generic token may match
-        // hundreds of unrelated URLs. Match a model code plus a distinct path term when both
-        // exist. If a title only gives a model code, use that exact code; generic brand/category
-        // words must not make a model URL impossible to discover.
-        val requiredLookaheads = when {
-            // Model-coded products are already distinctive. Don't require a secondary word like
-            // "wireless" that retailers may omit from the URL slug.
-            modelTokens.isNotEmpty() -> listOf("(?=.*${urlTokenPattern(modelTokens.first())})")
-            textTokens.size >= 2 -> textTokens.take(2).map { "(?=.*${urlTokenPattern(it)})" }
-            else -> return null
+        // A product SKU/model code is the strongest URL hint, but some retailers use
+        // short generic slugs and keep the SKU only in page metadata. Search by either a
+        // distinctive model code or two title terms; strict page validators still apply.
+        val modelAlternatives = modelTokens.take(2).map { token ->
+            "(?=.*${urlTokenPattern(token)})"
         }
+        val textAlternatives = if (textTokens.size >= 2) {
+            listOf("(?=.*${urlTokenPattern(textTokens[0])})(?=.*${urlTokenPattern(textTokens[1])})")
+        } else emptyList()
+        val requiredLookaheads = (modelAlternatives + textAlternatives).distinct()
+        if (requiredLookaheads.isEmpty()) return null
         val start = (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
         val from = formatUtc(start, "yyyyMMdd")
         val to = formatUtc(now, "yyyyMMdd")
-        val urlPattern = "(?i)" + requiredLookaheads.joinToString("") + ".*"
+        val urlPattern = "(?i)(?:" + requiredLookaheads.joinToString("|") + ").*"
         return HttpUrl.Builder()
             .scheme("https")
             .host("web.archive.org")

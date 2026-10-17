@@ -30,7 +30,7 @@ private fun normalizeFamilyText(value: String): String =
         .trim()
         .replace(Regex("\\s+"), " ")
         .replace(Regex("\\bplaystation\\s*5\\b"), "ps5")
-        .replace(Regex("\bxbox\\s*series\\s*([xs])\\b"), "xbox series $1")
+        .replace(Regex("\\bxbox\\s*series\\s*([xs])\\b"), "xbox series $1")
 
 /** True only for an overview query; searches for a specific edition/capacity remain exact. */
 internal fun isConsoleFamilyOverviewQuery(query: String): Boolean {
@@ -55,7 +55,7 @@ internal fun isConsoleFamilyOverviewQuery(query: String): Boolean {
 
     val allowed = setOf(
         "ps5", "sony", "playstation", "5", "xbox", "series", "nintendo", "switch",
-        "consola", "consolas", "precio", "precios", "version", "versiones", "ofertas", "la", "de", "el"
+        "consola", "consolas", "console", "precio", "precios", "version", "versiones", "ofertas", "la", "de", "el"
     )
     return normalized.split(' ').all { it in allowed }
 }

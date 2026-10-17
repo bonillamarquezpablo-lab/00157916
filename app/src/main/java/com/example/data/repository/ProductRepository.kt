@@ -811,6 +811,15 @@ class ProductRepository(
         for (quote in quotes.distinctBy { it.observedAt to it.price }) {
             val snapshotUri = parseHttpUri(quote.snapshotUrl) ?: continue
             if (!snapshotUri.host.equals("web.archive.org", ignoreCase = true)) continue
+            // Validate the URL embedded in the Wayback snapshot itself, not only the provider's
+            // separate originalUrl field. Otherwise a mismatched snapshot can be attached to a
+            // different merchant page while claiming the expected source URL in metadata.
+            val snapshotTarget = Regex("""^/web/\d{14}id_/(https://.+)$""")
+                .find(snapshotUri.rawPath.orEmpty())
+                ?.groupValues
+                ?.getOrNull(1)
+                ?: continue
+            if (normalizedProductPageKey(snapshotTarget) != originalUrlKey) continue
             val snapshotTimestamp = Regex("""^/web/(\d{14})id_/""")
                 .find(snapshotUri.path.orEmpty())?.groupValues?.getOrNull(1)?.let { rawTimestamp ->
                     runCatching {

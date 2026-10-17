@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - fix/restore-catalog-prices-20261017
+      - integration/unified-search-game-stability-20261017
     paths:
       - "app/**"
       - "gradle/**"
@@ -20,7 +21,7 @@ concurrency:
 
 jobs:
   build:
-    if: github.ref == 'refs/heads/fix/restore-catalog-prices-20261017'
+    if: github.ref == 'refs/heads/fix/restore-catalog-prices-20261017' || github.ref == 'refs/heads/integration/unified-search-game-stability-20261017'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -73,7 +74,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION_CODE=$((4000 + GITHUB_RUN_NUMBER))
-          VERSION_NAME="1.6.1020"
+          VERSION_NAME="1.6.1021"
           gradle :app:assembleDebug --stacktrace -PVERSION_CODE="$VERSION_CODE" -PVERSION_NAME="$VERSION_NAME"
 
       - name: Verificar paquete, versión y firma estable
@@ -83,7 +84,7 @@ jobs:
           set -euo pipefail
           APK="app/build/outputs/apk/debug/app-debug.apk"
           VERSION_CODE=$((4000 + GITHUB_RUN_NUMBER))
-          VERSION_NAME="1.6.1020"
+          VERSION_NAME="1.6.1021"
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           test -s "$APK"

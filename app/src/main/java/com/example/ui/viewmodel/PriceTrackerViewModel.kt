@@ -1624,14 +1624,38 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     fun runUrlOrReferenceVerification() {
         val query = _uiState.value.verifierInput.trim()
-        if (query.isBlank()) return
+        if (query.isBlank() || _uiState.value.isVerifying) return
 
-        _uiState.value = _uiState.value.copy(isVerifying = true)
-        val result = repository.analyzeSpanishUrlOrQuery(query)
-        _uiState.value = _uiState.value.copy(
-            isVerifying = false,
-            verifierResult = result
-        )
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isVerifying = true)
+            try {
+                // Catalog matching is CPU work; keep it off the main thread.
+                val result = withContext(Dispatchers.Default) {
+                    repository.analyzeSpanishUrlOrQuery(query)
+                }
+                // Do not publish an outdated result if the user has changed the input meanwhile.
+                if (_uiState.value.verifierInput.trim() == query) {
+                    _uiState.value = _uiState.value.copy(verifierResult = result)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (_uiState.value.verifierInput.trim() == query) {
+                    _uiState.value = _uiState.value.copy(
+                        verifierResult = UrlAnalysisResult(
+                            queryOrUrl = query,
+                            identifiedStore = null,
+                            detectedTitle = query,
+                            matchedProduct = null,
+                            isKnownRetailerDomain = false,
+                            adviceMessage = "No se pudo completar la comprobación. Vuelve a intentarlo."
+                        )
+                    )
+                }
+            } finally {
+                _uiState.value = _uiState.value.copy(isVerifying = false)
+            }
+        }
     }
 
     fun clearVerifierResult() {

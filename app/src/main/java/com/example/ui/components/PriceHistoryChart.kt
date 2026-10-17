@@ -239,7 +239,7 @@ fun PriceHistoryChart(
                             .padding(horizontal = 6.dp, vertical = 3.dp)
                     ) {
                         Text(
-                            text = "Media histórica externa: ${historySummary.averagePrice?.let { String.format("%.2f", it) + " €" } ?: "—"}",
+                            text = "Media histórica externa: ${filteredPoints.map { it.price }.average().takeIf { filteredPoints.isNotEmpty() }?.let { String.format("%.2f", it) + " €" } ?: "—"}",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant

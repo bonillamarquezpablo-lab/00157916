@@ -738,8 +738,9 @@ class ProductRepository(
         val verifiedUrlMatches = matchingProducts.filter { candidate ->
             normalizedProductPageKey(candidate.storeUrl) == originalUrlKey ||
                 priceObservationDao.getVerifiedLiveObservationsForProduct(candidate.id).any { observation ->
-                    normalizedProductPageKey(observation.sourceUrl) == originalUrlKey ||
-                        normalizedProductPageKey(observation.sourcePageUrl) == originalUrlKey
+                    isEligibleObservationForHistory(observation) &&
+                        (normalizedProductPageKey(observation.sourceUrl) == originalUrlKey ||
+                            normalizedProductPageKey(observation.sourcePageUrl) == originalUrlKey)
                 }
         }
         val product = when {
@@ -768,7 +769,8 @@ class ProductRepository(
         // Without an actual verified live quote, accept archive history only for the product's
         // own direct URL. This permits old prices before a live search without letting any same-
         // title archive URL populate an unverified product from another seller or variant.
-        val hasVerifiedLiveQuote = priceObservationDao.getLatestVerified(product.id) != null
+        val hasVerifiedLiveQuote = priceObservationDao.getLatestVerified(product.id)
+            ?.let(::isEligibleObservationForHistory) == true
         val productOwnsArchiveUrl = normalizedProductPageKey(product.storeUrl) == originalUrlKey
         val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
         val storeId = canonicalStoreId(merchantName, originalUrl)

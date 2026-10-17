@@ -148,10 +148,10 @@ class SerpApiException(
  */
 class SerpApiClient(
     private val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(12, TimeUnit.SECONDS)
-        .readTimeout(18, TimeUnit.SECONDS)
-        .writeTimeout(12, TimeUnit.SECONDS)
-        .callTimeout(25, TimeUnit.SECONDS)
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
+        .writeTimeout(8, TimeUnit.SECONDS)
+        .callTimeout(18, TimeUnit.SECONDS)
         .build()
 ) {
     /**

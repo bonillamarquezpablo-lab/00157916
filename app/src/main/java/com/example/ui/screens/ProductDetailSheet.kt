@@ -396,7 +396,7 @@ fun ProductDetailSheet(
                                     )
                                 }
                             }
-                            if (product.officialPvp > 0.0) {
+                            if (product.isOfficialPvpVerified && product.officialPvp > 0.0) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text(
                                         text = "PVP de referencia",
@@ -411,7 +411,7 @@ fun ProductDetailSheet(
                                     )
                                 }
                             }
-                            if (product.officialPvp > product.currentPrice) {
+                            if (product.isOfficialPvpVerified && product.officialPvp > product.currentPrice) {
                                 Column(horizontalAlignment = Alignment.End) {
                                     Text(
                                         text = "Diferencia frente al PVP",

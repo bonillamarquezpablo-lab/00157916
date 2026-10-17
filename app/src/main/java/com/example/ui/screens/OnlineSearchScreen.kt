@@ -148,6 +148,7 @@ fun OnlineSearchScreen(
     onQueryChange: (String) -> Unit,
     onSearch: () -> Unit,
     onAmazonSearch: () -> Unit,
+    onGameSearch: () -> Unit,
     onForceRefresh: () -> Unit,
     onAmazonOnlyChange: (Boolean) -> Unit,
     onToggleDiscarded: () -> Unit,
@@ -244,6 +245,33 @@ fun OnlineSearchScreen(
                             }
                             Text("Amazon.es", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
+                    }
+                    OutlinedButton(
+                        onClick = onGameSearch,
+                        enabled = !state.isOnlineSearching && !state.isRefreshingPrices &&
+                            state.onlineSearchQuery.trim().length >= 2,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (state.isOnlineSearching && state.onlineSearchProvider == OnlineSearchProvider.GAME) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.Storefront, contentDescription = null, modifier = Modifier.size(17.dp))
+                        }
+                        Spacer(Modifier.width(7.dp))
+                        Text("Buscar precios en GAME España", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Text(
+                        "Búsqueda manual independiente. Si no hay resultados guardados, puede consumir 1 búsqueda de SerpApi.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    TextButton(
+                        onClick = { openGameSearch(context, state.onlineSearchQuery) },
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Abrir catálogo oficial de GAME.es")
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (state.onlineSearchResults.isNotEmpty()) {
@@ -644,6 +672,17 @@ private fun openAmazonSearch(context: Context, query: String) {
         "https://www.amazon.es/"
     }
     openStoreUrl(context, url, preferAmazonApp = true)
+}
+
+/** Opens GAME Spain's own search results without using SerpApi or spending search quota. */
+private fun openGameSearch(context: Context, query: String) {
+    val trimmedQuery = query.trim()
+    val url = if (trimmedQuery.length >= 2) {
+        "https://www.game.es/buscar/${Uri.encode(trimmedQuery)}/o%3D1"
+    } else {
+        "https://www.game.es/"
+    }
+    openStoreUrl(context, url, preferAmazonApp = false)
 }
 
 private fun openStoreUrl(context: Context, url: String, preferAmazonApp: Boolean) {

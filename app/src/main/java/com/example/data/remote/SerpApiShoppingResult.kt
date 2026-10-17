@@ -497,13 +497,17 @@ fun onlineProductIdentityKey(title: String): String {
     // Console identity must retain chassis/media variants as well as storage.
     val consoleVariants = if (
         Regex("""\b(ps5|xbox|nintendo switch|switch)\b""").containsMatchIn(productNameNormalized)
-    ) setOf("slim", "fat", "digital", "disc", "disk", "original", "standard", "oled", "series", "s")
+    ) setOf("slim", "digital", "disc", "disk", "oled", "series", "s", "x")
       else emptySet()
-    val variants = (generalVariants + consoleVariants)
+    val variantTokens = (generalVariants + consoleVariants)
         .filter { Regex("""\b""" + Regex.escape(it) + """\b""").containsMatchIn(productNameNormalized) }
-        .distinct()
-        .sorted()
-        .joinToString("+")
+        .toMutableSet()
+    // Fat/original/standard are aliases for the base PS5 chassis. Give that model a
+    // stable identity even when a retailer omits those words from its title.
+    if (Regex("""\bps5\b""").containsMatchIn(productNameNormalized) &&
+        "pro" !in variantTokens && "slim" !in variantTokens
+    ) variantTokens += "standard"
+    val variants = variantTokens.sorted().joinToString("+")
     val accessoryType = listOf(
         "cristal templado", "screen protector", "mop kit", "poster", "funda",
         "carcasa", "case", "cover", "protector", "cable", "cargador", "adaptador", "hub",

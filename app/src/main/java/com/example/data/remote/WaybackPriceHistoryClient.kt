@@ -657,9 +657,9 @@ class WaybackPriceHistoryClient(
         if (Regex("""\\bsamsung\\b""").containsMatchIn(e) &&
             Regex("""\\bsamsung\\b""").containsMatchIn(a)) {
             fun samsungModel(value: String): String? =
-                Regex("""\\b(?:tq|qe)(\\d{2}[a-z0-9]{5,})\\b""")
+                Regex("""\\b(?:tq|qe)(\\d{2}[a-z0-9]{5,})""")
                     .find(value)?.groupValues?.getOrNull(1)
-                    ?: Regex("""\\b(\\d{2}[a-z0-9]{5,})\\b""")
+                    ?: Regex("""\\b(\\d{2}[a-z0-9]{5,})""")
                         .find(value)?.groupValues?.getOrNull(1)
 
             fun diagonal(value: String): String? =

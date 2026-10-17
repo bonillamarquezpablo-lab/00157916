@@ -654,8 +654,8 @@ class WaybackPriceHistoryClient(
 
         // Titles from Samsung's regional catalogues use TQ/QE prefixes for the same EU TV
         // model. Compare the exact compact model code and diagonal before fuzzy text matching.
-        if (Regex("""\bsamsung\\b""").containsMatchIn(e) &&
-            Regex("""\bsamsung\\b""").containsMatchIn(a)) {
+        if (Regex("""\bsamsung\b""").containsMatchIn(e) &&
+            Regex("""\bsamsung\b""").containsMatchIn(a)) {
             fun samsungModel(value: String): String? =
                 Regex("""\b(?:tq|qe)(\d{2}[a-z0-9]{5,})""")
                     .find(value)?.groupValues?.getOrNull(1)
@@ -663,7 +663,7 @@ class WaybackPriceHistoryClient(
                         .find(value)?.groupValues?.getOrNull(1)
 
             fun diagonal(value: String): String? =
-                Regex("""\b(\d{2})\s*(?:inch|inches|pulgadas)?\\b""")
+                Regex("""\b(\d{2})\s*(?:inch|inches|pulgadas)?\b""")
                     .find(value)?.groupValues?.getOrNull(1)
 
             val expectedModel = samsungModel(e)

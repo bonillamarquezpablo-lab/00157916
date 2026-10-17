@@ -770,7 +770,8 @@ class ProductRepository(
         // title archive URL populate an unverified product from another seller or variant.
         val hasVerifiedLiveQuote = priceObservationDao.getLatestVerified(product.id) != null
         val productOwnsArchiveUrl = normalizedProductPageKey(product.storeUrl) == originalUrlKey
-        val storeId = canonicalStoreId(storeName.ifBlank { originalUri.host.orEmpty() }, originalUrl)
+        val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
+        val storeId = canonicalStoreId(merchantName, originalUrl)
         // A Google Shopping-only product has no direct retailer URL yet. Historical capture
         // may be attached before the first live search only when this product identity is unique
         // in Room AND the retailer matches the product's saved store identity. The indirect
@@ -783,13 +784,10 @@ class ProductRepository(
 
         val now = System.currentTimeMillis()
         val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)
-        val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
         if (!isEligibleHistoryTitle(expectedTitle) ||
             isPromotionalBulkListing(expectedTitle, "") ||
             !isEligibleSeller(merchantName, originalUrl)
         ) return 0
-        // Use the store identity validated above when associating this archive to the product.
-        if (storeId != canonicalStoreId(merchantName, originalUrl)) return 0
         var inserted = 0
 
         for (quote in quotes.distinctBy { it.observedAt to it.price }) {

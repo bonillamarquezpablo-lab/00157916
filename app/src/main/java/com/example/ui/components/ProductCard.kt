@@ -1,8 +1,7 @@
 package com.example.ui.components
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.background
+import com.example.security.openExternalHttpsUrl
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -400,10 +399,9 @@ fun ProductCard(
                                 TextButton(
                                     onClick = {
                                         val searchUrl = store.searchUrlFor(product.title)
-                                        context.startActivity(
-                                            Intent(Intent.ACTION_VIEW, Uri.parse(searchUrl))
-                                        )
-                                        showStoreComparison = false
+                                        if (openExternalHttpsUrl(context, searchUrl)) {
+                                            showStoreComparison = false
+                                        }
                                     }
                                 ) {
                                     Text("Buscar")

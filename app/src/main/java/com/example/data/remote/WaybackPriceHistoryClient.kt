@@ -648,22 +648,38 @@ class WaybackPriceHistoryClient(
     }
 
     private fun isMatchingProductTitle(expected: String, archived: String): Boolean {
-        // Normalize first and then standardize Samsung regional TV model prefixes: retailers
-        // sometimes archive the same European TV model as TQ... or QE... . Keep the model digits,
-        // so a 48-inch set can never match a 55-inch set.
+        // First preserve strict variant matching across retail title variants.
         val e = canonicalizeArchiveTitle(normalizeTitle(expected))
         val a = canonicalizeArchiveTitle(normalizeTitle(archived))
         if (e.isBlank() || a.isBlank()) return false
 
         val sameIdentity = onlineProductIdentityKey(e) == onlineProductIdentityKey(a)
 
-        // Never let a high overlap of generic words override a different model, size, year,
-        // or capacity. For example, "Anker Prime 20K Power Bank" must not match a 27K listing.
+        // Model codes, diagonals, storage and capacities must match exactly after canonicalization.
         val expectedVariants = requiredVariantTokens(e)
         val archivedVariants = requiredVariantTokens(a)
         if (!sameIdentity && !archivedVariants.containsAll(expectedVariants)) return false
-
         if (sameIdentity) return true
+
+        // Samsung regional TV identifiers may encode the exact same panel/model with a regional
+        // prefix (TQ/QE). Compare these only after removing that prefix and retain the two-digit
+        // diagonal as a mandatory marker, so 48-inch and 55-inch products cannot cross-match.
+        if (Regex("""\bsamsung\b""").containsMatchIn(e) &&
+            Regex("""\bsamsung\b""").containsMatchIn(a)) {
+            val expectedSamsungModel = Regex("""\b(?:tq|qe)?(\d{2}[a-z0-9]{5,})\b""")
+                .find(e)?.groupValues?.getOrNull(1)
+            val archivedSamsungModel = Regex("""\b(?:tq|qe)?(\d{2}[a-z0-9]{5,})\b""")
+                .find(a)?.groupValues?.getOrNull(1)
+            val expectedDiagonal = Regex("""\b(\d{2})\s*(?:inch|inches|pulgadas)?\b""")
+                .find(e)?.groupValues?.getOrNull(1)
+            val archivedDiagonal = Regex("""\b(\d{2})\s*(?:inch|inches|pulgadas)?\b""")
+                .find(a)?.groupValues?.getOrNull(1)
+            if (expectedSamsungModel != null && archivedSamsungModel != null &&
+                expectedSamsungModel == archivedSamsungModel &&
+                expectedDiagonal != null && archivedDiagonal != null &&
+                expectedDiagonal == archivedDiagonal) return true
+        }
+
         val expectedTokens = meaningfulTokens(e)
         val archivedTokens = meaningfulTokens(a)
         if (expectedTokens.isEmpty() || archivedTokens.isEmpty()) return false

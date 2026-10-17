@@ -487,6 +487,98 @@ class FreeArchiveHistoryPersistenceTest {
     }
 
     @Test
+    fun invalidVerifiedLiveRowsCannotDriveCurrentPriceOrPriceAlerts() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val dao = database.priceObservationDao()
+            val now = System.currentTimeMillis()
+            val valid = PriceObservationEntity(
+                productId = "valid-live-query-gate",
+                storeId = "shop",
+                price = 19.99,
+                currency = "EUR",
+                observedAt = now - 5_000L,
+                sourceUrl = "https://shop.example/product",
+                sourceName = "Google Shopping",
+                isVerified = true,
+                productTitle = "Test product",
+                storeName = "Shop",
+                sourceType = "Google Shopping",
+                linkType = "directo",
+                collectedAt = now,
+                evidenceType = "live"
+            )
+            dao.insert(valid)
+
+            database.productDao().insert(
+                ProductEntity(
+                    id = "invalid-live-query-gate",
+                    title = "Test product",
+                    brand = "Test",
+                    category = "TV_AUDIO",
+                    currentPrice = 19.99,
+                    athMinPrice = 19.99,
+                    athMinDate = "",
+                    athMinStore = "Shop",
+                    athMaxPrice = 19.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "shop",
+                    storeUrl = "https://shop.example/product",
+                    ean = "",
+                    isPriceVerified = true
+                )
+            )
+
+            // Simulate old/corrupt rows whose cached isVerified flag must not make them current.
+            val invalidRows = listOf(
+                valid.copy(productId = "invalid-live-query-gate", price = 0.01),
+                valid.copy(productId = "invalid-live-query-gate", currency = "USD", price = 3.00),
+                valid.copy(
+                    productId = "invalid-live-query-gate",
+                    observedAt = now + 2L * 60L * 60L * 1000L,
+                    price = 2.00
+                ),
+                valid.copy(productId = "invalid-live-query-gate", productTitle = "", price = 4.00),
+                valid.copy(productId = "invalid-live-query-gate", storeName = "", price = 5.00),
+                valid.copy(
+                    productId = "invalid-live-query-gate",
+                    sourceUrl = "http://shop.example/product",
+                    price = 6.00
+                )
+            )
+            dao.insertAll(invalidRows)
+
+            database.productDao().markProductsWithVerifiedObservations(now)
+
+            assertEquals(19.99, dao.getLatestVerified("valid-live-query-gate", now)?.price ?: 0.0, 0.001)
+            assertEquals(1, dao.getVerifiedSince("valid-live-query-gate", now - 60_000L, now).size)
+            assertEquals(null, dao.getLatestVerified("invalid-live-query-gate", now))
+            assertTrue(dao.getVerifiedSince("invalid-live-query-gate", now - 60_000L, now).isEmpty())
+            assertFalse(
+                "Invalid stored rows must not set the product's cached current-price flag",
+                database.productDao().getProductById("invalid-live-query-gate")!!.isPriceVerified
+            )
+            assertEquals(
+                "Invalid legacy rows are excluded from valid counts but remain stored",
+                1,
+                dao.getVerifiedObservationCount(now)
+            )
+            assertEquals(
+                "No stored history is deleted while it is reclassified as invalid",
+                6,
+                dao.getObservationCount("invalid-live-query-gate")
+            )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun googleHistoricalInsightCannotReplaceOrBlockLiveObservationOnSameDay() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(

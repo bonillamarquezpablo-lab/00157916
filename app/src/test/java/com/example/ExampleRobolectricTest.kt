@@ -3239,8 +3239,7 @@ class ExampleRobolectricTest {
                     storeUrl = "https://www.pccomponentes.com/sony-wh1000xm5",
                     ean = "",
                     isPriceVerified = true
-                )
-                ,
+                ),
                 ProductEntity(
                     id = ids[3],
                     title = "Sony WH-1000XM5 Wireless Headphones",
@@ -3297,8 +3296,7 @@ class ExampleRobolectricTest {
                         productTitle = products[2].title,
                         storeName = "Amazon.es",
                         sourceType = "Google Shopping"
-                    )
-                    ,
+                    ),
                     PriceObservationEntity(
                         productId = ids[3],
                         storeId = "amazon_es",

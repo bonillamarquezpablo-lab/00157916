@@ -75,6 +75,7 @@ fun MarketScreen(
     onSearchChange: (String) -> Unit,
     onCategorySelect: (ProductCategory) -> Unit,
     onToggleOnlyAth: () -> Unit,
+    onToggleOnlyHistoricalMinimum: () -> Unit,
     onStoreFilterSelect: (String?) -> Unit,
     onSortChange: (SortOption) -> Unit,
     onProductClick: (Product) -> Unit,
@@ -347,6 +348,29 @@ fun MarketScreen(
                         selectedLabelColor = Color(0xFF047857)
                     ),
                     modifier = Modifier.testTag("filter_only_ath")
+                )
+
+                // Dedicated filter for the verified "MÍNIMO OBSERVADO" badge.
+                FilterChip(
+                    selected = uiState.onlyHistoricalMinimumFilter,
+                    onClick = onToggleOnlyHistoricalMinimum,
+                    label = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Star,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = if (uiState.onlyHistoricalMinimumFilter) Color(0xFF047857) else Color(0xFF10B981)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Mínimo observado", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Color(0xFF10B981).copy(alpha = 0.2f),
+                        selectedLabelColor = Color(0xFF047857)
+                    ),
+                    modifier = Modifier.testTag("filter_historical_minimum")
                 )
 
                 // Store Filter Dropdown

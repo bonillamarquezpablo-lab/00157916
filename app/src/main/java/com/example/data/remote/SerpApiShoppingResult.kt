@@ -484,6 +484,7 @@ fun onlineProductIdentityKey(title: String): String {
         .replace(Regex("""[^a-z0-9]+"""), " ")
         .trim()
         .replace(Regex("""\s+"""), " ")
+        .replace(Regex("""\bplaystation\s*5\b"""), "ps5")
     val productNameNormalized = rawNormalized
         .substringBefore(" compatible con ")
         .substringBefore(" compatible para ")
@@ -492,8 +493,14 @@ fun onlineProductIdentityKey(title: String): String {
         .map { it.value.replace(" ", "") }
         .distinct()
         .joinToString("+")
-    val variants = setOf("pro", "max", "plus", "ultra", "fe", "lite", "mini", "fold", "flip", "classic", "edge")
-        .filter { Regex("""\b""" + it + """\b""").containsMatchIn(productNameNormalized) }
+    val generalVariants = setOf("pro", "max", "plus", "ultra", "fe", "lite", "mini", "fold", "flip", "classic", "edge")
+    // Console identity must retain chassis/media variants as well as storage.
+    val consoleVariants = if (
+        Regex("""\b(ps5|xbox|nintendo switch|switch)\b""").containsMatchIn(productNameNormalized)
+    ) setOf("slim", "fat", "digital", "disc", "disk", "original", "standard", "oled", "series", "s")
+      else emptySet()
+    val variants = (generalVariants + consoleVariants)
+        .filter { Regex("""\b""" + Regex.escape(it) + """\b""").containsMatchIn(productNameNormalized) }
         .distinct()
         .sorted()
         .joinToString("+")
@@ -520,6 +527,9 @@ fun onlineProductIdentityKey(title: String): String {
         .replace(Regex("""\s+"""), " ")
 
     val brand = when {
+        Regex("""\bps5\b""").containsMatchIn(normalized) -> "sony"
+        Regex("""\bxbox\b""").containsMatchIn(normalized) -> "microsoft"
+        Regex("""\b(nintendo switch|switch)\b""").containsMatchIn(normalized) -> "nintendo"
         Regex("""\b(xiaomi|redmi|poco)\b""").containsMatchIn(normalized) -> "xiaomi"
         Regex("""\b(samsung|galaxy)\b""").containsMatchIn(normalized) -> "samsung"
         Regex("""\b(apple|iphone)\b""").containsMatchIn(normalized) -> "apple"

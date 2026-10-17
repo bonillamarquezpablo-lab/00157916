@@ -31,7 +31,7 @@ import java.util.TimeZone
 class FreeArchiveHistoryPersistenceTest {
 
     @Test
-    fun archivedPricesAreVisibleWithoutVerifyingCurrentPriceAndImportsAreDeduplicated() = runBlocking<Unit> {
+    fun archivedPricesWithNonCanonicalEuroCurrencyRemainVisibleAndDeduplicated() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,
@@ -108,7 +108,7 @@ class FreeArchiveHistoryPersistenceTest {
             val quote = ArchivedPriceQuote(
                 observedAt = archivedAt,
                 price = 89.99,
-                currency = "EUR",
+                currency = " eur ",
                 productTitle = title,
                 originalUrl = originalUrl,
                 snapshotUrl = snapshotUrl
@@ -716,6 +716,112 @@ class FreeArchiveHistoryPersistenceTest {
             )
             assertTrue("Recovery must not overwrite the catalogue's placeholder/current field", product.currentPrice == 499.99)
             assertTrue("Unverified legacy record must not feed deal history", product.priceHistory.isEmpty())
+        } finally {
+            database.close()
+        }
+    }
+
+
+    @Test
+    fun archivedObservationsDoNotAppearAsSavedStorePrices() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+
+        try {
+            val now = System.currentTimeMillis()
+            val originalUrl = "https://www.pccomponentes.com/anker-prime-27k"
+            val timestampFormat = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+                isLenient = false
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            val rawTimestamp = timestampFormat.format(Date(now - 60L * 24L * 60L * 60L * 1000L))
+            val archivedAt = timestampFormat.parse(rawTimestamp)!!.time
+            val snapshotUrl = "https://web.archive.org/web/${rawTimestamp}id_/${originalUrl}"
+
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "archive-only-store-test",
+                    storeId = "pccomponentes",
+                    price = 89.99,
+                    currency = "EUR",
+                    observedAt = archivedAt,
+                    sourceUrl = snapshotUrl,
+                    sourceName = "Internet Archive",
+                    isVerified = true,
+                    productTitle = "Anker Prime 27K Power Bank",
+                    storeName = "PcComponentes",
+                    sourceType = "Internet Archive",
+                    linkType = "Archivo histórico",
+                    collectedAt = now,
+                    evidenceType = "archive",
+                    sourcePageUrl = originalUrl
+                )
+            )
+            // Legacy rows can be mislabeled "live" despite pointing at Wayback.
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "archive-only-store-legacy-test",
+                    storeId = "pccomponentes",
+                    price = 79.99,
+                    currency = "EUR",
+                    observedAt = archivedAt + 1L,
+                    sourceUrl = snapshotUrl,
+                    sourceName = "Internet Archive",
+                    isVerified = true,
+                    productTitle = "Anker Prime 27K Power Bank",
+                    storeName = "PcComponentes",
+                    sourceType = "Internet Archive",
+                    linkType = "Archivo histórico",
+                    collectedAt = now,
+                    evidenceType = "live",
+                    sourcePageUrl = originalUrl
+                )
+            )
+
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+
+            val archiveOnlyStores = repository.storesWithSavedPricesStream.first()
+            assertTrue(
+                "Archived history must not create a current saved-store entry",
+                archiveOnlyStores.none { it.savedPriceCount > 0 }
+            )
+
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "live-store-test",
+                    storeId = "pccomponentes",
+                    price = 99.99,
+                    currency = "EUR",
+                    observedAt = now,
+                    sourceUrl = originalUrl,
+                    sourceName = "Google Shopping",
+                    isVerified = true,
+                    productTitle = "Anker Prime 27K Power Bank",
+                    storeName = "PcComponentes",
+                    sourceType = "Google Shopping",
+                    linkType = "directo",
+                    collectedAt = now,
+                    evidenceType = "live"
+                )
+            )
+
+            val storesWithLivePrice = repository.storesWithSavedPricesStream.first { stores ->
+                stores.any { it.savedPriceCount > 0 }
+            }
+            assertEquals(
+                "Only the live quote should count toward the current saved-store directory",
+                1,
+                storesWithLivePrice.sumOf { it.savedPriceCount }
+            )
         } finally {
             database.close()
         }

@@ -752,6 +752,113 @@ class ExampleRobolectricTest {
 
 
     @Test
+    fun `previously saved Google Shopping product URLs restore current prices but generic searches stay unverified`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val now = System.currentTimeMillis()
+            val validTitle = "Sony WH-1000XM5 Wireless Headphones"
+            val genericTitle = "Anker Prime 27K Power Bank"
+            database.productDao().insertAll(
+                listOf(
+                    ProductEntity(
+                        id = "online_product_google_shopping_valid",
+                        title = validTitle,
+                        brand = "Sony",
+                        category = "TV_AUDIO",
+                        currentPrice = 249.99,
+                        athMinPrice = 249.99,
+                        athMinDate = "Historial en construcción",
+                        athMinStore = "Amazon.es",
+                        athMaxPrice = 249.99,
+                        avg90dPrice = 0.0,
+                        officialPvp = 0.0,
+                        currentStoreId = "amazon_es",
+                        storeUrl = "https://www.amazon.es/dp/SONYTEST",
+                        ean = "",
+                        isPriceVerified = false
+                    ),
+                    ProductEntity(
+                        id = "online_product_google_generic_search",
+                        title = genericTitle,
+                        brand = "Anker",
+                        category = "COMPUTING",
+                        currentPrice = 99.99,
+                        athMinPrice = 99.99,
+                        athMinDate = "Historial en construcción",
+                        athMinStore = "Amazon.es",
+                        athMaxPrice = 99.99,
+                        avg90dPrice = 0.0,
+                        officialPvp = 0.0,
+                        currentStoreId = "amazon_es",
+                        storeUrl = "https://www.amazon.es/",
+                        ean = "",
+                        isPriceVerified = false
+                    )
+                )
+            )
+            database.priceObservationDao().insertAll(
+                listOf(
+                    PriceObservationEntity(
+                        productId = "online_product_google_shopping_valid",
+                        storeId = "amazon_es",
+                        price = 249.99,
+                        observedAt = now,
+                        sourceUrl = "https://www.google.com/shopping/product/1234567890123456789?prds=1234567890123456789",
+                        sourceName = "Google Shopping",
+                        isVerified = true,
+                        productTitle = validTitle,
+                        storeName = "Amazon.es",
+                        sourceType = "Google Shopping",
+                        linkType = "Google Shopping"
+                    ),
+                    PriceObservationEntity(
+                        productId = "online_product_google_generic_search",
+                        storeId = "amazon_es",
+                        price = 99.99,
+                        observedAt = now,
+                        sourceUrl = "https://www.google.com/search?q=Anker+Prime+27K",
+                        sourceName = "Google Shopping",
+                        isVerified = true,
+                        productTitle = genericTitle,
+                        storeName = "Amazon.es",
+                        sourceType = "Google Shopping",
+                        linkType = "Google Shopping"
+                    )
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val products = withTimeout<List<Product>>(10_000) {
+                repository.allProductsStream.first { rows ->
+                    rows.any { it.id == "online_product_google_shopping_valid" } &&
+                        rows.any { it.id == "online_product_google_generic_search" }
+                }
+            }
+            val restored = products.single { it.id == "online_product_google_shopping_valid" }
+            assertTrue("A specific saved Google Shopping product link must retain its source-backed price", restored.isPriceVerified)
+            assertEquals(249.99, restored.currentPrice, 0.001)
+            assertEquals(1, restored.offers.size)
+            assertEquals("Google Shopping", restored.offers.single().linkType)
+            assertEquals(1, restored.priceHistory.size)
+
+            val generic = products.single { it.id == "online_product_google_generic_search" }
+            assertFalse("A generic Google search URL must not be treated as a verified offer", generic.isPriceVerified)
+            assertTrue(generic.priceHistory.isEmpty())
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun `online search stores real offers once per store and day and rejects used listings and low outliers`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(

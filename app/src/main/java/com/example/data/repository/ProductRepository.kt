@@ -148,7 +148,10 @@ class ProductRepository(
             observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
             observation.currency.equals("EUR", ignoreCase = true) &&
             uri?.scheme.equals("https", ignoreCase = true) &&
-            !pointsToSearchInsteadOfMerchant &&
+            // Allow an indirect Google Shopping link only when it identifies a product.
+            // Generic Google search pages are not evidence of a merchant price.
+            (!pointsToSearchInsteadOfMerchant ||
+                isSpecificGoogleShoppingProductUrl(uri, observation.linkType)) &&
             sourceIsRecognized &&
             observation.sourceType in setOf("Google Shopping", "Amazon.es") &&
             isEligibleHistoryTitle(observedTitle) &&
@@ -156,6 +159,38 @@ class ProductRepository(
             isPlausibleHistoryPrice(observedTitle, observation.price) &&
             isSafeCatalogTitleMatch(observedTitle, catalogTitle) &&
             !hasStrictModelMismatch(catalogTitle, explicitModelMarkers(catalogTitle), observedTitle)
+    }
+
+    /**
+     * Older versions stored some valid offers as Google Shopping product URLs. Accept only
+     * product-specific destinations with the explicit indirect-link marker; never a generic
+     * Google search, ad redirect, or landing page.
+     */
+    private fun isSpecificGoogleShoppingProductUrl(uri: URI?, linkType: String): Boolean {
+        if (uri == null || !linkType.equals("Google Shopping", ignoreCase = true)) return false
+
+        val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+        val isGoogleHost = host == "google.com" || host == "google.es" ||
+            host.endsWith(".google.com") || host.endsWith(".google.es")
+        if (!isGoogleHost) return false
+
+        val path = uri.path.orEmpty().lowercase(Locale.ROOT)
+        if (Regex("""/shopping/products?/[^/?]+""").containsMatchIn(path)) return true
+
+        // SerpApi sometimes gives product-specific /search?prds=... URLs. Require a substantial
+        // product identifier; a short or generic ?q= search remains rejected.
+        return uri.rawQuery.orEmpty().split('&').any { parameter ->
+            val key = parameter.substringBefore('=').lowercase(Locale.ROOT)
+            if (key !in setOf("prds", "product_id", "productid")) {
+                false
+            } else {
+                val compactValue = parameter.substringAfter('=', "")
+                    .lowercase(Locale.ROOT)
+                    .filter { it.isLetterOrDigit() }
+                compactValue.length >= 12 ||
+                    (compactValue.length >= 8 && compactValue.any { it.isDigit() })
+            }
+        }
     }
 
     /**

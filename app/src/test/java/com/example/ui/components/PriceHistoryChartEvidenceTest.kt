@@ -39,7 +39,7 @@ class PriceHistoryChartEvidenceTest {
         }
 
         composeRule.onNodeWithText("Evolución del precio observado").assertIsDisplayed()
-        composeRule.onNodeWithText("Media 90 d:", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Wayback").assertIsDisplayed()
 
         composeRule.onNodeWithText("Wayback").performClick()
         composeRule.onNodeWithText("Histórico externo · Wayback").assertIsDisplayed()

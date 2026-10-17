@@ -609,6 +609,11 @@ class SerpApiClient(
                 ?: fallbackProviderUrl?.let {
                     retailerDestinationForOffer(it, providerSource.orEmpty(), title)
                 }
+                ?: retailerDestinationForOffer(
+                    googleShoppingSearchUrl(title),
+                    providerSource.orEmpty(),
+                    title
+                )
                 ?: googleShoppingSearchUrl(title)
             val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()

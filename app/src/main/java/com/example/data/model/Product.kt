@@ -47,7 +47,11 @@ data class Product(
     /** Provider-backed Google Shopping catalog ID, when available. */
     val googleProductId: String? = null,
     /** Provider which supplied the latest saved observation, e.g. Google Shopping or Amazon.es. */
-    val priceSource: String = ""
+    val priceSource: String = "",
+    /** Latest verified historical observation for display only when no live quote is available. */
+    val savedHistoricalPrice: Double? = null,
+    val savedHistoricalPriceObservedAt: Long? = null,
+    val savedHistoricalPriceSource: String = ""
 ) {
     /**
      * Historical conclusions require at least three distinct snapshots spanning 90 days,
@@ -127,6 +131,9 @@ data class Product(
             isPriceFresh && currentPrice.isFinite() && currentPrice > 0.0 ->
                 PriceDisplayStatus.VERIFIED_CURRENT
             isPriceVerified && currentPrice.isFinite() && currentPrice > 0.0 ->
+                PriceDisplayStatus.SAVED_PENDING_REVALIDATION
+            savedHistoricalPrice?.let { it.isFinite() && it > 0.0 } == true &&
+                savedHistoricalPriceObservedAt?.let { it > 0L && it <= System.currentTimeMillis() } == true ->
                 PriceDisplayStatus.SAVED_PENDING_REVALIDATION
             else -> PriceDisplayStatus.DEMONSTRATION
         }

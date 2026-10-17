@@ -827,17 +827,6 @@ private fun openAmazonSearch(context: Context, query: String) {
     openStoreUrl(context, url, preferAmazonApp = true)
 }
 
-/** Opens GAME Spain's own search results without using SerpApi or spending search quota. */
-private fun openGameSearch(context: Context, query: String) {
-    val trimmedQuery = query.trim()
-    val url = if (trimmedQuery.length >= 2) {
-        "https://www.game.es/buscar/${Uri.encode(trimmedQuery)}/o%3D1"
-    } else {
-        "https://www.game.es/"
-    }
-    openStoreUrl(context, url, preferAmazonApp = false)
-}
-
 private fun openStoreUrl(context: Context, url: String, preferAmazonApp: Boolean) {
     val uri = Uri.parse(url)
     if (preferAmazonApp) {

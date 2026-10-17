@@ -1,5 +1,14 @@
 package com.example.data.model
 
+enum class PriceDisplayStatus {
+    /** A live, source-backed observation captured within the freshness window. */
+    VERIFIED_CURRENT,
+    /** A real saved observation exists, but must not be represented as today's price. */
+    SAVED_PENDING_REVALIDATION,
+    /** No source-backed saved price can be safely shown; bundled/demo values stay hidden. */
+    DEMONSTRATION
+}
+
 data class Product(
     val id: String,
     val title: String,
@@ -107,6 +116,20 @@ data class Product(
     val isPriceFresh: Boolean
         get() = isPriceVerified &&
             priceAgeMillis?.let { it <= PRICE_FRESHNESS_WINDOW_MS } == true
+
+    /**
+     * Separates a current quote from a stale-but-real saved quote and from bundled/demo values.
+     * Never infer a real saved price from currentPrice alone: old catalogue rows also contain
+     * placeholder numbers, so a verified source flag and valid price are required.
+     */
+    val priceDisplayStatus: PriceDisplayStatus
+        get() = when {
+            isPriceFresh && currentPrice.isFinite() && currentPrice > 0.0 ->
+                PriceDisplayStatus.VERIFIED_CURRENT
+            isPriceVerified && currentPrice.isFinite() && currentPrice > 0.0 ->
+                PriceDisplayStatus.SAVED_PENDING_REVALIDATION
+            else -> PriceDisplayStatus.DEMONSTRATION
+        }
 
     val priceFreshnessLabel: String
         get() {

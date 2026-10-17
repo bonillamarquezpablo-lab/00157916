@@ -244,7 +244,7 @@ fun ProductDetailSheet(
             // Existing analysis certificate.
             DealVerdictBadge(verdict = product.verdict, compact = false)
 
-            if (!product.isPriceVerified) {
+            if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.DEMONSTRATION) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
@@ -252,7 +252,7 @@ fun ProductDetailSheet(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = "Ficha sin precio verificado",
+                            text = "Datos de demostración · sin precio real guardado",
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -269,7 +269,7 @@ fun ProductDetailSheet(
                     }
                 }
             }
-            if (product.isPriceVerified) {
+            if (product.priceDisplayStatus != com.example.data.model.PriceDisplayStatus.DEMONSTRATION) {
             // Key Price Metrics Grid
             Surface(
                 modifier = Modifier
@@ -286,19 +286,15 @@ fun ProductDetailSheet(
                         // Current price
                         Column {
                             Text(
-                                text = if (product.isPriceVerified) "Precio actual" else "Precio actual no confirmado",
+                                text = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT) "Precio actual verificado" else "Precio guardado · pendiente de revalidación",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = if (product.isPriceVerified) {
-                                    "${String.format("%.2f", product.currentPrice)} €"
-                                } else {
-                                    "No disponible"
-                                },
+                                text = "${String.format("%.2f", product.currentPrice)} €",
                                 fontWeight = FontWeight.Black,
-                                fontSize = if (product.isPriceVerified) 20.sp else 15.sp,
-                                color = if (product.isPriceVerified && product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
+                                fontSize = 20.sp,
+                                color = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             product.priceObservedAt?.let { observedAt ->
                                 Text(
@@ -308,7 +304,7 @@ fun ProductDetailSheet(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            if (product.isPriceVerified && !product.isPriceFresh) {
+                            if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION) {
                                 Text(
                                     text = product.priceFreshnessLabel,
                                     fontSize = 11.sp,
@@ -317,10 +313,10 @@ fun ProductDetailSheet(
                                 )
                             }
                             Text(
-                                text = if (product.isPriceVerified) {
-                                    "$currentSourceLabel · confirma precio final y stock en la tienda."
+                                text = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION) {
+                                    "Última fuente guardada: $currentSourceLabel · no confirma precio actual ni stock."
                                 } else {
-                                    currentSourceLabel
+                                    "$currentSourceLabel · confirma precio final y stock en la tienda."
                                 },
                                 fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant

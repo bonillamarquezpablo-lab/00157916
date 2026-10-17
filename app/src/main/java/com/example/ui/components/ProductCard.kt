@@ -195,9 +195,16 @@ fun ProductCard(
             Spacer(modifier = Modifier.height(10.dp))
 
             // Price Section
-            if (!product.isPriceVerified) {
-                Text(
-                    text = "SIN PRECIO VERIFICADO · CONSULTA PENDIENTE",
+            when (product.priceDisplayStatus) {
+                com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT -> Unit
+                com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION -> Text(
+                    text = "PRECIO GUARDADO · PENDIENTE DE REVALIDACIÓN",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+                com.example.data.model.PriceDisplayStatus.DEMONSTRATION -> Text(
+                    text = "DATOS DE DEMOSTRACIÓN · SIN PRECIO REAL VERIFICADO",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.error
@@ -211,13 +218,13 @@ fun ProductCard(
                 Column {
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
-                            text = if (product.isPriceVerified) "${String.format("%.2f", product.currentPrice)} €" else "Precio no disponible",
+                            text = if (product.priceDisplayStatus != com.example.data.model.PriceDisplayStatus.DEMONSTRATION) "${String.format("%.2f", product.currentPrice)} €" else "Precio no disponible",
                             fontWeight = FontWeight.Black,
-                            fontSize = if (product.isPriceVerified) 22.sp else 15.sp,
+                            fontSize = if (product.priceDisplayStatus != com.example.data.model.PriceDisplayStatus.DEMONSTRATION) 22.sp else 15.sp,
                             color = if (product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
-                        if (product.isPriceVerified && product.officialPvp > product.currentPrice) {
+                        if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.officialPvp > product.currentPrice) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "${String.format("%.2f", product.officialPvp)} €",
@@ -228,7 +235,7 @@ fun ProductCard(
                         }
                     }
 
-                    if (product.isPriceVerified && product.realSavingsPercent > 0) {
+                    if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.realSavingsPercent > 0) {
                         Text(
                             text = "Ahorro real: -${product.realSavingsPercent}% (-${String.format("%.2f", product.realSavingsAmount)} €)",
                             fontSize = 11.sp,
@@ -236,7 +243,7 @@ fun ProductCard(
                             color = Color(0xFF059669)
                         )
                     }
-                    if (product.isPriceVerified && product.priceObservedAt != null) {
+                    if (product.priceDisplayStatus != com.example.data.model.PriceDisplayStatus.DEMONSTRATION && product.priceObservedAt != null) {
                         Text(
                             text = "Consultado " + SimpleDateFormat("dd/MM HH:mm", Locale("es", "ES"))
                                 .format(Date(product.priceObservedAt)),
@@ -244,7 +251,7 @@ fun ProductCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    if (product.isPriceVerified && !product.isPriceFresh) {
+                    if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION) {
                         Text(
                             text = product.priceFreshnessLabel,
                             fontSize = 11.sp,
@@ -252,9 +259,13 @@ fun ProductCard(
                             color = MaterialTheme.colorScheme.tertiary
                         )
                     }
-                    if (product.isPriceVerified) {
+                    if (product.priceDisplayStatus != com.example.data.model.PriceDisplayStatus.DEMONSTRATION) {
                         Text(
-                            text = "Fuente: ${product.priceSource.ifBlank { "buscador online" }} · confirma el precio final y el stock.",
+                            text = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION) {
+                                "Última fuente guardada: ${product.priceSource.ifBlank { "buscador online" }} · precio antiguo, no confirmado como actual."
+                            } else {
+                                "Fuente: ${product.priceSource.ifBlank { "buscador online" }} · confirma el precio final y el stock."
+                            },
                             fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

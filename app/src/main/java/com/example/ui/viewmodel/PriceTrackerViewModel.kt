@@ -1041,219 +1041,219 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             try {
                 withTimeout(26_000L) {
-                // Cache lookup comes first: saved results remain usable even if the quota is empty
-                // or the API key was removed after the previous search.
-                val cached = withContext(Dispatchers.IO) {
-                    onlineSearchCache.read(searchCacheProviderKey(provider), query)
-                }
-                if (cached != null && (cached.rawResponse != null || cached.results.isNotEmpty())) {
-                    // Parsing stored JSON and classifying offers can be CPU-heavy. Keep it off
-                    // Android's main thread so the search screen continues drawing smoothly.
-                    val cachedReport = withContext(Dispatchers.Default) {
-                        if (cached.rawResponse != null) {
-                            val cachedRoot = org.json.JSONObject(cached.rawResponse)
-                            if (provider == OnlineSearchProvider.AMAZON) {
-                                serpApiClient.parseAmazonResultsDetailed(cachedRoot, query, cached.savedAt)
+                    // Cache lookup comes first: saved results remain usable even if the quota is empty
+                    // or the API key was removed after the previous search.
+                    val cached = withContext(Dispatchers.IO) {
+                        onlineSearchCache.read(searchCacheProviderKey(provider), query)
+                    }
+                    if (cached != null && (cached.rawResponse != null || cached.results.isNotEmpty())) {
+                        // Parsing stored JSON and classifying offers can be CPU-heavy. Keep it off
+                        // Android's main thread so the search screen continues drawing smoothly.
+                        val cachedReport = withContext(Dispatchers.Default) {
+                            if (cached.rawResponse != null) {
+                                val cachedRoot = org.json.JSONObject(cached.rawResponse)
+                                if (provider == OnlineSearchProvider.AMAZON) {
+                                    serpApiClient.parseAmazonResultsDetailed(cachedRoot, query, cached.savedAt)
+                                } else {
+                                    serpApiClient.parseShoppingResultsDetailed(cachedRoot, query, cached.savedAt)
+                                }
                             } else {
-                                serpApiClient.parseShoppingResultsDetailed(cachedRoot, query, cached.savedAt)
+                                com.example.data.remote.SerpApiShoppingSearchReport(
+                                    results = cached.results,
+                                    rawResultCount = cached.results.size,
+                                    rejectedAsIrrelevant = 0,
+                                    rejectedForPriceOrCurrency = 0,
+                                    rejectedForLink = 0,
+                                    rejectedOther = 0,
+                                    providerName = if (provider == OnlineSearchProvider.AMAZON) "Amazon.es" else "Google Shopping"
+                                )
+                            }
+                        }
+                        val cachedResults = cachedReport.results
+                        val (safeCachedResults, cachedDiscarded) = withContext(Dispatchers.Default) {
+                            val eligible = repository.filterOnlineSearchResults(cachedResults, query)
+                            val discarded = (cachedReport.discardedOffers +
+                                repository.diagnoseOnlineSearchRejections(cachedResults, query))
+                                .distinctBy { it.provider + "|" + it.title + "|" + it.priceLabel + "|" + it.reason }
+                            eligible to discarded
+                        }
+                        onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = cachedDiscarded
+                        val ageMinutes = ((System.currentTimeMillis() - cached.savedAt) / 60_000L).coerceAtLeast(1L)
+                        val base = if (safeCachedResults.isEmpty()) {
+                            cachedReport.emptyResultMessage(query)
+                        } else {
+                            onlineSearchResultMessage(safeCachedResults, provider, query)
+                        }
+                        val cacheNotice = "Resultados guardados hace $ageMinutes min; no se ha consumido otra búsqueda."
+                        val savedObservations = if (safeCachedResults.isNotEmpty()) {
+                            withContext(Dispatchers.IO) {
+                                repository.recordOnlineSearchResults(safeCachedResults, provider.name, query)
+                            }
+                        } else 0
+                        val historyNotice = if (safeCachedResults.isNotEmpty()) {
+                            onlineHistoryNotice(savedObservations, safeCachedResults.size)
+                        } else ""
+                        val filterNotice = onlineFilterNotice(cachedDiscarded)
+                        val status = listOf(base, cacheNotice, filterNotice, historyNotice)
+                            .map { it.trim() }
+                            .filter { it.isNotBlank() }
+                            .joinToString("\n\n")
+                        _uiState.value = _uiState.value.copy(
+                            onlineSearchResults = safeCachedResults,
+                            onlineSearchDiscardedOffers = cachedDiscarded,
+                            showOnlineSearchDiscarded = false,
+                            onlineSearchStatus = status
+                        )
+                        // Historical archive scans are user-triggered from a product detail sheet.
+                        // Do not start a second crawl automatically during every online search.
+                        return@withTimeout
+                    }
+
+                    val token = withContext(Dispatchers.IO) { serpApiTokenStore.read() }
+                    if (token.isNullOrBlank()) {
+                        val message = serpApiTokenStore.lastReadErrorMessage()
+                            ?: "Para mostrar precios dentro de Mínimo, guarda tu clave de SerpApi en Ajustes. También puedes abrir Amazon con tu sesión iniciada."
+                        _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                        showSnackbar(message)
+                        return@withTimeout
+                    }
+
+                    // Validate the key and quota before the paid search request.
+                    val accountInfo = readAccountInfo(token)
+                    if (accountInfo == null) {
+                        val message = "No se ha podido validar la cuenta SerpApi. No se ha lanzado ninguna búsqueda ni gastado cuota. Comprueba la conexión e inténtalo de nuevo."
+                        _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                        showSnackbar(message)
+                        return@withTimeout
+                    }
+                    accountStatusBlockMessage(accountInfo)?.let { message ->
+                        _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                        showSnackbar(message)
+                        return@withTimeout
+                    }
+                    if (accountCapacity(accountInfo) <= 0) {
+                        val message = quotaBlockMessage(accountInfo)
+                        _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                        showSnackbar(message)
+                        return@withTimeout
+                    }
+
+                    val providerReport = when (provider) {
+                        OnlineSearchProvider.GOOGLE_SHOPPING ->
+                            serpApiClient.searchOnlineWithDiagnostics(token, query)
+                        OnlineSearchProvider.AMAZON ->
+                            serpApiClient.searchAmazonOnlineWithDiagnostics(token, query)
+                    }
+
+                    var providerResults = providerReport.results
+                    var providerDiscardedOffers = providerReport.discardedOffers
+                    var providerRawResultCount = providerReport.rawResultCount
+                    var gameSupplementRequired = false
+                    var gameSupplementAttempted = false
+                    var gameSupplementSucceeded = false
+                    var gameSupplementNote = ""
+
+                    // GAME is part of this same search flow. Only gaming-related queries with no
+                    // identified GAME offer may trigger one optional Shopping supplement.
+                    // At least two credits must have remained before the primary request.
+                    if (provider == OnlineSearchProvider.GOOGLE_SHOPPING &&
+                        shouldSearchGameSupplement(query, providerResults)
+                    ) {
+                        gameSupplementRequired = true
+                        if (accountCapacity(accountInfo) >= 2) {
+                            gameSupplementAttempted = true
+                            try {
+                                val gameReport = withTimeoutOrNull(8_000L) {
+                                    serpApiClient.searchGameSupplementWithDiagnostics(token, query)
+                                } ?: throw java.net.SocketTimeoutException("La consulta complementaria de GAME ha agotado el tiempo límite.")
+                                val identifiedGameOffers = gameReport.results.count(::isGameSpainOffer)
+                                providerResults = mergeGoogleShoppingWithGameSupplement(
+                                    primaryOffers = providerResults,
+                                    supplementalOffers = gameReport.results
+                                )
+                                providerDiscardedOffers = providerDiscardedOffers + gameReport.discardedOffers
+                                providerRawResultCount += gameReport.rawResultCount
+                                gameSupplementSucceeded = true
+                                gameSupplementNote = if (identifiedGameOffers > 0) {
+                                    "Búsqueda unificada: se han añadido $identifiedGameOffers ofertas identificadas como GAME España. La consulta complementaria puede consumir una búsqueda adicional."
+                                } else {
+                                    "Se consultó GAME dentro de la búsqueda unificada, pero Google Shopping no devolvió ofertas identificables de esa tienda. No se ha inventado ningún precio."
+                                }
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                // A secondary retailer lookup must never discard valid general results.
+                                gameSupplementNote = "El complemento automático de GAME no respondió; se conservan los resultados generales."
                             }
                         } else {
-                            com.example.data.remote.SerpApiShoppingSearchReport(
-                                results = cached.results,
-                                rawResultCount = cached.results.size,
-                                rejectedAsIrrelevant = 0,
-                                rejectedForPriceOrCurrency = 0,
-                                rejectedForLink = 0,
-                                rejectedOther = 0,
-                                providerName = if (provider == OnlineSearchProvider.AMAZON) "Amazon.es" else "Google Shopping"
-                            )
+                            gameSupplementNote = "No se ha consultado GAME por separado porque el saldo disponible solo permite priorizar la búsqueda general."
                         }
                     }
-                    val cachedResults = cachedReport.results
-                    val (safeCachedResults, cachedDiscarded) = withContext(Dispatchers.Default) {
-                        val eligible = repository.filterOnlineSearchResults(cachedResults, query)
-                        val discarded = (cachedReport.discardedOffers +
-                            repository.diagnoseOnlineSearchRejections(cachedResults, query))
-                            .distinctBy { it.provider + "|" + it.title + "|" + it.priceLabel + "|" + it.reason }
-                        eligible to discarded
+
+                    // Keep CPU-heavy product relevance filtering off Android's UI thread.
+                    val (results, discarded) = withContext(Dispatchers.Default) {
+                        val rawResults = providerResults
+                        val repositoryDiscarded = repository.diagnoseOnlineSearchRejections(rawResults, query)
+                        val accepted = repository.filterOnlineSearchResults(rawResults, query)
+                        val rejected = (providerDiscardedOffers + repositoryDiscarded)
+                            .distinctBy { "${it.provider}|${it.title}|${it.priceLabel}|${it.reason}" }
+                        accepted to rejected
                     }
-                    onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = cachedDiscarded
-                    val ageMinutes = ((System.currentTimeMillis() - cached.savedAt) / 60_000L).coerceAtLeast(1L)
-                    val base = if (safeCachedResults.isEmpty()) {
-                        cachedReport.emptyResultMessage(query)
-                    } else {
-                        onlineSearchResultMessage(safeCachedResults, provider, query)
-                    }
-                    val cacheNotice = "Resultados guardados hace $ageMinutes min; no se ha consumido otra búsqueda."
-                    val savedObservations = if (safeCachedResults.isNotEmpty()) {
+                    onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = discarded
+                    val savedObservations = if (results.isNotEmpty()) {
                         withContext(Dispatchers.IO) {
-                            repository.recordOnlineSearchResults(safeCachedResults, provider.name, query)
+                                repository.recordOnlineSearchResults(results, provider.name, query)
                         }
                     } else 0
-                    val historyNotice = if (safeCachedResults.isNotEmpty()) {
-                        onlineHistoryNotice(savedObservations, safeCachedResults.size)
-                    } else ""
-                    val filterNotice = onlineFilterNotice(cachedDiscarded)
-                    val status = listOf(base, cacheNotice, filterNotice, historyNotice)
-                        .map { it.trim() }
-                        .filter { it.isNotBlank() }
-                        .joinToString("\n\n")
-                    _uiState.value = _uiState.value.copy(
-                        onlineSearchResults = safeCachedResults,
-                        onlineSearchDiscardedOffers = cachedDiscarded,
-                        showOnlineSearchDiscarded = false,
-                        onlineSearchStatus = status
-                    )
-                    // Historical archive scans are user-triggered from a product detail sheet.
-                    // Do not start a second crawl automatically during every online search.
-                    return@launch
-                }
 
-                val token = withContext(Dispatchers.IO) { serpApiTokenStore.read() }
-                if (token.isNullOrBlank()) {
-                    val message = serpApiTokenStore.lastReadErrorMessage()
-                        ?: "Para mostrar precios dentro de Mínimo, guarda tu clave de SerpApi en Ajustes. También puedes abrir Amazon con tu sesión iniciada."
-                    _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
-                    showSnackbar(message)
-                    return@launch
-                }
-
-                // Validate the key and quota before the paid search request.
-                val accountInfo = readAccountInfo(token)
-                if (accountInfo == null) {
-                    val message = "No se ha podido validar la cuenta SerpApi. No se ha lanzado ninguna búsqueda ni gastado cuota. Comprueba la conexión e inténtalo de nuevo."
-                    _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
-                    showSnackbar(message)
-                    return@launch
-                }
-                accountStatusBlockMessage(accountInfo)?.let { message ->
-                    _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
-                    showSnackbar(message)
-                    return@launch
-                }
-                if (accountCapacity(accountInfo) <= 0) {
-                    val message = quotaBlockMessage(accountInfo)
-                    _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
-                    showSnackbar(message)
-                    return@launch
-                }
-
-                val providerReport = when (provider) {
-                    OnlineSearchProvider.GOOGLE_SHOPPING ->
-                        serpApiClient.searchOnlineWithDiagnostics(token, query)
-                    OnlineSearchProvider.AMAZON ->
-                        serpApiClient.searchAmazonOnlineWithDiagnostics(token, query)
-                }
-
-                var providerResults = providerReport.results
-                var providerDiscardedOffers = providerReport.discardedOffers
-                var providerRawResultCount = providerReport.rawResultCount
-                var gameSupplementRequired = false
-                var gameSupplementAttempted = false
-                var gameSupplementSucceeded = false
-                var gameSupplementNote = ""
-
-                // GAME is part of this same search flow. Only gaming-related queries with no
-                // identified GAME offer may trigger one optional Shopping supplement.
-                // At least two credits must have remained before the primary request.
-                if (provider == OnlineSearchProvider.GOOGLE_SHOPPING &&
-                    shouldSearchGameSupplement(query, providerResults)
-                ) {
-                    gameSupplementRequired = true
-                    if (accountCapacity(accountInfo) >= 2) {
-                        gameSupplementAttempted = true
-                        try {
-                            val gameReport = withTimeoutOrNull(8_000L) {
-                                serpApiClient.searchGameSupplementWithDiagnostics(token, query)
-                            } ?: throw java.net.SocketTimeoutException("La consulta complementaria de GAME ha agotado el tiempo límite.")
-                            val identifiedGameOffers = gameReport.results.count(::isGameSpainOffer)
-                            providerResults = mergeGoogleShoppingWithGameSupplement(
-                                primaryOffers = providerResults,
-                                supplementalOffers = gameReport.results
-                            )
-                            providerDiscardedOffers = providerDiscardedOffers + gameReport.discardedOffers
-                            providerRawResultCount += gameReport.rawResultCount
-                            gameSupplementSucceeded = true
-                            gameSupplementNote = if (identifiedGameOffers > 0) {
-                                "Búsqueda unificada: se han añadido $identifiedGameOffers ofertas identificadas como GAME España. La consulta complementaria puede consumir una búsqueda adicional."
-                            } else {
-                                "Se consultó GAME dentro de la búsqueda unificada, pero Google Shopping no devolvió ofertas identificables de esa tienda. No se ha inventado ningún precio."
+                    // Cache the merged snapshot only after the supplement succeeds. Otherwise retain
+                    // the primary raw response so accepted/rejected offers can be reclassified.
+                    if (gameSupplementSucceeded) {
+                        withContext(Dispatchers.IO) {
+                            onlineSearchCache.write(searchCacheProviderKey(provider), query, providerResults)
+                        }
+                    } else if (!gameSupplementRequired) {
+                        // Ordinary non-gaming searches and broad searches that already returned GAME
+                        // can cache the provider response as usual.
+                        providerReport.rawResponse?.let { rawResponse ->
+                            withContext(Dispatchers.IO) {
+                                onlineSearchCache.writeRaw(searchCacheProviderKey(provider), query, rawResponse)
                             }
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (_: Exception) {
-                            // A secondary retailer lookup must never discard valid general results.
-                            gameSupplementNote = "El complemento automático de GAME no respondió; se conservan los resultados generales."
                         }
                     } else {
-                        gameSupplementNote = "No se ha consultado GAME por separado porque el saldo disponible solo permite priorizar la búsqueda general."
-                    }
-                }
-
-                // Keep CPU-heavy product relevance filtering off Android's UI thread.
-                val (results, discarded) = withContext(Dispatchers.Default) {
-                    val rawResults = providerResults
-                    val repositoryDiscarded = repository.diagnoseOnlineSearchRejections(rawResults, query)
-                    val accepted = repository.filterOnlineSearchResults(rawResults, query)
-                    val rejected = (providerDiscardedOffers + repositoryDiscarded)
-                        .distinctBy { "${it.provider}|${it.title}|${it.priceLabel}|${it.reason}" }
-                    accepted to rejected
-                }
-                onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = discarded
-                val savedObservations = if (results.isNotEmpty()) {
-                    withContext(Dispatchers.IO) {
-                            repository.recordOnlineSearchResults(results, provider.name, query)
-                    }
-                } else 0
-
-                // Cache the merged snapshot only after the supplement succeeds. Otherwise retain
-                // the primary raw response so accepted/rejected offers can be reclassified.
-                if (gameSupplementSucceeded) {
-                    withContext(Dispatchers.IO) {
-                        onlineSearchCache.write(searchCacheProviderKey(provider), query, providerResults)
-                    }
-                } else if (!gameSupplementRequired) {
-                    // Ordinary non-gaming searches and broad searches that already returned GAME
-                    // can cache the provider response as usual.
-                    providerReport.rawResponse?.let { rawResponse ->
+                        // Do not cache a gaming search as complete when its GAME supplement failed
+                        // or could not run due to quota: otherwise a later retry would reuse the
+                        // general-only cache for 24 hours and never retry the missing retailer.
                         withContext(Dispatchers.IO) {
-                            onlineSearchCache.writeRaw(searchCacheProviderKey(provider), query, rawResponse)
+                            onlineSearchCache.invalidate(searchCacheProviderKey(provider), query)
                         }
                     }
-                } else {
-                    // Do not cache a gaming search as complete when its GAME supplement failed
-                    // or could not run due to quota: otherwise a later retry would reuse the
-                    // general-only cache for 24 hours and never retry the missing retailer.
-                    withContext(Dispatchers.IO) {
-                        onlineSearchCache.invalidate(searchCacheProviderKey(provider), query)
+                    val base = if (results.isEmpty() && providerRawResultCount > 0) {
+                        providerReport.emptyResultMessage(query)
+                    } else {
+                        onlineSearchResultMessage(results, provider, query)
                     }
-                }
-                val base = if (results.isEmpty() && providerRawResultCount > 0) {
-                    providerReport.emptyResultMessage(query)
-                } else {
-                    onlineSearchResultMessage(results, provider, query)
-                }
-                val quotaNote = if (gameSupplementAttempted) {
-                    "Saldo comprobado antes de buscar: ${accountInfo.quotaSummary()} La búsqueda general y el complemento de GAME pueden consumir hasta dos búsquedas."
-                } else {
-                    "Saldo comprobado antes de buscar: ${accountInfo.quotaSummary()} La búsqueda general puede haber consumido una búsqueda."
-                }
-                val filterNote = onlineFilterNotice(discarded)
-                val historyNote = if (results.isNotEmpty()) {
-                    onlineHistoryNotice(savedObservations, results.size)
-                } else ""
-                val message = listOf(base, quotaNote, gameSupplementNote, filterNote, historyNote)
-                    .map { it.trim() }
-                    .filter { it.isNotBlank() }
-                    .joinToString("\\n\\n")
-                _uiState.value = _uiState.value.copy(
-                    onlineSearchResults = results,
-                    onlineSearchDiscardedOffers = discarded,
-                    showOnlineSearchDiscarded = false,
-                    onlineSearchStatus = message
-                )
-                // Keep the paid/live search responsive. Historical lookups remain available
-                // via the explicit free-history action in each product detail sheet.
+                    val quotaNote = if (gameSupplementAttempted) {
+                        "Saldo comprobado antes de buscar: ${accountInfo.quotaSummary()} La búsqueda general y el complemento de GAME pueden consumir hasta dos búsquedas."
+                    } else {
+                        "Saldo comprobado antes de buscar: ${accountInfo.quotaSummary()} La búsqueda general puede haber consumido una búsqueda."
+                    }
+                    val filterNote = onlineFilterNotice(discarded)
+                    val historyNote = if (results.isNotEmpty()) {
+                        onlineHistoryNotice(savedObservations, results.size)
+                    } else ""
+                    val message = listOf(base, quotaNote, gameSupplementNote, filterNote, historyNote)
+                        .map { it.trim() }
+                        .filter { it.isNotBlank() }
+                        .joinToString("\\n\\n")
+                    _uiState.value = _uiState.value.copy(
+                        onlineSearchResults = results,
+                        onlineSearchDiscardedOffers = discarded,
+                        showOnlineSearchDiscarded = false,
+                        onlineSearchStatus = message
+                    )
+                    // Keep the paid/live search responsive. Historical lookups remain available
+                    // via the explicit free-history action in each product detail sheet.
                 }
             } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
                 val message = "La búsqueda ha tardado demasiado y se ha cancelado para evitar que quede bloqueada. Comprueba la conexión e inténtalo de nuevo; los resultados guardados se mantienen."

@@ -55,20 +55,23 @@ object PriceBadgeClassifier {
             )
         }
 
+        // A lower quote is not enough to claim a historical minimum: the model's
+        // hasValidAverage flag is true only when current price and 90-day live coverage
+        // have both been validated. Use the same evidence gate for the minimum badge.
+        if (!hasValidAverage || !averagePrice.isFinite() || averagePrice <= 0.0) {
+            return PriceBadgeState(
+                PriceBadgeType.HISTORY_IN_PROGRESS,
+                "HISTORIAL EN CONSTRUCCIÓN",
+                "Hay precios observados, pero aún no hay cobertura verificada suficiente para confirmar un mínimo o comparar la media."
+            )
+        }
+
         val historicalMinimum = validPriorPrices.minOrNull()!!
         if (currentPrice <= historicalMinimum) {
             return PriceBadgeState(
                 PriceBadgeType.HISTORICAL_MINIMUM,
                 "🔥 MÍNIMO OBSERVADO",
-                "El precio iguala o mejora el mínimo de las observaciones anteriores."
-            )
-        }
-
-        if (!hasValidAverage || !averagePrice.isFinite() || averagePrice <= 0.0) {
-            return PriceBadgeState(
-                PriceBadgeType.HISTORY_IN_PROGRESS,
-                "HISTORIAL EN CONSTRUCCIÓN",
-                "Aún no hay una media fiable para clasificar esta oferta."
+                "El precio iguala o mejora el mínimo de las observaciones anteriores dentro de un historial verificado de al menos 90 días."
             )
         }
 

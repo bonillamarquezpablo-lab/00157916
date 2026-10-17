@@ -121,11 +121,18 @@ jobs:
           echo "Building Mínimo ${VERSION_NAME} (versionCode ${VERSION_CODE})"
           gradle :app:assembleDebug --stacktrace -PVERSION_CODE="${VERSION_CODE}" -PVERSION_NAME="${VERSION_NAME}"
 
-      - name: Verificar firma y validez del APK
+      - name: Verificar paquete, versión y firma del APK
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
           APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          VERSION_CODE=$((5000 + GITHUB_RUN_NUMBER))
+          VERSION_NAME="1.6.$((1019 + GITHUB_RUN_NUMBER))"
+          AAPT="${ANDROID_HOME}/build-tools/36.0.0/aapt"
           test -s "${APK_PATH}"
+          BADGING="$("${AAPT}" dump badging "${APK_PATH}")"
+          printf '%s\\n' "${BADGING}" | grep -F "package: name='com.aistudio.preciominimo.esrxvt' versionCode='${VERSION_CODE}' versionName='${VERSION_NAME}'"
           "${ANDROID_HOME}/build-tools/36.0.0/apksigner" verify --verbose --print-certs "${APK_PATH}"
           sha256sum "${APK_PATH}"
 

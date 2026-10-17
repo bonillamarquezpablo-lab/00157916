@@ -209,11 +209,14 @@ class ExampleUnitTest {
                 PricePoint(now - 50L * day, "hace 50 días", 1.0, "Internet Archive",
                     sourceUrl = "https://web.archive.org/web/20260701000000/https://tienda.example/product",
                     evidenceType = "archive"),
+                PricePoint(now - 20L * day, "hace 20 días", 2.0, "Internet Archive",
+                    sourceUrl = "https://web.archive.org/web/20260920000000/https://tienda.example/product",
+                    evidenceType = "archive"),
                 PricePoint(now, "hoy", 100.0, "Tienda", evidenceType = "live")
             )
         )
 
-        assertFalse("One archive capture must not count as a live observation", product.hasSufficientHistory)
+        assertFalse("Archive captures must never satisfy the three-point live-history threshold", product.hasSufficientHistory)
     }
 
     @Test

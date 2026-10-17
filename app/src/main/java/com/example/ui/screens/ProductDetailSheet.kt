@@ -377,7 +377,7 @@ fun ProductDetailSheet(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    if (product.hasSufficientHistory || product.officialPvp > 0.0) {
+                    if (product.hasSufficientHistory || (product.isOfficialPvpVerified && product.officialPvp > 0.0)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
@@ -411,7 +411,7 @@ fun ProductDetailSheet(
                                     )
                                 }
                             }
-                            if (product.isOfficialPvpVerified && product.officialPvp > product.currentPrice) {
+                            if (product.isPriceFresh && product.isOfficialPvpVerified && product.officialPvp > product.currentPrice) {
                                 Column(horizontalAlignment = Alignment.End) {
                                     Text(
                                         text = "Diferencia frente al PVP",

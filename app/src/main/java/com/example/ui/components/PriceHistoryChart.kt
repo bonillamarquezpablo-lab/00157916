@@ -59,7 +59,7 @@ import java.util.Locale
 enum class ChartRange(val label: String, val days: Int?) {
     DAYS_30("30D", 30),
     DAYS_90("90D", 90),
-    MONTHS_6("6M", 180),
+    MONTHS_6("6M", 183),
     YEARS_1("1A", 365),
     YEARS_2("2A", 730),
     YEARS_3("3A", 1095),

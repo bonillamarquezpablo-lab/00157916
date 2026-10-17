@@ -1,6 +1,0 @@
-{
-  "name": "Mínimo",
-  "description": "Rastreador de precios mínimos históricos y detector de ofertas reales en el mercado español.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

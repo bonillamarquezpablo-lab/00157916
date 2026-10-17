@@ -494,6 +494,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
                 _uiState.value = _uiState.value.copy(serpApiAccountStatus = message)
                 showSnackbar(message)
+            } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+                // Timeouts are cancellation exceptions in Kotlin; handle this one before the
+                // generic cancellation branch so the user sees a useful status instead of a
+                // silently abandoned account check.
+                val message = "La consulta de saldo de SerpApi ha tardado demasiado. Inténtalo de nuevo; no se ha iniciado ninguna búsqueda de productos."
+                _uiState.value = _uiState.value.copy(serpApiAccountStatus = message)
+                showSnackbar(message)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: SerpApiException) {

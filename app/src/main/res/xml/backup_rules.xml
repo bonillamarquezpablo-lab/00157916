@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<full-backup-content>
-    <!-- The encrypted provider key is device-bound; do not copy its ciphertext into backups. -->
-    <exclude domain="sharedpref" path="minimo_serpapi_secret.xml" />
-</full-backup-content>

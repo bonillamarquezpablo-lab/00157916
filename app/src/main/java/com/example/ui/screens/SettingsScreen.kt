@@ -1,8 +1,7 @@
 package com.example.ui.screens
 
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
+import com.example.security.openExternalHttpsUrl
 import android.util.Patterns
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -671,7 +670,5 @@ private fun InfoLine(label: String, value: String) {
 }
 
 private fun openWeb(context: Context, url: String) {
-    runCatching {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-    }
+    openExternalHttpsUrl(context, url)
 }

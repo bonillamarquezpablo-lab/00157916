@@ -1,8 +1,8 @@
 package com.example.ui.components
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.background
+import com.example.security.safeExternalHttpsUrl
+import com.example.security.openExternalHttpsUrl
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -116,9 +116,8 @@ fun StoreComparisonView(
                         color = if (isBestCurrent) Color(0xFF10B981) else MaterialTheme.colorScheme.outline.copy(alpha = 0.15f),
                         shape = RoundedCornerShape(10.dp)
                     )
-                    .clickable(enabled = !actionDestination.isNullOrBlank()) {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(actionDestination!!))
-                        context.startActivity(intent)
+                    .clickable(enabled = safeExternalHttpsUrl(actionDestination) != null) {
+                        openExternalHttpsUrl(context, actionDestination)
                     },
                 color = if (isBestCurrent) Color(0xFF10B981).copy(alpha = 0.06f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
             ) {

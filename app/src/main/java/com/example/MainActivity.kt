@@ -137,9 +137,6 @@ class MainActivity : ComponentActivity() {
                                         }
                                         runCatching {
                                             startActivity(Intent.createChooser(sendIntent, "Compartir informe de Mínimo"))
-                                        }.onSuccess {
-                                            crashStore.clear()
-                                            pendingCrashReport = null
                                         }.onFailure {
                                             Toast.makeText(this@MainActivity, "No se pudo abrir el menú para compartir", Toast.LENGTH_SHORT).show()
                                         }

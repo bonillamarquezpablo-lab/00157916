@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -65,16 +66,41 @@ enum class ChartRange(val label: String, val days: Int?) {
     ALL("Todo", null)
 }
 
+private enum class HistoryEvidenceSeries(val label: String, val description: String) {
+    LIVE("Mínimo", "Observaciones válidas registradas por Mínimo; base de mínimos y medias."),
+    WAYBACK("Wayback", "Capturas externas de Internet Archive; no son ofertas actuales."),
+    GOOGLE_INSIGHTS("Google histórico", "Datos históricos externos de Google Shopping; no son cotizaciones en vivo.")
+}
+
 @Composable
 fun PriceHistoryChart(
     priceHistory: List<PricePoint>,
     avg90dPrice: Double,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    archiveHistory: List<PricePoint> = emptyList(),
+    googleInsightHistory: List<PricePoint> = emptyList()
 ) {
     var selectedRange by remember { mutableStateOf(ChartRange.ALL) }
+    var selectedSeries by remember { mutableStateOf(HistoryEvidenceSeries.LIVE) }
     var selectedPointIndex by remember { mutableIntStateOf(-1) }
 
-    val validHistory = remember(priceHistory) { sanitizePriceHistory(priceHistory) }
+    val availableSeries = buildList {
+        add(HistoryEvidenceSeries.LIVE)
+        if (archiveHistory.isNotEmpty()) add(HistoryEvidenceSeries.WAYBACK)
+        if (googleInsightHistory.isNotEmpty()) add(HistoryEvidenceSeries.GOOGLE_INSIGHTS)
+    }
+    LaunchedEffect(availableSeries, selectedSeries) {
+        if (selectedSeries !in availableSeries) {
+            selectedSeries = HistoryEvidenceSeries.LIVE
+            selectedPointIndex = -1
+        }
+    }
+    val selectedHistory = when (selectedSeries) {
+        HistoryEvidenceSeries.LIVE -> priceHistory
+        HistoryEvidenceSeries.WAYBACK -> archiveHistory
+        HistoryEvidenceSeries.GOOGLE_INSIGHTS -> googleInsightHistory
+    }
+    val validHistory = remember(selectedHistory, selectedSeries) { sanitizePriceHistory(selectedHistory) }
     val filteredPoints = remember(validHistory, selectedRange) {
         val days = selectedRange.days
         if (days == null) validHistory
@@ -84,7 +110,9 @@ fun PriceHistoryChart(
         }
     }
     val historySummary = remember(filteredPoints) { summarizePriceHistory(filteredPoints) }
-    val valid90dAverage = avg90dPrice.takeIf { it.isFinite() && it > 0.0 }
+    val valid90dAverage = avg90dPrice.takeIf {
+        selectedSeries == HistoryEvidenceSeries.LIVE && it.isFinite() && it > 0.0
+    }
 
     // All labels and historical claims follow the currently selected range.
     val firstObservationLabel = remember(validHistory, historySummary, filteredPoints) {
@@ -133,7 +161,11 @@ fun PriceHistoryChart(
         ) {
             Column {
                 Text(
-                    text = "Evolución Real del Precio",
+                    text = when (selectedSeries) {
+                        HistoryEvidenceSeries.LIVE -> "Evolución del precio observado"
+                        HistoryEvidenceSeries.WAYBACK -> "Histórico externo · Wayback"
+                        HistoryEvidenceSeries.GOOGLE_INSIGHTS -> "Histórico externo · Google"
+                    },
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurface
@@ -141,6 +173,11 @@ fun PriceHistoryChart(
                 Text(
                     text = firstObservationLabel,
                     fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = selectedSeries.description,
+                    fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -184,7 +221,27 @@ fun PriceHistoryChart(
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        if (availableSeries.size > 1) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                availableSeries.forEach { series ->
+                    FilterChip(
+                        selected = selectedSeries == series,
+                        onClick = {
+                            selectedSeries = series
+                            selectedPointIndex = -1
+                        },
+                        label = { Text(series.label, fontSize = 11.sp) },
+                        modifier = Modifier.height(30.dp)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+        }
 
         // Time Range Filter Chips
         Row(
@@ -365,7 +422,7 @@ fun PriceHistoryChart(
             }
             if (filteredPoints.isEmpty()) {
                 Text(
-                    text = if (priceHistory.isEmpty()) "Sin datos todavía" else "Sin datos en este rango",
+                    text = if (selectedHistory.isEmpty()) "Sin datos todavía para esta fuente" else "Sin datos en este rango",
                     modifier = Modifier.align(Alignment.Center),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.SemiBold,

@@ -211,4 +211,49 @@ class SerpApiVariantMismatchTest {
         assertEquals(99.99, report.results.single().price, 0.001)
     }
 
+
+    @Test
+    fun broadXiaomiScooterSearchKeepsRelatedModelsForSelection() {
+        val client = SerpApiClient()
+        val report = client.parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "shopping_results": [
+                    {
+                      "title": "Xiaomi Electric Scooter 5 Max",
+                      "price": "457,94 €",
+                      "extracted_price": 457.94,
+                      "link": "https://shop.example/xiaomi-scooter-5-max",
+                      "source": "Tienda"
+                    },
+                    {
+                      "title": "Xiaomi Electric Scooter 4 Pro",
+                      "price": "399,00 €",
+                      "extracted_price": 399.00,
+                      "link": "https://shop.example/xiaomi-scooter-4-pro",
+                      "source": "Tienda"
+                    },
+                    {
+                      "title": "Samsung Galaxy S26",
+                      "price": "899,00 €",
+                      "extracted_price": 899.00,
+                      "link": "https://shop.example/samsung-s26",
+                      "source": "Tienda"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "Xiaomi scooter",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals(2, report.results.size)
+        assertTrue(report.results.any { it.title.contains("5 Max") })
+        assertTrue(report.results.any { it.title.contains("4 Pro") })
+        assertFalse(report.results.any { it.title.contains("Samsung") })
+    }
+
+
 }

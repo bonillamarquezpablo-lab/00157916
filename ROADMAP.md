@@ -1,27 +1,32 @@
 # Mínimo — hoja de ruta de producto
 
-**Estado de la rama del buscador:** consulta manual de Google Shopping y Amazon.es mediante SerpApi integrada; falta confirmar clave y consulta real en el móvil · 33 comercios en el directorio · actualización en segundo plano y alertas automáticas no implementadas.
+**Estado actual de main (17/10/2026):** buscador unificado de Google Shopping con complemento automático de GAME para búsquedas de videojuegos/consolas, búsqueda de Amazon.es y selección de familias/variantes. La clave de SerpApi se configura en el dispositivo; la consulta real y la estabilidad final deben comprobarse en la tablet.
 
-**Progreso global provisional: 1%** se mantiene hasta completar el primer flujo de precio real de extremo a extremo en el móvil. El código del conector está integrado, pero falta la clave del proveedor y validar una búsqueda real; el porcentaje se actualiza por resultados funcionales, no por líneas de código.
+## Estado de estabilidad y confianza de precios
 
-## Política estricta de historial (2026-10-13)
+- Las consultas de red usan el hilo IO y límites de conexión/lectura/llamada; el complemento opcional de GAME tiene un límite de 12 s para no retrasar indefinidamente la búsqueda principal.
+- Agrupación, clasificación y filtros caros de los resultados online se calculan fuera del hilo de interfaz. Los guardados de observaciones del buscador en Room se ejecutan en IO.
+- Los precios sospechosos, variantes incompatibles, artículos promocionales y enlaces falsos se filtran o etiquetan; un resultado de Google Shopping no se confunde con una tienda conectada ni garantiza disponibilidad.
+- La ficha distingue precios actuales verificados, datos guardados pendientes de revalidación y valores de demostración. Un precio guardado antiguo no se convierte en precio actual.
+- El historial distingue tres series: observaciones en vivo guardadas por Mínimo, capturas de Internet Archive y datos históricos de Google Shopping. Las dos fuentes externas no alimentan la media en vivo ni pueden fabricar el mínimo histórico de la serie en vivo.
+- Las capturas históricas conservan su procedencia y las filas de Room no se borran para “limpiar” el historial. Si hay una observación viva en un día, esa observación determina el punto visible de ese día.
+- Los informes de cierre inesperado se guardan en almacenamiento privado, omiten el mensaje de excepción y no se envían automáticamente. El usuario puede copiar o compartir el informe de forma explícita al abrir la app.
+- Las acciones de CI del flujo de recuperación están fijadas a revisiones inmutables. El escaneo de secretos y las pruebas relacionadas se ejecutan en CI.
+- **Limitación de validación:** pasar CI demuestra que el código compila y supera las pruebas automatizadas incluidas; no garantiza ausencia absoluta de defectos ni sustituye las búsquedas reales con la clave del usuario en su dispositivo.
 
-- El gráfico solo admite observaciones reales y fechadas de búsquedas válidas guardadas en Room.
-- No se generan puntos retrospectivos, series 2022–2026 ni precios interpolados almacenados.
-- El primer punto del historial define la etiqueta «Historial desde [fecha]»; si no hay observaciones globales muestra «Sin datos todavía» y si el rango elegido está vacío muestra «Sin datos en este rango».
-- El catálogo precargado se marca como EJEMPLO y nunca alimenta el historial de precios.
-- Se retiró la acción de simular una caída de precio, incluido el punto temporal de historial que añadía en memoria.
-- En la rama revisada no existen funciones llamadas `generateHistory` o `generateInflatedHistory`; los tests ahora exigen que los productos de ejemplo tengan `priceHistory` vacío.
+## Reglas de historial y precio
 
-## Correcciones técnicas recientes en `fix/real-price-history-only`
+- No se generan puntos retrospectivos, curvas interpoladas ni series sintéticas.
+- Las ofertas en vivo y las fuentes históricas externas se representan en series separadas y etiquetadas.
+- El mínimo observado, la media y los juicios de “mínimo histórico” solo se basan en evidencia en vivo válida. Las afirmaciones históricas requieren suficientes fechas verificadas; una sola observación no basta.
+- El catálogo precargado es de demostración y no alimenta la evolución real del precio.
+- Las migraciones de Room deben preservar productos, observaciones y seguimientos existentes. No borrar datos locales ni recurrir a una migración destructiva para resolver incompatibilidades.
 
-- Las observaciones anteriores al 13 de octubre de 2026 quedan fuera de cualquier precio actual verificado o del gráfico, incluso si sobreviven en instalaciones antiguas.
-- Los resultados solo se guardan con URL HTTPS directa al comercio; las URL de Google Shopping/búsqueda genérica ya no se tratan como enlaces de producto válidos.
-- La ingesta descarta segunda mano, reacondicionados, alquileres y financiación cuando aparecen en el título o en los campos de condición del proveedor.
-- La misma tienda y el mismo producto conservan una sola observación por día: las búsquedas posteriores actualizan esa fila en vez de duplicar datos o mostrar un precio obsoleto.
-- Se corrigió la identidad para conservar capacidad mAh y potencia W de baterías/cargadores, y para normalizar formatos equivalentes del modelo Sony WH-1000XM5.
-- La ficha utiliza la fuente real del último dato y el gráfico une puntos reales con segmentos rectos, sin curvas que sugieran precios no observados.
-- Se añadieron y actualizaron pruebas de regresión para fecha de corte, estado del artículo, enlaces directos, variantes de producto y actualización diaria. La compilación y las pruebas todavía necesitan ejecución en un entorno Android; no se consideran aprobadas solo por estar escritas.
+## Integración de cambios y dependencias
+
+- Se han integrado selectivamente familias de producto, búsqueda unificada, GAME, filtros de calidad, endurecimiento de enlaces, separación de fuentes de historial, manejo del tiempo de espera y diagnóstico local de cierres.
+- Las actualizaciones de dependencias solo se incorporan cuando compilan y pasan pruebas. No se debe forzar una dependencia que requiera una versión del SDK Android que el entorno de compilación no pueda instalar.
+- Las ramas antiguas o divergentes no se fusionan completas si duplican funciones actuales o podrían revertir migraciones, controles de precio, enlaces seguros o versión/firma de la APK.
 
 ## 16 mejoras planificadas
 

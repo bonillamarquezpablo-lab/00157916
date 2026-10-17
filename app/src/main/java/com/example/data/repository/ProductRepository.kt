@@ -1489,22 +1489,29 @@ class ProductRepository(
         val latestBatch = liveHistory.filter {
             latestLiveDayStart != null && localDayBounds(it.observedAt).first == latestLiveDayStart
         }
-        // One point per local day. Prefer a live observation for a day when available; otherwise
-        // use its lowest verified archive quote. Gaps remain gaps, with no interpolated values.
+        // Keep one point per local day AND evidence series. A live quote, Wayback capture and
+        // Google historical insight on the same date remain distinct; external points cannot
+        // silently replace or strengthen the live series.
         val snapshotHistory = sortedHistory
-            .groupBy { localDayBounds(it.observedAt).first }
-            .values
-            .mapNotNull { dayOffers ->
-                val liveOffers = dayOffers.filter(::isLiveObservation)
-                (liveOffers.ifEmpty { dayOffers }).minByOrNull { it.price }
+            .groupBy { observation ->
+                val series = when {
+                    isLiveObservation(observation) -> "live"
+                    observation.evidenceType.equals("google_insights", ignoreCase = true) -> "google_insights"
+                    isArchiveBackedObservation(observation) -> "archive"
+                    else -> observation.evidenceType.lowercase(Locale.ROOT).ifBlank { "other" }
+                }
+                localDayBounds(observation.observedAt).first to series
             }
-            .sortedBy { localDayBounds(it.observedAt).first }
+            .values
+            .mapNotNull { seriesOffers -> seriesOffers.minByOrNull { it.price } }
+            .sortedBy { it.observedAt }
+        val liveSnapshotHistory = snapshotHistory.filter(::isLiveObservation)
         val latestObservation = latestBatch.minByOrNull { it.price }
-        val minObservation = snapshotHistory.minByOrNull { it.price }
-        val maxObservation = snapshotHistory.maxByOrNull { it.price }
+        val minObservation = liveSnapshotHistory.minByOrNull { it.price }
+        val maxObservation = liveSnapshotHistory.maxByOrNull { it.price }
         // Require both the explicit product flag and a provider-backed observation.
         val priceIsVerified = isPriceVerified && latestObservation != null
-        val effectiveHistory = if (priceIsVerified) snapshotHistory else emptyList()
+        val effectiveHistory = if (priceIsVerified) liveSnapshotHistory else emptyList()
         val effectiveStore = if (priceIsVerified) {
             observationStore(latestObservation!!, stores)
         } else {
@@ -1514,7 +1521,7 @@ class ProductRepository(
         val ninetyDaysMs = 90L * 24L * 60L * 60L * 1000L
         val ninetyDaysAgo = now - ninetyDaysMs
         val lastNinetyDays = effectiveHistory.filter { it.observedAt >= ninetyDaysAgo }
-        val uniqueTimestamps = snapshotHistory.map { localDayBounds(it.observedAt).first }.distinct().sorted()
+        val uniqueTimestamps = liveSnapshotHistory.map { localDayBounds(it.observedAt).first }.distinct().sorted()
         val hasSufficientHistory = priceIsVerified &&
             uniqueTimestamps.size >= 3 &&
             uniqueTimestamps.last() - uniqueTimestamps.first() >= ninetyDaysMs &&
@@ -1551,7 +1558,14 @@ class ProductRepository(
                 price = observation.price,
                 storeName = observation.storeName.ifBlank { observationStore(observation, stores).name },
                 eventLabel = observation.sourceType.ifBlank { observation.sourceName },
-                linkType = observation.linkType
+                linkType = observation.linkType,
+                sourceUrl = observation.sourceUrl,
+                evidenceType = when {
+                    isArchiveBackedObservation(observation) -> "archive"
+                    observation.evidenceType.equals("google_insights", ignoreCase = true) -> "google_insights"
+                    isLiveObservation(observation) -> "live"
+                    else -> observation.evidenceType
+                }
             )
         }
         val savedHistoricalObservation = if (!priceIsVerified) {

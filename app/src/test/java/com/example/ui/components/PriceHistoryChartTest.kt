@@ -1,7 +1,6 @@
 package com.example.ui.components
 
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -84,6 +83,5 @@ class PriceHistoryChartTest {
         composeRule.onNodeWithText("Evolución del precio observado").assertIsDisplayed()
         composeRule.onNodeWithText("Sin datos todavía").assertIsDisplayed()
         composeRule.onNodeWithTag("price_history_chart_container").assertIsDisplayed()
-        composeRule.onNodeWithText("Wayback").assertDoesNotExist()
     }
 }

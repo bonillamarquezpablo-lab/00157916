@@ -165,11 +165,55 @@ class ExampleUnitTest {
         assertTrue(products.isNotEmpty())
         products.forEach { product ->
             assertFalse("Bundled sample must not be marked verified: ${product.title}", product.isPriceVerified)
+            assertFalse("Bundled PVP must remain unverified: ${product.title}", product.isOfficialPvpVerified)
+            assertFalse("Bundled ratings must remain unverified: ${product.title}", product.isRatingVerified)
+            assertFalse("Bundled EAN must remain unverified: ${product.title}", product.isEanVerified)
             assertFalse("Bundled sample must not claim an all-time low: ${product.title}", product.isAtAth)
             assertEquals(VerdictLevel.UNVERIFIED, product.verdict.level)
             assertEquals(0, product.verdict.confidenceScore)
             assertTrue("Example catalogue entries must not include generated history points: ${product.title}", product.priceHistory.isEmpty())
         }
+    }
+
+    @Test
+    fun unverifiedReferencePvpCannotCreateApparentSavings() {
+        val seed = SpanishMarketData.getInitialProducts().first()
+        val now = System.currentTimeMillis()
+        val unverified = seed.copy(
+            currentPrice = 100.0,
+            officialPvp = 300.0,
+            isPriceVerified = true,
+            isOfficialPvpVerified = false,
+            priceObservedAt = now
+        )
+
+        assertEquals(0.0, unverified.realSavingsAmount, 0.001)
+        assertEquals(0, unverified.realSavingsPercent)
+
+        val independentlyVerified = unverified.copy(isOfficialPvpVerified = true)
+        assertEquals(200.0, independentlyVerified.realSavingsAmount, 0.001)
+        assertEquals(66, independentlyVerified.realSavingsPercent)
+    }
+
+    @Test
+    fun archiveAndGoogleInsightPointsCannotSubstituteForLivePriceHistory() {
+        val seed = SpanishMarketData.getInitialProducts().first()
+        val now = System.currentTimeMillis()
+        val day = 24L * 60L * 60L * 1000L
+        val product = seed.copy(
+            isPriceVerified = true,
+            priceObservedAt = now,
+            currentPrice = 100.0,
+            priceHistory = listOf(
+                PricePoint(now - 100L * day, "hace 100 días", 200.0, "Tienda", evidenceType = "live"),
+                PricePoint(now - 50L * day, "hace 50 días", 1.0, "Internet Archive",
+                    sourceUrl = "https://web.archive.org/web/20260701000000/https://tienda.example/product",
+                    evidenceType = "archive"),
+                PricePoint(now, "hoy", 100.0, "Tienda", evidenceType = "live")
+            )
+        )
+
+        assertFalse("One archive capture must not count as a live observation", product.hasSufficientHistory)
     }
 
     @Test

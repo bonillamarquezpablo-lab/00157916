@@ -54,7 +54,7 @@ jobs:
           packages: 'platform-tools'
 
       - name: Instalar componentes Android
-        run: sdkmanager "platforms;android-37" "build-tools;37.0.0"
+        run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
 
       - name: Ejecutar pruebas unitarias
         timeout-minutes: 15
@@ -93,7 +93,7 @@ jobs:
           set -euo pipefail
           APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
           test -s "${APK_PATH}"
-          "${ANDROID_HOME}/build-tools/37.0.0/apksigner" verify --verbose --print-certs "${APK_PATH}"
+          "${ANDROID_HOME}/build-tools/36.0.0/apksigner" verify --verbose --print-certs "${APK_PATH}"
           sha256sum "${APK_PATH}"
 
       - name: Guardar el APK durante 7 días

@@ -59,12 +59,27 @@ import java.util.Locale
 enum class ChartRange(val label: String, val days: Int?) {
     DAYS_30("30D", 30),
     DAYS_90("90D", 90),
-    MONTHS_6("6M", 183),
+    MONTHS_6("6M", 180),
     YEARS_1("1A", 365),
     YEARS_2("2A", 730),
     YEARS_3("3A", 1095),
     YEARS_4("4A", 1460),
     ALL("Todo", null)
+}
+
+/**
+ * Filter actual observations by elapsed time. [nowMillis] is injectable for deterministic tests.
+ * Future-dated points are not included in a time window.
+ */
+internal fun filterPricePointsForRange(
+    priceHistory: List<PricePoint>,
+    selectedRange: ChartRange,
+    nowMillis: Long = System.currentTimeMillis()
+): List<PricePoint> {
+    val days = selectedRange.days ?: return priceHistory.filter { it.timestamp <= nowMillis }
+    val windowMs = days.toLong() * 24L * 60L * 60L * 1000L
+    val startAt = nowMillis - windowMs
+    return priceHistory.filter { it.timestamp in startAt..nowMillis }
 }
 
 private enum class HistoryEvidenceSeries(val label: String, val description: String) {
@@ -103,12 +118,7 @@ fun PriceHistoryChart(
     }
     val validHistory = remember(selectedHistory, selectedSeries) { sanitizePriceHistory(selectedHistory) }
     val filteredPoints = remember(validHistory, selectedRange) {
-        val days = selectedRange.days
-        if (days == null) validHistory
-        else {
-            val cutoff = System.currentTimeMillis() - days.toLong() * 24L * 60L * 60L * 1000L
-            validHistory.filter { it.timestamp >= cutoff }
-        }
+        filterPricePointsForRange(validHistory, selectedRange)
     }
     val historySummary = remember(filteredPoints) { summarizePriceHistory(filteredPoints) }
     val valid90dAverage = avg90dPrice.takeIf {

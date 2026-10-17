@@ -59,6 +59,19 @@ class PriceBadgeClassifierTest {
     }
 
     @Test
+    fun previousMinimumIsNotClaimedWhenNinetyDayHistoryIsInsufficient() {
+        val state = PriceBadgeClassifier.classify(
+            isPriceVerified = true,
+            currentPrice = 90.0,
+            priorObservedPrices = listOf(90.0, 110.0),
+            averagePrice = 0.0,
+            hasValidAverage = false
+        )
+        assertEquals(PriceBadgeType.HISTORY_IN_PROGRESS, state.type)
+        assertEquals("HISTORIAL EN CONSTRUCCIÓN", state.label)
+    }
+
+    @Test
     fun priceBelowValidAverageButAbovePreviousMinimumIsGoodPrice() {
         val state = PriceBadgeClassifier.classify(
             isPriceVerified = true,

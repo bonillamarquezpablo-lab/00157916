@@ -2289,6 +2289,22 @@ class ExampleRobolectricTest {
         assertEquals("Google Shopping", result.linkType)
     }
 
+    @Test
+    fun `retailer destination preserves Google catalog pages and routes generic links`() {
+        val catalog = com.example.data.remote.retailerDestinationForOffer(
+            "https://www.google.com/shopping/product/123456?gl=es", "Fnac", "Sony WH-1000XM5"
+        )
+        assertEquals("https://www.google.com/shopping/product/123456?gl=es", catalog)
+        val fnac = com.example.data.remote.retailerDestinationForOffer(
+            "https://www.google.com/search?tbm=shop&q=Sony", "Fnac", "Sony WH-1000XM5"
+        )
+        assertTrue(fnac.orEmpty().startsWith("https://www.fnac.es/SearchResult/ResultList.aspx?Search="))
+        val anker = com.example.data.remote.retailerDestinationForOffer(
+            "https://www.google.com/search?tbm=shop&q=Anker", "Anker", "Anker Prime 27K"
+        )
+        assertTrue(anker.orEmpty().startsWith("https://www.anker.com/eu-en/search?q="))
+    }
+
 
     @Test
     fun `online search stores valid offers once per store and day and marks low outliers`() = runBlocking<Unit> {

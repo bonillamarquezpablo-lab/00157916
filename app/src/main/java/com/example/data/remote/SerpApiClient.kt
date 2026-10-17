@@ -604,21 +604,11 @@ class SerpApiClient(
             ).filter(::isNavigableHttpUrl).toList()
             val providerSource = item.optString("source").trim()
                 .takeIf { it.isNotBlank() && it != "null" }
-            val directRetailerUrl = candidateUrls.firstNotNullOfOrNull(::extractDirectRetailerUrl)
             val fallbackProviderUrl = candidateUrls.firstOrNull()
-            val isGoogleCatalogProductPage = fallbackProviderUrl?.let { candidate ->
-                isGoogleShoppingUrl(candidate) &&
-                    runCatching { URI(candidate).path.orEmpty().contains("/shopping/product/") }
-                        .getOrDefault(false)
-            } == true
-            val knownStore = providerSource?.let { storeName ->
-                Store.findKnownByName(storeName, directRetailerUrl ?: fallbackProviderUrl.orEmpty())
-            }
-            val url = directRetailerUrl
-                ?: knownStore?.takeIf {
-                    it.supportsProductSearch && !isGoogleCatalogProductPage
-                }?.searchUrlFor(title)
-                ?: fallbackProviderUrl
+            val url = candidateUrls.firstNotNullOfOrNull(::extractDirectRetailerUrl)
+                ?: fallbackProviderUrl?.let {
+                    retailerDestinationForOffer(it, providerSource.orEmpty(), title)
+                }
                 ?: googleShoppingSearchUrl(title)
             val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()
@@ -1018,22 +1008,20 @@ class SerpApiClient(
                 priceText.contains("EUR", ignoreCase = true)
             if (extractedPrice == null && !isEuroPrice) return@mapNotNull null
 
-            // Keep Google Shopping URLs or synthesize a Google Shopping search URL when the
-            // provider omits a navigable destination. Link type is not a rejection criterion.
+            // Apply the same URL-routing policy used by the interactive offer cards.
             val candidateUrls = sequenceOf(
                 item.optString("link_clean"),
                 item.optString("link"),
                 item.optString("product_link")
             ).filter(::isNavigableHttpUrl).toList()
-            val url = candidateUrls.firstOrNull { !isGoogleDomainUrl(it) }
-                ?: candidateUrls.firstOrNull()
-                ?: googleShoppingSearchUrl(title)
-            val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
-                .getOrNull().orEmpty()
-
+            val rawUrl = candidateUrls.firstOrNull() ?: googleShoppingSearchUrl(title)
             val merchant = item.optString("source")
                 .takeIf { it.isNotBlank() && it != "null" }
-                ?: humanizeHost(host)
+                ?: runCatching { URI(rawUrl).host.lowercase(Locale.ROOT).removePrefix("www.") }
+                    .getOrNull()?.let(::humanizeHost).orEmpty()
+            val url = retailerDestinationForOffer(rawUrl, merchant, title) ?: rawUrl
+            val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
+                .getOrNull().orEmpty()
 
             SerpApiQuote(
                 productId = requested.id,

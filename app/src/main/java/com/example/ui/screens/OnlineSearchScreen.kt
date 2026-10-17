@@ -253,10 +253,11 @@ fun OnlineSearchScreen(
 
 
     fun openOffer(offer: SerpApiShoppingResult) {
-        val directDestination = extractDirectRetailerUrl(offer.sourceUrl)
-        val knownStore = Store.findKnownByName(name = offer.storeName, sourceUrl = offer.sourceUrl)
-        // A Google catalog URL is an intermediary, not a retailer destination.
-        val destination = directDestination ?: knownStore?.searchUrlFor(offer.title) ?: offer.sourceUrl
+        val destination = retailerDestinationForOffer(
+            sourceUrl = offer.sourceUrl,
+            storeName = offer.storeName,
+            productTitle = offer.title
+        ) ?: return
         openStoreUrl(
             context,
             destination,

@@ -342,6 +342,25 @@ fun linkTypeForUrl(sourceUrl: String): String {
     return if (searchPath || searchQuery) "Búsqueda en tienda" else "directo"
 }
 
+/**
+ * Resolves offer destinations consistently for interactive search and saved-price refreshes.
+ * Exact seller URLs win; generic Google Shopping links may fall back to a known retailer's
+ * own search page. Keep Google catalog product pages because they can contain specific offers.
+ */
+fun retailerDestinationForOffer(sourceUrl: String, storeName: String, productTitle: String): String? {
+    extractDirectRetailerUrl(sourceUrl)?.let { direct ->
+        if (!isGoogleShoppingUrl(direct)) return direct
+    }
+    val uri = runCatching { URI(sourceUrl) }.getOrNull()
+    val catalogProduct = uri?.let {
+        isGoogleShoppingUrl(sourceUrl) && it.path.orEmpty().contains("/shopping/product/")
+    } == true
+    if (catalogProduct) return sourceUrl
+    val store = Store.findKnownByName(storeName, sourceUrl)
+    if (store?.supportsProductSearch == true) return store.searchUrlFor(productTitle)
+    return sourceUrl.takeIf { it.isNotBlank() }
+}
+
 fun isSecondHandCondition(condition: String): Boolean = Regex(
     """(?i)\b(used|second[\s_-]*hand|pre[\s_-]*owned|usad[oa]s?|seminuev[oa]s?|refurbished|reacondicionad[oa]s?|renewed|open[\s_-]*box)\b"""
 ).containsMatchIn(condition)

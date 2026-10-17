@@ -66,6 +66,29 @@ class ProductFamilyBrowserTest {
     }
 
     @Test
+    fun broadPs5SearchKeepsKnownModelsSelectableWithoutInventingMissingPrices() {
+        val onlyStandard = listOf(
+            offer(
+                title = "Sony PlayStation 5 Fat Disc Edition 825 GB",
+                price = 499.99,
+                store = "GAME España",
+                path = "ps5-fat-only"
+            )
+        )
+        val buckets = buildConsoleModelBuckets("PS5", groupOnlineShoppingResults(onlyStandard))
+        val pro = buckets.first { it.key == "ps5-pro" }
+        val slim = buckets.first { it.key == "ps5-slim" }
+
+        assertEquals(3, buckets.size)
+        assertTrue(pro.groups.isEmpty())
+        assertTrue(slim.groups.isEmpty())
+        assertTrue(pro.cheapestPrice.isInfinite())
+        assertEquals(0, pro.storeCount)
+        assertEquals("PlayStation 5 Pro", pro.label)
+        assertEquals("PlayStation 5 Pro", pro.searchQuery)
+    }
+
+    @Test
     fun broadConsoleSearchDoesNotOverrideSpecificVariantOrAccessorySearches() {
         assertTrue(isConsoleFamilyOverviewQuery("PS5"))
         assertTrue(isConsoleFamilyOverviewQuery("PlayStation 5"))

@@ -230,7 +230,7 @@ fun ProductCard(
                             color = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
-                        if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.officialPvp > product.currentPrice) {
+                        if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isOfficialPvpVerified && product.officialPvp > product.currentPrice) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "${String.format("%.2f", product.officialPvp)} €",

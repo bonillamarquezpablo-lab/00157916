@@ -375,7 +375,13 @@ class WaybackPriceHistoryClient(
             token.any(Char::isDigit) && token.any(Char::isLetter) &&
                 !Regex("""^\d+(?:[.,]\d+)?(?:gb|tb|mb|mah|wh|hz|w|mm|cm|inch|inches|pulgadas?)$""")
                     .containsMatchIn(token)
-        }
+        }.toMutableList()
+        // Samsung TV URLs may expose a family code such as S95H instead of the complete
+        // regional SKU (TQ48S95HAEXXC / QE48S95HAEXXC). Search that fallback too.
+        Regex("""(?i)\b(?:tq|qe)\d{2}(s\d{2}[a-z])""")
+            .findAll(normalizeTitle(expectedTitle))
+            .map { it.groupValues[1].lowercase(Locale.ROOT) }
+            .forEach { coreModel -> if (coreModel !in modelTokens) modelTokens.add(0, coreModel) }
         val hostBrandTerms = when (normalizedDomain) {
             "apple.com" -> setOf("apple")
             "samsung.com" -> setOf("samsung", "galaxy")
@@ -399,21 +405,21 @@ class WaybackPriceHistoryClient(
         val textTokens = tokens.filter { token ->
             token.any(Char::isLetter) && !token.any(Char::isDigit) && token !in hostBrandTerms
         }
-        // Avoid broad "OR" queries: on a large retailer domain, one generic token may match
-        // hundreds of unrelated URLs. Match a model code plus a distinct path term when both
-        // exist. If a title only gives a model code, use that exact code; generic brand/category
-        // words must not make a model URL impossible to discover.
-        val requiredLookaheads = when {
-            // Model-coded products are already distinctive. Don't require a secondary word like
-            // "wireless" that retailers may omit from the URL slug.
-            modelTokens.isNotEmpty() -> listOf("(?=.*${urlTokenPattern(modelTokens.first())})")
-            textTokens.size >= 2 -> textTokens.take(2).map { "(?=.*${urlTokenPattern(it)})" }
-            else -> return null
+        // A product SKU/model code is the strongest URL hint, but some retailers use
+        // short generic slugs and keep the SKU only in page metadata. Search by either a
+        // distinctive model code or two title terms; strict page validators still apply.
+        val modelAlternatives = modelTokens.take(2).map { token ->
+            "(?=.*${urlTokenPattern(token)})"
         }
+        val textAlternatives = if (textTokens.size >= 2) {
+            listOf("(?=.*${urlTokenPattern(textTokens[0])})(?=.*${urlTokenPattern(textTokens[1])})")
+        } else emptyList()
+        val requiredLookaheads = (modelAlternatives + textAlternatives).distinct()
+        if (requiredLookaheads.isEmpty()) return null
         val start = (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
         val from = formatUtc(start, "yyyyMMdd")
         val to = formatUtc(now, "yyyyMMdd")
-        val urlPattern = "(?i)" + requiredLookaheads.joinToString("") + ".*"
+        val urlPattern = "(?i)(?:" + requiredLookaheads.joinToString("|") + ").*"
         return HttpUrl.Builder()
             .scheme("https")
             .host("web.archive.org")
@@ -652,24 +658,61 @@ class WaybackPriceHistoryClient(
         val a = normalizeTitle(archived)
         if (e.isBlank() || a.isBlank()) return false
 
-        // Normalize product identity first so known equivalent model spellings (such as
-        // Sony WH-1000XM5 vs WH1000XM5) are not rejected solely because punctuation differs.
-        val sameIdentity = onlineProductIdentityKey(expected) == onlineProductIdentityKey(archived)
+        // Titles from Samsung's regional catalogues use TQ/QE prefixes for the same EU TV
+        // model. Compare the exact compact model code and diagonal before fuzzy text matching.
+        if (Regex("""\bsamsung\b""").containsMatchIn(e) &&
+            Regex("""\bsamsung\b""").containsMatchIn(a)) {
+            fun samsungModel(value: String): String? =
+                Regex("""\b(?:tq|qe)(\d{2}[a-z0-9]{5,})""")
+                    .find(value)?.groupValues?.getOrNull(1)
+                    ?: Regex("""\b(\d{2}[a-z0-9]{5,})""")
+                        .find(value)?.groupValues?.getOrNull(1)
 
-        // Never let a high overlap of generic words override a different model, size, year,
-        // or capacity. For example, "Anker Prime 20K Power Bank" must not match a 27K listing.
-        // Merge common unit spellings first so "512 GB" and "512GB" compare consistently.
-        val expectedVariants = requiredVariantTokens(e)
-        val archivedVariants = requiredVariantTokens(a)
+            fun diagonal(value: String): String? =
+                Regex("""\b(\d{2})\s*(?:inch|inches|pulgadas)?\b""")
+                    .find(value)?.groupValues?.getOrNull(1)
+
+            val expectedModel = samsungModel(e)
+            val archivedModel = samsungModel(a)
+            val expectedDiagonal = diagonal(e)
+            val archivedDiagonal = diagonal(a)
+            if (expectedModel != null && archivedModel != null &&
+                expectedModel == archivedModel &&
+                expectedDiagonal != null && archivedDiagonal != null &&
+                expectedDiagonal == archivedDiagonal) return true
+        }
+
+        val canonicalExpected = canonicalizeArchiveTitle(e)
+        val canonicalArchived = canonicalizeArchiveTitle(a)
+        val sameIdentity =
+            onlineProductIdentityKey(canonicalExpected) == onlineProductIdentityKey(canonicalArchived)
+
+        // Variant-defining numeric/model tokens must not conflict or silently disappear.
+        val expectedVariants = requiredVariantTokens(canonicalExpected)
+        val archivedVariants = requiredVariantTokens(canonicalArchived)
         if (!sameIdentity && !archivedVariants.containsAll(expectedVariants)) return false
-
         if (sameIdentity) return true
-        val expectedTokens = meaningfulTokens(e)
-        val archivedTokens = meaningfulTokens(a)
+
+        val expectedTokens = meaningfulTokens(canonicalExpected)
+        val archivedTokens = meaningfulTokens(canonicalArchived)
         if (expectedTokens.isEmpty() || archivedTokens.isEmpty()) return false
         val overlap = expectedTokens.intersect(archivedTokens)
         return overlap.size >= minOf(2, expectedTokens.size) &&
             overlap.size.toDouble() / expectedTokens.size >= 0.72
+    }
+    private fun canonicalizeArchiveTitle(normalizedTitle: String): String {
+        // These regional prefixes are only interchangeable for Samsung model identifiers.
+        if (!Regex("""\bsamsung\b""").containsMatchIn(normalizedTitle)) return normalizedTitle
+        return normalizedTitle
+            // Normalize only known Samsung TV regional model prefixes in compact alphanumeric
+            // identifiers (e.g. TQ48S95HAEXXC vs QE48S95HAEXXC); retain size and suffix.
+            .replace(Regex("""\b(?:tq|qe)(?=\d{2}[a-z0-9]{5,})"""), "")
+            .replace(Regex("""\b(\d{2,})\s+inches?\b"""), "$1")
+            .replace(Regex("""\b(?:2k|4k|8k|uhd|fhd|fullhd)\b"""), " ")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+            // Samsung catalogue titles sometimes include an explicit region code in one title
+            // but omit it in the other; identity matching below still guards diagonal/model.
     }
 
     /**

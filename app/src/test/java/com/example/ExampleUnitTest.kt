@@ -222,8 +222,22 @@ class ExampleUnitTest {
         assertTrue("History requires coverage across 90 days plus recent samples", enoughHistory.hasSufficientHistory)
 
         assertTrue("A just-observed price should be fresh", oneSnapshot.isPriceFresh)
+        assertEquals(
+            com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT,
+            oneSnapshot.priceDisplayStatus
+        )
         val stale = oneSnapshot.copy(priceObservedAt = now - 2L * day)
         assertFalse("A price older than 24 hours must not be considered current", stale.isPriceFresh)
+        assertEquals(
+            "A real saved quote must remain visible but be marked for revalidation",
+            com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION,
+            stale.priceDisplayStatus
+        )
+        assertEquals(
+            "A bundled sample price must remain hidden when it has no verified source",
+            com.example.data.model.PriceDisplayStatus.DEMONSTRATION,
+            seed.priceDisplayStatus
+        )
         assertTrue("Stale prices need an explicit age label", stale.priceFreshnessLabel.contains("2 días"))
         val staleWithHistory = enoughHistory.copy(priceObservedAt = now - 2L * day)
         assertEquals(

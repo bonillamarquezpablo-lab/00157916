@@ -41,6 +41,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,6 +62,8 @@ import com.example.data.remote.isAccessorySearchQuery
 import com.example.data.remote.isWheelFitmentQuery
 import com.example.ui.viewmodel.OnlineSearchProvider
 import com.example.ui.viewmodel.TrackerUiState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -145,6 +148,7 @@ fun OnlineSearchScreen(
     onQueryChange: (String) -> Unit,
     onSearch: () -> Unit,
     onAmazonSearch: () -> Unit,
+    onGameSearch: () -> Unit,
     onForceRefresh: () -> Unit,
     onAmazonOnlyChange: (Boolean) -> Unit,
     onToggleDiscarded: () -> Unit,
@@ -154,32 +158,32 @@ fun OnlineSearchScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    // Reuse grouped/sorted results across status and loading updates. The bounded result list
-    // is grouped synchronously so filter counts are immediately consistent with the loaded data.
-    val allGroups = remember(
+    // Grouping, relevance checks and sorting can be CPU-heavy on the tablet. Keep them
+    // off the UI thread so the search progress indicator and navigation stay responsive.
+    val groupedResults = produceState(
+        initialValue = emptyList<OnlineSearchDisplayGroup>() to emptyList<OnlineSearchDisplayGroup>(),
         state.onlineSearchResults,
         state.onlineSearchQuery,
         state.onlineSearchShowSecondHand
     ) {
-        buildOnlineSearchDisplayGroups(
-            results = state.onlineSearchResults,
-            query = state.onlineSearchQuery,
-            showSecondHand = state.onlineSearchShowSecondHand,
-            amazonOnly = false
-        )
+        value = withContext(Dispatchers.Default) {
+            val all = buildOnlineSearchDisplayGroups(
+                results = state.onlineSearchResults,
+                query = state.onlineSearchQuery,
+                showSecondHand = state.onlineSearchShowSecondHand,
+                amazonOnly = false
+            )
+            val amazon = buildOnlineSearchDisplayGroups(
+                results = state.onlineSearchResults,
+                query = state.onlineSearchQuery,
+                showSecondHand = state.onlineSearchShowSecondHand,
+                amazonOnly = true
+            )
+            all to amazon
+        }
     }
-    val amazonGroups = remember(
-        state.onlineSearchResults,
-        state.onlineSearchQuery,
-        state.onlineSearchShowSecondHand
-    ) {
-        buildOnlineSearchDisplayGroups(
-            results = state.onlineSearchResults,
-            query = state.onlineSearchQuery,
-            showSecondHand = state.onlineSearchShowSecondHand,
-            amazonOnly = true
-        )
-    }
+    val allGroups = groupedResults.value.first
+    val amazonGroups = groupedResults.value.second
     val visibleGroups = if (state.onlineSearchAmazonOnly) amazonGroups else allGroups
 
     LazyColumn(
@@ -241,6 +245,33 @@ fun OnlineSearchScreen(
                             }
                             Text("Amazon.es", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
+                    }
+                    OutlinedButton(
+                        onClick = onGameSearch,
+                        enabled = !state.isOnlineSearching && !state.isRefreshingPrices &&
+                            state.onlineSearchQuery.trim().length >= 2,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (state.isOnlineSearching && state.onlineSearchProvider == OnlineSearchProvider.GAME) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.Storefront, contentDescription = null, modifier = Modifier.size(17.dp))
+                        }
+                        Spacer(Modifier.width(7.dp))
+                        Text("Buscar precios en GAME España", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Text(
+                        "Búsqueda manual independiente. Si no hay resultados guardados, puede consumir 1 búsqueda de SerpApi.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    TextButton(
+                        onClick = { openGameSearch(context, state.onlineSearchQuery) },
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Abrir catálogo oficial de GAME.es")
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (state.onlineSearchResults.isNotEmpty()) {
@@ -641,6 +672,17 @@ private fun openAmazonSearch(context: Context, query: String) {
         "https://www.amazon.es/"
     }
     openStoreUrl(context, url, preferAmazonApp = true)
+}
+
+/** Opens GAME Spain's own search results without using SerpApi or spending search quota. */
+private fun openGameSearch(context: Context, query: String) {
+    val trimmedQuery = query.trim()
+    val url = if (trimmedQuery.length >= 2) {
+        "https://www.game.es/buscar/${Uri.encode(trimmedQuery)}/o%3D1"
+    } else {
+        "https://www.game.es/"
+    }
+    openStoreUrl(context, url, preferAmazonApp = false)
 }
 
 private fun openStoreUrl(context: Context, url: String, preferAmazonApp: Boolean) {

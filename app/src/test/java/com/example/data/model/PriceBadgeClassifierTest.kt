@@ -19,6 +19,20 @@ class PriceBadgeClassifierTest {
     }
 
     @Test
+    fun savedPricePendingRevalidationNeverReceivesADealBadge() {
+        val state = PriceBadgeClassifier.classify(
+            isPriceVerified = false,
+            currentPrice = 50.0,
+            priorObservedPrices = listOf(40.0),
+            averagePrice = 45.0,
+            hasValidAverage = true,
+            isSavedPendingRevalidation = true
+        )
+        assertEquals(PriceBadgeType.SAVED_PENDING_REVALIDATION, state.type)
+        assertEquals("PRECIO GUARDADO · PENDIENTE", state.label)
+    }
+
+    @Test
     fun oneRealObservationIsOnlyTheFirstRecordedPrice() {
         val state = PriceBadgeClassifier.classify(
             isPriceVerified = true,

@@ -113,6 +113,7 @@ class ProductRepository(
         observations.asSequence()
             .filter { observation ->
                 observation.isVerified &&
+                    isLiveObservation(observation) &&
                     observation.currency.trim().equals("EUR", ignoreCase = true) &&
                     observation.price.isFinite() && observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
                     observation.observedAt in 1L..System.currentTimeMillis() &&
@@ -187,7 +188,7 @@ class ProductRepository(
         productDao.getAllProducts(),
         storeDao.getAllStores(),
         trackedDao.getAllTracked(),
-        priceObservationDao.observeAllVerified()
+        priceObservationDao.observeAllStored()
     ) { productEntities, storeEntities, trackedEntities, observations ->
         val stores = storeEntities.map { it.toDomainStore() }.ifEmpty { Store.ALL_STORES }
         val trackingMap = trackedEntities.associateBy { it.productId }
@@ -196,7 +197,7 @@ class ProductRepository(
         productEntities.map { entity ->
             val product = entity.toDomainProduct(
                 stores = stores,
-                verifiedObservations = observationsByProduct[entity.id].orEmpty()
+                allObservations = observationsByProduct[entity.id].orEmpty()
             )
             val trackingInfo = trackingMap[product.id]
             product.copy(
@@ -232,7 +233,7 @@ class ProductRepository(
             val title = titleById[quote.productId].orEmpty()
             quote.productId.isNotBlank() &&
                 quote.price.isFinite() && quote.price > 0.0 && quote.price <= MAX_HISTORY_PRICE_EUR &&
-                quote.currency == "EUR" &&
+                isEuroCurrency(quote.currency) &&
                 quote.observedAt >= HISTORY_START_TIMESTAMP &&
                 isEligibleHistoryTitle(title) &&
                 !isPromotionalBulkListing(title, "") &&
@@ -452,6 +453,10 @@ class ProductRepository(
         observation.evidenceType.equals("live", ignoreCase = true) &&
             !isArchiveBackedObservation(observation)
 
+    /** Accept canonical EUR values and legacy/provider values with casing or whitespace differences. */
+    private fun isEuroCurrency(currency: String): Boolean =
+        currency.trim().equals("EUR", ignoreCase = true)
+
     private fun isEligibleObservationForHistory(observation: PriceObservationEntity): Boolean {
         val archiveBacked = isArchiveBackedObservation(observation)
         val merchantUrl = if (archiveBacked) {
@@ -484,7 +489,7 @@ class ProductRepository(
 
         return observation.isVerified &&
             observation.productId.isNotBlank() &&
-            observation.currency == "EUR" &&
+            isEuroCurrency(observation.currency) &&
             observation.price.isFinite() &&
             observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
             parseHttpUri(observation.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
@@ -764,16 +769,25 @@ class ProductRepository(
         // own direct URL. This permits old prices before a live search without letting any same-
         // title archive URL populate an unverified product from another seller or variant.
         val hasVerifiedLiveQuote = priceObservationDao.getLatestVerified(product.id) != null
-        if (!hasVerifiedLiveQuote && normalizedProductPageKey(product.storeUrl) != originalUrlKey) return 0
+        val productOwnsArchiveUrl = normalizedProductPageKey(product.storeUrl) == originalUrlKey
+        val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
+        val storeId = canonicalStoreId(merchantName, originalUrl)
+        // A Google Shopping-only product has no direct retailer URL yet. Historical capture
+        // may be attached before the first live search only when this product identity is unique
+        // in Room AND the retailer matches the product's saved store identity. The indirect
+        // link must never let an arbitrary same-title retailer populate this product's history.
+        val productStoreId = canonicalStoreId(product.currentStoreId, product.storeUrl)
+        val uniqueGoogleOnlyProduct = isGoogleShoppingUrl(product.storeUrl) &&
+            matchingProducts.size == 1 &&
+            productStoreId == storeId
+        if (!hasVerifiedLiveQuote && !productOwnsArchiveUrl && !uniqueGoogleOnlyProduct) return 0
 
         val now = System.currentTimeMillis()
         val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)
-        val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
         if (!isEligibleHistoryTitle(expectedTitle) ||
             isPromotionalBulkListing(expectedTitle, "") ||
             !isEligibleSeller(merchantName, originalUrl)
         ) return 0
-        val storeId = canonicalStoreId(merchantName, originalUrl)
         var inserted = 0
 
         for (quote in quotes.distinctBy { it.observedAt to it.price }) {
@@ -790,7 +804,7 @@ class ProductRepository(
                 } ?: continue
             if (kotlin.math.abs(snapshotTimestamp - quote.observedAt) > 1_000L) continue
             if (!quote.originalUrl.trimEnd('/').equals(originalUrl.trimEnd('/'), ignoreCase = true)) continue
-            if (quote.currency != "EUR" ||
+            if (!isEuroCurrency(quote.currency) ||
                 !quote.price.isFinite() ||
                 quote.price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR ||
                 quote.observedAt < earliestAllowed ||
@@ -857,7 +871,7 @@ class ProductRepository(
         val sourceUrl = "https://www.google.com/shopping/product/$googleCatalogId"
         var inserted = 0
         for (quote in insights.distinctBy { Triple(it.storeName.lowercase(Locale.ROOT), it.observedAt, it.price) }) {
-            if (quote.currency != "EUR" ||
+            if (!isEuroCurrency(quote.currency) ||
                 !isSafeCatalogTitleMatch(quote.productTitle, product.title) ||
                 quote.observedAt < earliestAllowed ||
                 quote.observedAt >= now ||
@@ -1450,11 +1464,14 @@ class ProductRepository(
 
     private fun ProductEntity.toDomainProduct(
         stores: List<Store>,
-        verifiedObservations: List<PriceObservationEntity>
+        allObservations: List<PriceObservationEntity>
     ): Product {
-        // Live rows retain the policy boundary so legacy/demo prices cannot enter the chart.
-        // Independently sourced historical archive points may predate that boundary, but only
-        // when the row explicitly carries archive provenance from the v8 schema.
+        // Only source-verified observations participate in calculations or current-price status.
+        // Legacy rows are retained separately for display as saved/pending, never as current offers.
+        val verifiedObservations = allObservations.filter { it.isVerified }
+        // Only post-policy live rows enter calculated history. Older verified live quotes are
+        // handled separately for display below, so they cannot change the low/average/deal claims.
+        // Properly provenance-labelled archive and Google insight rows retain their independent path.
         val sortedHistory = verifiedObservations.filter { observation ->
             val eligibleDate = observation.evidenceType in setOf("archive", "google_insights") ||
                 observation.observedAt >= HISTORY_START_TIMESTAMP
@@ -1534,6 +1551,25 @@ class ProductRepository(
                 linkType = observation.linkType
             )
         }
+        val savedHistoricalObservation = if (!priceIsVerified) {
+            val verifiedArchived = snapshotHistory.filter(::isHistoricalDisplayObservation)
+            val savedLegacyLive = verifiedObservations.filter(::isPrePolicySavedLiveObservation)
+            val recoverableStoredRows = allObservations.filter { observation ->
+                observation.currency.trim().equals("EUR", ignoreCase = true) &&
+                    observation.price.isFinite() &&
+                    observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
+                    observation.observedAt in 1L..System.currentTimeMillis() &&
+                    observation.productTitle.isNotBlank() &&
+                    isEligibleHistoryTitle(observation.productTitle) &&
+                    isSafeCatalogTitleMatch(observation.productTitle, title) &&
+                    !isPromotionalBulkListing(observation.productTitle, "") &&
+                    parseHttpUri(observation.sourceUrl) != null &&
+                    !observation.sourceUrl.contains("google.com/search", ignoreCase = true) &&
+                    !observation.sourceUrl.contains("web.archive.org", ignoreCase = true)
+            }
+            (verifiedArchived + savedLegacyLive + recoverableStoredRows).maxByOrNull { it.observedAt }
+        } else null
+
         return Product(
             id = id,
             title = title,
@@ -1567,8 +1603,39 @@ class ProductRepository(
                 ?.let { it.sourceType.ifBlank { it.sourceName } }
                 .orEmpty()
                 .takeIf { priceIsVerified }
+                .orEmpty(),
+            // A verified archive/insight point is real saved history, not a current quote.
+            // Keep it separate from currentPrice so it cannot affect offer sorting or deal logic.
+            savedHistoricalPrice = savedHistoricalObservation?.price,
+            savedHistoricalPriceObservedAt = savedHistoricalObservation?.observedAt,
+            savedHistoricalPriceSource = savedHistoricalObservation
+                ?.let { it.sourceType.ifBlank { it.sourceName } }
                 .orEmpty()
         )
+    }
+
+    /**
+     * Previously saved live prices before the policy cutoff stay visible as stale saved quotes.
+     * They are not allowed into the comparison history or to influence minimum/average claims.
+     */
+    private fun isPrePolicySavedLiveObservation(observation: PriceObservationEntity): Boolean =
+        isLiveObservation(observation) &&
+            observation.observedAt in 1L until HISTORY_START_TIMESTAMP &&
+            isEligibleObservationForHistory(observation)
+
+    private fun isHistoricalDisplayObservation(observation: PriceObservationEntity): Boolean {
+        val evidenceType = observation.evidenceType.lowercase(Locale.ROOT)
+        val isHistoricalProvider = evidenceType == "archive" || evidenceType == "google_insights" ||
+            observation.sourceUrl.contains("web.archive.org", ignoreCase = true)
+        return isHistoricalProvider &&
+            observation.isVerified &&
+            observation.currency.trim().equals("EUR", ignoreCase = true) &&
+            observation.price.isFinite() &&
+            observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
+            observation.observedAt in 1L..System.currentTimeMillis() &&
+            observation.productTitle.isNotBlank() &&
+            isEligibleHistoryTitle(observation.productTitle) &&
+            !isPromotionalBulkListing(observation.productTitle, "")
     }
 
     private fun configuredStoreForObservation(

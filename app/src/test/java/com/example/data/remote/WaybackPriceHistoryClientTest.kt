@@ -150,6 +150,61 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun acceptsSamsungTvRegionalPrefixAndInchLabelDifferences() {
+        val client = newClient()
+        val html = """
+            <script type="application/ld+json">
+            {"@type":"Product","name":"Samsung QE48S95HAEXXC OLED 48 inch Smart TV",
+             "offers":{"@type":"Offer","price":"1394.10","priceCurrency":"EUR"}}
+            </script>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "OLED Samsung TQ48S95HAEXXC 48 4K Smart TV",
+            originalUrl = "https://www.samsung.com/es/tvs/oled-tv/tq48s95haexxc/",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://www.samsung.com/es/tvs/oled-tv/tq48s95haexxc/",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("Equivalent TQ/QE regional identifiers for the same Samsung model should match", quote)
+        assertEquals(1394.10, quote!!.price, 0.001)
+
+        val url = client.buildDomainCdxUrl(
+            domain = "samsung.com",
+            expectedTitle = "OLED Samsung TQ48S95HAEXXC 48 4K Smart TV",
+            now = 1_800_000_000_000L
+        )
+        val pathFilter = url?.queryParameterValues("filter").orEmpty()
+            .firstOrNull { (it ?: "").startsWith("original:") }.orEmpty()
+        assertTrue("Archive lookup should try the stable S95H family model", pathFilter.contains("s95h"))
+        assertTrue("Archive lookup should retain the exact regional SKU as a fallback", pathFilter.contains("tq48s95haexxc"))
+        assertTrue("Archive lookup should allow product-specific title terms when the SKU is not in the URL", pathFilter.contains("oled"))
+        assertTrue("Archive lookup should combine the title fallback with a second distinctive term", pathFilter.contains("smart"))
+    }
+
+    @Test
+    fun rejectsArchivedSamsungTvWithDifferentDiagonalAndModel() {
+        val client = newClient()
+        val html = """
+            <script type="application/ld+json">
+            {"@type":"Product","name":"Samsung QE55S95HFEHTXC OLED 55 inch Smart TV",
+             "offers":{"@type":"Offer","price":"1548.87","priceCurrency":"EUR"}}
+            </script>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "OLED Samsung TQ48S95HAEXXC 48 4K Smart TV",
+            originalUrl = "https://www.samsung.com/es/tvs/oled-tv/tq48s95haexxc/",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://www.samsung.com/es/tvs/oled-tv/tq48s95haexxc/",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNull("A different model and diagonal must never be accepted as historical evidence", quote)
+    }
+
+    @Test
     fun acceptsEquivalentSonyHeadphoneModelSpelling() {
         val client = newClient()
         val html = """

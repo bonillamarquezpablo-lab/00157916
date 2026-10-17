@@ -25,6 +25,7 @@ private data class BadgePalette(
 
 private fun paletteFor(type: PriceBadgeType): BadgePalette = when (type) {
     PriceBadgeType.UNVERIFIED -> BadgePalette(Color(0xFF252B38), Color(0xFFB8C2D4), Color(0xFF475569))
+    PriceBadgeType.SAVED_PENDING_REVALIDATION -> BadgePalette(Color(0xFF292D38), Color(0xFFD0D5E1), Color(0xFF667085))
     PriceBadgeType.FIRST_OBSERVATION -> BadgePalette(Color(0xFF172B43), Color(0xFF9DD2FF), Color(0xFF3978A8))
     PriceBadgeType.HISTORICAL_MINIMUM -> BadgePalette(Color(0xFF073D30), Color(0xFF59FFC0), Color(0xFF14F1A0))
     PriceBadgeType.GOOD_PRICE -> BadgePalette(Color(0xFF123D30), Color(0xFF6EE7B7), Color(0xFF34D399))

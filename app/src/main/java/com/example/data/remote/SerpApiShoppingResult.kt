@@ -1,5 +1,6 @@
 package com.example.data.remote
 
+import com.example.data.model.Store
 import java.net.URI
 import java.net.URLDecoder
 import java.text.Normalizer
@@ -230,6 +231,10 @@ fun isGoogleShoppingUrl(sourceUrl: String): Boolean {
         host.endsWith(".google.com") ||
         host.endsWith(".google.es")
 }
+
+/** True only when the provider identifies a GAME Spain offer by seller name or retailer host. */
+internal fun isGameSpainOffer(offer: SerpApiShoppingResult): Boolean =
+    Store.findKnownByName(offer.storeName, offer.sourceUrl)?.id == Store.GAME.id
 
 /**
  * Return a retailer destination if a provider URL is already direct or if a Google redirect

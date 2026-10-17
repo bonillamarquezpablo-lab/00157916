@@ -6,6 +6,7 @@ package com.example.data.model
  */
 enum class PriceBadgeType {
     UNVERIFIED,
+    SAVED_PENDING_REVALIDATION,
     FIRST_OBSERVATION,
     HISTORICAL_MINIMUM,
     GOOD_PRICE,
@@ -26,8 +27,17 @@ object PriceBadgeClassifier {
         currentPrice: Double,
         priorObservedPrices: List<Double>,
         averagePrice: Double,
-        hasValidAverage: Boolean
+        hasValidAverage: Boolean,
+        isSavedPendingRevalidation: Boolean = false
     ): PriceBadgeState {
+        if (isSavedPendingRevalidation) {
+            return PriceBadgeState(
+                PriceBadgeType.SAVED_PENDING_REVALIDATION,
+                "PRECIO GUARDADO · PENDIENTE",
+                "Mínimo conserva un precio observado, pero necesita revalidación y no se presenta como oferta actual."
+            )
+        }
+
         if (!isPriceVerified || !currentPrice.isFinite() || currentPrice <= 0.0) {
             return PriceBadgeState(
                 PriceBadgeType.UNVERIFIED,

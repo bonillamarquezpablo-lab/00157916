@@ -1,5 +1,14 @@
 package com.example.data.model
 
+enum class PriceDisplayStatus {
+    /** A live, source-backed observation captured within the freshness window. */
+    VERIFIED_CURRENT,
+    /** A real saved observation exists, but must not be represented as today's price. */
+    SAVED_PENDING_REVALIDATION,
+    /** No source-backed saved price can be safely shown; bundled/demo values stay hidden. */
+    DEMONSTRATION
+}
+
 data class Product(
     val id: String,
     val title: String,
@@ -38,7 +47,11 @@ data class Product(
     /** Provider-backed Google Shopping catalog ID, when available. */
     val googleProductId: String? = null,
     /** Provider which supplied the latest saved observation, e.g. Google Shopping or Amazon.es. */
-    val priceSource: String = ""
+    val priceSource: String = "",
+    /** Latest verified historical observation for display only when no live quote is available. */
+    val savedHistoricalPrice: Double? = null,
+    val savedHistoricalPriceObservedAt: Long? = null,
+    val savedHistoricalPriceSource: String = ""
 ) {
     /**
      * Historical conclusions require at least three distinct snapshots spanning 90 days,
@@ -75,7 +88,9 @@ data class Product(
                 currentPrice = currentPrice,
                 priorObservedPrices = priorPrices,
                 averagePrice = avg90dPrice,
-                hasValidAverage = isPriceFresh && hasSufficientHistory
+                hasValidAverage = isPriceFresh && hasSufficientHistory,
+                isSavedPendingRevalidation =
+                    priceDisplayStatus == PriceDisplayStatus.SAVED_PENDING_REVALIDATION
             )
         }
 
@@ -107,6 +122,23 @@ data class Product(
     val isPriceFresh: Boolean
         get() = isPriceVerified &&
             priceAgeMillis?.let { it <= PRICE_FRESHNESS_WINDOW_MS } == true
+
+    /**
+     * Separates a current quote from a stale-but-real saved quote and from bundled/demo values.
+     * Never infer a real saved price from currentPrice alone: old catalogue rows also contain
+     * placeholder numbers, so a verified source flag and valid price are required.
+     */
+    val priceDisplayStatus: PriceDisplayStatus
+        get() = when {
+            isPriceFresh && currentPrice.isFinite() && currentPrice > 0.0 ->
+                PriceDisplayStatus.VERIFIED_CURRENT
+            isPriceVerified && currentPrice.isFinite() && currentPrice > 0.0 ->
+                PriceDisplayStatus.SAVED_PENDING_REVALIDATION
+            savedHistoricalPrice?.let { it.isFinite() && it > 0.0 } == true &&
+                savedHistoricalPriceObservedAt?.let { it > 0L && it <= System.currentTimeMillis() } == true ->
+                PriceDisplayStatus.SAVED_PENDING_REVALIDATION
+            else -> PriceDisplayStatus.DEMONSTRATION
+        }
 
     val priceFreshnessLabel: String
         get() {

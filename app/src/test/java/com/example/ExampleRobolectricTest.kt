@@ -1304,6 +1304,170 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun verifiedLivePriceBeforePolicyCutoffRemainsVisibleAsStaleSavedPrice() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val now = System.currentTimeMillis()
+            val savedAt = now - 7L * 24L * 60L * 60L * 1000L
+            val title = "Anker Prime 27K Power Bank"
+            val productId = "old-saved-live-price"
+            val sourceUrl = "https://www.amazon.es/dp/B0OLDPRICE"
+            database.productDao().insert(
+                ProductEntity(
+                    id = productId,
+                    title = title,
+                    brand = "Anker",
+                    category = "HOME",
+                    currentPrice = 999.99,
+                    athMinPrice = 999.99,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "",
+                    athMaxPrice = 999.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "amazon_es",
+                    storeUrl = sourceUrl,
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = productId,
+                    storeId = "amazon_es",
+                    price = 79.99,
+                    currency = "EUR",
+                    observedAt = savedAt,
+                    sourceUrl = sourceUrl,
+                    sourceName = "Google Shopping",
+                    isVerified = true,
+                    verificationNote = "Previously saved source-backed quote; stale and awaiting revalidation.",
+                    productTitle = title,
+                    storeName = "Amazon España",
+                    sourceType = "Google Shopping",
+                    linkType = "directo",
+                    collectedAt = savedAt,
+                    evidenceType = "live"
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+
+            val product = withTimeout<com.example.data.model.Product>(10_000L) {
+                repository.allProductsStream.first { products ->
+                    products.any { it.id == productId && it.savedHistoricalPrice == 79.99 }
+                }.first { it.id == productId }
+            }
+            assertFalse("A pre-policy saved quote must not count as a current verified quote", product.isPriceVerified)
+            assertEquals("Keep the catalogue placeholder separate from the saved historical quote",
+                999.99, product.currentPrice, 0.001)
+            assertEquals(79.99, product.savedHistoricalPrice!!, 0.001)
+            assertEquals(savedAt, product.savedHistoricalPriceObservedAt)
+            assertEquals("Google Shopping", product.savedHistoricalPriceSource)
+            assertTrue("A pre-policy row must not affect calculated history", product.priceHistory.isEmpty())
+            assertEquals(
+                com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION,
+                product.priceDisplayStatus
+            )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun archiveOnlySavedPriceIsShownAsHistoricalAndNotAsCurrentQuote() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val now = System.currentTimeMillis()
+            val title = "Anker Prime 27K Power Bank"
+            val originalUrl = "https://shop.example/products/anker-prime-27k"
+            val productId = "archive-only-anker"
+            database.productDao().insert(
+                ProductEntity(
+                    id = productId,
+                    title = title,
+                    brand = "Anker",
+                    category = "HOME",
+                    currentPrice = 999.99,
+                    athMinPrice = 999.99,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "",
+                    athMaxPrice = 999.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "unknown_store",
+                    storeUrl = originalUrl,
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+
+            val archivedAt = now - 200L * 24L * 60L * 60L * 1000L
+            val archiveTimestamp = java.text.SimpleDateFormat(
+                "yyyyMMddHHmmss",
+                java.util.Locale.ROOT
+            ).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.format(java.util.Date(archivedAt))
+            val quote = ArchivedPriceQuote(
+                observedAt = archivedAt,
+                price = 79.99,
+                currency = "EUR",
+                productTitle = title,
+                originalUrl = originalUrl,
+                snapshotUrl = "https://web.archive.org/web/" + archiveTimestamp + "id_/" + originalUrl
+            )
+
+            assertEquals(
+                1,
+                repository.recordArchivedPriceHistory(
+                    expectedTitle = title,
+                    originalUrl = originalUrl,
+                    storeName = "Tienda directa",
+                    quotes = listOf(quote)
+                )
+            )
+
+            val product = withTimeout<com.example.data.model.Product>(10_000L) {
+                repository.allProductsStream.first { products ->
+                    products.any { it.id == productId && it.savedHistoricalPrice == 79.99 }
+                }.first { it.id == productId }
+            }
+            assertFalse(product.isPriceVerified)
+            assertEquals("Archive history must not overwrite the catalogue's current-price field",
+                999.99, product.currentPrice, 0.001)
+            assertEquals(79.99, product.savedHistoricalPrice!!, 0.001)
+            assertEquals(archivedAt, product.savedHistoricalPriceObservedAt)
+            assertEquals(
+                com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION,
+                product.priceDisplayStatus
+            )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun archiveHistoryDoesNotAttachToDifferentQueryVariant() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(

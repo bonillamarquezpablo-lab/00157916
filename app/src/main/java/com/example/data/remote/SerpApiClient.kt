@@ -148,9 +148,10 @@ class SerpApiException(
  */
 class SerpApiClient(
     private val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(18, TimeUnit.SECONDS)
+        .writeTimeout(12, TimeUnit.SECONDS)
+        .callTimeout(25, TimeUnit.SECONDS)
         .build()
 ) {
     /**
@@ -223,6 +224,25 @@ class SerpApiClient(
         val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
         require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
         val response = executeSearch(apiKey, normalizedQuery)
+        parseShoppingResultsDetailed(response, normalizedQuery).copy(rawResponse = response.toString())
+    }
+
+    /**
+     * A separate, user-triggered GAME Spain search. It spends at most the same single
+     * Shopping query as a normal manual search, but asks Google Shopping to prioritize
+     * GAME results. The clean product query is still used for relevance validation so
+     * adding the retailer name does not make real product titles look irrelevant.
+     */
+    suspend fun searchGameOnlineWithDiagnostics(
+        token: String,
+        query: String
+    ): SerpApiShoppingSearchReport = withContext(Dispatchers.IO) {
+        val apiKey = token.trim()
+        require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
+        val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(100)
+        require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
+        val targetedQuery = "$normalizedQuery GAME España"
+        val response = executeSearch(apiKey, targetedQuery)
         parseShoppingResultsDetailed(response, normalizedQuery).copy(rawResponse = response.toString())
     }
 

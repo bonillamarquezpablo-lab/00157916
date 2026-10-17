@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Store
 import androidx.compose.material.icons.filled.Settings
@@ -81,7 +82,8 @@ enum class MainTab(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
-    viewModel: PriceTrackerViewModel
+    viewModel: PriceTrackerViewModel,
+    onOpenCrashReport: () -> Unit = {}
 ) {
     var currentTab by remember { mutableStateOf(MainTab.MARKET) }
     var showSettings by remember { mutableStateOf(false) }
@@ -134,6 +136,18 @@ fun MainScreen(
                 },
                 actions = {
                     if (!showSettings && !showOnlineSearch) {
+                        IconButton(
+                            onClick = onOpenCrashReport,
+                            modifier = Modifier
+                                .padding(end = 1.dp)
+                                .testTag("open_crash_report_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "Abrir informes de cierre",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                         IconButton(
                             onClick = { showOnlineSearch = true },
                             modifier = Modifier.padding(end = 1.dp)

@@ -239,7 +239,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
      * manual single searches can still be attempted and the provider remains the final authority.
      */
     private suspend fun readAccountInfo(token: String): SerpApiAccountInfo? = try {
-        serpApiClient.getAccountInfo(token)
+        // The account endpoint is free, but it must not delay the interface indefinitely.
+        withTimeoutOrNull(5_000L) { serpApiClient.getAccountInfo(token) }
     } catch (error: SerpApiException) {
         if (error.httpCode == 401 || error.httpCode == 403) throw error
         null
@@ -1039,6 +1040,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         )
         viewModelScope.launch {
             try {
+                withTimeout(26_000L) {
                 // Cache lookup comes first: saved results remain usable even if the quota is empty
                 // or the API key was removed after the previous search.
                 val cached = withContext(Dispatchers.IO) {
@@ -1161,7 +1163,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     if (accountCapacity(accountInfo) >= 2) {
                         gameSupplementAttempted = true
                         try {
-                            val gameReport = withTimeoutOrNull(12_000L) {
+                            val gameReport = withTimeoutOrNull(8_000L) {
                                 serpApiClient.searchGameSupplementWithDiagnostics(token, query)
                             } ?: throw java.net.SocketTimeoutException("La consulta complementaria de GAME ha agotado el tiempo límite.")
                             val identifiedGameOffers = gameReport.results.count(::isGameSpainOffer)
@@ -1252,6 +1254,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 )
                 // Keep the paid/live search responsive. Historical lookups remain available
                 // via the explicit free-history action in each product detail sheet.
+                }
+            } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+                val message = "La búsqueda ha tardado demasiado y se ha cancelado para evitar que quede bloqueada. Comprueba la conexión e inténtalo de nuevo; los resultados guardados se mantienen."
+                _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                showSnackbar(message)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: SerpApiException) {

@@ -39,10 +39,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.launch
 import java.net.URI
 import java.text.SimpleDateFormat
@@ -173,7 +176,7 @@ class ProductRepository(
             }
             .distinctBy { normalizeStoreIdentity(it.name) }
             .sortedBy { it.name.lowercase(Locale.ROOT) }
-    }
+    }.flowOn(Dispatchers.Default)
 
     private data class StorePriceCandidate(
         val key: String,
@@ -207,15 +210,16 @@ class ProductRepository(
         }
     }.onEach { currentProducts ->
         _latestProducts.value = currentProducts
-    }
+    }.flowOn(Dispatchers.Default)
+        .shareIn(externalScope, SharingStarted.WhileSubscribed(5_000L), replay = 1)
 
     val trackedProductsStream: Flow<List<Product>> = allProductsStream.map { list ->
         list.filter { it.isTracked }
-    }
+    }.flowOn(Dispatchers.Default)
 
     val todayAthDealsStream: Flow<List<Product>> = allProductsStream.map { list ->
         list.filter { it.isAtAth }
-    }
+    }.flowOn(Dispatchers.Default)
 
     /**
      * Store only provider-backed, valid EUR offers. Direct merchant URLs and Google Shopping

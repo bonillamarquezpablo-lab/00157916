@@ -231,8 +231,9 @@ fun OnlineSearchScreen(
             else displayGroup.copy(group = displayGroup.group.copy(offers = offers))
         }.sortedBy { it.group.minPrice }
     }
-    val familyBuckets = remember(filteredGroups, state.onlineSearchQuery) {
-        buildConsoleModelBuckets(state.onlineSearchQuery, filteredGroups.map { it.group })
+    // Model choices are based on the full provider result, not the active retailer filter.
+    val familyBuckets = remember(visibleGroups, state.onlineSearchQuery) {
+        buildConsoleModelBuckets(state.onlineSearchQuery, visibleGroups.map { it.group })
     }
     val selectedBucket = familyBuckets.firstOrNull { it.key == selectedConsoleModelKey.value }
     val showConsoleModelPicker =
@@ -477,7 +478,7 @@ fun OnlineSearchScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("Elige una versión de consola", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Text(
-                            "Después podrás escoger almacenamiento/edición y comparar las tiendas para esa variante exacta.",
+                            "Después podrás escoger almacenamiento/edición y comparar las tiendas. Si falta una versión, podrás lanzar una búsqueda específica.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -509,11 +510,31 @@ fun OnlineSearchScreen(
                 } else {
                     filteredGroups
                 }
-                if (groupsToShow.isEmpty()) {
+                if (showConsoleModelPicker && selectedBucket != null && selectedBucket.groups.isEmpty()) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                "No se encontraron ofertas de ${selectedBucket.label} en la búsqueda general. No se muestra ningún precio estimado.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Button(
+                                onClick = {
+                                    selectedStoreKey.value = null
+                                    onAmazonOnlyChange(false)
+                                    onQueryChange(selectedBucket.searchQuery)
+                                    onSearch()
+                                },
+                                enabled = !state.isOnlineSearching && !state.isRefreshingPrices
+                            ) {
+                                Text("Buscar esta versión · puede consumir cuota")
+                            }
+                        }
+                    }
+                } else if (groupsToShow.isEmpty()) {
                     item {
                         Text(
                             if (selectedStoreKey.value != null)
-                                "No hay ofertas de esa tienda en los resultados devueltos por Google Shopping para esta búsqueda. Mínimo no inventa precios."
+                                "No hay ofertas de esa tienda para esta versión en los resultados devueltos por el proveedor. Selecciona «Todas las tiendas» para quitar el filtro. Mínimo no inventa precios."
                             else if (state.onlineSearchProvider == OnlineSearchProvider.AMAZON)
                                 "Amazon.es no ha devuelto productos con precio en euros para esta búsqueda."
                             else
@@ -771,17 +792,27 @@ private fun ConsoleModelBucketCard(bucket: ConsoleModelBucket, onClick: () -> Un
             horizontalAlignment = Alignment.Start
         ) {
             Text(bucket.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text(
-                "${bucket.groups.size} variantes de almacenamiento/edición · ${bucket.storeCount} tiendas",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                "Desde " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(bucket.cheapestPrice),
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.ExtraBold,
-                color = MaterialTheme.colorScheme.primary
-            )
+            if (bucket.groups.isEmpty()) {
+                Text(
+                    "Sin ofertas en la búsqueda actual",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Text(
+                    "${bucket.groups.size} variantes de almacenamiento/edición · ${bucket.storeCount} tiendas",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (bucket.cheapestPrice.isFinite() && bucket.cheapestPrice > 0.0) {
+                    Text(
+                        "Desde " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(bucket.cheapestPrice),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
         }
     }
 }

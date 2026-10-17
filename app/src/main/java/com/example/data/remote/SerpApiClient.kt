@@ -228,25 +228,6 @@ class SerpApiClient(
     }
 
     /**
-     * A separate, user-triggered GAME Spain search. It spends at most the same single
-     * Shopping query as a normal manual search, but asks Google Shopping to prioritize
-     * GAME results. The clean product query is still used for relevance validation so
-     * adding the retailer name does not make real product titles look irrelevant.
-     */
-    suspend fun searchGameOnlineWithDiagnostics(
-        token: String,
-        query: String
-    ): SerpApiShoppingSearchReport = withContext(Dispatchers.IO) {
-        val apiKey = token.trim()
-        require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
-        val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(100)
-        require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
-        val targetedQuery = "$normalizedQuery GAME España"
-        val response = executeSearch(apiKey, targetedQuery)
-        parseShoppingResultsDetailed(response, normalizedQuery).copy(rawResponse = response.toString())
-    }
-
-    /**
      * Search Amazon.es itself, rather than Google Shopping. This still returns a public search
      * snapshot through SerpApi; it cannot see the user's signed-in account or personalized coupons.
      */
@@ -1619,6 +1600,7 @@ class SerpApiClient(
             .replace(Regex("\\p{Mn}+"), "")
             .replace(Regex("[^a-z0-9]+"), " ")
             .trim()
+            .replace(Regex("""\bplaystation\s*5\b"""), "ps5")
             .replace(Regex("\\s+"), " ")
 
     private fun storeIdForHost(host: String, merchantName: String = ""): String {

@@ -220,7 +220,7 @@ fun ProductCard(
                         val displayedSavedPrice = when (product.priceDisplayStatus) {
                             com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT -> product.currentPrice
                             com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION ->
-                                if (!product.isPriceVerified) product.savedHistoricalPrice ?: product.currentPrice else product.currentPrice
+                                if (!product.isPriceVerified) product.savedHistoricalPrice else product.currentPrice
                             com.example.data.model.PriceDisplayStatus.DEMONSTRATION -> null
                         }
                         Text(

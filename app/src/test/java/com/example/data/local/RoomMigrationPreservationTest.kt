@@ -21,12 +21,12 @@ import org.robolectric.annotation.Config
 class RoomMigrationPreservationTest {
 
     @Test
-    fun room7To9PreservesExistingRealDataAndTrackingTarget() {
+    fun room7To10PreservesExistingRealDataAndTrackingTarget() {
         assertMigrationPreservesRealData(startVersion = 7)
     }
 
     @Test
-    fun room8To9PreservesExistingRealDataAndLeavesAmbiguousRowUnchanged() {
+    fun room8To10PreservesExistingRealDataAndLeavesAmbiguousRowUnchanged() {
         assertMigrationPreservesRealData(startVersion = 8)
     }
 
@@ -66,14 +66,15 @@ class RoomMigrationPreservationTest {
                 AppDatabase.MIGRATION_5_6,
                 AppDatabase.MIGRATION_6_7,
                 AppDatabase.MIGRATION_7_8,
-                AppDatabase.MIGRATION_8_9
+                AppDatabase.MIGRATION_8_9,
+                AppDatabase.MIGRATION_9_10
             )
             .allowMainThreadQueries()
             .build()
 
         try {
             val products = migrated.productDao().getAllProductsSnapshot()
-            assertEquals("Product must survive Room $startVersion -> 9", 1, products.size)
+            assertEquals("Product must survive Room $startVersion -> 10", 1, products.size)
             val product = products.single()
             assertEquals("real-product-1", product.id)
             assertEquals(349.95, product.currentPrice, 0.001)

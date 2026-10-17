@@ -1288,6 +1288,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
                 showSnackbar(message)
             } finally {
+                // A timeout or cancellation must never strand the search screen in its loading state.
                 _uiState.value = _uiState.value.copy(isOnlineSearching = false)
             }
         }

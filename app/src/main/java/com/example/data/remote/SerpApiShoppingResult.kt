@@ -227,9 +227,10 @@ fun isWheelFitmentQuery(query: String): Boolean {
 fun isGoogleShoppingUrl(sourceUrl: String): Boolean {
     val uri = runCatching { URI(sourceUrl) }.getOrNull() ?: return false
     val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
-    return host.startsWith("google.") ||
-        host.endsWith(".google.com") ||
-        host.endsWith(".google.es")
+    // Match Google's actual domains and subdomains, not lookalike hosts such as
+    // google.com.attacker.example, which otherwise pass a startsWith("google.") check.
+    return Regex("(?i)^(?:[a-z0-9-]+\\.)*google\\.(?:com|es|[a-z]{2,3}(?:\\.[a-z]{2,3})?)$")
+        .matches(host)
 }
 
 /** True only when the provider identifies a GAME Spain offer by seller name or retailer host. */

@@ -60,6 +60,37 @@ jobs:
         timeout-minutes: 15
         run: gradle :app:testDebugUnitTest --stacktrace
 
+      - name: Mostrar resumen de pruebas fallidas sin volcar datos sensibles
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          reports = sorted(Path("app/build/test-results/testDebugUnitTest").glob("TEST-*.xml"))
+          failures = 0
+          for report in reports:
+              try:
+                  root = ET.parse(report).getroot()
+              except (OSError, ET.ParseError):
+                  continue
+              for case in root.iter("testcase"):
+                  problem = case.find("failure")
+                  if problem is None:
+                      problem = case.find("error")
+                  if problem is None:
+                      continue
+                  failures += 1
+                  message = (problem.get("message") or "Sin mensaje").replace("\\n", " ")[:1000]
+                  print(f"FAILED: {case.get('classname')} > {case.get('name')}")
+                  print(f"Message: {message}")
+          if failures == 0:
+              print(f"No se encontraron fallos XML en {len(reports)} informes de pruebas.")
+          else:
+              print(f"Pruebas fallidas: {failures}")
+          PY
+
       - name: Compilar pruebas instrumentadas Android
         run: gradle :app:compileDebugAndroidTestKotlin --stacktrace
 

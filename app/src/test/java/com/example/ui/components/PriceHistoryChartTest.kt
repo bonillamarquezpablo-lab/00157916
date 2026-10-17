@@ -1,10 +1,11 @@
 package com.example.ui.components
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.example.data.model.PricePoint
 import org.junit.Rule
@@ -59,17 +60,17 @@ class PriceHistoryChartTest {
             }
         }
 
-        composeRule.onNodeWithText("Evolución Real del Precio").assertIsDisplayed()
-        composeRule.onNodeWithText("Wayback (2)").performClick()
-        composeRule.onNodeWithText("Historial antiguo (Wayback)").assertIsDisplayed()
-        composeRule.onNodeWithText("Mín. del archivo:", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Evolución del precio observado").assertIsDisplayed()
+        composeRule.onNodeWithText("Wayback").performClick()
+        composeRule.onNodeWithText("Histórico externo · Wayback").assertIsDisplayed()
+        composeRule.onNodeWithText("Mín. del rango:", substring = true).assertIsDisplayed()
         composeRule.onNodeWithText(
-            "Precios anunciados en páginas archivadas. No confirman stock, envío ni precio final y no se mezclan con el historial real."
+            "Capturas externas de Internet Archive; no son ofertas actuales."
         ).assertIsDisplayed()
     }
 
     @Test
-    fun waybackOptionRemainsVisibleWhenNoCapturesHaveBeenVerified() {
+    fun archiveSelectorIsNotShownWhenThereAreNoVerifiedCaptures() {
         composeRule.setContent {
             MaterialTheme {
                 PriceHistoryChart(
@@ -80,10 +81,9 @@ class PriceHistoryChartTest {
             }
         }
 
-        composeRule.onNodeWithText("Evolución Real del Precio").assertIsDisplayed()
+        composeRule.onNodeWithText("Evolución del precio observado").assertIsDisplayed()
         composeRule.onNodeWithText("Sin datos todavía").assertIsDisplayed()
-        composeRule.onNodeWithText("Wayback (0)").assertIsDisplayed()
-        composeRule.onNodeWithText("Consulta precios para empezar el historial").assertIsDisplayed()
         composeRule.onNodeWithTag("price_history_chart_container").assertIsDisplayed()
+        composeRule.onNodeWithText("Wayback").assertDoesNotExist()
     }
 }

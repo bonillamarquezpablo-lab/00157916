@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import android.content.ActivityNotFoundException
+import com.example.security.safeExternalHttpsUrl
+import com.example.security.openExternalHttpsUrl
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -870,16 +872,20 @@ private fun openAmazonSearch(context: Context, query: String) {
 }
 
 private fun openStoreUrl(context: Context, url: String, preferAmazonApp: Boolean) {
-    val uri = Uri.parse(url)
+    // Search results are provider-controlled. Validate before passing any URI to an app/browser.
+    val safeUrl = safeExternalHttpsUrl(url) ?: return
+    val uri = Uri.parse(safeUrl)
     if (preferAmazonApp) {
         val amazonIntent = Intent(Intent.ACTION_VIEW, uri).setPackage(AMAZON_SHOPPING_PACKAGE)
         try {
             context.startActivity(amazonIntent)
             return
         } catch (_: ActivityNotFoundException) {
-            // Amazon app isn't installed; continue with the website below.
+            // Amazon app isn't installed; continue with the validated website below.
+        } catch (_: SecurityException) {
+            // If Android refuses the app-specific intent, use the validated browser fallback.
         }
     }
-    context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+    openExternalHttpsUrl(context, safeUrl)
 }
 

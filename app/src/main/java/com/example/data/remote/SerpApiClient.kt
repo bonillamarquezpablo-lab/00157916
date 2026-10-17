@@ -1426,6 +1426,11 @@ class SerpApiClient(
                 queryValues.sorted() != titleValues.sorted()
             ) return true
         }
+        // Broad family searches such as "Xiaomi scooter" should return the family's
+        // model range; numeric specifications on the returned model are variants, not a
+        // contradiction with the generic query. Exact model queries remain strict.
+        if (isBroadFamilyOverviewQuery(query, title)) return false
+
         val pack = Regex("""\b(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(ml|g|kg|l)\b""").find(t)
         if (pack != null) {
             val queryHasSamePack = Regex("""\b${pack.groupValues[1]}\s*[x×]\s*${Regex.escape(pack.groupValues[2])}\s*${Regex.escape(pack.groupValues[3])}\b""").containsMatchIn(q)

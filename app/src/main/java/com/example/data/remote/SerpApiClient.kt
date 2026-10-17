@@ -1603,7 +1603,8 @@ class SerpApiClient(
      * This does not weaken the repository's strict model checks before saving price history.
      */
     private fun isBroadFamilyOverviewQuery(requested: String, returned: String): Boolean {
-        val query = normalize(requested).split(' ').filter { it.length > 1 && it !in STOP_WORDS }.toSet()
+        val queryTokens = normalize(requested).split(' ').filter { it.length > 1 && it !in STOP_WORDS }
+        val query = queryTokens.toSet()
         if (query.size !in 2..4) return false
         val broadFamilies = setOf(
             "scooter", "scooters", "patinete", "patinetes",
@@ -1612,8 +1613,7 @@ class SerpApiClient(
             "auriculares", "headphones", "televisor", "televisores", "tv",
             "robot", "aspiradora", "aspiradoras", "bicicleta", "bicicletas"
         )
-        if (query.none { it in broadFamilies }) return false
-        val family = query.firstOrNull { it in broadFamilies } ?: return false
+        val family = queryTokens.firstOrNull { it in broadFamilies } ?: return false
         val title = normalize(returned).split(' ').filter { it.isNotBlank() }.toSet()
         val categoryAliases = when (family) {
             "scooter", "scooters", "patinete", "patinetes" ->

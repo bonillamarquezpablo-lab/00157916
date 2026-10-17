@@ -648,17 +648,17 @@ class WaybackPriceHistoryClient(
     }
 
     private fun isMatchingProductTitle(expected: String, archived: String): Boolean {
-        val e = normalizeTitle(expected)
-        val a = normalizeTitle(archived)
+        // Normalize first and then standardize Samsung regional TV model prefixes: retailers
+        // sometimes archive the same European TV model as TQ... or QE... . Keep the model digits,
+        // so a 48-inch set can never match a 55-inch set.
+        val e = canonicalizeArchiveTitle(normalizeTitle(expected))
+        val a = canonicalizeArchiveTitle(normalizeTitle(archived))
         if (e.isBlank() || a.isBlank()) return false
 
-        // Normalize product identity first so known equivalent model spellings (such as
-        // Sony WH-1000XM5 vs WH1000XM5) are not rejected solely because punctuation differs.
-        val sameIdentity = onlineProductIdentityKey(expected) == onlineProductIdentityKey(archived)
+        val sameIdentity = onlineProductIdentityKey(e) == onlineProductIdentityKey(a)
 
         // Never let a high overlap of generic words override a different model, size, year,
         // or capacity. For example, "Anker Prime 20K Power Bank" must not match a 27K listing.
-        // Merge common unit spellings first so "512 GB" and "512GB" compare consistently.
         val expectedVariants = requiredVariantTokens(e)
         val archivedVariants = requiredVariantTokens(a)
         if (!sameIdentity && !archivedVariants.containsAll(expectedVariants)) return false
@@ -670,6 +670,19 @@ class WaybackPriceHistoryClient(
         val overlap = expectedTokens.intersect(archivedTokens)
         return overlap.size >= minOf(2, expectedTokens.size) &&
             overlap.size.toDouble() / expectedTokens.size >= 0.72
+    }
+
+    private fun canonicalizeArchiveTitle(normalizedTitle: String): String {
+        // These regional prefixes are only interchangeable for Samsung model identifiers.
+        if (!Regex("""\bsamsung\b""").containsMatchIn(normalizedTitle)) return normalizedTitle
+        return normalizedTitle
+            .replace(Regex("""\b(?:tq|qe)(?=\d{2}[a-z0-9]{5,}\b)"""), "")
+            // Google Shopping commonly omits the word "inch" and adds resolution labels.
+            // Keep the numeric diagonal and model identifier as strict variant markers.
+            .replace(Regex("""\b(\d{2,})\s+inches?\b"""), "$1")
+            .replace(Regex("""\b(?:2k|4k|8k|uhd|fhd|fullhd)\b"""), " ")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
     }
 
     /**

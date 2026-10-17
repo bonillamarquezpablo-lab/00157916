@@ -167,8 +167,11 @@ fun OnlineSearchScreen(
         state.onlineSearchResults,
         state.onlineSearchQuery,
         state.onlineSearchShowSecondHand,
-        state.onlineSearchAmazonOnly
+        state.onlineSearchAmazonOnly,
+        state.onlineSearchProvider
     ) {
+        // Grouping must stay off the UI thread. Build once per state key and yield
+        // naturally to the Compose frame scheduler while a large result set is prepared.
         value = withContext(Dispatchers.Default) {
             buildOnlineSearchDisplayGroups(
                 results = state.onlineSearchResults,
@@ -179,6 +182,22 @@ fun OnlineSearchScreen(
         }
     }
     val visibleGroups = visibleGroupsState.value
+    val allGroups = remember(state.onlineSearchResults, state.onlineSearchQuery, state.onlineSearchShowSecondHand) {
+        buildOnlineSearchDisplayGroups(
+            results = state.onlineSearchResults,
+            query = state.onlineSearchQuery,
+            showSecondHand = state.onlineSearchShowSecondHand,
+            amazonOnly = false
+        )
+    }
+    val amazonGroups = remember(state.onlineSearchResults, state.onlineSearchQuery, state.onlineSearchShowSecondHand) {
+        buildOnlineSearchDisplayGroups(
+            results = state.onlineSearchResults,
+            query = state.onlineSearchQuery,
+            showSecondHand = state.onlineSearchShowSecondHand,
+            amazonOnly = true
+        )
+    }
     // Store selection is a local view filter over the common Google Shopping response.
     // GAME is not queried separately; it appears only when Shopping reports that merchant.
     val selectedStoreKey = remember(state.onlineSearchQuery, state.onlineSearchProvider) {

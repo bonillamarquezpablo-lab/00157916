@@ -3182,7 +3182,12 @@ class ExampleRobolectricTest {
         ).allowMainThreadQueries().build()
         try {
             val now = System.currentTimeMillis()
-            val ids = listOf("legacy-cheap-laptop", "legacy-promo-battery", "legacy-mismatched-seller")
+            val ids = listOf(
+                "legacy-cheap-laptop",
+                "legacy-promo-battery",
+                "legacy-mismatched-seller",
+                "legacy-future-live-quote"
+            )
             val products = listOf(
                 ProductEntity(
                     id = ids[0],
@@ -3235,6 +3240,24 @@ class ExampleRobolectricTest {
                     ean = "",
                     isPriceVerified = true
                 )
+                ,
+                ProductEntity(
+                    id = ids[3],
+                    title = "Sony WH-1000XM5 Wireless Headphones",
+                    brand = "Sony",
+                    category = "TV_AUDIO",
+                    currentPrice = 229.99,
+                    athMinPrice = 229.99,
+                    athMinDate = "legacy",
+                    athMinStore = "Amazon.es",
+                    athMaxPrice = 229.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "amazon_es",
+                    storeUrl = "https://www.amazon.es/dp/B0FUTURE",
+                    ean = "",
+                    isPriceVerified = true
+                )
             )
             database.productDao().insertAll(products)
             database.priceObservationDao().insertAll(
@@ -3275,6 +3298,19 @@ class ExampleRobolectricTest {
                         storeName = "Amazon.es",
                         sourceType = "Google Shopping"
                     )
+                    ,
+                    PriceObservationEntity(
+                        productId = ids[3],
+                        storeId = "amazon_es",
+                        price = 229.99,
+                        observedAt = now + 2L * 60L * 60L * 1000L,
+                        sourceUrl = "https://www.amazon.es/dp/B0FUTURE",
+                        sourceName = "Google Shopping",
+                        isVerified = true,
+                        productTitle = products[3].title,
+                        storeName = "Amazon.es",
+                        sourceType = "Google Shopping"
+                    )
                 )
             )
 
@@ -3288,7 +3324,7 @@ class ExampleRobolectricTest {
 
             val visible = repository.allProductsStream.first { rows -> ids.all { id -> rows.any { it.id == id } } }
                 .filter { it.id in ids }
-            assertEquals(3, visible.size)
+            assertEquals(4, visible.size)
             assertTrue(
                 "Invalid legacy rows must not be deleted; only their trusted-history projection is filtered",
                 ids.all { database.priceObservationDao().getObservationCount(it) == 1 }
@@ -3304,6 +3340,12 @@ class ExampleRobolectricTest {
             assertTrue(
                 "A known retailer domain must not be attributed to a different seller label",
                 visible.filter { it.id == ids[2] }.all { !it.isPriceVerified && it.priceHistory.isEmpty() }
+            )
+            assertTrue(
+                "A future-dated legacy quote must not appear as a saved price or historical point",
+                visible.filter { it.id == ids[3] }.all {
+                    !it.isPriceVerified && it.priceHistory.isEmpty()
+                }
             )
         } finally {
             database.close()

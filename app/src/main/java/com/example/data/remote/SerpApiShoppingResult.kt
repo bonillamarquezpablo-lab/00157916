@@ -227,14 +227,55 @@ fun isWheelFitmentQuery(query: String): Boolean {
 fun isGoogleShoppingUrl(sourceUrl: String): Boolean {
     val uri = runCatching { URI(sourceUrl) }.getOrNull() ?: return false
     val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
-    return host.startsWith("google.") ||
-        host.endsWith(".google.com") ||
-        host.endsWith(".google.es")
+    // Match Google's actual domains and subdomains, not lookalike hosts such as
+    // google.com.attacker.example, which otherwise pass a startsWith("google.") check.
+    return Regex("(?i)^(?:[a-z0-9-]+\\.)*google\\.(?:com|es|[a-z]{2,3}(?:\\.[a-z]{2,3})?)$")
+        .matches(host)
 }
 
 /** True only when the provider identifies a GAME Spain offer by seller name or retailer host. */
 internal fun isGameSpainOffer(offer: SerpApiShoppingResult): Boolean =
     Store.findKnownByName(offer.storeName, offer.sourceUrl)?.id == Store.GAME.id
+
+/**
+ * Supplement the common search with GAME only for gaming-related queries that did not already
+ * return an identified GAME offer. Unrelated searches do not consume an extra query.
+ */
+internal fun shouldSearchGameSupplement(
+    query: String,
+    existingOffers: List<SerpApiShoppingResult>
+): Boolean {
+    if (existingOffers.any(::isGameSpainOffer)) return false
+    val normalized = Normalizer.normalize(query.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+        .replace(Regex("[^a-z0-9]+"), " ")
+        .trim()
+        .split(" ")
+        .filter { it.isNotBlank() }
+        .toSet()
+    val gamingIntent = setOf(
+        "ps5", "playstation", "xbox", "nintendo", "switch", "consola", "consolas",
+        "console", "consoles", "videojuego", "videojuegos", "juego", "juegos", "gaming",
+        "gamepad", "mando", "mandos", "controller", "controllers", "steam", "deck", "rog", "ally"
+    )
+    return normalized.any { it in gamingIntent }
+}
+
+/** Merge only positively identified GAME offers from the supplemental Shopping query. */
+internal fun mergeGoogleShoppingWithGameSupplement(
+    primaryOffers: List<SerpApiShoppingResult>,
+    supplementalOffers: List<SerpApiShoppingResult>
+): List<SerpApiShoppingResult> {
+    val combined = primaryOffers + supplementalOffers.filter(::isGameSpainOffer)
+    return combined.distinctBy { offer ->
+        val normalizedTitle = Normalizer.normalize(offer.title.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+            .replace(Regex("[^a-z0-9]+"), " ")
+            .trim()
+            .replace(Regex(" +"), " ")
+        val storeKey = Store.findKnownByName(offer.storeName, offer.sourceUrl)?.id
+            ?: offer.storeName.trim().lowercase(Locale.ROOT)
+        normalizedTitle + "|" + storeKey + "|" + String.format(Locale.ROOT, "%.2f", offer.price)
+    }
+}
 
 /**
  * Return a retailer destination if a provider URL is already direct or if a Google redirect
@@ -484,6 +525,7 @@ fun onlineProductIdentityKey(title: String): String {
         .replace(Regex("""[^a-z0-9]+"""), " ")
         .trim()
         .replace(Regex("""\s+"""), " ")
+        .replace(Regex("""\bplaystation\s*5\b"""), "ps5")
     val productNameNormalized = rawNormalized
         .substringBefore(" compatible con ")
         .substringBefore(" compatible para ")
@@ -492,11 +534,21 @@ fun onlineProductIdentityKey(title: String): String {
         .map { it.value.replace(" ", "") }
         .distinct()
         .joinToString("+")
-    val variants = setOf("pro", "max", "plus", "ultra", "fe", "lite", "mini", "fold", "flip", "classic", "edge")
-        .filter { Regex("""\b""" + it + """\b""").containsMatchIn(productNameNormalized) }
-        .distinct()
-        .sorted()
-        .joinToString("+")
+    val generalVariants = setOf("pro", "max", "plus", "ultra", "fe", "lite", "mini", "fold", "flip", "classic", "edge")
+    // Console identity must retain chassis/media variants as well as storage.
+    val consoleVariants = if (
+        Regex("""\b(ps5|xbox|nintendo switch|switch)\b""").containsMatchIn(productNameNormalized)
+    ) setOf("slim", "digital", "disc", "disk", "oled", "series", "s", "x")
+      else emptySet()
+    val variantTokens = (generalVariants + consoleVariants)
+        .filter { Regex("""\b""" + Regex.escape(it) + """\b""").containsMatchIn(productNameNormalized) }
+        .toMutableSet()
+    // Fat/original/standard are aliases for the base PS5 chassis. Give that model a
+    // stable identity even when a retailer omits those words from its title.
+    if (Regex("""\bps5\b""").containsMatchIn(productNameNormalized) &&
+        "pro" !in variantTokens && "slim" !in variantTokens
+    ) variantTokens += "standard"
+    val variants = variantTokens.sorted().joinToString("+")
     val accessoryType = listOf(
         "cristal templado", "screen protector", "mop kit", "poster", "funda",
         "carcasa", "case", "cover", "protector", "cable", "cargador", "adaptador", "hub",
@@ -520,6 +572,9 @@ fun onlineProductIdentityKey(title: String): String {
         .replace(Regex("""\s+"""), " ")
 
     val brand = when {
+        Regex("""\bps5\b""").containsMatchIn(normalized) -> "sony"
+        Regex("""\bxbox\b""").containsMatchIn(normalized) -> "microsoft"
+        Regex("""\b(nintendo switch|switch)\b""").containsMatchIn(normalized) -> "nintendo"
         Regex("""\b(xiaomi|redmi|poco)\b""").containsMatchIn(normalized) -> "xiaomi"
         Regex("""\b(samsung|galaxy)\b""").containsMatchIn(normalized) -> "samsung"
         Regex("""\b(apple|iphone)\b""").containsMatchIn(normalized) -> "apple"

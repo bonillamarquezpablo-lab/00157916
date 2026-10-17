@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -148,7 +150,6 @@ fun OnlineSearchScreen(
     onQueryChange: (String) -> Unit,
     onSearch: () -> Unit,
     onAmazonSearch: () -> Unit,
-    onGameSearch: () -> Unit,
     onForceRefresh: () -> Unit,
     onAmazonOnlyChange: (Boolean) -> Unit,
     onToggleDiscarded: () -> Unit,
@@ -185,6 +186,72 @@ fun OnlineSearchScreen(
     val allGroups = groupedResults.value.first
     val amazonGroups = groupedResults.value.second
     val visibleGroups = if (state.onlineSearchAmazonOnly) amazonGroups else allGroups
+    // Store selection is a local view filter over the common Google Shopping response.
+    // GAME is not queried separately; it appears only when Shopping reports that merchant.
+    val selectedStoreKey = remember(state.onlineSearchQuery, state.onlineSearchProvider) {
+        androidx.compose.runtime.mutableStateOf<String?>(null)
+    }
+    val selectedConsoleModelKey = remember(state.onlineSearchQuery, state.onlineSearchProvider) {
+        androidx.compose.runtime.mutableStateOf<String?>(null)
+    }
+    fun storeKey(offer: SerpApiShoppingResult): String = onlineOfferStoreKey(offer)
+
+    val storeChoices = remember(
+        visibleGroups,
+        state.onlineSearchResults,
+        state.onlineSearchQuery,
+        state.onlineSearchAmazonOnly,
+        state.onlineSearchShowSecondHand,
+        state.onlineSearchProvider
+    ) {
+        visibleGroups.flatMap { it.group.offers }
+            .distinctBy(::storeKey)
+            .map { offer ->
+                val known = Store.findKnownByName(offer.storeName, offer.sourceUrl)
+                StoreFilterChoice(
+                    key = storeKey(offer),
+                    label = known?.name ?: offer.storeName.trim()
+                )
+            }
+            .sortedBy { it.label.lowercase(Locale.ROOT) }
+    }
+    val filteredGroups = remember(
+        visibleGroups,
+        state.onlineSearchResults,
+        state.onlineSearchQuery,
+        state.onlineSearchAmazonOnly,
+        state.onlineSearchShowSecondHand,
+        selectedStoreKey.value
+    ) {
+        visibleGroups.mapNotNull { displayGroup ->
+            val offers = displayGroup.group.offers.filter { offer ->
+                selectedStoreKey.value == null || storeKey(offer) == selectedStoreKey.value
+            }
+            if (offers.isEmpty()) null
+            else displayGroup.copy(group = displayGroup.group.copy(offers = offers))
+        }.sortedBy { it.group.minPrice }
+    }
+    // Model choices are based on the full provider result, not the active retailer filter.
+    val familyBuckets = remember(visibleGroups, state.onlineSearchQuery) {
+        buildConsoleModelBuckets(state.onlineSearchQuery, visibleGroups.map { it.group })
+    }
+    val selectedBucket = familyBuckets.firstOrNull { it.key == selectedConsoleModelKey.value }
+    val showConsoleModelPicker =
+        isConsoleFamilyOverviewQuery(state.onlineSearchQuery) && familyBuckets.isNotEmpty()
+
+
+
+    fun openOffer(offer: SerpApiShoppingResult) {
+        val directDestination = extractDirectRetailerUrl(offer.sourceUrl)
+        val knownStore = Store.findKnownByName(name = offer.storeName, sourceUrl = offer.sourceUrl)
+        // A Google catalog URL is an intermediary, not a retailer destination.
+        val destination = directDestination ?: knownStore?.searchUrlFor(offer.title) ?: offer.sourceUrl
+        openStoreUrl(
+            context,
+            destination,
+            preferAmazonApp = offer.isAmazonOffer && destination.contains("amazon.es", ignoreCase = true)
+        )
+    }
 
     LazyColumn(
         modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
@@ -245,33 +312,6 @@ fun OnlineSearchScreen(
                             }
                             Text("Amazon.es", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                    }
-                    OutlinedButton(
-                        onClick = onGameSearch,
-                        enabled = !state.isOnlineSearching && !state.isRefreshingPrices &&
-                            state.onlineSearchQuery.trim().length >= 2,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        if (state.isOnlineSearching && state.onlineSearchProvider == OnlineSearchProvider.GAME) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Default.Storefront, contentDescription = null, modifier = Modifier.size(17.dp))
-                        }
-                        Spacer(Modifier.width(7.dp))
-                        Text("Buscar precios en GAME España", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    Text(
-                        "Búsqueda manual independiente. Si no hay resultados guardados, puede consumir 1 búsqueda de SerpApi.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    TextButton(
-                        onClick = { openGameSearch(context, state.onlineSearchQuery) },
-                        modifier = Modifier.align(Alignment.End)
-                    ) {
-                        Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(15.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Abrir catálogo oficial de GAME.es")
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (state.onlineSearchResults.isNotEmpty()) {
@@ -409,45 +449,113 @@ fun OnlineSearchScreen(
                     }
                 }
             }
-            if (visibleGroups.isEmpty()) {
+            if (storeChoices.isNotEmpty()) {
                 item {
-                    Text(
-                        if (state.onlineSearchProvider == OnlineSearchProvider.AMAZON)
-                            "Amazon.es no ha devuelto productos con precio en euros para esta búsqueda."
-                        else
-                            "No hay ofertas identificadas como Amazon en esta consulta."
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Tiendas encontradas", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        Row(
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FilterChip(
+                                selected = selectedStoreKey.value == null,
+                                onClick = { selectedStoreKey.value = null },
+                                label = { Text("Todas las tiendas") }
+                            )
+                            storeChoices.forEach { choice ->
+                                FilterChip(
+                                    selected = selectedStoreKey.value == choice.key,
+                                    onClick = { selectedStoreKey.value = if (selectedStoreKey.value == choice.key) null else choice.key },
+                                    label = { Text(choice.label, maxLines = 1) }
+                                )
+                            }
+                        }
+                    }
                 }
             }
-            items(visibleGroups, key = { it.stableKey }) { displayGroup ->
-                val group = displayGroup.group
-                ShoppingResultCard(
-                    group = group,
-                    onOpenProduct = if (group.offers.all { it.isFitmentUnverified || it.isCategoryUnverified }) {
-                        null
-                    } else {
-                        { onOpenProduct(group.identityKey) }
-                    },
-                    onOpenBestOffer = {
-                        val purchaseOffer = group.bestPurchaseOffer
-                        val directDestination = extractDirectRetailerUrl(purchaseOffer.sourceUrl)
-                        val knownStore = Store.findKnownByName(
-                            name = purchaseOffer.storeName,
-                            sourceUrl = purchaseOffer.sourceUrl
-                        )
-                        // When Google exposes only a catalog page, route to the identified
-                        // retailer's own search page instead of a generic Google search.
-                        val destination = directDestination
-                            ?: knownStore?.searchUrlFor(purchaseOffer.title)
-                            ?: purchaseOffer.sourceUrl
-                        openStoreUrl(
-                            context,
-                            destination,
-                            preferAmazonApp = purchaseOffer.isAmazonOffer &&
-                                destination.contains("amazon.es", ignoreCase = true)
+            if (showConsoleModelPicker && selectedBucket == null) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Elige una versión de consola", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(
+                            "Después podrás escoger almacenamiento/edición y comparar las tiendas. Si falta una versión, podrás lanzar una búsqueda específica.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                )
+                }
+                items(familyBuckets, key = { it.key }) { bucket ->
+                    ConsoleModelBucketCard(bucket = bucket, onClick = { selectedConsoleModelKey.value = bucket.key })
+                }
+            } else {
+                if (showConsoleModelPicker && selectedBucket != null) {
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextButton(onClick = { selectedConsoleModelKey.value = null }) {
+                                Text("Todas las versiones")
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(selectedBucket.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Text("Elige almacenamiento/edición", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+                val groupsToShow = if (showConsoleModelPicker && selectedBucket != null) {
+                    filteredGroups.filter { item -> selectedBucket.groups.any { it.identityKey == item.group.identityKey } }
+                } else {
+                    filteredGroups
+                }
+                if (showConsoleModelPicker && selectedBucket != null && selectedBucket.groups.isEmpty()) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                "No se encontraron ofertas de ${selectedBucket.label} en la búsqueda general. No se muestra ningún precio estimado.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Button(
+                                onClick = {
+                                    selectedStoreKey.value = null
+                                    onAmazonOnlyChange(false)
+                                    onQueryChange(selectedBucket.searchQuery)
+                                    onSearch()
+                                },
+                                enabled = !state.isOnlineSearching && !state.isRefreshingPrices
+                            ) {
+                                Text("Buscar esta versión · puede consumir cuota")
+                            }
+                        }
+                    }
+                } else if (groupsToShow.isEmpty()) {
+                    item {
+                        Text(
+                            if (selectedStoreKey.value != null)
+                                "No hay ofertas de esa tienda para esta versión en los resultados devueltos por el proveedor. Selecciona «Todas las tiendas» para quitar el filtro. Mínimo no inventa precios."
+                            else if (state.onlineSearchProvider == OnlineSearchProvider.AMAZON)
+                                "Amazon.es no ha devuelto productos con precio en euros para esta búsqueda."
+                            else
+                                "No hay ofertas con precio en euros y un enlace utilizable para esta búsqueda.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                items(groupsToShow, key = { it.stableKey }) { displayGroup ->
+                    val group = displayGroup.group
+                    ShoppingResultCard(
+                        group = group,
+                        onOpenProduct = if (group.offers.all { it.isFitmentUnverified || it.isCategoryUnverified }) {
+                            null
+                        } else {
+                            { onOpenProduct(group.identityKey) }
+                        },
+                        onOpenOffer = ::openOffer,
+                        onOpenBestOffer = { openOffer(group.bestPurchaseOffer) }
+                    )
+                }
             }
             item {
                 Text(
@@ -464,6 +572,7 @@ fun OnlineSearchScreen(
 private fun ShoppingResultCard(
     group: OnlineProductGroup,
     onOpenProduct: (() -> Unit)?,
+    onOpenOffer: (SerpApiShoppingResult) -> Unit,
     onOpenBestOffer: () -> Unit
 ) {
     val best = group.cheapestOffer
@@ -607,6 +716,42 @@ private fun ShoppingResultCard(
                     }
                 }
             }
+            val displayedOffers = buildList {
+                addAll(group.offers.filterNot { it.isSuspiciousPrice }.sortedBy { it.price }.take(4))
+                group.offers.firstOrNull { Store.findKnownByName(it.storeName, it.sourceUrl)?.id == Store.GAME.id }?.let(::add)
+            }.distinctBy { onlineOfferStoreKey(it) + "|" + it.price }
+            if (displayedOffers.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Tiendas y precios", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    displayedOffers.forEach { offer ->
+                        val seller = Store.findKnownByName(offer.storeName, offer.sourceUrl)?.name ?: offer.storeName
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onOpenOffer(offer) }
+                                .padding(horizontal = 8.dp, vertical = 7.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(seller, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                if (offer.isGoogleShoppingProductLink) {
+                                    Text("Precio listado en Google Shopping · confirmar en tienda", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                            Text(
+                                NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(offer.price),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    if (group.offers.size > displayedOffers.size) {
+                        Text("${group.offers.size - displayedOffers.size} ofertas más · abre la ficha para verlas todas", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
             if (best.primeEligible) {
                 Text("Entrega Prime disponible en la oferta más barata", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
             }
@@ -626,6 +771,47 @@ private fun ShoppingResultCard(
                 )
                 Spacer(Modifier.width(8.dp))
                 Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+            }
+        }
+    }
+}
+
+
+private data class StoreFilterChoice(val key: String, val label: String)
+
+private fun onlineOfferStoreKey(offer: SerpApiShoppingResult): String =
+    Store.findKnownByName(offer.storeName, offer.sourceUrl)?.id
+        ?: "seller:" + offer.storeName.trim().lowercase(Locale.ROOT)
+
+@Composable
+private fun ConsoleModelBucketCard(bucket: ConsoleModelBucket, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalAlignment = Alignment.Start
+        ) {
+            Text(bucket.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            if (bucket.groups.isEmpty()) {
+                Text(
+                    "Sin ofertas en la búsqueda actual",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Text(
+                    "${bucket.groups.size} variantes de almacenamiento/edición · ${bucket.storeCount} tiendas",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (bucket.cheapestPrice.isFinite() && bucket.cheapestPrice > 0.0) {
+                    Text(
+                        "Desde " + NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(bucket.cheapestPrice),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
     }
@@ -672,17 +858,6 @@ private fun openAmazonSearch(context: Context, query: String) {
         "https://www.amazon.es/"
     }
     openStoreUrl(context, url, preferAmazonApp = true)
-}
-
-/** Opens GAME Spain's own search results without using SerpApi or spending search quota. */
-private fun openGameSearch(context: Context, query: String) {
-    val trimmedQuery = query.trim()
-    val url = if (trimmedQuery.length >= 2) {
-        "https://www.game.es/buscar/${Uri.encode(trimmedQuery)}/o%3D1"
-    } else {
-        "https://www.game.es/"
-    }
-    openStoreUrl(context, url, preferAmazonApp = false)
 }
 
 private fun openStoreUrl(context: Context, url: String, preferAmazonApp: Boolean) {

@@ -32,7 +32,10 @@ class OnlineSearchCacheTest {
             rating = 4.7,
             reviewCount = 120,
             observedAt = now - 10_000L,
-            primeEligible = true
+            primeEligible = true,
+            condition = "used",
+            isSuspiciousPrice = true,
+            googleProductId = "shopping-anker-27k"
         )
 
         cache.write("AMAZON", "Anker Prime 20.000 mAh", listOf(result), now)
@@ -44,6 +47,9 @@ class OnlineSearchCacheTest {
         assertEquals("Amazon.es", cached.results[0].storeName)
         assertEquals("Entrega GRATIS con Prime", cached.results[0].delivery)
         assertTrue(cached.results[0].primeEligible)
+        assertEquals("used", cached.results[0].condition)
+        assertTrue(cached.results[0].isSuspiciousPrice)
+        assertEquals("shopping-anker-27k", cached.results[0].googleProductId)
         assertEquals(4.7, cached.results[0].rating!!, 0.001)
     }
 

@@ -83,8 +83,10 @@ jobs:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
-          VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))
-          VERSION_NAME="1.5.${GITHUB_RUN_NUMBER}"
+          # Stay above recovery APK versionCodes (4000+) so every main build is upgradeable.
+          VERSION_CODE=$((5000 + GITHUB_RUN_NUMBER))
+          # Main workflow run #3 follows the published 1.6.1021 recovery build.
+          VERSION_NAME="1.6.$((1019 + GITHUB_RUN_NUMBER))"
           echo "Building Mínimo ${VERSION_NAME} (versionCode ${VERSION_CODE})"
           gradle :app:assembleDebug --stacktrace -PVERSION_CODE="${VERSION_CODE}" -PVERSION_NAME="${VERSION_NAME}"
 

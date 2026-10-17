@@ -74,6 +74,9 @@ class OnlineSearchCache(context: Context) {
                     reviewCount = reviewCount,
                     observedAt = item.optLong("observedAt", savedAt),
                     primeEligible = item.optBoolean("primeEligible", false),
+                    condition = item.optString("condition").takeIf { it.isNotBlank() && it != "null" } ?: "new",
+                    isSuspiciousPrice = item.optBoolean("isSuspiciousPrice", false),
+                    googleProductId = item.optString("googleProductId").takeIf { it.isNotBlank() && it != "null" },
                     isFitmentUnverified = item.optBoolean("isFitmentUnverified", false),
                     isCategoryUnverified = item.optBoolean("isCategoryUnverified", false)
                 )
@@ -143,6 +146,9 @@ class OnlineSearchCache(context: Context) {
                 put("reviewCount", result.reviewCount ?: JSONObject.NULL)
                 put("observedAt", result.observedAt)
                 put("primeEligible", result.primeEligible)
+                put("condition", result.condition)
+                put("isSuspiciousPrice", result.isSuspiciousPrice)
+                put("googleProductId", result.googleProductId ?: JSONObject.NULL)
                 put("isFitmentUnverified", result.isFitmentUnverified)
                 put("isCategoryUnverified", result.isCategoryUnverified)
             })

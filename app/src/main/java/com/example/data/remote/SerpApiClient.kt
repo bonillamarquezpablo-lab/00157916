@@ -228,12 +228,11 @@ class SerpApiClient(
     }
 
     /**
-     * A separate, user-triggered GAME Spain search. It spends at most the same single
-     * Shopping query as a normal manual search, but asks Google Shopping to prioritize
-     * GAME results. The clean product query is still used for relevance validation so
-     * adding the retailer name does not make real product titles look irrelevant.
+     * Internal supplement for the unified search, never a separate retailer button.
+     * Called only if the general search contains no identified GAME offer and there is
+     * enough remaining quota for an additional Google Shopping request.
      */
-    suspend fun searchGameOnlineWithDiagnostics(
+    suspend fun searchGameSupplementWithDiagnostics(
         token: String,
         query: String
     ): SerpApiShoppingSearchReport = withContext(Dispatchers.IO) {
@@ -241,7 +240,7 @@ class SerpApiClient(
         require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
         val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(100)
         require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
-        val targetedQuery = "$normalizedQuery GAME España"
+        val targetedQuery = normalizedQuery + " GAME España"
         val response = executeSearch(apiKey, targetedQuery)
         parseShoppingResultsDetailed(response, normalizedQuery).copy(rawResponse = response.toString())
     }
@@ -1619,6 +1618,7 @@ class SerpApiClient(
             .replace(Regex("\\p{Mn}+"), "")
             .replace(Regex("[^a-z0-9]+"), " ")
             .trim()
+            .replace(Regex("""\bplaystation\s*5\b"""), "ps5")
             .replace(Regex("\\s+"), " ")
 
     private fun storeIdForHost(host: String, merchantName: String = ""): String {
@@ -1626,6 +1626,7 @@ class SerpApiClient(
             val merchant = normalize(merchantName)
             val knownStoreId = when {
                 "amazon" in merchant -> "amazon_es"
+                merchant == "game" || merchant == "game es" || "game espana" in merchant -> "game"
                 "pccomponentes" in merchant -> "pccomponentes"
                 "mediamarkt" in merchant -> "mediamarkt"
                 "el corte ingles" in merchant -> "elcorteingles"

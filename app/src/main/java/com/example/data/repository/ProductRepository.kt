@@ -1567,8 +1567,35 @@ class ProductRepository(
                 ?.let { it.sourceType.ifBlank { it.sourceName } }
                 .orEmpty()
                 .takeIf { priceIsVerified }
+                .orEmpty(),
+            // A verified archive/insight point is real saved history, not a current quote.
+            // Keep it separate from currentPrice so it cannot affect offer sorting or deal logic.
+            savedHistoricalPrice = snapshotHistory.lastOrNull()
+                ?.takeIf { !priceIsVerified && isHistoricalDisplayObservation(it) }
+                ?.price,
+            savedHistoricalPriceObservedAt = snapshotHistory.lastOrNull()
+                ?.takeIf { !priceIsVerified && isHistoricalDisplayObservation(it) }
+                ?.observedAt,
+            savedHistoricalPriceSource = snapshotHistory.lastOrNull()
+                ?.takeIf { !priceIsVerified && isHistoricalDisplayObservation(it) }
+                ?.let { it.sourceType.ifBlank { it.sourceName } }
                 .orEmpty()
         )
+    }
+
+    private fun isHistoricalDisplayObservation(observation: PriceObservationEntity): Boolean {
+        val evidenceType = observation.evidenceType.lowercase(Locale.ROOT)
+        val isHistoricalProvider = evidenceType == "archive" || evidenceType == "google_insights" ||
+            observation.sourceUrl.contains("web.archive.org", ignoreCase = true)
+        return isHistoricalProvider &&
+            observation.isVerified &&
+            observation.currency.trim().equals("EUR", ignoreCase = true) &&
+            observation.price.isFinite() &&
+            observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
+            observation.observedAt in 1L..System.currentTimeMillis() &&
+            observation.productTitle.isNotBlank() &&
+            isEligibleHistoryTitle(observation.productTitle) &&
+            !isPromotionalBulkListing(observation.productTitle, "")
     }
 
     private fun configuredStoreForObservation(

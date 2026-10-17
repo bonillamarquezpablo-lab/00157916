@@ -110,8 +110,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         const val MAX_TRACKED_REFRESH_PER_TAP = 10
         const val MAX_ARCHIVE_PAGES_PER_SEARCH = 2
         const val MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS = 20_000L
-        const val ONLINE_SEARCH_TIMEOUT_MS = 60_000L
-        const val ONLINE_SEARCH_ACCOUNT_TIMEOUT_MS = 12_000L
+
     }
 
     private val database = AppDatabase.getInstance(application)
@@ -1040,7 +1039,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         )
         viewModelScope.launch {
             try {
-                withTimeout(ONLINE_SEARCH_TIMEOUT_MS) {
                 // Cache lookup comes first: saved results remain usable even if the quota is empty
                 // or the API key was removed after the previous search.
                 val cached = withContext(Dispatchers.IO) {
@@ -1119,7 +1117,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
 
                 // Validate the key and quota before the paid search request.
-                val accountInfo = withTimeout(ONLINE_SEARCH_ACCOUNT_TIMEOUT_MS) { readAccountInfo(token) }
+                val accountInfo = readAccountInfo(token)
                 if (accountInfo == null) {
                     val message = "No se ha podido validar la cuenta SerpApi. No se ha lanzado ninguna búsqueda ni gastado cuota. Comprueba la conexión e inténtalo de nuevo."
                     _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
@@ -1252,11 +1250,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 )
                 // Keep the paid/live search responsive. Historical lookups remain available
                 // via the explicit free-history action in each product detail sheet.
-                }
-            } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
-                val message = "La búsqueda ha superado el límite de tiempo y se ha detenido para que Mínimo siga respondiendo. Comprueba la conexión y vuelve a intentarlo."
-                _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
-                showSnackbar(message)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: SerpApiException) {

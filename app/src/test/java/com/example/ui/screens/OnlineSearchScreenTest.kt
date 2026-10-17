@@ -187,8 +187,8 @@ class OnlineSearchScreenTest {
         }
 
         // OFF + Todos: new shops and Amazon remain; Wallapop and Warehouse are hidden.
-        assertVisibleText("Todos (5)")
-        assertVisibleText("Solo Amazon (1)")
+        assertVisibleText("Todas las ofertas")
+        assertVisibleText("Solo Amazon")
         assertEquals(14, results.size)
         assertTrue(results.any { it.storeName == "Wallapop" && it.isSecondHand })
         assertTrue(results.any { it.storeName == "Amazon Warehouse" && it.isSecondHand })
@@ -199,9 +199,9 @@ class OnlineSearchScreenTest {
         assertTrue(results.any { it.condition == "refurbished" && it.isSecondHand })
 
         // OFF + Solo Amazon.
-        clickFilter("Solo Amazon (1)")
-        assertVisibleText("Todos (5)")
-        assertVisibleText("Solo Amazon (1)")
+        clickFilter("Solo Amazon")
+        assertVisibleText("Todas las ofertas")
+        assertVisibleText("Solo Amazon")
         assertTrue(
             composeRule.onAllNodesWithText("7 tiendas · precio más bajo en Wallapop")
                 .fetchSemanticsNodes().isEmpty()
@@ -209,8 +209,8 @@ class OnlineSearchScreenTest {
 
         // ON + Solo Amazon: Amazon Warehouse is appended as a separate labelled card.
         clickFilter("Mostrar segunda mano")
-        assertVisibleText("Todos (6)")
-        assertVisibleText("Solo Amazon (2)")
+        assertVisibleText("Todas las ofertas")
+        assertVisibleText("Solo Amazon")
         assertVisibleText("Segunda mano")
         assertVisibleText("1 tiendas · precio más bajo en Amazon Warehouse")
         assertTrue(
@@ -219,9 +219,9 @@ class OnlineSearchScreenTest {
         )
 
         // ON + Todos: Wallapop is added after the new-shop card, not instead of it.
-        clickFilter("Todos (6)")
-        assertVisibleText("Todos (6)")
-        assertVisibleText("Solo Amazon (2)")
+        clickFilter("Todas las ofertas")
+        assertVisibleText("Todas las ofertas")
+        assertVisibleText("Solo Amazon")
         assertVisibleText("3 tiendas · precio más bajo en Amazon.es")
         assertVisibleText("7 tiendas · precio más bajo en Wallapop")
         assertEquals(4, results.count { it.isAccessoryOffer })

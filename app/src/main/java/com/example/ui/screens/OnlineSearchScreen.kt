@@ -197,6 +197,7 @@ fun OnlineSearchScreen(
     fun storeKey(offer: SerpApiShoppingResult): String = onlineOfferStoreKey(offer)
 
     val storeChoices = remember(
+        visibleGroups,
         state.onlineSearchResults,
         state.onlineSearchQuery,
         state.onlineSearchAmazonOnly,
@@ -215,6 +216,7 @@ fun OnlineSearchScreen(
             .sortedBy { it.label.lowercase(Locale.ROOT) }
     }
     val filteredGroups = remember(
+        visibleGroups,
         state.onlineSearchResults,
         state.onlineSearchQuery,
         state.onlineSearchAmazonOnly,

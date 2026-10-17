@@ -9,6 +9,7 @@ import com.example.data.model.Store
 import com.example.data.model.VerdictLevel
 import com.example.data.repository.SpanishMarketData
 import com.example.ui.components.ChartRange
+import com.example.ui.components.filterPricePointsForRange
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.isIrrelevantMultiProductBundle
@@ -453,6 +454,36 @@ class ExampleUnitTest {
         val group = groupOnlineShoppingResults(listOf(representativeWithoutImage, otherListing)).single()
 
         assertEquals(otherListing.thumbnailUrl, group.representativeImageUrl)
+    }
+
+    @Test
+    fun chartRangesFilterByActualDateWindowsNotObservationCounts() {
+        val now = 2_000_000_000_000L
+        val day = 24L * 60L * 60L * 1000L
+        val points = listOf(
+            PricePoint(now - 200L * day, "hace 200 días", 200.0, "Tienda"),
+            PricePoint(now - 100L * day, "hace 100 días", 180.0, "Tienda"),
+            PricePoint(now - 45L * day, "hace 45 días", 150.0, "Tienda"),
+            PricePoint(now - 20L * day, "hace 20 días", 120.0, "Tienda"),
+            PricePoint(now, "hoy", 100.0, "Tienda"),
+            PricePoint(now + day, "mañana", 90.0, "Tienda")
+        )
+        assertEquals(
+            listOf(points[3], points[4]),
+            filterPricePointsForRange(points, ChartRange.DAYS_30, now)
+        )
+        assertEquals(
+            listOf(points[2], points[3], points[4]),
+            filterPricePointsForRange(points, ChartRange.DAYS_90, now)
+        )
+        assertEquals(
+            listOf(points[1], points[2], points[3], points[4]),
+            filterPricePointsForRange(points, ChartRange.MONTHS_6, now)
+        )
+        assertEquals(
+            listOf(points[0], points[1], points[2], points[3], points[4]),
+            filterPricePointsForRange(points, ChartRange.ALL, now)
+        )
     }
 
 }

@@ -676,14 +676,15 @@ class WaybackPriceHistoryClient(
         // These regional prefixes are only interchangeable for Samsung model identifiers.
         if (!Regex("""\bsamsung\b""").containsMatchIn(normalizedTitle)) return normalizedTitle
         return normalizedTitle
-            // On Samsung televisions, a model identifier may appear as "tq48s95haexxc"
-            // or "qe48s95haexxc". Normalize only that prefix and retain all model digits/suffix.
+            // Normalize only known Samsung TV regional model prefixes in compact alphanumeric
+            // identifiers (e.g. TQ48S95HAEXXC vs QE48S95HAEXXC); retain size and suffix.
             .replace(Regex("""\b(?:tq|qe)(?=\d{2}[a-z0-9]{5,})"""), "")
-            // Google Shopping may omit "inch" and append resolution labels. Keep the diagonal.
             .replace(Regex("""\b(\d{2,})\s+inches?\b"""), "$1")
             .replace(Regex("""\b(?:2k|4k|8k|uhd|fhd|fullhd)\b"""), " ")
             .replace(Regex("""\s+"""), " ")
             .trim()
+            // Samsung catalogue titles sometimes include an explicit region code in one title
+            // but omit it in the other; identity matching below still guards diagonal/model.
     }
 
     /**

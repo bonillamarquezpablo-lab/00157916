@@ -816,7 +816,7 @@ class ProductRepository(
             // Extract the archived target from the original URL text rather than rawPath:
             // URI parsing treats the target page's query string as the outer Wayback URL query,
             // so rawPath silently drops variant parameters and rejects valid captures.
-            val snapshotTarget = Regex("""^https://web\\.archive\\.org/web/\\d{14}id_/(https://.+)$""")
+            val snapshotTarget = Regex("""^https://web\.archive\.org/web/\d{14}id_/(https://.+)$""")
                 .find(quote.snapshotUrl)
                 ?.groupValues
                 ?.getOrNull(1)

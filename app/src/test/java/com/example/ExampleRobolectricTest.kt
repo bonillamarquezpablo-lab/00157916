@@ -1304,6 +1304,90 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun archiveOnlySavedPriceIsShownAsHistoricalAndNotAsCurrentQuote() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val now = System.currentTimeMillis()
+            val title = "Anker Prime 27K Power Bank"
+            val originalUrl = "https://shop.example/products/anker-prime-27k"
+            val productId = "archive-only-anker"
+            database.productDao().insert(
+                ProductEntity(
+                    id = productId,
+                    title = title,
+                    brand = "Anker",
+                    category = "HOME",
+                    currentPrice = 999.99,
+                    athMinPrice = 999.99,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "",
+                    athMaxPrice = 999.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "unknown_store",
+                    storeUrl = originalUrl,
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+
+            val archivedAt = now - 200L * 24L * 60L * 60L * 1000L
+            val archiveTimestamp = java.text.SimpleDateFormat(
+                "yyyyMMddHHmmss",
+                java.util.Locale.ROOT
+            ).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.format(java.util.Date(archivedAt))
+            val quote = ArchivedPriceQuote(
+                observedAt = archivedAt,
+                price = 79.99,
+                currency = "EUR",
+                productTitle = title,
+                originalUrl = originalUrl,
+                snapshotUrl = "https://web.archive.org/web/" + archiveTimestamp + "id_/" + originalUrl
+            )
+
+            assertEquals(
+                1,
+                repository.recordArchivedPriceHistory(
+                    expectedTitle = title,
+                    originalUrl = originalUrl,
+                    storeName = "Tienda directa",
+                    quotes = listOf(quote)
+                )
+            )
+
+            val product = withTimeout<com.example.data.model.Product>(10_000L) {
+                repository.allProductsStream.first { products ->
+                    products.any { it.id == productId && it.savedHistoricalPrice == 79.99 }
+                }.first { it.id == productId }
+            }
+            assertFalse(product.isPriceVerified)
+            assertEquals("Archive history must not overwrite the catalogue's current-price field",
+                999.99, product.currentPrice, 0.001)
+            assertEquals(79.99, product.savedHistoricalPrice!!, 0.001)
+            assertEquals(archivedAt, product.savedHistoricalPriceObservedAt)
+            assertEquals(
+                com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION,
+                product.priceDisplayStatus
+            )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun archiveHistoryDoesNotAttachToDifferentQueryVariant() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(

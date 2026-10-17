@@ -1,6 +1,7 @@
 package com.example.data.model
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PriceBadgeClassifierTest {
@@ -59,7 +60,7 @@ class PriceBadgeClassifierTest {
     }
 
     @Test
-    fun previousMinimumIsNotClaimedWhenNinetyDayHistoryIsInsufficient() {
+    fun observedMinimumIsShownWithQualificationWhenNinetyDayHistoryIsInsufficient() {
         val state = PriceBadgeClassifier.classify(
             isPriceVerified = true,
             currentPrice = 90.0,
@@ -67,8 +68,26 @@ class PriceBadgeClassifierTest {
             averagePrice = 0.0,
             hasValidAverage = false
         )
-        assertEquals(PriceBadgeType.HISTORY_IN_PROGRESS, state.type)
-        assertEquals("HISTORIAL EN CONSTRUCCIÓN", state.label)
+        assertEquals(PriceBadgeType.HISTORICAL_MINIMUM, state.type)
+        assertEquals("🔥 MÍNIMO OBSERVADO", state.label)
+        assertTrue(state.description.contains("no cubre 90 días"))
+        assertTrue(state.description.contains("solo el periodo observado"))
+    }
+
+    @Test
+    fun staleSavedMinimumRemainsVisibleButExplicitlyPendingRevalidation() {
+        val state = PriceBadgeClassifier.classify(
+            isPriceVerified = false,
+            currentPrice = 90.0,
+            priorObservedPrices = listOf(90.0, 110.0),
+            averagePrice = 0.0,
+            hasValidAverage = false,
+            isSavedPendingRevalidation = true
+        )
+        assertEquals(PriceBadgeType.HISTORICAL_MINIMUM, state.type)
+        assertEquals("MÍNIMO OBSERVADO · PENDIENTE", state.label)
+        assertTrue(state.description.contains("Necesita revalidación"))
+        assertTrue(state.description.contains("no debe interpretarse como una oferta actual"))
     }
 
     @Test

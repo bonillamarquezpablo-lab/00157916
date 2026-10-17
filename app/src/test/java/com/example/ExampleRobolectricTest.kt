@@ -847,7 +847,10 @@ class ExampleRobolectricTest {
             assertTrue("A specific saved Google Shopping product link must retain its source-backed price", restored.isPriceVerified)
             assertEquals(249.99, restored.currentPrice, 0.001)
             assertEquals(1, restored.offers.size)
-            assertEquals("Google Shopping", restored.offers.single().linkType)
+            assertEquals(
+                "https://www.google.com/shopping/product/1234567890123456789?prds=1234567890123456789",
+                restored.offers.single().url
+            )
             assertEquals(1, restored.priceHistory.size)
 
             val generic = products.single { it.id == "online_product_google_generic_search" }

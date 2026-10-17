@@ -75,15 +75,12 @@ fun ProductDetailSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     val scrollState = rememberScrollState()
-    val archivedHistoryPoints = product.priceHistory.filter {
-        it.eventLabel.equals("Internet Archive", ignoreCase = true)
-    }
+    val liveHistoryPoints = product.priceHistory.filterNot { it.isExternalHistoryEvidence }
+    val archivedHistoryPoints = product.priceHistory.filter { it.isArchiveEvidence }
     val oldestArchivedDate = archivedHistoryPoints.minByOrNull { it.timestamp }?.let {
         SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(it.timestamp))
     }
-    val googleInsightPoints = product.priceHistory.filter {
-        it.eventLabel?.contains("price_insights", ignoreCase = true) == true
-    }
+    val googleInsightPoints = product.priceHistory.filter { it.isGoogleInsightEvidence }
     val oldestGoogleInsightDate = googleInsightPoints.minByOrNull { it.timestamp }?.let {
         SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(it.timestamp))
     }
@@ -106,12 +103,7 @@ fun ProductDetailSheet(
         }
     }
     // Historical archive/insight points must never be presented as the source for today's price.
-    val latestLivePricePoint = product.priceHistory
-        .filterNot {
-            it.eventLabel.equals("Internet Archive", ignoreCase = true) ||
-                it.eventLabel?.contains("price_insights", ignoreCase = true) == true
-        }
-        .maxByOrNull { it.timestamp }
+    val latestLivePricePoint = liveHistoryPoints.maxByOrNull { it.timestamp }
     val currentSourceLabel = if (!product.isPriceVerified && product.savedHistoricalPrice != null) {
         product.savedHistoricalPriceSource.takeIf { it.isNotBlank() } ?: "Historial archivado"
     } else if (!product.isPriceVerified) {
@@ -372,8 +364,8 @@ fun ProductDetailSheet(
                                 )
                                 Text(
                                     text = when {
-                                        product.priceHistory.size == 1 -> "1 observación real · la gráfica ya está disponible"
-                                        product.priceHistory.size > 1 -> "${product.priceHistory.size} fechas registradas · evolución en curso"
+                                        liveHistoryPoints.size == 1 -> "1 observación real · la gráfica ya está disponible"
+                                        liveHistoryPoints.size > 1 -> "${liveHistoryPoints.size} fechas registradas · evolución en curso"
                                         else -> "Se necesitan observaciones reales para mostrar la evolución"
                                     },
                                     fontSize = 10.sp,
@@ -460,8 +452,10 @@ fun ProductDetailSheet(
             // Only validated observations reach priceHistory. Show genuine archive captures
             // even when there is no verified current quote; never extrapolate missing dates.
             PriceHistoryChart(
-                priceHistory = product.priceHistory,
-                avg90dPrice = product.avg90dPrice
+                priceHistory = liveHistoryPoints,
+                avg90dPrice = product.avg90dPrice,
+                archiveHistory = archivedHistoryPoints,
+                googleInsightHistory = googleInsightPoints
             )
 
             // Only show offers that came back from the latest provider query.

@@ -1039,6 +1039,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         )
         viewModelScope.launch {
             try {
+                // Bound the whole online-search flow so a stalled provider/account endpoint
+                // cannot leave the UI in an indefinite "searching" state.
+                withTimeout(35_000L) {
                 // Cache lookup comes first: saved results remain usable even if the quota is empty
                 // or the API key was removed after the previous search.
                 val cached = withContext(Dispatchers.IO) {
@@ -1250,6 +1253,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 )
                 // Keep the paid/live search responsive. Historical lookups remain available
                 // via the explicit free-history action in each product detail sheet.
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: SerpApiException) {

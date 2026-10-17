@@ -68,6 +68,9 @@ class WaybackPriceHistoryClient(
         now: Long = System.currentTimeMillis(),
         lookbackDays: Int = DEFAULT_LOOKBACK_DAYS
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
+        if (!preferences.getBoolean("enabled", true)) {
+            return@withContext WaybackBackfillResult()
+        }
         if (!isEligibleDirectUrl(originalUrl) || expectedTitle.isBlank()) {
             return@withContext WaybackBackfillResult()
         }
@@ -91,6 +94,9 @@ class WaybackPriceHistoryClient(
         now: Long = System.currentTimeMillis(),
         lookbackDays: Int = DEFAULT_LOOKBACK_DAYS
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
+        if (!preferences.getBoolean("enabled", true)) {
+            return@withContext WaybackBackfillResult()
+        }
         val normalizedDomain = normalizeMerchantDomain(domain)
             ?: return@withContext WaybackBackfillResult()
         if (expectedTitle.isBlank()) return@withContext WaybackBackfillResult()

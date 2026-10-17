@@ -1169,7 +1169,9 @@ class ProductRepository(
         val resultMarkers = explicitModelMarkers(resultTitle)
         if (resultMarkers.isEmpty() || queryMarkers.intersect(resultMarkers).isEmpty()) return true
 
-        val variantWords = setOf("pro", "max", "plus", "ultra", "fe", "lite", "mini", "fold", "flip", "classic", "edge")
+        val generalVariantWords = setOf("pro", "max", "plus", "ultra", "fe", "lite", "mini", "fold", "flip", "classic", "edge")
+        val consoleVariantWords = setOf("slim", "fat", "digital", "disc", "disk", "standard", "original", "oled")
+        val variantWords = generalVariantWords + consoleVariantWords
         val requestedVariants = normalizedProductTitle(query).split(' ').filter { it in variantWords }.toSet()
         val resultVariants = normalizedProductTitle(resultTitle).split(' ').filter { it in variantWords }.toSet()
         if (!resultVariants.containsAll(requestedVariants)) return true
@@ -1267,6 +1269,7 @@ class ProductRepository(
             .replace(Regex("\\p{Mn}+"), "")
             .replace(Regex("[^a-z0-9]+"), " ")
             .trim()
+            .replace(Regex("""\bplaystation\s*5\b"""), "ps5")
             .replace(Regex("\\s+"), " ")
 
     private fun canonicalStoreId(storeName: String, sourceUrl: String): String {

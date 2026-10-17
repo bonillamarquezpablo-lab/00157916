@@ -41,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -55,6 +56,8 @@ import java.util.Date
 import java.util.Locale
 import com.example.data.model.Product
 import com.example.data.model.Store
+import com.example.ui.theme.ProductCardShape
+import com.example.ui.theme.ProductImageShape
 
 @Composable
 fun ProductCard(
@@ -69,18 +72,22 @@ fun ProductCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(ProductCardShape)
             .border(
                 width = if (product.isAtAth) 1.5.dp else 1.dp,
                 color = if (product.isAtAth) Color(0xFF10B981).copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
-                shape = RoundedCornerShape(16.dp)
+                shape = ProductCardShape
             )
             .clickable(onClick = onClick)
             .testTag("product_card_${product.id}"),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = if (product.isPriceFresh) {
+                lerp(MaterialTheme.colorScheme.surface, product.currentStore.brandColor, 0.05f)
+            } else {
+                MaterialTheme.colorScheme.surface
+            }
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             // Top Section: Product Photo + Product Details
@@ -93,7 +100,7 @@ fun ProductCard(
                     product = product,
                     modifier = Modifier
                         .size(88.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(ProductImageShape)
                         .testTag("product_photo_${product.id}"),
                     showAthRibbon = product.isPriceVerified && product.isAtAth
                 )

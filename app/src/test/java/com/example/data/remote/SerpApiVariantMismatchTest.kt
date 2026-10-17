@@ -256,4 +256,83 @@ class SerpApiVariantMismatchTest {
     }
 
 
+
+    @Test
+    fun broadFamilyMatcherKeepsCommonModelsFromEnglishAndSpanishListings() {
+        val client = SerpApiClient()
+        val report = client.parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "shopping_results": [
+                    {
+                      "title": "Xiaomi Electric Scooter 5 Max",
+                      "price": "457,94 €",
+                      "extracted_price": 457.94,
+                      "link": "https://shop.example/xiaomi-scooter-5-max",
+                      "source": "Tienda"
+                    },
+                    {
+                      "title": "Xiaomi Electric Scooter 4 Pro",
+                      "price": "399,00 €",
+                      "extracted_price": 399.00,
+                      "link": "https://shop.example/xiaomi-scooter-4-pro",
+                      "source": "Tienda"
+                    },
+                    {
+                      "title": "Samsung Galaxy S26",
+                      "price": "899,00 €",
+                      "extracted_price": 899.00,
+                      "link": "https://shop.example/samsung-s26",
+                      "source": "Tienda"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "Xiaomi scooter",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals(2, report.results.size)
+        assertTrue(report.results.any { it.title.contains("5 Max") })
+        assertTrue(report.results.any { it.title.contains("4 Pro") })
+        assertFalse(report.results.any { it.title.contains("Samsung") })
+    }
+
+    @Test
+    fun broadFamilyMatcherRejectsDifferentBrandEvenWhenCategoryMatches() {
+        val client = SerpApiClient()
+        val report = client.parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "shopping_results": [
+                    {
+                      "title": "Xiaomi Electric Scooter 5 Max",
+                      "price": "457,94 €",
+                      "extracted_price": 457.94,
+                      "link": "https://shop.example/xiaomi-scooter",
+                      "source": "Tienda"
+                    },
+                    {
+                      "title": "Segway Ninebot Max G2 Electric Scooter",
+                      "price": "599,00 €",
+                      "extracted_price": 599.00,
+                      "link": "https://shop.example/segway-scooter",
+                      "source": "Tienda"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "Xiaomi scooter",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals(1, report.results.size)
+        assertTrue(report.results.single().title.contains("Xiaomi"))
+    }
+
+
 }

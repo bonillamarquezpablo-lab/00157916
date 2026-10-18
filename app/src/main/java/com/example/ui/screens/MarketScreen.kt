@@ -1,8 +1,6 @@
 package com.example.ui.screens
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -51,20 +50,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.R
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.Store
 import com.example.ui.components.ProductCard
 import com.example.ui.viewmodel.SortOption
 import com.example.ui.viewmodel.TrackerUiState
-import com.example.ui.theme.FloatingSurfaceShape
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -92,79 +87,26 @@ fun MarketScreen(
             .testTag("market_screen_list"),
         contentPadding = PaddingValues(bottom = 24.dp)
     ) {
-        // Hero Visual Banner
+        // Compact section heading: remove the large decorative banner so products and
+        // filters appear sooner, with less drawing and less vertical scrolling.
         item {
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .clip(FloatingSurfaceShape)
-                    .background(Color(0xFF0B132B))
-                    .border(1.dp, Color(0xFF10B981).copy(alpha = 0.34f), FloatingSurfaceShape)
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                Image(
-                    painter = painterResource(id = R.drawable.hero_price_banner),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(130.dp)
+                Text(
+                    text = "Productos guardados",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
-
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .background(Color(0xFF0B132B).copy(alpha = 0.78f))
+                Text(
+                    text = "${stores.size} comercios con precios guardados",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .clip(CircleShape)
-                                .background(Color(0xFF34D399))
-                                .padding(horizontal = 10.dp, vertical = 5.dp)
-                        ) {
-                            Text(
-                                text = "CATÁLOGO PERSONAL",
-                                color = Color(0xFF0B132B),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Black
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Icon(
-                            imageVector = Icons.Default.Info,
-                            contentDescription = null,
-                            tint = Color(0xFF10B981),
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "${stores.size} tiendas configuradas",
-                            color = Color(0xFF10B981),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Text(
-                        text = "Tu mercado de productos",
-                        color = Color.White,
-                        fontWeight = FontWeight.Black,
-                        fontSize = 18.sp,
-                        lineHeight = 22.sp
-                    )
-
-                    Text(
-                        text = "Los productos que consultes online se guardan aquí con sus ofertas y el historial real de precios.",
-                        color = Color(0xFFCBD5E1),
-                        fontSize = 11.sp,
-                        lineHeight = 15.sp
-                    )
-                }
             }
         }
 
@@ -225,7 +167,7 @@ fun MarketScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Tiendas Españolas en Base de Datos",
+                        text = "Tiendas con precios",
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -399,32 +341,38 @@ fun MarketScreen(
                         expanded = showStoreMenu,
                         onDismissRequest = { showStoreMenu = false }
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("Todas las tiendas (${stores.size})") },
-                            onClick = {
-                                onStoreFilterSelect(null)
-                                showStoreMenu = false
-                            }
-                        )
-                        stores.forEach { store ->
-                            DropdownMenuItem(
-                                text = {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(10.dp)
-                                                .clip(CircleShape)
-                                                .background(store.brandColor)
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(store.name)
+                        // There can be hundreds of historical sellers in the database. Compose
+                        // only the visible options instead of building every menu row at once.
+                        LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
+                            item {
+                                DropdownMenuItem(
+                                    text = { Text("Todas las tiendas (${stores.size})") },
+                                    onClick = {
+                                        onStoreFilterSelect(null)
+                                        showStoreMenu = false
                                     }
-                                },
-                                onClick = {
-                                    onStoreFilterSelect(store.name)
-                                    showStoreMenu = false
-                                }
-                            )
+                                )
+                            }
+                            items(stores, key = { it.id }) { store ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(10.dp)
+                                                    .clip(CircleShape)
+                                                    .background(store.brandColor)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(store.name)
+                                        }
+                                    },
+                                    onClick = {
+                                        onStoreFilterSelect(store.name)
+                                        showStoreMenu = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -494,7 +442,7 @@ fun MarketScreen(
                     )
                 }
                 Text(
-                    "Solo fichas seguidas (marcador verde «Siguiendo») · manual · máximo 10 por pulsación · no repite consultas antes de 24 h",
+                    "Manual · solo productos seguidos · máximo 10 por actualización; espera 24 h entre consultas.",
                     modifier = Modifier.padding(horizontal = 4.dp),
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -520,17 +468,11 @@ fun MarketScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "${products.size} productos · ${products.count { it.isPriceVerified }} precios observados",
+                    text = "${products.size} productos · ${products.count { it.isPriceVerified }} con precio verificado",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Text(
-                    text = if (products.any { it.isPriceVerified }) "Precios online observados" else "Sin precios observados",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
                 )
             }
         }

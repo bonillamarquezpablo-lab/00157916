@@ -5,9 +5,6 @@ import com.example.data.model.Store
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -213,9 +210,8 @@ class WaybackPriceHistoryClient(
     }
 
     /**
-     * Use the fast availability endpoint to discover captures for exact product-page candidates.
-     * Broad CDX host/domain scans repeatedly time out even when Wayback itself is reachable.
-     * Query a few target dates per candidate, then verify the archived HTML before accepting prices.
+     * Legacy availability-based candidate lookup retained for the narrowly scoped parser tests.
+     * Production entry points prefer batched CDX queries to avoid one network call per target date.
      */
     private suspend fun queryAvailabilityAndFetchPrices(
         candidateUrls: List<String>,
@@ -1627,7 +1623,7 @@ class WaybackPriceHistoryClient(
         private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 2L
         private const val MAX_DOMAIN_PRODUCT_URL_CANDIDATES = 2
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 2
-        private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 4
+        private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 2
         private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 3L
         private const val MAX_DOMAIN_INDEX_ROWS = 6
         private const val DOMAIN_LOOKBACK_DAYS = 730

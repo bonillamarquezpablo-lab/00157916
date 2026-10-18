@@ -83,7 +83,7 @@ fun ProductCard(
             .clip(ProductCardShape)
             .border(
                 width = if (isVerifiedMinimum) 1.5.dp else 1.dp,
-                color = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isAtAth) {
+                color = if (isVerifiedMinimum) {
                     Color(0xFF10B981).copy(alpha = 0.6f)
                 } else {
                     MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
@@ -322,7 +322,7 @@ fun ProductCard(
                 Icon(
                     imageVector = Icons.Default.TrendingDown,
                     contentDescription = null,
-                    tint = if (product.hasSufficientHistory && product.isAtAth) {
+                    tint = if (hasSufficientHistory && product.isAtAth) {
                         Color(0xFF059669)
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
@@ -331,14 +331,14 @@ fun ProductCard(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = if (product.hasSufficientHistory) {
+                    text = if (hasSufficientHistory) {
                         "Mínimo observado: ${String.format(Locale("es", "ES"), "%.2f", product.athMinPrice)} €"
                     } else if (product.isPriceVerified) {
                         "Historial en curso · requiere 90 días"
                     } else {
                         "Sin historial verificable"
                     },
-                    fontWeight = if (product.hasSufficientHistory) FontWeight.SemiBold else FontWeight.Normal,
+                    fontWeight = if (hasSufficientHistory) FontWeight.SemiBold else FontWeight.Normal,
                     fontSize = 11.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

@@ -1493,6 +1493,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 var requestFailedCount = 0
                 var skippedCount = 0
                 var timedOutCount = 0
+                val diagnosticCodes = linkedSetOf<String>()
                 val archiveDates = mutableListOf<Long>()
                 for (candidate in candidates) {
                     // Bound each candidate's direct + merchant-domain lookup so slow public
@@ -1520,6 +1521,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }
                     if (attempts == null) {
                         timedOutCount++
+                        diagnosticCodes.add("CANDIDATE_TIMEOUT")
                         continue
                     }
 
@@ -1527,6 +1529,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         skippedCount++
                         continue
                     }
+                    attempts.flatMap { it.diagnosticCodes }.forEach(diagnosticCodes::add)
                     val quotes = attempts.flatMap { it.quotes }
                         .distinctBy { Triple(it.originalUrl, it.observedAt, it.price) }
                     checkedCount += attempts.sumOf { it.capturesChecked }
@@ -1602,7 +1605,41 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     else ->
                         "No se recuperó histórico gratuito. Puede que el vendedor no haya sido identificado con un enlace directo o que la página no publique metadatos de precio verificables. No se ha gastado cuota de SerpApi."
                 }
-                appendArchiveNotice(query, provider, notice, targetProductId)
+                val diagnosticLabels = diagnosticCodes.take(5).map { code ->
+                    when {
+                        code.startsWith("CDX_HTTP_") -> "$code (respuesta HTTP del índice)"
+                        code.startsWith("SNAPSHOT_HTTP_") -> "$code (respuesta HTTP de una captura)"
+                        else -> when (code) {
+                            "WAYBACK_DISABLED" -> "$code (búsqueda desactivada)"
+                            "DIRECT_URL_INVALID" -> "$code (la URL guardada no es una página de comercio válida)"
+                            "PRODUCT_TITLE_EMPTY" -> "$code (falta el nombre del producto)"
+                            "CDX_URL_BUILD_FAILED" -> "$code (no se pudo construir la consulta por URL)"
+                            "DOMAIN_UNRESOLVED" -> "$code (no se identificó el dominio de la tienda)"
+                            "CDX_QUERY_NOT_BUILDABLE" -> "$code (faltan términos útiles para buscar en el dominio)"
+                            "CACHE_SKIPPED" -> "$code (resultado reciente en caché)"
+                            "CDX_BODY_EMPTY_OR_LIMIT" -> "$code (respuesta del índice vacía o demasiado grande)"
+                            "CDX_INVALID_RESPONSE" -> "$code (el índice no devolvió el formato esperado)"
+                            "CDX_TIMEOUT" -> "$code (el índice agotó el tiempo)"
+                            "CDX_DNS" -> "$code (no se pudo resolver el servidor del índice)"
+                            "CDX_NETWORK" -> "$code (fallo de conexión con el índice)"
+                            "CDX_UNEXPECTED_ERROR" -> "$code (error inesperado en el índice)"
+                            "CDX_NO_CAPTURES" -> "$code (el índice respondió, pero no encontró capturas)"
+                            "NO_VERIFIED_EUR_PRICE" -> "$code (capturas sin título coincidente y precio EUR verificable)"
+                            "SNAPSHOT_URL_INVALID" -> "$code (URL de captura no válida)"
+                            "SNAPSHOT_BODY_EMPTY_OR_LIMIT" -> "$code (contenido vacío o demasiado grande)"
+                            "SNAPSHOT_TIMEOUT" -> "$code (la descarga de la captura agotó el tiempo)"
+                            "SNAPSHOT_DNS" -> "$code (no se resolvió el servidor de la captura)"
+                            "SNAPSHOT_NETWORK" -> "$code (fallo de red al descargar la captura)"
+                            "ALL_SNAPSHOTS_FAILED" -> "$code (ninguna captura se pudo descargar)"
+                            "CANDIDATE_TIMEOUT" -> "$code (se agotó el tiempo total de la búsqueda de esta tienda)"
+                            else -> code
+                        }
+                    }
+                }
+                val noticeWithDiagnostics = if (diagnosticLabels.isNotEmpty() && skippedCount != candidates.size) {
+                    "$notice\nDiagnóstico Wayback: ${diagnosticLabels.joinToString(" · ")}."
+                } else notice
+                appendArchiveNotice(query, provider, noticeWithDiagnostics, targetProductId)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {

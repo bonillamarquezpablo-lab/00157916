@@ -572,4 +572,36 @@ class WaybackPriceHistoryClientTest {
     }
 
 
+
+    @Test
+    fun domainCdxQueryHasBoundedProductSpecificRequestParameters() {
+        val client = newClient()
+        val url = client.buildDomainCdxUrl(
+            domain = "shop.example",
+            expectedTitle = "Anker Prime 27K Power Bank",
+            now = 1_800_000_000_000L,
+            lookbackDays = 1600
+        )
+        assertNotNull(url)
+        assertEquals("web.archive.org", url!!.host)
+        assertEquals("/cdx/search/cdx", url.encodedPath)
+        assertEquals("shop.example/", url.queryParameter("url"))
+        assertEquals("prefix", url.queryParameter("matchType"))
+        assertEquals("json", url.queryParameter("output"))
+        assertEquals("80", url.queryParameter("limit"))
+        assertTrue(url.queryParameterValues("filter").orEmpty().any { it == "statuscode:200" })
+        assertTrue(url.queryParameterValues("filter").orEmpty().any { it == "mimetype:text/html" })
+        assertTrue(url.queryParameterValues("filter").orEmpty().any { it.orEmpty().startsWith("original:") })
+        assertEquals("20250701", url.queryParameter("from"))
+        assertEquals("20270115", url.queryParameter("to"))
+    }
+
+    @Test
+    fun domainCdxQueryRejectsUnrecognisedOrGenericTargets() {
+        val client = newClient()
+        assertNull(client.buildDomainCdxUrl("https://google.com", "Anker Prime 27K Power Bank"))
+        assertNull(client.buildDomainCdxUrl("shop.example", ""))
+        assertNull(client.buildDomainCdxUrl("shop.example", "Producto genérico"))
+    }
+
 }

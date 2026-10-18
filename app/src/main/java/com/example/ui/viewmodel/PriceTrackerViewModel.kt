@@ -972,8 +972,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         val current = _uiState.value
         if (current.isSearchingFreeHistory) return
 
-        // Archived snapshots are independent evidence; a product URL is sufficient to look for
-        // them. Do not require or fabricate a current price to perform this free lookup.
+        // Archived snapshots are independent evidence; use the saved retailer offers first.
+        // Some older Google Shopping rows contain a generic Google URL and an incomplete
+        // merchant-domain field. Resolve the merchant from the saved store directory before
+        // giving up, without making a paid query or changing the stored offer.
         val candidates = buildList {
             product.offers.forEach { offer ->
                 val destination = offer.url.ifBlank {
@@ -994,6 +996,33 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 sourceUrl = currentDestination,
                 knownDomain = product.currentStore.domain
             )?.let(::add)
+
+            // A Google Shopping intermediary is not an archive target. If it is the only
+            // saved destination, retry using the known seller name/domain from the saved row.
+            if (isGoogleShoppingUrl(product.storeUrl) || candidates.isEmpty()) {
+                val savedStore = Store.findKnownByName(product.currentStore.name, currentDestination)
+                    ?: Store.findKnownByName(product.currentStore.id.replace('_', ' '), currentDestination)
+                val fallbackDomain = savedStore?.domain
+                    ?.takeIf { it.isNotBlank() && !it.endsWith(".invalid") }
+                val fallbackStore = savedStore ?: product.currentStore
+                val resolved = waybackPriceHistoryClient.resolveMerchantDomain(
+                    storeName = product.currentStore.name,
+                    sourceUrl = "",
+                    knownStoreDomain = fallbackDomain.orEmpty()
+                )
+                val domain = fallbackDomain ?: resolved
+                    ?: waybackPriceHistoryClient.resolveBrandMerchant(product.title)?.second
+                if (domain != null) {
+                    add(
+                        FreeArchiveCandidate(
+                            title = product.title,
+                            storeName = fallbackStore.name,
+                            directUrl = null,
+                            merchantDomain = domain
+                        )
+                    )
+                }
+            }
         }.sortedWith(
             compareBy<FreeArchiveCandidate> { if (it.directUrl != null) 0 else 1 }
                 .thenBy { it.merchantDomain.orEmpty() }
@@ -1005,7 +1034,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         if (candidates.isEmpty()) {
             _uiState.value = current.copy(
                 isSearchingFreeHistory = false,
-                freeHistoryStatus = "No hay una URL directa o una tienda identificable para buscar capturas gratuitas. No se ha gastado cuota."
+                freeHistoryStatus = "Mínimo no pudo identificar la tienda de esta oferta para buscar capturas gratuitas. No se ha gastado cuota de SerpApi."
             )
             return
         }

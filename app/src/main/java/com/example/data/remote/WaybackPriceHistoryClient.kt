@@ -310,6 +310,17 @@ class WaybackPriceHistoryClient(
             activeRateLimitUntil(System.currentTimeMillis())?.let {
                 return AvailabilityProbe(requestFailed = true, diagnosticCode = "WAYBACK_RATE_LIMITED")
             }
+            val now = System.currentTimeMillis()
+            val lastRequestAt = preferences.getLong(KEY_LAST_AVAILABILITY_REQUEST_AT, 0L)
+            val waitMs = computeAvailabilityDelayMs(lastRequestAt, now)
+            if (waitMs > 0L) delay(waitMs)
+            // Re-check just before dispatch in case another client set a cooldown meanwhile.
+            activeRateLimitUntil(System.currentTimeMillis())?.let {
+                return AvailabilityProbe(requestFailed = true, diagnosticCode = "WAYBACK_RATE_LIMITED")
+            }
+            preferences.edit()
+                .putLong(KEY_LAST_AVAILABILITY_REQUEST_AT, System.currentTimeMillis())
+                .apply()
             availabilityHttp.newCall(request).execute().use { response ->
                 if (response.code == 429) {
                     activateRateLimit(response.header("Retry-After"), System.currentTimeMillis())
@@ -474,6 +485,13 @@ class WaybackPriceHistoryClient(
             else -> NEGATIVE_RETRY_INTERVAL_MS
         }
         return now - lastAttempt < retryInterval
+    }
+
+    internal fun computeAvailabilityDelayMs(lastRequestAt: Long, now: Long): Long {
+        if (lastRequestAt <= 0L) return 0L
+        // Cap wait time to one interval so clock changes cannot stall history for hours.
+        return (lastRequestAt + MIN_AVAILABILITY_REQUEST_INTERVAL_MS - now)
+            .coerceIn(0L, MIN_AVAILABILITY_REQUEST_INTERVAL_MS)
     }
 
     internal fun computeRateLimitUntil(retryAfter: String?, now: Long): Long {
@@ -1483,6 +1501,8 @@ class WaybackPriceHistoryClient(
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L
         const val NEGATIVE_RETRY_INTERVAL_MS = 6L * 60L * 60L * 1000L
         const val FAILURE_RETRY_INTERVAL_MS = 30L * 60L * 1000L
+        private const val MIN_AVAILABILITY_REQUEST_INTERVAL_MS = 1_500L
+        private const val KEY_LAST_AVAILABILITY_REQUEST_AT = "wayback_last_availability_request_at"
         private const val MIN_RATE_LIMIT_COOLDOWN_MS = 60L * 1000L
         private const val DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60L * 60L * 1000L
         private const val MAX_RATE_LIMIT_COOLDOWN_MS = 6L * 60L * 60L * 1000L

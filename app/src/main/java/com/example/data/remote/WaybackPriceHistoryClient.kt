@@ -1091,16 +1091,15 @@ class WaybackPriceHistoryClient(
             Triple(pageTitle, metaPrice, metaCurrency).takeIf(::isValidCandidate)
         } else null
 
-        // JSON-LD can contain several sellers/offers or both regular and sale prices. Never let
-        // the JSON property order decide which price becomes historical evidence.
+        // A retailer page can expose multiple valid EUR offers for the exact same product.
+        // Product title, numeric variants, and condition are validated before this point, so the
+        // lowest matching offer is a deterministic historical market price—not JSON property order.
+        // Explicit page-level product price metadata remains authoritative when valid.
         val matchingJsonLd = jsonLdCandidates.filter(::isValidCandidate)
-        val matching = explicitMeta ?: run {
-            val distinctPrices = matchingJsonLd
-                .map { it.second to it.third.uppercase(Locale.ROOT) }
-                .distinct()
-            if (distinctPrices.size != 1) return null
-            matchingJsonLd.firstOrNull()
-        } ?: return null
+        val matching = explicitMeta ?: matchingJsonLd.minWithOrNull(
+            compareBy<Triple<String, Double, String>> { it.second }
+                .thenBy { normalizeTitle(it.first) }
+        ) ?: return null
 
         return ArchivedPriceQuote(
             observedAt = observedAt,
@@ -1186,6 +1185,7 @@ class WaybackPriceHistoryClient(
         val e = normalizeTitle(expected)
         val a = normalizeTitle(archived)
         if (e.isBlank() || a.isBlank()) return false
+        if (productConditionKey(e) != productConditionKey(a)) return false
 
         // Titles from Samsung's regional catalogues use TQ/QE prefixes for the same EU TV
         // model. Compare the exact compact model code and diagonal before fuzzy text matching.
@@ -1229,6 +1229,16 @@ class WaybackPriceHistoryClient(
         return overlap.size >= minOf(2, expectedTokens.size) &&
             overlap.size.toDouble() / expectedTokens.size >= 0.72
     }
+    private fun productConditionKey(title: String): String = when {
+        Regex("""\\b(reacondicionado|reacondicionada|refurbished|renewed)\\b""")
+            .containsMatchIn(title) -> "refurbished"
+        Regex("""\\b(usado|usada|used|seminuevo|seminueva|segunda mano)\\b""")
+            .containsMatchIn(title) -> "used"
+        Regex("""\\b(open box|open-box|caja abierta)\\b""")
+            .containsMatchIn(title) -> "open-box"
+        else -> "standard"
+    }
+
     private fun canonicalizeArchiveTitle(normalizedTitle: String): String {
         // These regional prefixes are only interchangeable for Samsung model identifiers.
         if (!Regex("""\bsamsung\b""").containsMatchIn(normalizedTitle)) return normalizedTitle

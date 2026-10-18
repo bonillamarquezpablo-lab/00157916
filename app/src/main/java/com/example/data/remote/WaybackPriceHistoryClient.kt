@@ -161,7 +161,7 @@ class WaybackPriceHistoryClient(
                 async {
                     val exactAttempt = attemptKey("url|$originalUrl|$expectedTitle")
                     if (wasAttemptedRecently(exactAttempt, now)) {
-                        val cachedQuotes = preferences.getBoolean("${{exactAttempt}_has_quotes", false)
+                        val cachedQuotes = preferences.getBoolean("${exactAttempt}_has_quotes", false)
                         WaybackBackfillResult(
                             skippedRecently = true,
                             available = cachedQuotes,
@@ -258,20 +258,20 @@ class WaybackPriceHistoryClient(
                 if (!response.isSuccessful) {
                     return CdxIndexOutcome(
                         requestFailed = true,
-                        diagnosticCodes = setOf("${{cdxStage}_HTTP_${{response.code}")
+                        diagnosticCodes = setOf("${cdxStage}_HTTP_${response.code}")
                     )
                 }
                 val body = readBodyLimited(response.body, MAX_CDX_BODY_BYTES)
                 if (body == null) {
                     return CdxIndexOutcome(
                         requestFailed = true,
-                        diagnosticCodes = setOf("${{cdxStage}_BODY_EMPTY_OR_LIMIT")
+                        diagnosticCodes = setOf("${cdxStage}_BODY_EMPTY_OR_LIMIT")
                     )
                 }
                 if (!isValidCaptureIndexResponse(body)) {
                     return CdxIndexOutcome(
                         requestFailed = true,
-                        diagnosticCodes = setOf("${{cdxStage}_INVALID_RESPONSE")
+                        diagnosticCodes = setOf("${cdxStage}_INVALID_RESPONSE")
                     )
                 }
                 CdxIndexOutcome(captures = parseCaptureIndex(body), available = true)

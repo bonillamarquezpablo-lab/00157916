@@ -316,9 +316,9 @@ class WaybackPriceHistoryClientTest {
             lookbackDays = 1600
         )
         assertNotNull(url)
-        assertEquals("domain", url!!.queryParameter("matchType"))
+        assertEquals("host", url!!.queryParameter("matchType"))
         assertEquals("6", url.queryParameter("limit"))
-        assertEquals("urlkey", url.queryParameter("collapse"))
+        assertNull("Host discovery avoids slow collapse processing", url.queryParameter("collapse"))
         assertEquals("20250115", url.queryParameter("from"))
         assertTrue(url.queryParameterValues("filter").orEmpty().any { raw ->
             val filter = raw.orEmpty()
@@ -586,7 +586,7 @@ class WaybackPriceHistoryClientTest {
             now,
             365
         )!!
-        assertEquals("domain query must remain bounded", "domain", domainUrl.queryParameter("matchType"))
+        assertEquals("domain query must remain bounded", "host", domainUrl.queryParameter("matchType"))
         assertEquals("product-specific path matching must be retained",
             true, domainUrl.queryParameterValues("filter").orEmpty().any { it?.startsWith("original:") == true })
     }
@@ -617,19 +617,49 @@ class WaybackPriceHistoryClientTest {
         assertEquals("web.archive.org", url!!.host)
         assertEquals("/cdx/search/cdx", url.encodedPath)
         assertEquals("shop.example", url.queryParameter("url"))
-        assertEquals("domain", url.queryParameter("matchType"))
+        assertEquals("host", url.queryParameter("matchType"))
         assertTrue(
             "The CDX original-field filter must limit URLs to distinguishing title/model tokens",
             url.queryParameterValues("filter").orEmpty().any { it.orEmpty().startsWith("original:(?i)") }
         )
         assertEquals("json", url.queryParameter("output"))
         assertEquals("6", url.queryParameter("limit"))
-        assertEquals("urlkey", url.queryParameter("collapse"))
+        assertNull("Host discovery avoids slow collapse processing", url.queryParameter("collapse"))
         assertTrue(url.queryParameterValues("filter").orEmpty().any { it == "statuscode:200" })
         assertTrue(url.queryParameterValues("filter").orEmpty().any { it == "mimetype:text/html" })
         assertTrue(url.queryParameterValues("filter").orEmpty().any { it.orEmpty().startsWith("original:") })
         assertEquals("20250115", url.queryParameter("from"))
         assertEquals("20270115", url.queryParameter("to"))
+    }
+
+    @Test
+    fun domainDiscoveryTargetsConcreteHostsWithoutSlowCollapse() {
+        val client = newClient()
+        assertEquals(
+            listOf("www.shop.example", "shop.example"),
+            client.domainDiscoveryHosts("shop.example")
+        )
+        assertEquals(
+            listOf("eu.ugreen.com"),
+            client.domainDiscoveryHosts("eu.ugreen.com")
+        )
+        assertEquals(
+            listOf("www.example.co.uk", "example.co.uk"),
+            client.domainDiscoveryHosts("example.co.uk")
+        )
+
+        val urls = client.buildDomainCdxHostUrls(
+            domain = "shop.example",
+            expectedTitle = "Anker Prime 27K Power Bank",
+            now = 1_800_000_000_000L,
+            lookbackDays = 730
+        )
+        assertNotNull(urls)
+        assertEquals(2, urls!!.size)
+        assertEquals(listOf("www.shop.example", "shop.example"), urls.map { it.queryParameter("url") })
+        assertTrue(urls.all { it.queryParameter("matchType") == "host" })
+        assertTrue(urls.all { it.queryParameter("collapse") == null })
+        assertTrue(urls.all { it.queryParameter("limit") == "6" })
     }
 
     @Test

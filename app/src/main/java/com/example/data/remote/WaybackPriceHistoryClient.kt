@@ -121,35 +121,53 @@ class WaybackPriceHistoryClient(
         if (expectedTitle.isBlank()) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("PRODUCT_TITLE_EMPTY"))
         }
-        val cdxUrl = buildDomainCdxUrl(normalizedDomain, expectedTitle, now, lookbackDays)
+        val cdxUrls = buildDomainCdxHostUrls(normalizedDomain, expectedTitle, now, lookbackDays)
             ?: return@withContext WaybackBackfillResult(diagnosticCodes = setOf("CDX_QUERY_NOT_BUILDABLE"))
         val attempt = attemptKey("domain|$normalizedDomain|$expectedTitle")
         if (wasAttemptedRecently(attempt, now)) {
             return@withContext WaybackBackfillResult(skippedRecently = true, diagnosticCodes = setOf("CACHE_SKIPPED"))
         }
 
-        // Stage 1 is discovery only: request a few distinct, product-like URLs instead of
-        // asking CDX to return dozens of captures across an entire large retailer domain.
-        // This lets the indexed URL range stop as soon as enough matching URLs are found.
-        val discovery = queryCdxIndexOnly(
-            cdxUrl = cdxUrl,
-            cdxTimeoutSeconds = DOMAIN_CDX_TIMEOUT_SECONDS,
-            cdxStage = "CDX_DOMAIN"
-        )
-        if (discovery.requestFailed) {
+        // Stage 1 is a bounded discovery over the store's likely product hosts (www + apex),
+        // not every subdomain. Each host query is capped at four seconds and they run together.
+        // Do not collapse by urlkey here: CDX documents that collapse on broad scans can be slow.
+        val discoveries = coroutineScope {
+            cdxUrls.map { cdxUrl ->
+                async {
+                    queryCdxIndexOnly(
+                        cdxUrl = cdxUrl,
+                        cdxTimeoutSeconds = DOMAIN_CDX_TIMEOUT_SECONDS,
+                        cdxStage = "CDX_DOMAIN"
+                    )
+                }
+            }.awaitAll()
+        }
+        val discoveryFailures = discoveries.filter { it.requestFailed }
+        val validDiscoveries = discoveries.filter { it.available && !it.requestFailed }
+        if (validDiscoveries.isEmpty()) {
             rememberAttempt(attempt, now, hasQuotes = false, failed = true)
             return@withContext WaybackBackfillResult(
                 requestFailed = true,
-                diagnosticCodes = discovery.diagnosticCodes
+                diagnosticCodes = discoveryFailures.flatMapTo(linkedSetOf()) { it.diagnosticCodes }
             )
         }
 
-        val candidateUrls = selectDistinctProductUrls(discovery.captures)
+        val candidateUrls = selectDistinctProductUrls(validDiscoveries.flatMap { it.captures })
         if (candidateUrls.isEmpty()) {
-            rememberAttempt(attempt, now, hasQuotes = false, failed = false)
+            val diagnostics = linkedSetOf<String>().apply {
+                discoveryFailures.forEach { addAll(it.diagnosticCodes) }
+                if (isEmpty()) add("CDX_NO_PRODUCT_URLS")
+            }
+            rememberAttempt(
+                attempt,
+                now,
+                hasQuotes = false,
+                failed = discoveryFailures.isNotEmpty()
+            )
             return@withContext WaybackBackfillResult(
-                available = discovery.available,
-                diagnosticCodes = setOf(if (discovery.available) "CDX_NO_PRODUCT_URLS" else "CDX_DOMAIN_NO_RESULT")
+                available = true,
+                requestFailed = discoveryFailures.isNotEmpty(),
+                diagnosticCodes = diagnostics
             )
         }
 
@@ -195,7 +213,7 @@ class WaybackPriceHistoryClient(
             .distinctBy { Triple(it.originalUrl, it.observedAt, it.price) }
         val cachedPositiveResult = exactResults.any { it.skippedRecently && it.available }
         val hasKnownHistory = quotes.isNotEmpty() || cachedPositiveResult
-        val requestFailed = exactResults.any { it.requestFailed }
+        val requestFailed = discoveryFailures.isNotEmpty() || exactResults.any { it.requestFailed }
         rememberAttempt(
             attempt,
             now,
@@ -203,6 +221,7 @@ class WaybackPriceHistoryClient(
             failed = quotes.isEmpty() && !cachedPositiveResult && requestFailed
         )
         val diagnostics = linkedSetOf<String>().apply {
+            discoveryFailures.forEach { addAll(it.diagnosticCodes) }
             exactResults.forEach { addAll(it.diagnosticCodes) }
             if (quotes.isEmpty() && isEmpty()) add("NO_VERIFIED_EUR_PRICE")
         }
@@ -602,8 +621,8 @@ class WaybackPriceHistoryClient(
     }
 
     /**
-     * Search only URLs whose paths contain distinctive product terms on a known retailer domain.
-     * The archive CDX API supports domain matching and URL-field regular-expression filters.
+     * Build a product-filtered CDX query for a single host. Discovery uses host scope and
+     * avoids urlkey collapsing; dated captures are fetched later through exact-URL queries.
      */
     internal fun buildDomainCdxUrl(
         domain: String,
@@ -683,12 +702,11 @@ class WaybackPriceHistoryClient(
             .scheme("https")
             .host("web.archive.org")
             .addPathSegments("cdx/search/cdx")
-            // Use CDX's documented domain matcher so the index can use its domain-key range
-            // rather than applying an unsupported regex match mode to the entire index.
-            // Product-specific original-field filters below still narrow the returned captures;
-            // archived title and EUR-price validation remains mandatory.
+            // Host scope narrows the CDX key range to one retailer host. A companion
+            // query may target the apex host when www has no captures.
+            // Product-specific filtering and final archived-page validation remain mandatory.
             .addQueryParameter("url", normalizedDomain)
-            .addQueryParameter("matchType", "domain")
+            .addQueryParameter("matchType", "host")
             .addQueryParameter("output", "json")
             .addQueryParameter("fl", "timestamp,original,statuscode,mimetype")
             .addQueryParameter("filter", "statuscode:200")
@@ -696,11 +714,43 @@ class WaybackPriceHistoryClient(
             .addQueryParameter("filter", "original:$urlPattern")
             .addQueryParameter("from", formatUtc((now - DOMAIN_LOOKBACK_DAYS.toLong() * DAY_MS).coerceAtLeast(start), "yyyyMMdd"))
             .addQueryParameter("to", to)
-            // Discovery needs distinct URLs, not repeated timestamps for one URL.
-            // Exact-URL queries fetch the time series after a candidate page is identified.
-            .addQueryParameter("collapse", "urlkey")
+            // Keep the discovery response small without a potentially costly collapse scan.
+            // Duplicate captures are deduplicated in memory before exact-URL lookups.
             .addQueryParameter("limit", MAX_DOMAIN_INDEX_ROWS.toString())
             .build()
+    }
+
+    /** Build www-host and apex-host requests for a registrable retailer root. */
+    internal fun buildDomainCdxHostUrls(
+        domain: String,
+        expectedTitle: String,
+        now: Long = System.currentTimeMillis(),
+        lookbackDays: Int = DEFAULT_LOOKBACK_DAYS
+    ): List<HttpUrl>? {
+        val normalizedDomain = normalizeMerchantDomain(domain) ?: return null
+        val base = buildDomainCdxUrl(normalizedDomain, expectedTitle, now, lookbackDays) ?: return null
+        val hosts = domainDiscoveryHosts(normalizedDomain)
+        return hosts.map { host ->
+            base.newBuilder()
+                .setQueryParameter("url", host)
+                .setQueryParameter("matchType", "host")
+                .removeAllQueryParameters("collapse")
+                .build()
+        }
+    }
+
+    internal fun domainDiscoveryHosts(domain: String): List<String> {
+        val normalized = normalizeMerchantDomain(domain) ?: return emptyList()
+        val labels = normalized.split('.')
+        val suffix = labels.takeLast(2).joinToString(".")
+        val rootLabelCount = if (suffix in MULTI_LABEL_PUBLIC_SUFFIXES) 3 else 2
+        return if (labels.size <= rootLabelCount) {
+            listOf("www.$normalized", normalized).distinct()
+        } else {
+            // Domains already hosted on a regional/subdomain host (e.g. eu.ugreen.com)
+            // must not be rewritten to www.<subdomain>, which commonly does not exist.
+            listOf(normalized)
+        }
     }
 
     /** Match both compact model codes (9n3) and split retailer slugs (iphone-16). */
@@ -1133,6 +1183,10 @@ class WaybackPriceHistoryClient(
         // CDX queries run in parallel for the exact URL and merchant-domain fallback.
         // A larger read budget is needed on slow archive responses; concurrency and row caps
         // below still bound total work per product.
+        private val MULTI_LABEL_PUBLIC_SUFFIXES = setOf(
+            "co.uk", "com.au", "co.nz", "co.jp", "co.in", "com.br", "com.mx",
+            "com.sg", "com.tr", "co.za", "com.ar", "com.cn", "com.tw", "com.pl"
+        )
         private const val MAX_CDX_HTTP_RETRIES = 1
         private const val CDX_RETRY_DELAY_MS = 500L
         private const val CDX_RETRY_JITTER_MS = 350L

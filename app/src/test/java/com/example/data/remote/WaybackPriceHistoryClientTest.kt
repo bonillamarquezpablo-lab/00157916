@@ -289,7 +289,7 @@ class WaybackPriceHistoryClientTest {
             lookbackDays = 1600
         )
         assertNotNull(url)
-        assertEquals("regex", url!!.queryParameter("matchType"))
+        assertEquals("domain", url!!.queryParameter("matchType"))
         assertEquals("80", url.queryParameter("limit"))
         assertNull("Domain scans must preserve repeated captures over time", url.queryParameter("collapse"))
         assertEquals("20250115", url.queryParameter("from"))
@@ -559,7 +559,7 @@ class WaybackPriceHistoryClientTest {
             now,
             365
         )!!
-        assertEquals("domain query must remain bounded", "regex", domainUrl.queryParameter("matchType"))
+        assertEquals("domain query must remain bounded", "domain", domainUrl.queryParameter("matchType"))
         assertEquals("product-specific path matching must be retained",
             true, domainUrl.queryParameterValues("filter").orEmpty().any { it?.startsWith("original:") == true })
     }
@@ -589,8 +589,8 @@ class WaybackPriceHistoryClientTest {
         assertNotNull(url)
         assertEquals("web.archive.org", url!!.host)
         assertEquals("/cdx/search/cdx", url.encodedPath)
-        assertEquals("shop.example/.*", url.queryParameter("url"))
-        assertEquals("regex", url.queryParameter("matchType"))
+        assertEquals("shop.example", url.queryParameter("url"))
+        assertEquals("domain", url.queryParameter("matchType"))
         assertTrue(
             "The CDX original-field filter must limit URLs to distinguishing title/model tokens",
             url.queryParameterValues("filter").orEmpty().any { it.orEmpty().startsWith("original:(?i)") }

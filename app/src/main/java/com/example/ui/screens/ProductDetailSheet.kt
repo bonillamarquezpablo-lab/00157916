@@ -76,35 +76,60 @@ fun ProductDetailSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     val scrollState = rememberScrollState()
-    val liveHistoryPoints = product.priceHistory.filterNot { it.isExternalHistoryEvidence }
-    val archivedHistoryPoints = product.priceHistory.filter { it.isArchiveEvidence }
-    val oldestArchivedDate = archivedHistoryPoints.minByOrNull { it.timestamp }?.let {
-        SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(it.timestamp))
+    val spanishLocale = remember { Locale("es", "ES") }
+    val observedAtFormatter = remember { SimpleDateFormat("dd/MM HH:mm", spanishLocale) }
+    val savedDateFormatter = remember { SimpleDateFormat("dd/MM/yyyy", spanishLocale) }
+    val liveHistoryPoints = remember(product.priceHistory) {
+        product.priceHistory.filterNot { it.isExternalHistoryEvidence }
     }
-    val googleInsightPoints = product.priceHistory.filter { it.isGoogleInsightEvidence }
-    val oldestGoogleInsightDate = googleInsightPoints.minByOrNull { it.timestamp }?.let {
-        SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(it.timestamp))
+    val archivedHistoryPoints = remember(product.priceHistory) {
+        product.priceHistory.filter { it.isArchiveEvidence }
     }
-    val historicalSourceSummary = buildString {
-        if (googleInsightPoints.isNotEmpty()) {
-            append("Google Shopping: ${googleInsightPoints.size} puntos históricos")
-            oldestGoogleInsightDate?.let { append(" desde $it") }
-            append(".")
+    val googleInsightPoints = remember(product.priceHistory) {
+        product.priceHistory.filter { it.isGoogleInsightEvidence }
+    }
+    val oldestArchivedDate = remember(archivedHistoryPoints, savedDateFormatter) {
+        archivedHistoryPoints.minByOrNull { it.timestamp }?.let {
+            savedDateFormatter.format(Date(it.timestamp))
         }
-        if (archivedHistoryPoints.isNotEmpty()) {
-            if (isNotEmpty()) append(" ")
-            append("Internet Archive: ${archivedHistoryPoints.size} capturas")
-            oldestArchivedDate?.let { append(" desde $it") }
-            append(".")
+    }
+    val oldestGoogleInsightDate = remember(googleInsightPoints, savedDateFormatter) {
+        googleInsightPoints.minByOrNull { it.timestamp }?.let {
+            savedDateFormatter.format(Date(it.timestamp))
         }
-        if (isEmpty()) {
-            append("Todavía no hay un historial anterior verificado. Pulsa «Buscar histórico gratis» para revisar páginas públicas archivadas sin gastar cuota de SerpApi. Si el comercio no está archivado o no publicó un precio EUR verificable, no se puede reconstruir ese precio. «Comparar tiendas» es una consulta adicional de SerpApi y tampoco garantiza datos históricos.")
-        } else {
-            append(" Puede haber huecos; los precios históricos no garantizan stock, envío ni precio final.")
+    }
+    val historicalSourceSummary = remember(
+        googleInsightPoints, archivedHistoryPoints, oldestArchivedDate, oldestGoogleInsightDate
+    ) {
+        buildString {
+            if (googleInsightPoints.isNotEmpty()) {
+                append("Google Shopping: ${googleInsightPoints.size} puntos")
+                oldestGoogleInsightDate?.let { append(" desde $it") }
+                append(".")
+            }
+            if (archivedHistoryPoints.isNotEmpty()) {
+                if (isNotEmpty()) append(" ")
+                append("Internet Archive: ${archivedHistoryPoints.size} capturas")
+                oldestArchivedDate?.let { append(" desde $it") }
+                append(".")
+            }
+            if (isEmpty()) {
+                append("Aún no hay historial verificable. «Buscar histórico gratis» consulta capturas públicas sin gastar cuota de SerpApi, pero solo podrá reconstruir el precio si hay una captura con título y precio en euros verificables.")
+            } else {
+                append(" Puede haber huecos; stock, envío y precio final deben confirmarse en la tienda.")
+            }
         }
     }
     // Historical archive/insight points must never be presented as the source for today's price.
-    val latestLivePricePoint = liveHistoryPoints.maxByOrNull { it.timestamp }
+    val latestLivePricePoint = remember(liveHistoryPoints) { liveHistoryPoints.maxByOrNull { it.timestamp } }
+    val isDisplayingSavedArchivePrice =
+        product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION &&
+            !product.isPriceVerified && product.savedHistoricalPrice != null
+    val displayedPriceObservedAt = if (isDisplayingSavedArchivePrice) {
+        product.savedHistoricalPriceObservedAt
+    } else {
+        product.priceObservedAt
+    }
     val currentSourceLabel = if (!product.isPriceVerified && product.savedHistoricalPrice != null) {
         product.savedHistoricalPriceSource.takeIf { it.isNotBlank() } ?: "Historial archivado"
     } else if (!product.isPriceVerified) {
@@ -132,9 +157,9 @@ fun ProductDetailSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(scrollState)
-                .padding(horizontal = 20.dp, vertical = 10.dp)
-                .padding(bottom = 36.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = 18.dp, vertical = 8.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // Header Top Bar
             Row(
@@ -172,11 +197,11 @@ fun ProductDetailSheet(
                             val shareText = when {
                                 product.hasSufficientHistory ->
                                     "Precio observado para ${product.title}:\\n" +
-                                        "• Precio actual: ${String.format("%.2f", product.currentPrice)} € en ${product.currentStore.name}\\n" +
-                                        "• Mínimo observado en los datos disponibles: ${String.format("%.2f", product.athMinPrice)} € (${product.athMinDate} en ${product.athMinStore})\\n" +
+                                        "• Precio actual: ${String.format(spanishLocale, "%.2f", product.currentPrice)} € en ${product.currentStore.name}\\n" +
+                                        "• Mínimo observado en los datos disponibles: ${String.format(spanishLocale, "%.2f", product.athMinPrice)} € (${product.athMinDate} en ${product.athMinStore})\\n" +
                                         "• Diagnóstico: ${product.verdict.badgeText} - ${product.verdict.explanation}"
                                 product.isPriceVerified ->
-                                    "Precio observado para ${product.title}: ${String.format("%.2f", product.currentPrice)} € en ${product.currentStore.name}. " +
+                                    "Precio observado para ${product.title}: ${String.format(spanishLocale, "%.2f", product.currentPrice)} € en ${product.currentStore.name}. " +
                                         "Aún no hay observaciones durante 90 días para afirmar un mínimo histórico o un descuento."
                                 else ->
                                     "Ficha sin precio verificado de Mínimo: ${product.title}.\\nNo contiene una oferta ni un historial real confirmados."
@@ -209,15 +234,15 @@ fun ProductDetailSheet(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(210.dp)
+                    .height(180.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(16.dp))
             ) {
                 ProductImageView(
                     product = product,
-                    modifier = Modifier.fillMaxWidth().height(210.dp),
+                    modifier = Modifier.fillMaxWidth().height(180.dp),
                     contentScale = ContentScale.Fit,
-                    showAthRibbon = product.isPriceVerified && product.isAtAth
+                    showAthRibbon = product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isAtAth
                 )
             }
 
@@ -286,24 +311,29 @@ fun ProductDetailSheet(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = "${String.format("%.2f", if (!product.isPriceVerified && product.savedHistoricalPrice != null) product.savedHistoricalPrice else product.currentPrice)} €",
+                                text = "${String.format(spanishLocale, "%.2f", if (!product.isPriceVerified && product.savedHistoricalPrice != null) product.savedHistoricalPrice else product.currentPrice)} €",
                                 fontWeight = FontWeight.Black,
                                 fontSize = 20.sp,
                                 color = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            product.priceObservedAt?.let { observedAt ->
+                            displayedPriceObservedAt?.let { observedAt ->
                                 Text(
-                                    text = "Consultado " + SimpleDateFormat("dd/MM HH:mm", Locale("es", "ES"))
-                                        .format(Date(observedAt)),
+                                    text = if (isDisplayingSavedArchivePrice) {
+                                        "Precio guardado el " + savedDateFormatter.format(Date(observedAt))
+                                    } else if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION) {
+                                        "Guardado " + observedAtFormatter.format(Date(observedAt))
+                                    } else {
+                                        "Consultado " + observedAtFormatter.format(Date(observedAt))
+                                    },
                                     fontSize = 10.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION) {
+                            if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION &&
+                                !isDisplayingSavedArchivePrice
+                            ) {
                                 Text(
-                                    text = if (!product.isPriceVerified && product.savedHistoricalPrice != null) {
-                                        "Precio histórico guardado · ${product.savedHistoricalPriceObservedAt?.let { SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(it)) } ?: "fecha desconocida"} · no es una oferta actual"
-                                    } else product.priceFreshnessLabel,
+                                    text = product.priceFreshnessLabel,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.tertiary
@@ -346,7 +376,7 @@ fun ProductDetailSheet(
                                     )
                                 }
                                 Text(
-                                    text = "${String.format("%.2f", product.athMinPrice)} €",
+                                    text = "${String.format(spanishLocale, "%.2f", product.athMinPrice)} €",
                                     fontWeight = FontWeight.Black,
                                     fontSize = 20.sp,
                                     color = Color(0xFF059669)
@@ -391,7 +421,7 @@ fun ProductDetailSheet(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Text(
-                                        text = "${String.format("%.2f", product.avg90dPrice)} €",
+                                        text = "${String.format(spanishLocale, "%.2f", product.avg90dPrice)} €",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 14.sp
                                     )
@@ -405,7 +435,7 @@ fun ProductDetailSheet(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Text(
-                                        text = "${String.format("%.2f", product.officialPvp)} €",
+                                        text = "${String.format(spanishLocale, "%.2f", product.officialPvp)} €",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 14.sp,
                                         textDecoration = TextDecoration.LineThrough
@@ -420,7 +450,7 @@ fun ProductDetailSheet(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Text(
-                                        text = "${String.format("%.2f", product.realSavingsAmount)} € (${product.realSavingsPercent}%)",
+                                        text = "${String.format(spanishLocale, "%.2f", product.realSavingsAmount)} € (${product.realSavingsPercent}%)",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 14.sp,
                                         color = Color(0xFF059669)

@@ -1591,7 +1591,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     requestFailedCount > 0 && capturesFoundCount > 0 && checkedCount == 0 ->
                         "Internet Archive encontró $capturesFoundCount capturas, pero no pudo descargar las páginas. No se puede confirmar el precio histórico; inténtalo más tarde. No se ha gastado cuota de SerpApi."
                     requestFailedCount > 0 && checkedCount == 0 ->
-                        "Falló la consulta a Internet Archive; no se puede distinguir un fallo temporal de la ausencia de capturas. No se ha gastado cuota de SerpApi. El sistema permitirá reintentar antes que una búsqueda con resultados útiles."
+                        "Internet Archive no respondió correctamente o rechazó la consulta. Es un fallo de conexión/servicio, no una confirmación de que no existan capturas. No se ha gastado cuota de SerpApi; puedes reintentar."
                     capturesFoundCount == 0 && successfulLookupsCount > 0 ->
                         "Internet Archive respondió, pero no encontró capturas públicas de esas páginas en el período consultado. No hay precios antiguos verificables que mostrar y no se ha gastado cuota de SerpApi."
                     checkedCount > 0 ->

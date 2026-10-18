@@ -97,18 +97,20 @@ class WaybackPriceHistoryClient(
         if (expectedTitle.isBlank()) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("PRODUCT_TITLE_EMPTY"))
         }
-        val attempt = attemptKey("url|$originalUrl|$expectedTitle")
+        val attempt = attemptKey("url-cascade-v2|$originalUrl|$expectedTitle")
         if (wasAttemptedRecently(attempt, now)) {
             return@withContext WaybackBackfillResult(skippedRecently = true, diagnosticCodes = setOf("CACHE_SKIPPED"))
         }
+        // Shopping links frequently append click/session parameters which were never archived.
+        // Probe the original URL first, then one deterministic tracking-free canonical variant.
         queryAvailabilityAndFetchPrices(
-            candidateUrls = listOf(originalUrl),
+            candidateUrls = buildDirectUrlCandidates(originalUrl),
             expectedTitle = expectedTitle,
             cacheKey = attempt,
             now = now,
             lookbackDays = lookbackDays,
             maxSnapshots = MAX_DIRECT_SNAPSHOTS_PER_URL,
-            maxCandidates = 1,
+            maxCandidates = 2,
             stage = "AVAILABILITY_EXACT"
         )
     }
@@ -136,11 +138,11 @@ class WaybackPriceHistoryClient(
         if (candidateUrls.isEmpty()) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("AVAILABILITY_CANDIDATES_EMPTY"))
         }
-        val attempt = attemptKey("domain|$normalizedDomain|$expectedTitle")
+        val attempt = attemptKey("domain-cascade-v2|$normalizedDomain|$expectedTitle")
         if (wasAttemptedRecently(attempt, now)) {
             return@withContext WaybackBackfillResult(skippedRecently = true, diagnosticCodes = setOf("CACHE_SKIPPED"))
         }
-        queryAvailabilityAndFetchPrices(
+        val availabilityResult = queryAvailabilityAndFetchPrices(
             candidateUrls = candidateUrls,
             expectedTitle = expectedTitle,
             cacheKey = attempt,
@@ -149,6 +151,48 @@ class WaybackPriceHistoryClient(
             maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP,
             maxCandidates = MAX_AVAILABILITY_PROBE_CANDIDATES,
             stage = "AVAILABILITY_DOMAIN"
+        )
+        if (availabilityResult.quotes.isNotEmpty() || availabilityResult.skippedRecently) {
+            return@withContext availabilityResult
+        }
+        if (availabilityResult.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ||
+            activeRateLimitUntil(System.currentTimeMillis()) != null
+        ) {
+            return@withContext availabilityResult
+        }
+
+        // If availability says there are no captures (or the endpoint timed out), switch APIs:
+        // the CDX index searches the retailer host for title/model tokens and returns real product
+        // URLs instead of guessing a page slug. Exactly one bounded host query, then <=2 snapshots.
+        val mayUseCdxFallback =
+            availabilityResult.diagnosticCodes.contains("AVAILABILITY_DOMAIN_NO_CAPTURES") ||
+                availabilityResult.diagnosticCodes.contains("AVAILABILITY_DOMAIN_TIMEOUT")
+        if (!mayUseCdxFallback) return@withContext availabilityResult
+
+        val cdxUrl = buildDomainCdxHostUrls(
+            domain = normalizedDomain,
+            expectedTitle = expectedTitle,
+            now = now,
+            lookbackDays = lookbackDays
+        )?.firstOrNull() ?: return@withContext availabilityResult
+
+        val cdxResult = queryCdxAndFetchPrices(
+            cdxUrl = cdxUrl,
+            expectedTitle = expectedTitle,
+            cacheKey = attempt,
+            now = now,
+            maxSnapshots = MAX_CDX_FALLBACK_SNAPSHOTS,
+            cdxTimeoutSeconds = CDX_FALLBACK_TIMEOUT_SECONDS,
+            cdxStage = "CDX_DOMAIN_FALLBACK"
+        )
+        if (cdxResult.quotes.isNotEmpty()) {
+            // Successful fallback should not leave a stale no-captures diagnostic visible.
+            return@withContext cdxResult.copy(diagnosticCodes = emptySet())
+        }
+        return@withContext cdxResult.copy(
+            available = availabilityResult.available || cdxResult.available,
+            requestFailed = availabilityResult.requestFailed || cdxResult.requestFailed,
+            diagnosticCodes = (availabilityResult.diagnosticCodes + cdxResult.diagnosticCodes).toSet()
         )
     }
 
@@ -179,7 +223,7 @@ class WaybackPriceHistoryClient(
 
         // Avoid bursts and stay within the UI's 10-second merchant-fallback budget:
         // one exact URL gets three dates; up to two domain candidates get two dates each.
-        val dates = availabilityTargetDates(now, lookbackDays, if (stage == "AVAILABILITY_EXACT") 3 else 2)
+        val dates = availabilityTargetDates(now, lookbackDays, if (stage == "AVAILABILITY_EXACT") 2 else 2)
         val probes = coroutineScope {
             urls.flatMap { originalUrl ->
                 dates.map { targetDate ->
@@ -401,6 +445,54 @@ class WaybackPriceHistoryClient(
             return "ARCHIVE_PRODUCT_TITLE_MISMATCH"
         }
         return "ARCHIVE_PRICE_AMBIGUOUS_OR_INVALID"
+    }
+
+    internal fun buildDirectUrlCandidates(originalUrl: String): List<String> {
+        if (!isEligibleDirectUrl(originalUrl)) return emptyList()
+        val uri = runCatching { URI(originalUrl) }.getOrNull() ?: return listOf(originalUrl)
+        if (uri.rawUserInfo != null || uri.host.isNullOrBlank()) return listOf(originalUrl)
+
+        val candidates = linkedSetOf(originalUrl)
+        val trackingNames = setOf(
+            "gclid", "dclid", "fbclid", "msclkid", "mc_eid", "mc_cid", "igshid",
+            "gad_source", "gbraid", "wbraid", "ref", "ref_", "tag", "linkcode",
+            "campid", "scid", "affid", "affiliate", "sourceid", "srsltid"
+        )
+        val queryParts = uri.rawQuery?.split('&').orEmpty()
+        val cleanedParts = queryParts.filterNot { part ->
+            val rawName = part.substringBefore('=')
+            val name = runCatching {
+                java.net.URLDecoder.decode(rawName.replace("+", "%2B"), "UTF-8")
+            }.getOrDefault(rawName).lowercase(Locale.ROOT)
+            name.startsWith("utm_") || name in trackingNames
+        }
+        val trackingRemoved = cleanedParts.size != queryParts.size
+        val base = buildString {
+            append(uri.scheme.lowercase(Locale.ROOT))
+            append("://")
+            append(uri.rawAuthority)
+            append(uri.rawPath?.takeIf { it.isNotBlank() } ?: "/")
+        }
+        if (cleanedParts.isNotEmpty()) {
+            candidates += "$base?${cleanedParts.joinToString("&")}"
+        } else if (trackingRemoved) {
+            candidates += base
+        }
+
+        // Queryless retailer pages are often archived under the opposite slash convention.
+        // Try that only when no tracking-free query candidate was available.
+        if (candidates.size == 1 && uri.rawPath.isNullOrBlank().not()) {
+            val path = uri.rawPath!!
+            val alternatePath = if (path.endsWith("/")) path.trimEnd('/').ifBlank { "/" } else "$path/"
+            candidates += buildString {
+                append(uri.scheme.lowercase(Locale.ROOT))
+                append("://")
+                append(uri.rawAuthority)
+                append(alternatePath)
+                uri.rawQuery?.takeIf { it.isNotBlank() }?.let { append("?").append(it) }
+            }
+        }
+        return candidates.filter(::isEligibleDirectUrl).take(2)
     }
 
     internal fun parseAvailabilityCapture(body: String, fallbackOriginalUrl: String): WaybackCapture? {
@@ -1518,7 +1610,9 @@ class WaybackPriceHistoryClient(
         private const val MAX_CDX_HTTP_RETRIES = 1
         private const val MAX_CONCURRENT_AVAILABILITY_REQUESTS = 1
         private const val MAX_AVAILABILITY_URL_CANDIDATES = 6
-        private const val MAX_AVAILABILITY_PROBE_CANDIDATES = 2
+        private const val MAX_AVAILABILITY_PROBE_CANDIDATES = 1
+        private const val MAX_CDX_FALLBACK_SNAPSHOTS = 2
+        private const val CDX_FALLBACK_TIMEOUT_SECONDS = 3L
         private const val MAX_AVAILABILITY_BODY_BYTES = 64 * 1024
         private const val CDX_RETRY_DELAY_MS = 500L
         private const val CDX_RETRY_JITTER_MS = 350L

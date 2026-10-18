@@ -49,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -69,6 +70,7 @@ fun SettingsScreen(
     isCheckingSerpApiAccount: Boolean,
     serpApiAccountStatus: String?,
     onCheckSerpApiAccount: () -> Unit,
+    onOpenCrashReport: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -642,6 +644,15 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                OutlinedButton(
+                    onClick = onOpenCrashReport,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("open_crash_report_button")
+                ) {
+                    Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(17.dp))
+                    Text("  Ver informes de cierre")
+                }
             }
         }
 

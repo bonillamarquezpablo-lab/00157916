@@ -1024,6 +1024,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     )
                 }
             }
+        }
         val orderedCandidates = candidates.sortedWith(
             compareBy<FreeArchiveCandidate> { if (it.directUrl != null) 0 else 1 }
                 .thenBy { it.merchantDomain.orEmpty() }

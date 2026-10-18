@@ -440,7 +440,7 @@ class WaybackPriceHistoryClient(
         val textAlternatives = if (textTokens.size >= 2) {
             listOf("(?=.*${urlTokenPattern(textTokens[0])})(?=.*${urlTokenPattern(textTokens[1])})")
         } else emptyList()
-        val requiredLookaheads = (modelAlternatives + textAlternatives).distinct()
+        val requiredLookaheads = (modelAlternatives + textAlternatives + modelFamilyAlternatives).distinct()
         if (requiredLookaheads.isEmpty()) return null
         val start = (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
         val from = formatUtc(start, "yyyyMMdd")

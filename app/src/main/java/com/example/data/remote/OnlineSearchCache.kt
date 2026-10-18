@@ -105,6 +105,9 @@ class OnlineSearchCache(context: Context) {
         rawResponse: String,
         now: Long = System.currentTimeMillis()
     ): Boolean {
+        // Reject obviously oversized JSON before parsing it. The caller stores compact accepted
+        // offers instead, avoiding avoidable CPU and peak-memory cost on large provider responses.
+        if (rawResponse.length > MAX_RAW_RESPONSE_CHARS) return false
         val root = runCatching { JSONObject(rawResponse) }.getOrNull() ?: return false
         stripSensitiveFields(root)
         val sanitizedResponse = root.toString()

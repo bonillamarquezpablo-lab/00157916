@@ -418,8 +418,18 @@ class WaybackPriceHistoryClient(
             "hp.com" -> setOf("hp")
             else -> setOf(normalizedDomain.substringBefore('.'))
         }
-        val textTokens = tokens.filter { token ->
-            token.any(Char::isLetter) && !token.any(Char::isDigit) && token !in hostBrandTerms
+        // Build model-family tokens from the original title. A standalone model number
+        // such as 25/26 is meaningful when paired with Galaxy, even though it is not a SKU.
+        val normalizedTitle = normalizeTitle(expectedTitle)
+        val modelFamilyAlternatives = when {
+            normalizedDomain == "samsung.com" && Regex("""\\bgalaxy\\s+s?\\d{2}\\s+edge\\b""").containsMatchIn(normalizedTitle) -> {
+                val modelNumber = Regex("""\\bgalaxy\\s+s?(\\d{2})\\s+edge\\b""")
+                    .find(normalizedTitle)?.groupValues?.getOrNull(1)
+                if (modelNumber != null) listOf(
+                    "(?=.*galaxy)(?=.*edge)(?=.*$modelNumber)"
+                ) else emptyList()
+            }
+            else -> emptyList()
         }
         // A product SKU/model code is the strongest URL hint, but some retailers use
         // short generic slugs and keep the SKU only in page metadata. Search by either a

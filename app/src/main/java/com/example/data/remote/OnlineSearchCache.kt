@@ -28,7 +28,11 @@ class OnlineSearchCache(context: Context) {
         val payload = preferences.getString(key, null) ?: return null
         val savedAt = preferences.getLong(key + "_saved_at", 0L)
         val age = now - savedAt
-        if (savedAt <= 0L || age < 0L || age >= CACHE_TTL_MS) {
+        if (savedAt <= 0L || age < 0L || age >= CACHE_TTL_MS ||
+            payload.length > MAX_CACHED_PAYLOAD_CHARS
+        ) {
+            // Drop oversized legacy entries on the IO caller rather than parsing them on a
+            // later search. Normal-sized cached results are unaffected.
             preferences.edit().remove(key).remove(key + "_saved_at").apply()
             return null
         }
@@ -100,18 +104,25 @@ class OnlineSearchCache(context: Context) {
         query: String,
         rawResponse: String,
         now: Long = System.currentTimeMillis()
-    ) {
-        val root = runCatching { JSONObject(rawResponse) }.getOrNull() ?: return
+    ): Boolean {
+        val root = runCatching { JSONObject(rawResponse) }.getOrNull() ?: return false
         stripSensitiveFields(root)
-        pruneExpiredAndOldEntries(now)
+        val sanitizedResponse = root.toString()
+        if (sanitizedResponse.length > MAX_RAW_RESPONSE_CHARS) return false
+
         val key = cacheKey(provider, query)
         val payload = JSONObject()
             .put("cache_version", 2)
-            .put("raw_response", root.toString())
+            .put("raw_response", sanitizedResponse)
+            .toString()
+        if (payload.length > MAX_CACHED_PAYLOAD_CHARS) return false
+
+        pruneExpiredAndOldEntries(now)
         preferences.edit()
-            .putString(key, payload.toString())
+            .putString(key, payload)
             .putLong(key + "_saved_at", now)
             .apply()
+        return true
     }
 
     private fun stripSensitiveFields(value: Any?) {
@@ -163,8 +174,9 @@ class OnlineSearchCache(context: Context) {
         val keys = preferences.all.keys
             .filter { it.startsWith("search_") && !it.endsWith("_saved_at") }
         val entries = keys.map { key -> key to preferences.getLong("${key}_saved_at", 0L) }
-        val stale = entries.filter { (_, savedAt) ->
-            savedAt <= 0L || now < savedAt || now - savedAt >= CACHE_TTL_MS
+        val stale = entries.filter { (key, savedAt) ->
+            savedAt <= 0L || now < savedAt || now - savedAt >= CACHE_TTL_MS ||
+                (preferences.getString(key, null)?.length ?: 0) > MAX_CACHED_PAYLOAD_CHARS
         }.map { it.first }
         val validNewestFirst = entries
             .filterNot { it.first in stale }
@@ -190,6 +202,9 @@ class OnlineSearchCache(context: Context) {
 
     companion object {
         const val CACHE_TTL_MS = 24L * 60L * 60L * 1000L
+        /** Bound large provider payloads so preferences remain quick to load and copy. */
+        const val MAX_RAW_RESPONSE_CHARS = 160_000
+        const val MAX_CACHED_PAYLOAD_CHARS = 300_000
         private const val MAX_CACHED_SEARCHES = 40
     }
 }

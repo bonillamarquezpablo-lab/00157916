@@ -330,10 +330,9 @@ fun MarketScreen(
                         expanded = showStoreMenu,
                         onDismissRequest = { showStoreMenu = false }
                     ) {
-                        // DropdownMenu hosts content in a popup. Avoid nesting LazyColumn here:
-                        // LazyLayout does not support intrinsic measurement, which can crash when
-                        // an ancestor in the popup requests intrinsic dimensions. The popup's
-                        // measured height is bounded, so use a regular Column for these options.
+                        // Regression guard for the store popup: keep its bounded content in a
+                        // regular Column rather than nesting LazyColumn (LazyLayout cannot answer
+                        // intrinsic-measurement queries).
                         Column(modifier = Modifier.heightIn(max = 420.dp)) {
                             DropdownMenuItem(
                                 text = { Text("Todas las tiendas (${stores.size})") },

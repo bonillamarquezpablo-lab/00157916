@@ -68,7 +68,13 @@ fun ProductCard(
 ) {
     val context = LocalContext.current
     var showStoreComparison by remember { mutableStateOf(false) }
-    // Reuse date formatters across recompositions instead of allocating them repeatedly.
+    // Reuse derived historical state during ordinary UI recompositions. These model getters
+    // filter/sort a product's timeline, so evaluating them repeatedly in every card is avoidable.
+    val priceBadgeState = remember(product) { product.priceBadgeState }
+    val hasSufficientHistory = remember(product) { product.hasSufficientHistory }
+    val isVerifiedMinimum =
+        product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT &&
+            product.isAtAth
     val observedAtFormatter = remember { SimpleDateFormat("dd/MM HH:mm", Locale("es", "ES")) }
 
     Card(
@@ -76,7 +82,7 @@ fun ProductCard(
             .fillMaxWidth()
             .clip(ProductCardShape)
             .border(
-                width = if (product.isAtAth) 1.5.dp else 1.dp,
+                width = if (isVerifiedMinimum) 1.5.dp else 1.dp,
                 color = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isAtAth) {
                     Color(0xFF10B981).copy(alpha = 0.6f)
                 } else {
@@ -105,7 +111,7 @@ fun ProductCard(
                         .size(80.dp)
                         .clip(ProductImageShape)
                         .testTag("product_photo_${product.id}"),
-                    showAthRibbon = product.isPriceVerified && product.isAtAth
+                    showAthRibbon = product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isAtAth
                 )
 
                 Spacer(modifier = Modifier.width(10.dp))
@@ -201,7 +207,7 @@ fun ProductCard(
 
             // Evidence-based hero badge: never call the first quote a historical minimum.
             HeroPriceBadge(
-                state = product.priceBadgeState,
+                state = priceBadgeState,
                 // A compact status chip is easier to scan than a full-width ribbon.
                 modifier = Modifier,
                 compact = true
@@ -226,7 +232,7 @@ fun ProductCard(
                             com.example.data.model.PriceDisplayStatus.DEMONSTRATION -> null
                         }
                         Text(
-                            text = displayedSavedPrice?.let { "${String.format("%.2f", it)} €" } ?: "Precio no disponible",
+                            text = displayedSavedPrice?.let { "${String.format(Locale("es", "ES"), "%.2f", it)} €" } ?: "Precio no disponible",
                             fontWeight = FontWeight.Black,
                             fontSize = if (displayedSavedPrice != null) 24.sp else 15.sp,
                             letterSpacing = if (displayedSavedPrice != null) (-0.65).sp else 0.sp,
@@ -236,7 +242,7 @@ fun ProductCard(
                         if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isOfficialPvpVerified && product.officialPvp > product.currentPrice) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "${String.format("%.2f", product.officialPvp)} €",
+                                text = "${String.format(Locale("es", "ES"), "%.2f", product.officialPvp)} €",
                                 fontSize = 13.sp,
                                 textDecoration = TextDecoration.LineThrough,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -246,7 +252,7 @@ fun ProductCard(
 
                     if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.realSavingsPercent > 0) {
                         Text(
-                            text = "Ahorro real: -${product.realSavingsPercent}% (-${String.format("%.2f", product.realSavingsAmount)} €)",
+                            text = "Ahorro real: -${product.realSavingsPercent}% (-${String.format(Locale("es", "ES"), "%.2f", product.realSavingsAmount)} €)",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color(0xFF059669)
@@ -296,7 +302,7 @@ fun ProductCard(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Elegir tienda para buscar",
+                    text = "Elegir tienda",
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 12.sp
                 )
@@ -326,7 +332,7 @@ fun ProductCard(
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = if (product.hasSufficientHistory) {
-                        "Mínimo observado: ${String.format("%.2f", product.athMinPrice)} €"
+                        "Mínimo observado: ${String.format(Locale("es", "ES"), "%.2f", product.athMinPrice)} €"
                     } else if (product.isPriceVerified) {
                         "Historial en curso · requiere 90 días"
                     } else {
@@ -349,7 +355,7 @@ fun ProductCard(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Puedes abrir las webs de los comercios desde aquí. Para precios observados, consulta Google Shopping desde Ajustes y confirma el precio final, envío y disponibilidad en la tienda.",
+                        "«Buscar» abre el buscador del comercio cuando está disponible; «Web» abre su página oficial. Comprueba el precio final, el envío y el stock.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -384,7 +390,7 @@ fun ProductCard(
                                         }
                                     }
                                 ) {
-                                    Text("Buscar")
+                                    Text(if (store.supportsProductSearch) "Buscar" else "Web")
                                 }
                             }
                         }

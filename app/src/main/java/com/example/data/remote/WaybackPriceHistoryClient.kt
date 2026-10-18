@@ -169,6 +169,9 @@ class WaybackPriceHistoryClient(
         cdxStage: String
     ): WaybackBackfillResult {
         val cdxHttp = http.newBuilder()
+            // OkHttp's read timeout is independent of callTimeout. Raise both together so the
+            // domain lookup can actually use its configured budget instead of still failing at 5s.
+            .readTimeout(cdxTimeoutSeconds, TimeUnit.SECONDS)
             .callTimeout(cdxTimeoutSeconds, TimeUnit.SECONDS)
             .build()
         val request = Request.Builder().url(cdxUrl).header("User-Agent", USER_AGENT).get().build()

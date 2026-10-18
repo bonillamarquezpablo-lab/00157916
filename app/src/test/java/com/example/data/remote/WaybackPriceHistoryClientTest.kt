@@ -40,6 +40,33 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun domainDiscoveryChoosesDistinctProductUrlsBeforeExactHistoryQueries() {
+        val client = newClient()
+        val body = """
+            [
+              ["timestamp","original","statuscode","mimetype"],
+              ["20250101120000","https://shop.example/products/anker-prime-27k","200","text/html"],
+              ["20250201120000","https://shop.example/products/anker-prime-27k","200","text/html"],
+              ["20250301120000","https://shop.example/item/anker-prime","200","text/html"],
+              ["20250401120000","https://shop.example/item/anker-prime","200","text/html"],
+              ["20250501120000","https://shop.example/products/unrelated","200","text/html"]
+            ]
+        """.trimIndent()
+
+        val captures = client.parseCaptureIndex(body)
+        val candidates = client.selectDistinctProductUrls(captures)
+
+        assertEquals(
+            listOf(
+                "https://shop.example/products/anker-prime-27k",
+                "https://shop.example/item/anker-prime"
+            ),
+            candidates
+        )
+        assertEquals(2, client.selectDistinctProductUrls(captures, limit = 2).size)
+    }
+
+    @Test
     fun acceptsVerifiedEurJsonLdPriceWhenProductTitleMatches() {
         val client = newClient()
         val html = """
@@ -290,7 +317,8 @@ class WaybackPriceHistoryClientTest {
         )
         assertNotNull(url)
         assertEquals("domain", url!!.queryParameter("matchType"))
-        assertEquals("80", url.queryParameter("limit"))
+        assertEquals("6", url.queryParameter("limit"))
+        assertEquals("urlkey", url.queryParameter("collapse"))
         assertNull("Domain scans must preserve repeated captures over time", url.queryParameter("collapse"))
         assertEquals("20250115", url.queryParameter("from"))
         assertTrue(url.queryParameterValues("filter").orEmpty().any { raw ->

@@ -116,8 +116,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         // page lookup first, but reserve only a short, separate budget for the broad fallback.
         const val MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS = 12_000L
         // Four seconds cap the CDX domain-index request itself. Allow one additional bounded
-        // snapshot phase so a fast index response can still yield and validate historical prices.
-        const val MAX_ARCHIVE_DOMAIN_FALLBACK_MS = 8_000L
+        // Four seconds for domain discovery, then a short exact-URL and snapshot phase.
+        // This remains a bounded background operation and never runs on the UI thread.
+        const val MAX_ARCHIVE_DOMAIN_FALLBACK_MS = 10_000L
     }
 
     private val database = AppDatabase.getInstance(application)
@@ -1677,6 +1678,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
                 val diagnosticLabels = diagnosticCodes.take(5).map { code ->
                     when {
+                        code.startsWith("CDX_DOMAIN_EXACT_HTTP_") -> "$code (respuesta HTTP de la consulta exacta de una URL candidata)"
                         code.startsWith("CDX_EXACT_HTTP_") -> "$code (respuesta HTTP de la búsqueda por URL exacta)"
                         code.startsWith("CDX_DOMAIN_HTTP_") -> "$code (respuesta HTTP de la búsqueda por dominio)"
                         code.startsWith("SNAPSHOT_HTTP_") -> "$code (respuesta HTTP de una captura)"
@@ -1693,7 +1695,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             "CDX_EXACT_INVALID_RESPONSE" -> "$code (la consulta exacta no devolvió el formato esperado)"
                             "CDX_DOMAIN_INVALID_RESPONSE" -> "$code (la consulta por dominio no devolvió el formato esperado)"
                             "CDX_EXACT_TIMEOUT" -> "$code (agotó el tiempo la consulta a la URL exacta)"
-                            "CDX_DOMAIN_TIMEOUT" -> "$code (agotó el tiempo la búsqueda amplia por dominio)"
+                            "CDX_DOMAIN_TIMEOUT" -> "$code (agotó el tiempo la búsqueda de URLs de producto en el índice)"
+                            "CDX_DOMAIN_EXACT_TIMEOUT" -> "$code (agotó el tiempo al consultar una URL de producto encontrada)"
+                            "CDX_DOMAIN_EXACT_DNS" -> "$code (no se pudo resolver el servidor al consultar una URL candidata)"
+                            "CDX_DOMAIN_EXACT_NETWORK" -> "$code (fallo de conexión al consultar una URL candidata)"
+                            "CDX_DOMAIN_EXACT_UNEXPECTED_ERROR" -> "$code (error inesperado al consultar una URL candidata)"
+                            "CDX_DOMAIN_EXACT_BODY_EMPTY_OR_LIMIT" -> "$code (respuesta de la URL candidata vacía o demasiado grande)"
+                            "CDX_DOMAIN_EXACT_INVALID_RESPONSE" -> "$code (la URL candidata devolvió un formato de índice no válido)"
+                            "CDX_NO_PRODUCT_URLS" -> "$code (el índice no devolvió URLs de producto que coincidieran con la búsqueda)"
                             "CDX_EXACT_DNS" -> "$code (no se pudo resolver el servidor del índice en la consulta exacta)"
                             "CDX_DOMAIN_DNS" -> "$code (no se pudo resolver el servidor del índice en la búsqueda por dominio)"
                             "CDX_EXACT_NETWORK" -> "$code (fallo de conexión en la consulta exacta)"

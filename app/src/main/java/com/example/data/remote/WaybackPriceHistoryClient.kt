@@ -71,6 +71,7 @@ class WaybackPriceHistoryClient(
         "minimo_wayback_backfill",
         Context.MODE_PRIVATE
     )
+    private val snapshotSemaphore = Semaphore(MAX_CONCURRENT_SNAPSHOT_REQUESTS)
 
     suspend fun fetchHistory(
         originalUrl: String,
@@ -126,14 +127,93 @@ class WaybackPriceHistoryClient(
         if (wasAttemptedRecently(attempt, now)) {
             return@withContext WaybackBackfillResult(skippedRecently = true, diagnosticCodes = setOf("CACHE_SKIPPED"))
         }
-        queryCdxAndFetchPrices(
-            cdxUrl, expectedTitle, attempt, now,
-            maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP,
-            // The expensive merchant-index request has a strict 4-second budget. Snapshot
-            // downloads are a separate bounded phase; the caller must not cancel them using
-            // the index budget or a successful CDX response can never yield a verified price.
+
+        // Stage 1 is discovery only: request a few distinct, product-like URLs instead of
+        // asking CDX to return dozens of captures across an entire large retailer domain.
+        // This lets the indexed URL range stop as soon as enough matching URLs are found.
+        val discovery = queryCdxIndexOnly(
+            cdxUrl = cdxUrl,
             cdxTimeoutSeconds = DOMAIN_CDX_TIMEOUT_SECONDS,
             cdxStage = "CDX_DOMAIN"
+        )
+        if (discovery.requestFailed) {
+            rememberAttempt(attempt, now, hasQuotes = false, failed = true)
+            return@withContext WaybackBackfillResult(
+                requestFailed = true,
+                diagnosticCodes = discovery.diagnosticCodes
+            )
+        }
+
+        val candidateUrls = selectDistinctProductUrls(discovery.captures)
+        if (candidateUrls.isEmpty()) {
+            rememberAttempt(attempt, now, hasQuotes = false, failed = false)
+            return@withContext WaybackBackfillResult(
+                available = discovery.available,
+                diagnosticCodes = setOf(if (discovery.available) "CDX_NO_PRODUCT_URLS" else "CDX_DOMAIN_NO_RESULT")
+            )
+        }
+
+        // Stage 2 is narrow: each discovered URL gets its own exact CDX request so we can
+        // retrieve multiple dates for the same page. Two candidates run concurrently, while
+        // the shared snapshot semaphore below caps total Wayback downloads across the client.
+        val exactResults = coroutineScope {
+            candidateUrls.map { originalUrl ->
+                async {
+                    val exactAttempt = attemptKey("url|$originalUrl|$expectedTitle")
+                    if (wasAttemptedRecently(exactAttempt, now)) {
+                        val cachedQuotes = preferences.getBoolean("${{exactAttempt}_has_quotes", false)
+                        WaybackBackfillResult(
+                            skippedRecently = true,
+                            available = cachedQuotes,
+                            diagnosticCodes = setOf("CACHE_SKIPPED")
+                        )
+                    } else {
+                        val exactCdxUrl = buildCdxUrl(
+                            originalUrl = originalUrl,
+                            now = now,
+                            lookbackDays = minOf(lookbackDays.coerceAtLeast(1), DOMAIN_LOOKBACK_DAYS)
+                        ) ?: return@async WaybackBackfillResult(
+                            requestFailed = true,
+                            diagnosticCodes = setOf("CDX_URL_BUILD_FAILED")
+                        )
+                        queryCdxAndFetchPrices(
+                            cdxUrl = exactCdxUrl,
+                            expectedTitle = expectedTitle,
+                            cacheKey = exactAttempt,
+                            now = now,
+                            maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP,
+                            cdxTimeoutSeconds = DOMAIN_EXACT_CDX_TIMEOUT_SECONDS,
+                            cdxStage = "CDX_DOMAIN_EXACT"
+                        )
+                    }
+                }
+            }.awaitAll()
+        }
+
+        val quotes = exactResults.flatMap { it.quotes }
+            .sortedBy { it.observedAt }
+            .distinctBy { Triple(it.originalUrl, it.observedAt, it.price) }
+        val cachedPositiveResult = exactResults.any { it.skippedRecently && it.available }
+        val hasKnownHistory = quotes.isNotEmpty() || cachedPositiveResult
+        val requestFailed = exactResults.any { it.requestFailed }
+        rememberAttempt(
+            attempt,
+            now,
+            hasQuotes = hasKnownHistory,
+            failed = quotes.isEmpty() && !cachedPositiveResult && requestFailed
+        )
+        val diagnostics = linkedSetOf<String>().apply {
+            exactResults.forEach { addAll(it.diagnosticCodes) }
+            if (quotes.isEmpty() && isEmpty()) add("NO_VERIFIED_EUR_PRICE")
+        }
+        WaybackBackfillResult(
+            quotes = quotes,
+            capturesFound = exactResults.sumOf { it.capturesFound },
+            capturesChecked = exactResults.sumOf { it.capturesChecked },
+            skippedRecently = exactResults.isNotEmpty() && exactResults.all { it.skippedRecently },
+            available = exactResults.any { it.available },
+            requestFailed = requestFailed,
+            diagnosticCodes = diagnostics
         )
     }
 
@@ -163,6 +243,60 @@ class WaybackPriceHistoryClient(
             .apply()
     }
 
+    private suspend fun queryCdxIndexOnly(
+        cdxUrl: HttpUrl,
+        cdxTimeoutSeconds: Long,
+        cdxStage: String
+    ): CdxIndexOutcome {
+        val cdxHttp = http.newBuilder()
+            .readTimeout(cdxTimeoutSeconds, TimeUnit.SECONDS)
+            .callTimeout(cdxTimeoutSeconds, TimeUnit.SECONDS)
+            .build()
+        val request = Request.Builder().url(cdxUrl).header("User-Agent", USER_AGENT).get().build()
+        return try {
+            executeCdxWithTransientRetry(cdxHttp, request, maxRetries = 0).use { response ->
+                if (!response.isSuccessful) {
+                    return CdxIndexOutcome(
+                        requestFailed = true,
+                        diagnosticCodes = setOf("${{cdxStage}_HTTP_${{response.code}")
+                    )
+                }
+                val body = readBodyLimited(response.body, MAX_CDX_BODY_BYTES)
+                if (body == null) {
+                    return CdxIndexOutcome(
+                        requestFailed = true,
+                        diagnosticCodes = setOf("${{cdxStage}_BODY_EMPTY_OR_LIMIT")
+                    )
+                }
+                if (!isValidCaptureIndexResponse(body)) {
+                    return CdxIndexOutcome(
+                        requestFailed = true,
+                        diagnosticCodes = setOf("${{cdxStage}_INVALID_RESPONSE")
+                    )
+                }
+                CdxIndexOutcome(captures = parseCaptureIndex(body), available = true)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            CdxIndexOutcome(
+                requestFailed = true,
+                diagnosticCodes = setOf(classifyNetworkFailure(cdxStage, failure))
+            )
+        }
+    }
+
+    internal fun selectDistinctProductUrls(
+        captures: List<WaybackCapture>,
+        limit: Int = MAX_DOMAIN_PRODUCT_URL_CANDIDATES
+    ): List<String> =
+        captures.asSequence()
+            .map { it.originalUrl }
+            .filter(::isEligibleDirectUrl)
+            .distinct()
+            .take(limit.coerceAtLeast(0))
+            .toList()
+
     private suspend fun queryCdxAndFetchPrices(
         cdxUrl: HttpUrl,
         expectedTitle: String,
@@ -186,7 +320,7 @@ class WaybackPriceHistoryClient(
             executeCdxWithTransientRetry(
                 cdxHttp,
                 request,
-                maxRetries = if (cdxStage == "CDX_DOMAIN") 0 else MAX_CDX_HTTP_RETRIES
+                maxRetries = if (cdxStage.startsWith("CDX_DOMAIN")) 0 else MAX_CDX_HTTP_RETRIES
             ).use { response ->
                 if (!response.isSuccessful) {
                     rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
@@ -214,7 +348,6 @@ class WaybackPriceHistoryClient(
         }
 
         val sampled = sampleCaptures(captures, maxSnapshots)
-        val semaphore = Semaphore(MAX_CONCURRENT_SNAPSHOT_REQUESTS)
         // Build the bounded snapshot client once per lookup and reuse its connection pool.
         val snapshotHttp = http.newBuilder()
             .callTimeout(SNAPSHOT_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -222,7 +355,7 @@ class WaybackPriceHistoryClient(
         val fetched = coroutineScope {
             sampled.map { capture ->
                 async {
-                    semaphore.withPermit {
+                    snapshotSemaphore.withPermit {
                         val snapshotUrl = buildSnapshotUrl(capture)
                             ?: return@withPermit SnapshotFetch(false, null, "SNAPSHOT_URL_INVALID")
                         val snapshotRequest = Request.Builder()
@@ -563,7 +696,9 @@ class WaybackPriceHistoryClient(
             .addQueryParameter("filter", "original:$urlPattern")
             .addQueryParameter("from", formatUtc((now - DOMAIN_LOOKBACK_DAYS.toLong() * DAY_MS).coerceAtLeast(start), "yyyyMMdd"))
             .addQueryParameter("to", to)
-            // Keep multiple timestamps for a URL; history needs multiple captures to build a curve.
+            // Discovery needs distinct URLs, not repeated timestamps for one URL.
+            // Exact-URL queries fetch the time series after a candidate page is identified.
+            .addQueryParameter("collapse", "urlkey")
             .addQueryParameter("limit", MAX_DOMAIN_INDEX_ROWS.toString())
             .build()
     }
@@ -974,6 +1109,13 @@ class WaybackPriceHistoryClient(
             timeZone = TimeZone.getTimeZone("UTC")
         }.format(Date(timestamp))
 
+    private data class CdxIndexOutcome(
+        val captures: List<WaybackCapture> = emptyList(),
+        val available: Boolean = false,
+        val requestFailed: Boolean = false,
+        val diagnosticCodes: Set<String> = emptySet()
+    )
+
     private data class SnapshotFetch(
         val fetched: Boolean,
         val quote: ArchivedPriceQuote?,
@@ -998,10 +1140,12 @@ class WaybackPriceHistoryClient(
         private const val DIRECT_CDX_TIMEOUT_SECONDS = 15L
         // Keep the broad domain-index request aligned with the UI's strict four-second budget.
         private const val DOMAIN_CDX_TIMEOUT_SECONDS = 4L
+        private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 2L
+        private const val MAX_DOMAIN_PRODUCT_URL_CANDIDATES = 2
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 4
-        private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 4
+        private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 2
         private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 3L
-        private const val MAX_DOMAIN_INDEX_ROWS = 80
+        private const val MAX_DOMAIN_INDEX_ROWS = 6
         private const val DOMAIN_LOOKBACK_DAYS = 730
         private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L

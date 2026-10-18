@@ -661,7 +661,23 @@ class WaybackPriceHistoryClientTest {
                 .putBoolean("${key}_has_quotes", false)
                 .putBoolean("${key}_failed", false)
                 .commit()
-            preferences.edit().putBoolean("${key}_failed", true).commit()
+            preferences.edit()
+                .putBoolean("${key}_failed", true)
+                .putBoolean("${key}_rate_limited", true)
+                .putLong("wayback_rate_limit_until", lastAttempt + 120_000L)
+                .commit()
+            assertTrue(
+                "A rate-limited lookup is paused until the stored cooldown expires",
+                client.wasAttemptedRecently(key, lastAttempt + 60_000L)
+            )
+            assertFalse(
+                "A rate-limited lookup can retry when Retry-After cooldown expires",
+                client.wasAttemptedRecently(key, lastAttempt + 180_000L)
+            )
+            preferences.edit()
+                .putBoolean("${key}_rate_limited", false)
+                .remove("wayback_rate_limit_until")
+                .commit()
             assertTrue(
                 "A failed network request is briefly cached to avoid amplifying server throttling",
                 client.wasAttemptedRecently(key, lastAttempt + 10L * 60L * 1000L)
@@ -698,6 +714,8 @@ class WaybackPriceHistoryClientTest {
                 .remove(key)
                 .remove("${key}_has_quotes")
                 .remove("${key}_failed")
+                .remove("${key}_rate_limited")
+                .remove("wayback_rate_limit_until")
                 .commit()
         }
     }

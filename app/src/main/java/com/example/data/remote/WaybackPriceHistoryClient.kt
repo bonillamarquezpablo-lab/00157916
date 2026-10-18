@@ -221,19 +221,26 @@ class WaybackPriceHistoryClient(
             return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("${stage}_NO_CANDIDATES"))
         }
 
-        // Avoid bursts and stay within the UI's 10-second merchant-fallback budget:
-        // one exact URL gets three dates; up to two domain candidates get two dates each.
-        val dates = availabilityTargetDates(now, lookbackDays, if (stage == "AVAILABILITY_EXACT") 2 else 2)
-        val probes = coroutineScope {
-            urls.flatMap { originalUrl ->
-                dates.map { targetDate ->
-                    async {
-                        availabilitySemaphore.withPermit {
-                            queryAvailability(originalUrl, targetDate, stage)
-                        }
-                    }
+        // Probe in a bounded cascade, not a fan-out: look at two dates for the most likely
+        // URL first. Only try a second URL if the first returned no captures; a 429 or network
+        // failure stops the stage immediately.
+        val dates = availabilityTargetDates(now, lookbackDays, 2)
+        val probes = mutableListOf<AvailabilityProbe>()
+        for (originalUrl in urls) {
+            var candidateHadCapture = false
+            for (targetDate in dates) {
+                val probe = availabilitySemaphore.withPermit {
+                    queryAvailability(originalUrl, targetDate, stage)
                 }
-            }.awaitAll()
+                probes += probe
+                if (probe.diagnosticCode == "WAYBACK_RATE_LIMITED") break
+                if (probe.capture != null) candidateHadCapture = true
+                if (probe.requestFailed) break
+            }
+            if (probes.any { it.diagnosticCode == "WAYBACK_RATE_LIMITED" } ||
+                probes.any { it.requestFailed && it.diagnosticCode != "${stage}_HTTP_404" } ||
+                candidateHadCapture
+            ) break
         }
         val captures = probes.mapNotNull { it.capture }
             .filter { it.timestamp <= now && it.timestamp >= (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L) }
@@ -379,22 +386,10 @@ class WaybackPriceHistoryClient(
             .build()
         val request = Request.Builder().url(endpoint).header("User-Agent", USER_AGENT).get().build()
         return try {
-            // The shared permit plus a persisted cooldown make a single HTTP 429 stop the
-            // remaining queued probes, including attempts started by another client instance.
-            activeRateLimitUntil(System.currentTimeMillis())?.let {
-                return AvailabilityProbe(requestFailed = true, diagnosticCode = "WAYBACK_RATE_LIMITED")
+            // The shared permit and persisted request gate are also used by CDX fallback calls.
+            awaitArchiveRequestTurn()?.let { code ->
+                return AvailabilityProbe(requestFailed = true, diagnosticCode = code)
             }
-            val now = System.currentTimeMillis()
-            val lastRequestAt = preferences.getLong(KEY_LAST_AVAILABILITY_REQUEST_AT, 0L)
-            val waitMs = computeAvailabilityDelayMs(lastRequestAt, now)
-            if (waitMs > 0L) delay(waitMs)
-            // Re-check just before dispatch in case another client set a cooldown meanwhile.
-            activeRateLimitUntil(System.currentTimeMillis())?.let {
-                return AvailabilityProbe(requestFailed = true, diagnosticCode = "WAYBACK_RATE_LIMITED")
-            }
-            preferences.edit()
-                .putLong(KEY_LAST_AVAILABILITY_REQUEST_AT, System.currentTimeMillis())
-                .apply()
             availabilityHttp.newCall(request).execute().use { response ->
                 if (response.code == 429) {
                     activateRateLimit(response.header("Retry-After"), System.currentTimeMillis())
@@ -613,6 +608,18 @@ class WaybackPriceHistoryClient(
         return now - lastAttempt < retryInterval
     }
 
+    private suspend fun awaitArchiveRequestTurn(): String? {
+        if (activeRateLimitUntil(System.currentTimeMillis()) != null) return "WAYBACK_RATE_LIMITED"
+        val now = System.currentTimeMillis()
+        val lastRequestAt = preferences.getLong(KEY_LAST_AVAILABILITY_REQUEST_AT, 0L)
+        val waitMs = computeAvailabilityDelayMs(lastRequestAt, now)
+        if (waitMs > 0L) delay(waitMs)
+        // Recheck after waiting; another client may have activated the cooldown.
+        if (activeRateLimitUntil(System.currentTimeMillis()) != null) return "WAYBACK_RATE_LIMITED"
+        preferences.edit().putLong(KEY_LAST_AVAILABILITY_REQUEST_AT, System.currentTimeMillis()).apply()
+        return null
+    }
+
     internal fun computeAvailabilityDelayMs(lastRequestAt: Long, now: Long): Long {
         if (lastRequestAt <= 0L) return 0L
         // Cap wait time to one interval so clock changes cannot stall history for hours.
@@ -684,6 +691,13 @@ class WaybackPriceHistoryClient(
         val request = Request.Builder().url(cdxUrl).header("User-Agent", USER_AGENT).get().build()
         return try {
             executeCdxWithTransientRetry(cdxHttp, request, maxRetries = 0).use { response ->
+                if (response.code == 429) {
+                    activateRateLimit(response.header("Retry-After"), System.currentTimeMillis())
+                    return CdxIndexOutcome(
+                        requestFailed = true,
+                        diagnosticCodes = setOf("WAYBACK_RATE_LIMITED")
+                    )
+                }
                 if (!response.isSuccessful) {
                     return CdxIndexOutcome(
                         requestFailed = true,
@@ -735,46 +749,23 @@ class WaybackPriceHistoryClient(
         cdxTimeoutSeconds: Long,
         cdxStage: String
     ): WaybackBackfillResult {
-        val cdxHttp = http.newBuilder()
-            // OkHttp's read timeout is independent of callTimeout. Raise both together so the
-            // domain lookup can actually use its configured budget instead of still failing at 5s.
-            .readTimeout(cdxTimeoutSeconds, TimeUnit.SECONDS)
-            .callTimeout(cdxTimeoutSeconds, TimeUnit.SECONDS)
-            .build()
-        val request = Request.Builder().url(cdxUrl).header("User-Agent", USER_AGENT).get().build()
-        val captures = try {
-            // A domain-wide regex query is costly on the public index. Do not issue it twice:
-            // one 503/timeout should end this stage quickly and leave the client responsive.
-            // Exact-URL queries retain their single retry for transient 5xx responses.
-            executeCdxWithTransientRetry(
-                cdxHttp,
-                request,
-                maxRetries = if (cdxStage.startsWith("CDX_DOMAIN")) 0 else MAX_CDX_HTTP_RETRIES
-            ).use { response ->
-                if (!response.isSuccessful) {
-                    rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
-                    return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("${cdxStage}_HTTP_${response.code}"))
-                }
-                val body = readBodyLimited(response.body, MAX_CDX_BODY_BYTES)
-                if (body == null) {
-                    rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
-                    return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("${cdxStage}_BODY_EMPTY_OR_LIMIT"))
-                }
-                if (!isValidCaptureIndexResponse(body)) {
-                    rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
-                    return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("${cdxStage}_INVALID_RESPONSE"))
-                }
-                parseCaptureIndex(body)
+        val cdxOutcome = availabilitySemaphore.withPermit {
+            val gate = awaitArchiveRequestTurn()
+            if (gate != null) {
+                CdxIndexOutcome(requestFailed = true, diagnosticCodes = setOf(gate))
+            } else {
+                queryCdxIndexOnly(cdxUrl, cdxTimeoutSeconds, cdxStage)
             }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (failure: Exception) {
-            rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
+        }
+        if (cdxOutcome.requestFailed) {
+            val rateLimited = cdxOutcome.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
+            rememberAttempt(cacheKey, now, hasQuotes = false, failed = true, rateLimited = rateLimited)
             return WaybackBackfillResult(
                 requestFailed = true,
-                diagnosticCodes = setOf(classifyNetworkFailure(cdxStage, failure))
+                diagnosticCodes = cdxOutcome.diagnosticCodes
             )
         }
+        val captures = cdxOutcome.captures
 
         val sampled = sampleCaptures(captures, maxSnapshots)
         // Build the bounded snapshot client once per lookup and reuse its connection pool.

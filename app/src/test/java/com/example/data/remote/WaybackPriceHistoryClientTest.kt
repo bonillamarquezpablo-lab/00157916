@@ -2,6 +2,11 @@ package com.example.data.remote
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
@@ -61,6 +66,84 @@ class WaybackPriceHistoryClientTest {
             "No verified historical EUR quote recovered from live Wayback. " + outcomes.joinToString(" | "),
             verifiedQuoteFound
         )
+    }
+
+    @Test
+    fun cdxProductUrlFallbackRecoversPriceWhenAvailabilityFindsNoCaptures() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .commit()
+
+        val title = "Anker Prime 27K Power Bank Cascade Test"
+        val archivedUrl = "https://www.shop.example/products/anker-prime-27k-power-bank"
+        val requests = CopyOnWriteArrayList<String>()
+        val availabilityBody = """{"archived_snapshots":{"closest":{"available":false}}}"""
+        val cdxBody = """
+            [
+              ["timestamp","original","statuscode","mimetype"],
+              ["20250101120000","$archivedUrl","200","text/html"]
+            ]
+        """.trimIndent()
+        val archivedHtml = """
+            <html><head>
+              <script type="application/ld+json">
+                {"@type":"Product","name":"$title",
+                 "offers":{"@type":"Offer","price":"79.99","priceCurrency":"EUR"}}
+              </script>
+            </head><body></body></html>
+        """.trimIndent()
+
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            val hostAndPath = request.url.host + request.url.encodedPath
+            requests += hostAndPath
+            val (body, contentType) = when {
+                request.url.host == "archive.org" &&
+                    request.url.encodedPath == "/wayback/available" ->
+                    availabilityBody to "application/json; charset=utf-8"
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") ->
+                    cdxBody to "application/json; charset=utf-8"
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/web/") ->
+                    archivedHtml to "text/html; charset=utf-8"
+                else -> throw AssertionError("Unexpected Wayback request: $hostAndPath")
+            }
+            Response.Builder()
+                .request(request)
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .header("Content-Type", contentType)
+                .body(body.toResponseBody(contentType.toMediaType()))
+                .build()
+        }.build()
+
+        try {
+            val client = WaybackPriceHistoryClient(context, http)
+            val result = withTimeout(12_000L) {
+                client.fetchHistoryByMerchantDomain(
+                    domain = "shop.example",
+                    expectedTitle = title,
+                    lookbackDays = 730
+                )
+            }
+
+            assertEquals("The fallback should verify the archived EUR price", 1, result.quotes.size)
+            assertEquals(79.99, result.quotes.single().price, 0.001)
+            assertEquals("EUR", result.quotes.single().currency)
+            assertEquals(2, requests.count { it.startsWith("archive.org/wayback/available") })
+            assertEquals(1, requests.count { it.startsWith("web.archive.org/cdx/search/cdx") })
+            assertEquals(1, requests.count { it.startsWith("web.archive.org/web/") })
+        } finally {
+            preferences.edit()
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .commit()
+        }
     }
 
     @Test

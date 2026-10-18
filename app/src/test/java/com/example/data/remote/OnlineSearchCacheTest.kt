@@ -126,4 +126,22 @@ class OnlineSearchCacheTest {
         assertNotNull(cache.read("GOOGLE_SHOPPING", "anker prime 27k", now + 1L))
     }
 
+
+    @Test
+    fun oversizedRawPayloadIsRejectedSoCallerCanCacheCompactOffersInstead() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val cache = OnlineSearchCache(context)
+        val now = 1_800_400_000_000L
+        val query = "oversized-cache-regression"
+        val response = JSONObject()
+            .put("shopping_results", org.json.JSONArray().put(
+                JSONObject().put("large_description", "x".repeat(OnlineSearchCache.MAX_RAW_RESPONSE_CHARS + 100))
+            ))
+            .toString()
+
+        assertTrue(response.length > OnlineSearchCache.MAX_RAW_RESPONSE_CHARS)
+        assertFalse(cache.writeRaw("GOOGLE_SHOPPING", query, response, now))
+        assertNull(cache.read("GOOGLE_SHOPPING", query, now + 1L))
+    }
+
 }

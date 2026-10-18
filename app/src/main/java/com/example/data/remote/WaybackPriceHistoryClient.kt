@@ -227,15 +227,19 @@ class WaybackPriceHistoryClient(
                                     if (html == null) {
                                         SnapshotFetch(false, null, "SNAPSHOT_BODY_EMPTY_OR_LIMIT")
                                     } else {
+                                        val quote = parseArchivedPrice(
+                                            html = html,
+                                            expectedTitle = expectedTitle,
+                                            originalUrl = capture.originalUrl,
+                                            snapshotUrl = snapshotUrl,
+                                            observedAt = capture.timestamp
+                                        )
                                         SnapshotFetch(
                                             fetched = true,
-                                            quote = parseArchivedPrice(
-                                                html = html,
-                                                expectedTitle = expectedTitle,
-                                                originalUrl = capture.originalUrl,
-                                                snapshotUrl = snapshotUrl,
-                                                observedAt = capture.timestamp
-                                            )
+                                            quote = quote,
+                                            diagnosticCode = if (quote == null) {
+                                                diagnoseArchivedPrice(html, expectedTitle)
+                                            } else null
                                         )
                                     }
                                 }
@@ -315,6 +319,31 @@ class WaybackPriceHistoryClient(
         }
     }
 
+    private fun diagnoseArchivedPrice(html: String, expectedTitle: String): String {
+        val jsonLd = extractJsonLdProductOffers(html)
+        val pageTitle = readMeta(html, setOf("og:title"))
+            ?: readMeta(html, setOf("twitter:title"))
+            ?: Regex("""(?is)<title[^>]*>(.*?)</title>""").find(html)?.groupValues?.getOrNull(1)?.let(::decodeHtml)
+        val metaPrice = listOf(
+            "product:price:amount", "og:price:amount", "price", "product:price"
+        ).firstNotNullOfOrNull { key -> readMeta(html, setOf(key))?.let(::parsePositivePrice) }
+        val metaCurrency = listOf(
+            "product:price:currency", "og:price:currency", "pricecurrency"
+        ).firstNotNullOfOrNull { key -> readMeta(html, setOf(key)) }?.uppercase(Locale.ROOT)
+        if (pageTitle.isNullOrBlank() && jsonLd.isEmpty()) return "ARCHIVE_TITLE_MISSING"
+        if (metaPrice == null && jsonLd.isEmpty()) return "ARCHIVE_PRICE_METADATA_MISSING"
+        val candidates = jsonLd + if (!pageTitle.isNullOrBlank() && metaPrice != null && !metaCurrency.isNullOrBlank()) {
+            listOf(Triple(pageTitle, metaPrice, metaCurrency))
+        } else emptyList()
+        if (candidates.none { it.third.equals("EUR", ignoreCase = true) }) {
+            return "ARCHIVE_EUR_PRICE_MISSING"
+        }
+        if (candidates.none { isMatchingProductTitle(expectedTitle, it.first) }) {
+            return "ARCHIVE_PRODUCT_TITLE_MISMATCH"
+        }
+        return "ARCHIVE_PRICE_AMBIGUOUS_OR_INVALID"
+    }
+
     internal fun parseAvailabilityCapture(body: String, fallbackOriginalUrl: String): WaybackCapture? {
         val closest = try {
             JSONObject(body).optJSONObject("archived_snapshots")?.optJSONObject("closest")
@@ -330,7 +359,13 @@ class WaybackPriceHistoryClient(
                 timeZone = TimeZone.getTimeZone("UTC")
             }.parse(rawTimestamp)?.time
         }.getOrNull() ?: return null
-        val original = fallbackOriginalUrl.takeIf(::isEligibleDirectUrl) ?: return null
+        val archivedSnapshotUrl = closest.optString("url")
+        val originalFromSnapshot = Regex(
+            """(?i)/web/\\d{14}(?:id_|if_)?/(https?://.+)$"""
+        ).find(archivedSnapshotUrl)?.groupValues?.getOrNull(1)
+        val original = originalFromSnapshot?.takeIf(::isEligibleDirectUrl)
+            ?: fallbackOriginalUrl.takeIf(::isEligibleDirectUrl)
+            ?: return null
         return WaybackCapture(rawTimestamp, timestamp, original)
     }
 

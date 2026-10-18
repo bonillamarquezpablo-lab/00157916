@@ -1505,12 +1505,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 expectedTitle = candidate.title
                             )
                         }
-                        // If the exact URL has no usable old prices (or only a Google Shopping link was
-                        // provided), try a bounded, product-term-filtered lookup on the known merchant.
-                        // If the exact product URL had archived captures but none contained
-                        // verifiable EUR price metadata, don't immediately repeat a broad domain scan.
-                        // Domain fallback remains enabled when there were no captures or the exact
-                        // URL request failed, which covers Google Shopping-only seller links.
+                        // If the exact URL yields no verified quote, try a bounded domain lookup too:
+                        // another archived product URL may carry price metadata even when this URL's
+                        // captures do not. Both paths have independent request and snapshot limits.
                         if (candidate.merchantDomain != null &&
                             results.none { it.quotes.isNotEmpty() }
                         ) {
@@ -1595,7 +1592,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     requestFailedCount > 0 && capturesFoundCount > 0 && checkedCount == 0 ->
                         "Internet Archive encontró $capturesFoundCount capturas, pero no logró descargar ninguna. No se puede confirmar el precio histórico; inténtalo de nuevo. No se ha gastado cuota de SerpApi."
                     requestFailedCount > 0 ->
-                        "Una o más consultas o descargas de Internet Archive fallaron. Esto no confirma que no existan capturas; puedes volver a intentarlo. No se ha gastado cuota de SerpApi."
+                        "Una o más consultas o descargas de Internet Archive fallaron o agotaron el tiempo. Esto no confirma que no existan capturas; puedes volver a intentarlo. No se ha gastado cuota de SerpApi."
                     timedOutCount > 0 ->
                         "La búsqueda histórica agotó el tiempo disponible para $timedOutCount tienda(s). Las consultas están limitadas para mantener la fluidez; prueba de nuevo más tarde. No se ha gastado cuota de SerpApi."
                     capturesFoundCount == 0 && successfulLookupsCount > 0 ->

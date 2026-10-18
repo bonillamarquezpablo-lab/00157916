@@ -203,7 +203,7 @@ fun ProductCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
             // Evidence-based hero badge: never call the first quote a historical minimum.
             HeroPriceBadge(
@@ -288,7 +288,7 @@ fun ProductCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
             OutlinedButton(
                 onClick = { showStoreComparison = true },
@@ -307,7 +307,7 @@ fun ProductCard(
                     fontSize = 12.sp
                 )
             }
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
             // One short history line; detailed evidence and the 90-day requirement live in
             // the product sheet, so repeated cards stay scannable.

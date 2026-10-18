@@ -19,7 +19,11 @@ import org.json.JSONException
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.net.URI
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.InterruptedIOException
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.text.Normalizer
@@ -44,7 +48,9 @@ data class WaybackBackfillResult(
     val skippedRecently: Boolean = false,
     val available: Boolean = false,
     /** True when the archive request or every snapshot download failed; distinct from no captures. */
-    val requestFailed: Boolean = false
+    val requestFailed: Boolean = false,
+    /** Sanitized stage codes for actionable UI diagnostics; never contains raw URLs or exception text. */
+    val diagnosticCodes: Set<String> = emptySet()
 )
 
 /**
@@ -72,17 +78,20 @@ class WaybackPriceHistoryClient(
         lookbackDays: Int = DEFAULT_LOOKBACK_DAYS
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
         if (!preferences.getBoolean("enabled", true)) {
-            return@withContext WaybackBackfillResult()
+            return@withContext WaybackBackfillResult(diagnosticCodes = setOf("WAYBACK_DISABLED"))
         }
-        if (!isEligibleDirectUrl(originalUrl) || expectedTitle.isBlank()) {
-            return@withContext WaybackBackfillResult()
+        if (!isEligibleDirectUrl(originalUrl)) {
+            return@withContext WaybackBackfillResult(diagnosticCodes = setOf("DIRECT_URL_INVALID"))
+        }
+        if (expectedTitle.isBlank()) {
+            return@withContext WaybackBackfillResult(diagnosticCodes = setOf("PRODUCT_TITLE_EMPTY"))
         }
         val attempt = attemptKey("url|$originalUrl|$expectedTitle")
         if (wasAttemptedRecently(attempt, now)) {
-            return@withContext WaybackBackfillResult(skippedRecently = true)
+            return@withContext WaybackBackfillResult(skippedRecently = true, diagnosticCodes = setOf("CACHE_SKIPPED"))
         }
         val cdxUrl = buildCdxUrl(originalUrl, now, lookbackDays)
-            ?: return@withContext WaybackBackfillResult()
+            ?: return@withContext WaybackBackfillResult(diagnosticCodes = setOf("CDX_URL_BUILD_FAILED"))
         queryCdxAndFetchPrices(
             cdxUrl, expectedTitle, attempt, now,
             maxSnapshots = MAX_DIRECT_SNAPSHOTS_PER_URL,
@@ -102,16 +111,18 @@ class WaybackPriceHistoryClient(
         lookbackDays: Int = DEFAULT_LOOKBACK_DAYS
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
         if (!preferences.getBoolean("enabled", true)) {
-            return@withContext WaybackBackfillResult()
+            return@withContext WaybackBackfillResult(diagnosticCodes = setOf("WAYBACK_DISABLED"))
         }
         val normalizedDomain = normalizeMerchantDomain(domain)
-            ?: return@withContext WaybackBackfillResult()
-        if (expectedTitle.isBlank()) return@withContext WaybackBackfillResult()
+            ?: return@withContext WaybackBackfillResult(diagnosticCodes = setOf("DOMAIN_UNRESOLVED"))
+        if (expectedTitle.isBlank()) {
+            return@withContext WaybackBackfillResult(diagnosticCodes = setOf("PRODUCT_TITLE_EMPTY"))
+        }
         val cdxUrl = buildDomainCdxUrl(normalizedDomain, expectedTitle, now, lookbackDays)
-            ?: return@withContext WaybackBackfillResult()
+            ?: return@withContext WaybackBackfillResult(diagnosticCodes = setOf("CDX_QUERY_NOT_BUILDABLE"))
         val attempt = attemptKey("domain|$normalizedDomain|$expectedTitle")
         if (wasAttemptedRecently(attempt, now)) {
-            return@withContext WaybackBackfillResult(skippedRecently = true)
+            return@withContext WaybackBackfillResult(skippedRecently = true, diagnosticCodes = setOf("CACHE_SKIPPED"))
         }
         queryCdxAndFetchPrices(
             cdxUrl, expectedTitle, attempt, now,
@@ -162,24 +173,27 @@ class WaybackPriceHistoryClient(
             cdxHttp.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
-                    return WaybackBackfillResult(requestFailed = true)
+                    return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("CDX_HTTP_${response.code}"))
                 }
                 val body = readBodyLimited(response.body, MAX_CDX_BODY_BYTES)
                 if (body == null) {
                     rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
-                    return WaybackBackfillResult(requestFailed = true)
+                    return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("CDX_BODY_EMPTY_OR_LIMIT"))
                 }
                 if (!isValidCaptureIndexResponse(body)) {
                     rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
-                    return WaybackBackfillResult(requestFailed = true)
+                    return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("CDX_INVALID_RESPONSE"))
                 }
                 parseCaptureIndex(body)
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
             rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
-            return WaybackBackfillResult(requestFailed = true)
+            return WaybackBackfillResult(
+                requestFailed = true,
+                diagnosticCodes = setOf(classifyNetworkFailure("CDX", failure))
+            )
         }
 
         val sampled = sampleCaptures(captures, maxSnapshots)
@@ -192,33 +206,44 @@ class WaybackPriceHistoryClient(
             sampled.map { capture ->
                 async {
                     semaphore.withPermit {
-                        val snapshotUrl = buildSnapshotUrl(capture) ?: return@withPermit SnapshotFetch(false, null)
+                        val snapshotUrl = buildSnapshotUrl(capture)
+                            ?: return@withPermit SnapshotFetch(false, null, "SNAPSHOT_URL_INVALID")
                         val snapshotRequest = Request.Builder()
                             .url(snapshotUrl)
                             .header("User-Agent", USER_AGENT)
                             .get()
                             .build()
-                        val html = try {
+                        try {
                             snapshotHttp.newCall(snapshotRequest).execute().use { response ->
-                                if (response.isSuccessful) {
-                                    readBodyLimited(response.body, MAX_SNAPSHOT_BODY_BYTES)
-                                } else null
+                                if (!response.isSuccessful) {
+                                    SnapshotFetch(false, null, "SNAPSHOT_HTTP_${response.code}")
+                                } else {
+                                    val html = readBodyLimited(response.body, MAX_SNAPSHOT_BODY_BYTES)
+                                    if (html == null) {
+                                        SnapshotFetch(false, null, "SNAPSHOT_BODY_EMPTY_OR_LIMIT")
+                                    } else {
+                                        SnapshotFetch(
+                                            fetched = true,
+                                            quote = parseArchivedPrice(
+                                                html = html,
+                                                expectedTitle = expectedTitle,
+                                                originalUrl = capture.originalUrl,
+                                                snapshotUrl = snapshotUrl,
+                                                observedAt = capture.timestamp
+                                            )
+                                        )
+                                    }
+                                }
                             }
                         } catch (cancelled: CancellationException) {
                             throw cancelled
-                        } catch (_: Exception) {
-                            null
-                        } ?: return@withPermit SnapshotFetch(false, null)
-                        SnapshotFetch(
-                            fetched = true,
-                            quote = parseArchivedPrice(
-                                html = html,
-                                expectedTitle = expectedTitle,
-                                originalUrl = capture.originalUrl,
-                                snapshotUrl = snapshotUrl,
-                                observedAt = capture.timestamp
+                        } catch (failure: Exception) {
+                            SnapshotFetch(
+                                fetched = false,
+                                quote = null,
+                                diagnosticCode = classifyNetworkFailure("SNAPSHOT", failure)
                             )
-                        )
+                        }
                     }
                 }
             }.awaitAll()
@@ -230,18 +255,25 @@ class WaybackPriceHistoryClient(
             .distinctBy { Triple(it.originalUrl, it.observedAt, it.price) }
         val anySnapshotFailed = captures.isNotEmpty() && fetched.any { !it.fetched }
         val allSnapshotsFailed = captures.isNotEmpty() && fetched.isNotEmpty() && fetched.none { it.fetched }
+        val diagnosticCodes = linkedSetOf<String>().apply {
+            fetched.mapNotNullTo(this) { it.diagnosticCode }
+            if (captures.isEmpty()) add("CDX_NO_CAPTURES")
+            else if (quotes.isEmpty() && fetched.any { it.fetched }) add("NO_VERIFIED_EUR_PRICE")
+        }
         rememberAttempt(
             cacheKey,
             now,
             hasQuotes = quotes.isNotEmpty(),
             failed = quotes.isEmpty() && anySnapshotFailed
         )
+        if (allSnapshotsFailed) diagnosticCodes.add("ALL_SNAPSHOTS_FAILED")
         return WaybackBackfillResult(
             quotes = quotes,
             capturesFound = captures.size,
             capturesChecked = fetched.count { it.fetched },
             available = true,
-            requestFailed = anySnapshotFailed
+            requestFailed = anySnapshotFailed,
+            diagnosticCodes = diagnosticCodes
         )
     }
 
@@ -848,6 +880,13 @@ class WaybackPriceHistoryClient(
     }
 
     /** Read bounded response bodies so unexpectedly large archived pages cannot spike app memory. */
+    private fun classifyNetworkFailure(stage: String, failure: Exception): String = when (failure) {
+        is SocketTimeoutException, is InterruptedIOException -> "${stage}_TIMEOUT"
+        is UnknownHostException -> "${stage}_DNS"
+        is IOException -> "${stage}_NETWORK"
+        else -> "${stage}_UNEXPECTED_ERROR"
+    }
+
     private fun readBodyLimited(body: ResponseBody?, maxBytes: Int): String? {
         body ?: return null
         if (body.contentLength() > maxBytes) return null
@@ -886,7 +925,8 @@ class WaybackPriceHistoryClient(
 
     private data class SnapshotFetch(
         val fetched: Boolean,
-        val quote: ArchivedPriceQuote?
+        val quote: ArchivedPriceQuote?,
+        val diagnosticCode: String? = null
     )
 
     internal data class WaybackCapture(

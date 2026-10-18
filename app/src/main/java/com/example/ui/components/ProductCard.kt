@@ -68,6 +68,9 @@ fun ProductCard(
 ) {
     val context = LocalContext.current
     var showStoreComparison by remember { mutableStateOf(false) }
+    // Reuse date formatters across recompositions instead of allocating them repeatedly.
+    val observedAtFormatter = remember { SimpleDateFormat("dd/MM HH:mm", Locale("es", "ES")) }
+    val savedDateFormatter = remember { SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")) }
 
     Card(
         modifier = modifier
@@ -89,7 +92,7 @@ fun ProductCard(
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(12.dp)) {
             // Top Section: Product Photo + Product Details
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -99,13 +102,13 @@ fun ProductCard(
                 ProductImageView(
                     product = product,
                     modifier = Modifier
-                        .size(88.dp)
+                        .size(80.dp)
                         .clip(ProductImageShape)
                         .testTag("product_photo_${product.id}"),
                     showAthRibbon = product.isPriceVerified && product.isAtAth
                 )
 
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(10.dp))
 
                 // Metadata & Title
                 Column(modifier = Modifier.weight(1f)) {
@@ -260,8 +263,7 @@ fun ProductCard(
                     }
                     if (product.priceDisplayStatus != com.example.data.model.PriceDisplayStatus.DEMONSTRATION && product.priceObservedAt != null) {
                         Text(
-                            text = "Consultado " + SimpleDateFormat("dd/MM HH:mm", Locale("es", "ES"))
-                                .format(Date(product.priceObservedAt)),
+                            text = "Consultado " + observedAtFormatter.format(Date(product.priceObservedAt)),
                             fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -269,7 +271,7 @@ fun ProductCard(
                     if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION) {
                         Text(
                             text = if (!product.isPriceVerified && product.savedHistoricalPrice != null) {
-                                "Precio histórico guardado · ${product.savedHistoricalPriceObservedAt?.let { SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(it)) } ?: "fecha desconocida"} · no es una oferta actual"
+                                "Precio histórico guardado · ${product.savedHistoricalPriceObservedAt?.let { savedDateFormatter.format(Date(it)) } ?: "fecha desconocida"} · no es una oferta actual"
                             } else product.priceFreshnessLabel,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,

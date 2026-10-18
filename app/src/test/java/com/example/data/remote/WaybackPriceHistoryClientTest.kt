@@ -114,7 +114,7 @@ class WaybackPriceHistoryClientTest {
                 "closest":{
                   "status":"200",
                   "available":true,
-                  "url":"https://web.archive.org/web/20250101120000/https://www.apple.com/es/iphone-16/",
+                  "url":"https://web.archive.org/web/20250101120000/https://www.apple.com/es/shop/buy-iphone/iphone-16/",
                   "timestamp":"20250101120000"
                 }
               }
@@ -128,7 +128,10 @@ class WaybackPriceHistoryClientTest {
 
         assertNotNull(capture)
         assertEquals("20250101120000", capture!!.rawTimestamp)
-        assertEquals("https://www.apple.com/es/iphone-16/", capture.originalUrl)
+        assertEquals(
+            "https://www.apple.com/es/shop/buy-iphone/iphone-16/",
+            capture.originalUrl
+        )
         assertNull(
             client.parseAvailabilityCapture(
                 """{"archived_snapshots":{"closest":{"available":false,"timestamp":"20250101120000"}}}""",

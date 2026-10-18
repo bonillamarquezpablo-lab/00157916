@@ -100,6 +100,39 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun directUrlCandidatesStripTrackingWithoutDiscardingProductParameters() {
+        val client = newClient()
+        val original = "https://www.shop.example/product/anker-prime?utm_source=shopping&gclid=click123&sku=27k"
+
+        val candidates = client.buildDirectUrlCandidates(original)
+
+        assertEquals(original, candidates.first())
+        assertEquals(2, candidates.size)
+        assertEquals(
+            "https://www.shop.example/product/anker-prime?sku=27k",
+            candidates[1]
+        )
+        assertTrue(candidates.all { client.isEligibleDirectUrl(it) })
+        assertFalse(candidates[1].contains("utm_source"))
+        assertFalse(candidates[1].contains("gclid"))
+        assertTrue("Functional SKU query parameters must be preserved", candidates[1].contains("sku=27k"))
+    }
+
+    @Test
+    fun directUrlCandidatesTrySlashVariantWhenThereAreNoTrackingParameters() {
+        val client = newClient()
+        val candidates = client.buildDirectUrlCandidates("https://shop.example/product/anker-prime")
+
+        assertEquals(
+            listOf(
+                "https://shop.example/product/anker-prime",
+                "https://shop.example/product/anker-prime/"
+            ),
+            candidates
+        )
+    }
+
+    @Test
     fun buildsBoundedProductSpecificAvailabilityCandidates() {
         val client = newClient()
         val appleCandidates = client.buildAvailabilityCandidateUrls("apple.com", "iPhone 16")

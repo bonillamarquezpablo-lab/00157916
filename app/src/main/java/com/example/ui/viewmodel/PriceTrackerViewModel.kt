@@ -1592,18 +1592,20 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }
                     foundCount > 0 ->
                         "Se encontraron capturas con precios previos, pero no se pudieron vincular a la ficha del producto o ya existían esos registros diarios."
-                    requestFailedCount > 0 && capturesFoundCount > 0 && checkedCount == 0 ->
-                        "Internet Archive encontró $capturesFoundCount capturas, pero no logró descargar ninguna. No se puede confirmar el precio histórico; inténtalo de nuevo. No se ha gastado cuota de SerpApi."
+                    capturesFoundCount > 0 && checkedCount == 0 && requestFailedCount > 0 ->
+                        "Internet Archive encontró $capturesFoundCount capturas, pero las descargas fallaron. No se puede confirmar el precio histórico; puedes volver a intentarlo."
+                    checkedCount > 0 && requestFailedCount > 0 ->
+                        "Se revisaron $checkedCount capturas, pero algunas consultas fallaron. Los resultados son parciales; vuelve a intentarlo para completar el histórico."
                     requestFailedCount > 0 ->
-                        "Una o más consultas o descargas de Internet Archive fallaron o agotaron el tiempo. Esto no confirma que no existan capturas; puedes volver a intentarlo. No se ha gastado cuota de SerpApi."
+                        "Falló una o más consultas de Internet Archive. El diagnóstico de abajo indica la fase; esto no confirma que no existan capturas."
                     timedOutCount > 0 ->
-                        "La búsqueda histórica agotó el tiempo disponible para $timedOutCount tienda(s). Las consultas están limitadas para mantener la fluidez; prueba de nuevo más tarde. No se ha gastado cuota de SerpApi."
+                        "La búsqueda histórica agotó el tiempo disponible para $timedOutCount tienda(s). Las consultas están limitadas para mantener la fluidez; prueba de nuevo más tarde."
                     capturesFoundCount == 0 && successfulLookupsCount > 0 ->
-                        "Internet Archive respondió correctamente, pero no encontró capturas públicas en el período consultado. No hay precios antiguos verificables que mostrar y no se ha gastado cuota de SerpApi."
+                        "Internet Archive respondió correctamente, pero no encontró capturas públicas en el período consultado. No hay precios antiguos verificables que mostrar."
                     checkedCount > 0 ->
-                        "Se consultaron $checkedCount capturas gratuitas, pero ninguna publicó un precio EUR verificable que coincidiera con el producto exacto. No se han inventado precios."
+                        "Se consultaron $checkedCount capturas gratuitas, pero ninguna publicó un precio EUR verificable que coincidiera con el producto exacto."
                     else ->
-                        "No se recuperó histórico gratuito. Puede que el vendedor no haya sido identificado con un enlace directo o que la página no publique metadatos de precio verificables. No se ha gastado cuota de SerpApi."
+                        "No se recuperó histórico gratuito. Comprueba el diagnóstico de Wayback para conocer la fase que falló."
                 }
                 val diagnosticLabels = diagnosticCodes.take(5).map { code ->
                     when {

@@ -1093,13 +1093,14 @@ class WaybackPriceHistoryClient(
         // accept either ordering of two distinctive title words. Archived-page validation
         // below remains the final authority, so a loose URL match can never become a price.
         val modelAlternatives = modelTokens.take(3).map { urlTokenPattern(it) }
+        // A single ordinary word is too broad for a domain-wide CDX scan. Require either
+        // a model/SKU token, a known model-family expression, or two useful product-name terms.
+        // The final page validator remains mandatory even when a URL passes this filter.
         val textAlternatives = if (textTokens.size >= 2) {
             val first = urlTokenPattern(textTokens[0])
             val second = urlTokenPattern(textTokens[1])
             listOf("$first.*$second", "$second.*$first")
-        } else {
-            textTokens.take(2).map { urlTokenPattern(it) }
-        }
+        } else emptyList()
         val urlAlternatives = (modelAlternatives + modelFamilyAlternatives + textAlternatives).distinct()
         if (urlAlternatives.isEmpty()) return null
         val start = (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
@@ -1176,8 +1177,10 @@ class WaybackPriceHistoryClient(
         val ignored = setOf(
             "the", "and", "for", "with", "from", "used", "de", "del", "la", "las", "el",
             "los", "un", "una", "para", "con", "en", "of", "by", "sale", "buy", "official",
-            "original", "product", "producto", "neu", "zapatilla", "zapatillas", "calzado",
-            "zapato", "zapatos", "sneaker", "sneakers", "shoe", "shoes", "calendario",
+            "original", "product", "producto", "generic", "generico", "muestra", "demo",
+            "sample", "test", "item", "articulo", "article", "unknown", "desconocido",
+            "neu", "zapatilla", "zapatillas", "calzado", "zapato", "zapatos",
+            "sneaker", "sneakers", "shoe", "shoes", "calendario",
             "calendarios", "calendar", "calendars", "advent", "adviento", "adventskalender",
             "beauty", "women", "woman", "hombre", "hombres", "mujer", "mujeres", "men",
             "damen", "frauen", "gb", "tb", "mb"

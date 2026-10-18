@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - fix/wayback-cdx-recovery
     paths:
       - "app/**"
       - "gradle/**"
@@ -197,3 +198,44 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
+
+
+  # Isolated validation for the emergency branch. No signing secrets or APK publication
+  # are used until this code is merged to the trusted main branch.
+  validate-wayback-fix:
+    if: github.ref == 'refs/heads/fix/wayback-cdx-recovery'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout emergency fix
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Setup Java 17
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          gradle-version: '9.8.1'
+          cache-read-only: false
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          packages: 'platform-tools'
+
+      - name: Install Android platform
+        run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
+
+      - name: Run unit tests
+        timeout-minutes: 15
+        run: gradle :app:testDebugUnitTest --stacktrace
+
+      - name: Compile Android instrumentation tests
+        run: gradle :app:compileDebugAndroidTestKotlin --stacktrace

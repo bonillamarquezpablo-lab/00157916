@@ -1063,7 +1063,16 @@ class WaybackPriceHistoryClientTest {
         assertEquals(listOf("www.shop.example", "shop.example"), urls.map { it.queryParameter("url") })
         assertTrue(urls.all { it.queryParameter("matchType") == "host" })
         assertTrue(urls.all { it.queryParameter("collapse") == null })
-        assertTrue(urls.all { it.queryParameter("limit") == "6" })
+        assertTrue(urls.all { it.queryParameter("limit") == "20" })
+    }
+
+    @Test
+    fun domainCdxQueryRejectsGenericOnlyTermsAndSingleBrandWords() {
+        val client = newClient()
+        assertNull(client.buildDomainCdxUrl("shop.example", "Producto genérico"))
+        assertNull(client.buildDomainCdxUrl("shop.example", "Producto demo"))
+        assertNull(client.buildDomainCdxUrl("shop.example", "Anker"))
+        assertNotNull(client.buildDomainCdxUrl("shop.example", "Anker Prime 27K Power Bank"))
     }
 
     @Test

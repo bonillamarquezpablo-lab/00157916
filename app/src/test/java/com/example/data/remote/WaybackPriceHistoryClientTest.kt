@@ -548,11 +548,12 @@ class WaybackPriceHistoryClientTest {
     @Test
     fun classifiesWaybackNetworkFailuresWithoutLeakingExceptionText() {
         val client = newClient()
-        assertEquals("CDX_TIMEOUT", client.classifyNetworkFailure("CDX", java.net.SocketTimeoutException("secret url")))
+        assertEquals("CDX_EXACT_TIMEOUT", client.classifyNetworkFailure("CDX_EXACT", java.net.SocketTimeoutException("secret url")))
+        assertEquals("CDX_DOMAIN_TIMEOUT", client.classifyNetworkFailure("CDX_DOMAIN", java.io.InterruptedIOException("timeout")))
         assertEquals("SNAPSHOT_TIMEOUT", client.classifyNetworkFailure("SNAPSHOT", java.io.InterruptedIOException("timeout")))
-        assertEquals("CDX_DNS", client.classifyNetworkFailure("CDX", java.net.UnknownHostException("private host")))
-        assertEquals("SNAPSHOT_NETWORK", client.classifyNetworkFailure("SNAPSHOT", java.io.IOException("private host")))
-        assertEquals("CDX_UNEXPECTED_ERROR", client.classifyNetworkFailure("CDX", IllegalStateException("private data")))
+        assertEquals("CDX_EXACT_DNS", client.classifyNetworkFailure("CDX_EXACT", java.net.UnknownHostException("private host")))
+        assertEquals("CDX_DOMAIN_NETWORK", client.classifyNetworkFailure("CDX_DOMAIN", java.io.IOException("private host")))
+        assertEquals("CDX_DOMAIN_UNEXPECTED_ERROR", client.classifyNetworkFailure("CDX_DOMAIN", IllegalStateException("private data")))
     }
 
 

@@ -602,6 +602,7 @@ class WaybackPriceHistoryClientTest {
         assertNull(client.buildDomainCdxUrl("https://google.com", "Anker Prime 27K Power Bank"))
         assertNull(client.buildDomainCdxUrl("shop.example", ""))
         assertNull(client.buildDomainCdxUrl("shop.example", "Producto genérico"))
+        assertNull(client.buildDomainCdxUrl("shop.example", "Anker"))
     }
 
 }

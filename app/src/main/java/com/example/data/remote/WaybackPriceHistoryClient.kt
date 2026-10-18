@@ -147,7 +147,7 @@ class WaybackPriceHistoryClient(
             now = now,
             lookbackDays = lookbackDays,
             maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP,
-            maxCandidates = MAX_AVAILABILITY_URL_CANDIDATES,
+            maxCandidates = MAX_AVAILABILITY_PROBE_CANDIDATES,
             stage = "AVAILABILITY_DOMAIN"
         )
     }
@@ -1463,7 +1463,8 @@ class WaybackPriceHistoryClient(
         )
         private const val MAX_CDX_HTTP_RETRIES = 1
         private const val MAX_CONCURRENT_AVAILABILITY_REQUESTS = 1
-        private const val MAX_AVAILABILITY_URL_CANDIDATES = 2
+        private const val MAX_AVAILABILITY_URL_CANDIDATES = 6
+        private const val MAX_AVAILABILITY_PROBE_CANDIDATES = 2
         private const val MAX_AVAILABILITY_BODY_BYTES = 64 * 1024
         private const val CDX_RETRY_DELAY_MS = 500L
         private const val CDX_RETRY_JITTER_MS = 350L

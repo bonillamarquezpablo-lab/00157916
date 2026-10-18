@@ -50,6 +50,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Product
+import com.example.data.model.ProductCategory
 import com.example.data.model.Store
 import com.example.data.remote.extractDirectRetailerUrl
 import java.text.SimpleDateFormat
@@ -197,13 +198,14 @@ fun ProductDetailSheet(
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    Text(
-                        text = product.category.displayName,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    if (product.category != ProductCategory.ALL) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = product.category.displayName,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
 
                 Row {

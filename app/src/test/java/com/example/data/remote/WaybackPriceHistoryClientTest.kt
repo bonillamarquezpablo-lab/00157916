@@ -608,7 +608,7 @@ class WaybackPriceHistoryClientTest {
         )
         assertNotNull(url)
         assertEquals("host", url!!.queryParameter("matchType"))
-        assertEquals("6", url.queryParameter("limit"))
+        assertEquals("20", url.queryParameter("limit"))
         assertNull("Host discovery avoids slow collapse processing", url.queryParameter("collapse"))
         assertEquals("20250115", url.queryParameter("from"))
         assertTrue(url.queryParameterValues("filter").orEmpty().any { raw ->
@@ -1014,12 +1014,20 @@ class WaybackPriceHistoryClientTest {
         assertEquals("/cdx/search/cdx", url.encodedPath)
         assertEquals("shop.example", url.queryParameter("url"))
         assertEquals("host", url.queryParameter("matchType"))
+        val originalFilter = url.queryParameterValues("filter").orEmpty()
+            .mapNotNull { it?.takeIf { filter -> filter.startsWith("original:") } }
+            .single()
         assertTrue(
             "The CDX original-field filter must limit URLs to distinguishing title/model tokens",
-            url.queryParameterValues("filter").orEmpty().any { it.orEmpty().startsWith("original:(?i)") }
+            originalFilter.startsWith("original:(?i).*")
         )
+        assertFalse(
+            "Use portable regex alternatives rather than look-ahead expressions unsupported by some CDX deployments",
+            originalFilter.contains("(?=")
+        )
+        assertTrue(originalFilter.contains("27k") || originalFilter.contains("prime"))
         assertEquals("json", url.queryParameter("output"))
-        assertEquals("6", url.queryParameter("limit"))
+        assertEquals("20", url.queryParameter("limit"))
         assertNull("Host discovery avoids slow collapse processing", url.queryParameter("collapse"))
         assertTrue(url.queryParameterValues("filter").orEmpty().any { it == "statuscode:200" })
         assertTrue(url.queryParameterValues("filter").orEmpty().any { it == "mimetype:text/html" })

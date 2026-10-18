@@ -523,4 +523,20 @@ class WaybackPriceHistoryClientTest {
     }
 
 
+
+    @Test
+    fun distinguishesValidEmptyCdxIndexFromMalformedErrorBody() {
+        val client = newClient()
+        assertTrue(client.isValidCaptureIndexResponse("[]"))
+        assertTrue(
+            client.isValidCaptureIndexResponse(
+                """[["timestamp","original","statuscode","mimetype"]]"""
+            )
+        )
+        assertFalse(client.isValidCaptureIndexResponse("<html>503 Service Unavailable</html>"))
+        assertFalse(client.isValidCaptureIndexResponse("""{"error":"rate limited"}"""))
+        assertFalse(client.isValidCaptureIndexResponse("""[["date","url"],["20260101120000","https://example.es/"]]"""))
+    }
+
+
 }

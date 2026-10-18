@@ -83,7 +83,11 @@ class WaybackPriceHistoryClient(
         }
         val cdxUrl = buildCdxUrl(originalUrl, now, lookbackDays)
             ?: return@withContext WaybackBackfillResult()
-        queryCdxAndFetchPrices(cdxUrl, expectedTitle, attempt, now, maxSnapshots = MAX_DIRECT_SNAPSHOTS_PER_URL)
+        queryCdxAndFetchPrices(
+            cdxUrl, expectedTitle, attempt, now,
+            maxSnapshots = MAX_DIRECT_SNAPSHOTS_PER_URL,
+            cdxTimeoutSeconds = DIRECT_CDX_TIMEOUT_SECONDS
+        )
     }
 
     /**
@@ -109,7 +113,11 @@ class WaybackPriceHistoryClient(
         if (wasAttemptedRecently(attempt, now)) {
             return@withContext WaybackBackfillResult(skippedRecently = true)
         }
-        queryCdxAndFetchPrices(cdxUrl, expectedTitle, attempt, now, maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP)
+        queryCdxAndFetchPrices(
+            cdxUrl, expectedTitle, attempt, now,
+            maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP,
+            cdxTimeoutSeconds = DOMAIN_CDX_TIMEOUT_SECONDS
+        )
     }
 
     internal fun wasAttemptedRecently(key: String, now: Long): Boolean {
@@ -143,11 +151,15 @@ class WaybackPriceHistoryClient(
         expectedTitle: String,
         cacheKey: String,
         now: Long,
-        maxSnapshots: Int
+        maxSnapshots: Int,
+        cdxTimeoutSeconds: Long
     ): WaybackBackfillResult {
+        val cdxHttp = http.newBuilder()
+            .callTimeout(cdxTimeoutSeconds, TimeUnit.SECONDS)
+            .build()
         val request = Request.Builder().url(cdxUrl).header("User-Agent", USER_AGENT).get().build()
         val captures = try {
-            http.newCall(request).execute().use { response ->
+            cdxHttp.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
                     return WaybackBackfillResult(requestFailed = true)
@@ -886,8 +898,10 @@ class WaybackPriceHistoryClient(
 
     companion object {
         const val DEFAULT_LOOKBACK_DAYS = 1600
+        private const val DIRECT_CDX_TIMEOUT_SECONDS = 5L
+        private const val DOMAIN_CDX_TIMEOUT_SECONDS = 11L
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 4
-        private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 8
+        private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 4
         private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 3L
         private const val MAX_DOMAIN_INDEX_ROWS = 80
         private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4

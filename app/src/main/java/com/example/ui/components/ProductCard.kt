@@ -313,42 +313,37 @@ fun ProductCard(
             }
             Spacer(modifier = Modifier.height(6.dp))
 
-            // One short history line; detailed evidence and the 90-day requirement live in
-            // the product sheet, so repeated cards stay scannable.
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f))
-                    .padding(horizontal = 10.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // Show a second history row only when it adds a verified, useful number.
+            // First-observation, stale, and unverified states are already communicated by the
+            // badge/date/source above and would only repeat the same warning here.
+            if (
+                product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT &&
+                hasSufficientHistory
             ) {
-                Icon(
-                    imageVector = Icons.Default.TrendingDown,
-                    contentDescription = null,
-                    tint = if (hasSufficientHistory && product.isAtAth) {
-                        Color(0xFF059669)
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    modifier = Modifier.size(15.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = when {
-                        hasSufficientHistory -> "Mínimo observado: ${String.format(SPANISH_LOCALE, "%.2f", product.athMinPrice)} €"
-                        product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION ->
-                            "Precio guardado · confirmar antes de comprar"
-                        product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT ->
-                            "Historial en curso · requiere 90 días"
-                        else -> "Sin historial verificable"
-                    },
-                    fontWeight = if (hasSufficientHistory) FontWeight.SemiBold else FontWeight.Normal,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f))
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.TrendingDown,
+                        contentDescription = null,
+                        tint = if (isVerifiedMinimum) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Mínimo observado: ${String.format(SPANISH_LOCALE, "%.2f", product.athMinPrice)} €",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }

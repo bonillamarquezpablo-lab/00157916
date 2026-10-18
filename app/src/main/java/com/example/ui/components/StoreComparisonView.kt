@@ -26,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,6 +39,8 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.StoreOffer
 import com.example.data.model.Store
 import com.example.data.remote.extractDirectRetailerUrl
+import java.text.NumberFormat
+import java.util.Locale
 
 @Composable
 fun StoreComparisonView(
@@ -48,6 +51,7 @@ fun StoreComparisonView(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val priceFormatter = remember { NumberFormat.getCurrencyInstance(Locale("es", "ES")) }
     val minOfferPrice = offers.minOfOrNull { it.price } ?: athPrice
 
     Column(
@@ -127,7 +131,7 @@ fun StoreComparisonView(
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.Start
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -188,13 +192,12 @@ fun StoreComparisonView(
                             )
                         }
                         Column(
-                            modifier = Modifier.widthIn(min = 92.dp),
+                            modifier = Modifier.widthIn(min = 112.dp, max = 132.dp),
                             horizontalAlignment = Alignment.End,
                             verticalArrangement = Arrangement.Center
                         ) {
                             Text(
-                                text = java.text.NumberFormat.getCurrencyInstance(java.util.Locale("es", "ES"))
-                                    .format(offer.price),
+                                text = priceFormatter.format(offer.price),
                                 fontWeight = FontWeight.ExtraBold,
                                 fontSize = 15.sp,
                                 color = if (isBestCurrent) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface,

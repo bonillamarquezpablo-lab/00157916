@@ -345,6 +345,17 @@ class WaybackPriceHistoryClientTest {
         assertEquals("nike.com", client.resolveMerchantDomain("Nike Oficial", googleUrl))
         assertEquals("sprinter.es", client.resolveMerchantDomain("Sprinter Deportes", googleUrl))
 
+        assertEquals(
+            "A stored retailer domain should outrank Google's intermediate URL",
+            "pixmania.com",
+            client.resolveMerchantDomain("Pixmania", googleUrl, "pixmania.com")
+        )
+        assertEquals(
+            "A complete official/store URL should normalize to its merchant host",
+            "pixmania.com",
+            client.resolveMerchantDomain("Pixmania", googleUrl, "https://www.pixmania.com/es/")
+        )
+
         assertEquals("Apple Store" to "apple.com", client.resolveBrandMerchant("Apple iPhone 16 256GB"))
         assertEquals("Nike" to "nike.com", client.resolveBrandMerchant("Nike Air Max Plus Zapatillas"))
         assertEquals("Anker" to "anker.com", client.resolveBrandMerchant("Anker Prime 27K Power Bank"))
@@ -427,7 +438,7 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun negativeArchiveCacheRetriesAfterSevenDaysButPositiveCacheWaitsThirty() {
+    fun negativeArchiveCacheRetriesAfterSixHoursButPositiveCacheWaitsThirty() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
         val client = newClient()
@@ -451,12 +462,12 @@ class WaybackPriceHistoryClientTest {
 
             preferences.edit().putBoolean("${key}_failed", false).commit()
             assertTrue(
-                "An empty search is suppressed during the first week",
-                client.wasAttemptedRecently(key, lastAttempt + 6L * WaybackPriceHistoryClient.DAY_MS)
+                "An empty search is cached briefly to avoid repeated requests",
+                client.wasAttemptedRecently(key, lastAttempt + 5L * 60L * 60L * 1000L)
             )
             assertFalse(
-                "An empty search can be retried after seven days",
-                client.wasAttemptedRecently(key, lastAttempt + 8L * WaybackPriceHistoryClient.DAY_MS)
+                "An empty search can be retried after six hours",
+                client.wasAttemptedRecently(key, lastAttempt + 7L * 60L * 60L * 1000L)
             )
 
             preferences.edit()

@@ -59,6 +59,8 @@ import com.example.data.model.Store
 import com.example.ui.theme.ProductCardShape
 import com.example.ui.theme.ProductImageShape
 
+private val SPANISH_LOCALE = Locale("es", "ES")
+
 @Composable
 fun ProductCard(
     product: Product,
@@ -70,12 +72,14 @@ fun ProductCard(
     var showStoreComparison by remember { mutableStateOf(false) }
     // Reuse derived historical state during ordinary UI recompositions. These model getters
     // filter/sort a product's timeline, so evaluating them repeatedly in every card is avoidable.
-    val priceBadgeState = remember(product) { product.priceBadgeState }
-    val hasSufficientHistory = remember(product) { product.hasSufficientHistory }
+    val freshnessKey = product.isPriceFresh
+    val historyDayKey = System.currentTimeMillis() / 86_400_000L
+    val priceBadgeState = remember(product, freshnessKey, historyDayKey) { product.priceBadgeState }
+    val hasSufficientHistory = remember(product, freshnessKey, historyDayKey) { product.hasSufficientHistory }
     val isVerifiedMinimum =
         product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT &&
             product.isAtAth
-    val observedAtFormatter = remember { SimpleDateFormat("dd/MM HH:mm", Locale("es", "ES")) }
+    val observedAtFormatter = remember { SimpleDateFormat("dd/MM HH:mm", SPANISH_LOCALE) }
 
     Card(
         modifier = modifier
@@ -232,7 +236,7 @@ fun ProductCard(
                             com.example.data.model.PriceDisplayStatus.DEMONSTRATION -> null
                         }
                         Text(
-                            text = displayedSavedPrice?.let { "${String.format(Locale("es", "ES"), "%.2f", it)} €" } ?: "Precio no disponible",
+                            text = displayedSavedPrice?.let { "${String.format(SPANISH_LOCALE, "%.2f", it)} €" } ?: "Precio no disponible",
                             fontWeight = FontWeight.Black,
                             fontSize = if (displayedSavedPrice != null) 24.sp else 15.sp,
                             letterSpacing = if (displayedSavedPrice != null) (-0.65).sp else 0.sp,
@@ -242,7 +246,7 @@ fun ProductCard(
                         if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isOfficialPvpVerified && product.officialPvp > product.currentPrice) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "${String.format(Locale("es", "ES"), "%.2f", product.officialPvp)} €",
+                                text = "${String.format(SPANISH_LOCALE, "%.2f", product.officialPvp)} €",
                                 fontSize = 13.sp,
                                 textDecoration = TextDecoration.LineThrough,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -252,7 +256,7 @@ fun ProductCard(
 
                     if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.realSavingsPercent > 0) {
                         Text(
-                            text = "Ahorro real: -${product.realSavingsPercent}% (-${String.format(Locale("es", "ES"), "%.2f", product.realSavingsAmount)} €)",
+                            text = "Ahorro real: -${product.realSavingsPercent}% (-${String.format(SPANISH_LOCALE, "%.2f", product.realSavingsAmount)} €)",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color(0xFF059669)
@@ -332,7 +336,7 @@ fun ProductCard(
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = if (hasSufficientHistory) {
-                        "Mínimo observado: ${String.format(Locale("es", "ES"), "%.2f", product.athMinPrice)} €"
+                        "Mínimo observado: ${String.format(SPANISH_LOCALE, "%.2f", product.athMinPrice)} €"
                     } else if (product.isPriceVerified) {
                         "Historial en curso · requiere 90 días"
                     } else {

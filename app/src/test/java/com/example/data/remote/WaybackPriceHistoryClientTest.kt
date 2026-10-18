@@ -543,4 +543,16 @@ class WaybackPriceHistoryClientTest {
     }
 
 
+ 
+    @Test
+    fun classifiesWaybackNetworkFailuresWithoutLeakingExceptionText() {
+        val client = newClient()
+        assertEquals("CDX_TIMEOUT", client.classifyNetworkFailure("CDX", java.net.SocketTimeoutException("secret url")))
+        assertEquals("SNAPSHOT_TIMEOUT", client.classifyNetworkFailure("SNAPSHOT", java.io.InterruptedIOException("timeout")))
+        assertEquals("CDX_DNS", client.classifyNetworkFailure("CDX", java.net.UnknownHostException("private host")))
+        assertEquals("SNAPSHOT_NETWORK", client.classifyNetworkFailure("SNAPSHOT", java.io.IOException("private host")))
+        assertEquals("CDX_UNEXPECTED_ERROR", client.classifyNetworkFailure("CDX", IllegalStateException("private data")))
+    }
+
+
 }

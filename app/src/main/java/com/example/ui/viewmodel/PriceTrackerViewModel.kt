@@ -1558,9 +1558,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }
                     // Try the broad fallback only if exact lookup did not find verified prices.
                     // Its shorter independent timeout leaves time for result rendering and other stores.
+                    val rateLimitedAtDirectStage =
+                        attempts.any { it.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") }
                     if (candidate.merchantDomain != null &&
                         attempts.none { it.quotes.isNotEmpty() } &&
-                        !candidateTimedOut
+                        !candidateTimedOut &&
+                        !rateLimitedAtDirectStage
                     ) {
                         val domainResult = withTimeoutOrNull(MAX_ARCHIVE_DOMAIN_FALLBACK_MS) {
                             waybackPriceHistoryClient.fetchHistoryByMerchantDomain(
@@ -1645,6 +1648,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 _uiState.value = currentState.copy(selectedProduct = refreshedProduct)
                             }
                         }
+                    }
+
+                    // An HTTP 429 applies to the archive service, not only this product.
+                    // Stop the batch now instead of iterating through the remaining candidates.
+                    if (attempts.any { it.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") }) {
+                        break
                     }
                 }
 

@@ -549,16 +549,15 @@ class WaybackPriceHistoryClientTest {
     fun cdxQueriesHaveEnoughBoundedTimeForSlowArchiveResponses() {
         val client = newClient()
         val now = 1_800_000_000_000L
-        val directResultMarker = "https://shop.example/products/anker-prime"
-        assertTrue(directResultMarker.startsWith("https://"))
         val domainUrl = client.buildDomainCdxUrl(
             "shop.example",
             "Anker Prime 27K power bank",
             now,
             365
         )!!
-        assertEquals("exact URL query must remain bounded", "exact", exactUrl.queryParameter("matchType"))
-        assertEquals("domain query must remain bounded", "domain", domainUrl.queryParameter("matchType"))
+        assertEquals("domain query must remain bounded", "prefix", domainUrl.queryParameter("matchType"))
+        assertEquals("product-specific path matching must be retained",
+            true, domainUrl.queryParameterValues("filter").orEmpty().any { it?.startsWith("original:") == true })
     }
 
     @Test

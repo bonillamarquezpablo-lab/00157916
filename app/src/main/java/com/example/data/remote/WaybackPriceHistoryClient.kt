@@ -95,7 +95,8 @@ class WaybackPriceHistoryClient(
         queryCdxAndFetchPrices(
             cdxUrl, expectedTitle, attempt, now,
             maxSnapshots = MAX_DIRECT_SNAPSHOTS_PER_URL,
-            cdxTimeoutSeconds = DIRECT_CDX_TIMEOUT_SECONDS
+            cdxTimeoutSeconds = DIRECT_CDX_TIMEOUT_SECONDS,
+            cdxStage = "CDX_EXACT"
         )
     }
 
@@ -127,7 +128,8 @@ class WaybackPriceHistoryClient(
         queryCdxAndFetchPrices(
             cdxUrl, expectedTitle, attempt, now,
             maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP,
-            cdxTimeoutSeconds = DOMAIN_CDX_TIMEOUT_SECONDS
+            cdxTimeoutSeconds = DOMAIN_CDX_TIMEOUT_SECONDS,
+            cdxStage = "CDX_DOMAIN"
         )
     }
 
@@ -163,7 +165,8 @@ class WaybackPriceHistoryClient(
         cacheKey: String,
         now: Long,
         maxSnapshots: Int,
-        cdxTimeoutSeconds: Long
+        cdxTimeoutSeconds: Long,
+        cdxStage: String
     ): WaybackBackfillResult {
         val cdxHttp = http.newBuilder()
             .callTimeout(cdxTimeoutSeconds, TimeUnit.SECONDS)
@@ -173,16 +176,16 @@ class WaybackPriceHistoryClient(
             cdxHttp.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
-                    return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("CDX_HTTP_${response.code}"))
+                    return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("${cdxStage}_HTTP_${response.code}"))
                 }
                 val body = readBodyLimited(response.body, MAX_CDX_BODY_BYTES)
                 if (body == null) {
                     rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
-                    return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("CDX_BODY_EMPTY_OR_LIMIT"))
+                    return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("${cdxStage}_BODY_EMPTY_OR_LIMIT"))
                 }
                 if (!isValidCaptureIndexResponse(body)) {
                     rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
-                    return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("CDX_INVALID_RESPONSE"))
+                    return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("${cdxStage}_INVALID_RESPONSE"))
                 }
                 parseCaptureIndex(body)
             }
@@ -192,7 +195,7 @@ class WaybackPriceHistoryClient(
             rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
             return WaybackBackfillResult(
                 requestFailed = true,
-                diagnosticCodes = setOf(classifyNetworkFailure("CDX", failure))
+                diagnosticCodes = setOf(classifyNetworkFailure(cdxStage, failure))
             )
         }
 
@@ -939,7 +942,7 @@ class WaybackPriceHistoryClient(
     companion object {
         const val DEFAULT_LOOKBACK_DAYS = 1600
         private const val DIRECT_CDX_TIMEOUT_SECONDS = 5L
-        private const val DOMAIN_CDX_TIMEOUT_SECONDS = 7L
+        private const val DOMAIN_CDX_TIMEOUT_SECONDS = 10L
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 4
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 4
         private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 3L

@@ -335,12 +335,13 @@ fun ProductCard(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = if (hasSufficientHistory) {
-                        "Mínimo observado: ${String.format(SPANISH_LOCALE, "%.2f", product.athMinPrice)} €"
-                    } else if (product.isPriceVerified) {
-                        "Historial en curso · requiere 90 días"
-                    } else {
-                        "Sin historial verificable"
+                    text = when {
+                        hasSufficientHistory -> "Mínimo observado: ${String.format(SPANISH_LOCALE, "%.2f", product.athMinPrice)} €"
+                        product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION ->
+                            "Precio guardado · confirmar antes de comprar"
+                        product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT ->
+                            "Historial en curso · requiere 90 días"
+                        else -> "Sin historial verificable"
                     },
                     fontWeight = if (hasSufficientHistory) FontWeight.SemiBold else FontWeight.Normal,
                     fontSize = 11.sp,

@@ -1072,6 +1072,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         startOnlineSearch(current.onlineSearchProvider)
     }
 
+    /** Ignore late results when the user edits the query during an in-flight request. */
+    private fun isOnlineSearchStillCurrent(query: String, provider: OnlineSearchProvider): Boolean {
+        val current = _uiState.value
+        return current.onlineSearchQuery.trim() == query && current.onlineSearchProvider == provider
+    }
+
     /** Search Google Shopping or Amazon.es, reusing fresh local results whenever possible. */
     private fun startOnlineSearch(provider: OnlineSearchProvider) {
         val current = _uiState.value
@@ -1108,6 +1114,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     val cached = withContext(Dispatchers.IO) {
                         onlineSearchCache.read(searchCacheProviderKey(provider), query)
                     }
+                    if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
                     if (cached != null && (cached.rawResponse != null || cached.results.isNotEmpty())) {
                         // Parsing stored JSON and classifying offers can be CPU-heavy. Keep it off
                         // Android's main thread so the search screen continues drawing smoothly.
@@ -1160,6 +1167,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             .map { it.trim() }
                             .filter { it.isNotBlank() }
                             .joinToString("\n\n")
+                        if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
                         _uiState.value = _uiState.value.copy(
                             onlineSearchResults = safeCachedResults,
                             onlineSearchDiscardedOffers = cachedDiscarded,
@@ -1172,6 +1180,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }
 
                     val token = withContext(Dispatchers.IO) { serpApiTokenStore.read() }
+                    if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
                     if (token.isNullOrBlank()) {
                         val message = serpApiTokenStore.lastReadErrorMessage()
                             ?: "Para mostrar precios dentro de Mínimo, guarda tu clave de SerpApi en Ajustes. También puedes abrir Amazon con tu sesión iniciada."
@@ -1182,6 +1191,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
                     // Validate the key and quota before the paid search request.
                     val accountInfo = readAccountInfo(token)
+                    if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
                     if (accountInfo == null) {
                         val message = "No se ha podido validar la cuenta SerpApi. No se ha lanzado ninguna búsqueda ni gastado cuota. Comprueba la conexión e inténtalo de nuevo."
                         _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
@@ -1206,6 +1216,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         OnlineSearchProvider.AMAZON ->
                             serpApiClient.searchAmazonOnlineWithDiagnostics(token, query)
                     }
+                    if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
 
                     var providerResults = providerReport.results
                     var providerDiscardedOffers = providerReport.discardedOffers
@@ -1324,6 +1335,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         .map { it.trim() }
                         .filter { it.isNotBlank() }
                         .joinToString("\\n\\n")
+                    if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
                     _uiState.value = _uiState.value.copy(
                         onlineSearchResults = results,
                         onlineSearchDiscardedOffers = discarded,
@@ -1335,18 +1347,24 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
             } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
                 val message = "La búsqueda ha tardado demasiado y se ha cancelado para evitar que quede bloqueada. Comprueba la conexión e inténtalo de nuevo; los resultados guardados se mantienen."
-                _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
-                showSnackbar(message)
+                if (isOnlineSearchStillCurrent(query, provider)) {
+                    _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                    showSnackbar(message)
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: SerpApiException) {
                 val message = error.message ?: "No se pudo completar la búsqueda."
-                _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
-                showSnackbar(message)
+                if (isOnlineSearchStillCurrent(query, provider)) {
+                    _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                    showSnackbar(message)
+                }
             } catch (_: Exception) {
                 val message = "No se pudo buscar. Comprueba la conexión y la clave guardada en Ajustes."
-                _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
-                showSnackbar(message)
+                if (isOnlineSearchStillCurrent(query, provider)) {
+                    _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                    showSnackbar(message)
+                }
             } finally {
                 // A timeout or cancellation must never strand the search screen in its loading state.
                 _uiState.value = _uiState.value.copy(isOnlineSearching = false)

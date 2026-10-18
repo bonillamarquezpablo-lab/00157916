@@ -296,7 +296,7 @@ class WaybackPriceHistoryClient(
 
         val sampled = sampleCaptures(captures, maxSnapshots)
         val snapshotHttp = http.newBuilder()
-            .callTimeout(snapshotTimeoutSeconds, TimeUnit.SECONDS)
+            .callTimeout(SNAPSHOT_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .build()
         val fetched = coroutineScope {
             sampled.map { capture ->
@@ -775,9 +775,9 @@ class WaybackPriceHistoryClient(
         val captures = cdxOutcome.captures
 
         val sampled = sampleCaptures(captures, maxSnapshots)
-        // Build the bounded snapshot client once per lookup and reuse its connection pool.
+        // The fallback uses at most two snapshots and a shorter request cap to stay responsive.
         val snapshotHttp = http.newBuilder()
-            .callTimeout(SNAPSHOT_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .callTimeout(snapshotTimeoutSeconds, TimeUnit.SECONDS)
             .build()
         val fetched = coroutineScope {
             sampled.map { capture ->

@@ -166,7 +166,10 @@ class WaybackPriceHistoryClient(
         // URLs instead of guessing a page slug. Exactly one bounded host query, then <=2 snapshots.
         val mayUseCdxFallback =
             availabilityResult.diagnosticCodes.contains("AVAILABILITY_DOMAIN_NO_CAPTURES") ||
-                availabilityResult.diagnosticCodes.contains("AVAILABILITY_DOMAIN_TIMEOUT")
+                availabilityResult.diagnosticCodes.contains("AVAILABILITY_DOMAIN_TIMEOUT") ||
+                listOf(500, 502, 503, 504).any { code ->
+                    availabilityResult.diagnosticCodes.contains("AVAILABILITY_DOMAIN_HTTP_$code")
+                }
         if (!mayUseCdxFallback) return@withContext availabilityResult
 
         val cdxUrl = buildDomainCdxHostUrls(
@@ -183,7 +186,8 @@ class WaybackPriceHistoryClient(
             now = now,
             maxSnapshots = MAX_CDX_FALLBACK_SNAPSHOTS,
             cdxTimeoutSeconds = CDX_FALLBACK_TIMEOUT_SECONDS,
-            cdxStage = "CDX_DOMAIN_FALLBACK"
+            cdxStage = "CDX_DOMAIN_FALLBACK",
+            snapshotTimeoutSeconds = CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS
         )
         if (cdxResult.quotes.isNotEmpty()) {
             // Successful fallback should not leave a stale no-captures diagnostic visible.
@@ -221,26 +225,28 @@ class WaybackPriceHistoryClient(
             return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("${stage}_NO_CANDIDATES"))
         }
 
-        // Probe in a bounded cascade, not a fan-out: look at two dates for the most likely
-        // URL first. Only try a second URL if the first returned no captures; a 429 or network
-        // failure stops the stage immediately.
+        // Cascade across URL variants efficiently: probe the newest capture for each URL;
+        // once one candidate works, query an older target date for that same URL to build history.
+        // A 429 or network failure stops immediately, and no more than three availability calls run.
         val dates = availabilityTargetDates(now, lookbackDays, 2)
         val probes = mutableListOf<AvailabilityProbe>()
         for (originalUrl in urls) {
-            var candidateHadCapture = false
-            for (targetDate in dates) {
-                val probe = availabilitySemaphore.withPermit {
-                    queryAvailability(originalUrl, targetDate, stage)
-                }
-                probes += probe
-                if (probe.diagnosticCode == "WAYBACK_RATE_LIMITED") break
-                if (probe.capture != null) candidateHadCapture = true
-                if (probe.requestFailed) break
+            val recentProbe = availabilitySemaphore.withPermit {
+                queryAvailability(originalUrl, dates.first(), stage)
             }
-            if (probes.any { it.diagnosticCode == "WAYBACK_RATE_LIMITED" } ||
-                probes.any { it.requestFailed && it.diagnosticCode != "${stage}_HTTP_404" } ||
-                candidateHadCapture
-            ) break
+            probes += recentProbe
+            if (recentProbe.diagnosticCode == "WAYBACK_RATE_LIMITED") break
+            if (recentProbe.requestFailed) {
+                if (recentProbe.diagnosticCode == "${stage}_HTTP_404") continue
+                break
+            }
+            if (recentProbe.capture != null) {
+                val olderProbe = availabilitySemaphore.withPermit {
+                    queryAvailability(originalUrl, dates.last(), stage)
+                }
+                probes += olderProbe
+                break
+            }
         }
         val captures = probes.mapNotNull { it.capture }
             .filter { it.timestamp <= now && it.timestamp >= (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L) }
@@ -290,7 +296,7 @@ class WaybackPriceHistoryClient(
 
         val sampled = sampleCaptures(captures, maxSnapshots)
         val snapshotHttp = http.newBuilder()
-            .callTimeout(SNAPSHOT_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .callTimeout(snapshotTimeoutSeconds, TimeUnit.SECONDS)
             .build()
         val fetched = coroutineScope {
             sampled.map { capture ->
@@ -747,7 +753,8 @@ class WaybackPriceHistoryClient(
         now: Long,
         maxSnapshots: Int,
         cdxTimeoutSeconds: Long,
-        cdxStage: String
+        cdxStage: String,
+        snapshotTimeoutSeconds: Long = SNAPSHOT_CALL_TIMEOUT_SECONDS
     ): WaybackBackfillResult {
         val cdxOutcome = availabilitySemaphore.withPermit {
             val gate = awaitArchiveRequestTurn()
@@ -1601,9 +1608,10 @@ class WaybackPriceHistoryClient(
         private const val MAX_CDX_HTTP_RETRIES = 1
         private const val MAX_CONCURRENT_AVAILABILITY_REQUESTS = 1
         private const val MAX_AVAILABILITY_URL_CANDIDATES = 6
-        private const val MAX_AVAILABILITY_PROBE_CANDIDATES = 1
+        private const val MAX_AVAILABILITY_PROBE_CANDIDATES = 2
         private const val MAX_CDX_FALLBACK_SNAPSHOTS = 2
-        private const val CDX_FALLBACK_TIMEOUT_SECONDS = 3L
+        private const val CDX_FALLBACK_TIMEOUT_SECONDS = 4L
+        private const val CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS = 2L
         private const val MAX_AVAILABILITY_BODY_BYTES = 64 * 1024
         private const val CDX_RETRY_DELAY_MS = 500L
         private const val CDX_RETRY_JITTER_MS = 350L

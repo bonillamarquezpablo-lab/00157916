@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.data.model.Store
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -176,7 +177,7 @@ class WaybackPriceHistoryClient(
             .build()
         val request = Request.Builder().url(cdxUrl).header("User-Agent", USER_AGENT).get().build()
         val captures = try {
-            cdxHttp.newCall(request).execute().use { response ->
+            executeCdxWithTransientRetry(cdxHttp, request).use { response ->
                 if (!response.isSuccessful) {
                     rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
                     return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("${cdxStage}_HTTP_${response.code}"))
@@ -281,6 +282,26 @@ class WaybackPriceHistoryClient(
             requestFailed = anySnapshotFailed,
             diagnosticCodes = diagnosticCodes
         )
+    }
+
+    /**
+     * Wayback's public CDX endpoint intermittently returns 5xx responses for otherwise valid
+     * queries. Retry only transient server failures once; never retry 4xx, timeouts, or arbitrary
+     * exceptions, so the free-history action remains bounded and responsive.
+     */
+    private suspend fun executeCdxWithTransientRetry(
+        client: OkHttpClient,
+        request: Request
+    ): okhttp3.Response {
+        repeat(MAX_CDX_HTTP_RETRIES + 1) { attempt ->
+            val response = client.newCall(request).execute()
+            val shouldRetry = response.code in RETRYABLE_CDX_HTTP_CODES &&
+                attempt < MAX_CDX_HTTP_RETRIES
+            if (!shouldRetry) return response
+            response.close()
+            delay(CDX_RETRY_DELAY_MS)
+        }
+        error("CDX retry loop exited unexpectedly")
     }
 
     /** Resolve recognisable merchant labels; never guess a site from generic labels. */
@@ -950,6 +971,9 @@ class WaybackPriceHistoryClient(
         // CDX queries run in parallel for the exact URL and merchant-domain fallback.
         // A larger read budget is needed on slow archive responses; concurrency and row caps
         // below still bound total work per product.
+        private const val MAX_CDX_HTTP_RETRIES = 1
+        private const val CDX_RETRY_DELAY_MS = 900L
+        private val RETRYABLE_CDX_HTTP_CODES = setOf(500, 502, 503, 504)
         private const val DIRECT_CDX_TIMEOUT_SECONDS = 15L
         private const val DOMAIN_CDX_TIMEOUT_SECONDS = 20L
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 4

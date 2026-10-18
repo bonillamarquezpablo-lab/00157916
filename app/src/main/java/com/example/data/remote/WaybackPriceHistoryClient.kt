@@ -129,6 +129,9 @@ class WaybackPriceHistoryClient(
         queryCdxAndFetchPrices(
             cdxUrl, expectedTitle, attempt, now,
             maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP,
+            // The expensive merchant-index request has a strict 4-second budget. Snapshot
+            // downloads are a separate bounded phase; the caller must not cancel them using
+            // the index budget or a successful CDX response can never yield a verified price.
             cdxTimeoutSeconds = DOMAIN_CDX_TIMEOUT_SECONDS,
             cdxStage = "CDX_DOMAIN"
         )
@@ -177,7 +180,14 @@ class WaybackPriceHistoryClient(
             .build()
         val request = Request.Builder().url(cdxUrl).header("User-Agent", USER_AGENT).get().build()
         val captures = try {
-            executeCdxWithTransientRetry(cdxHttp, request).use { response ->
+            // A domain-wide regex query is costly on the public index. Do not issue it twice:
+            // one 503/timeout should end this stage quickly and leave the client responsive.
+            // Exact-URL queries retain their single retry for transient 5xx responses.
+            executeCdxWithTransientRetry(
+                cdxHttp,
+                request,
+                maxRetries = if (cdxStage == "CDX_DOMAIN") 0 else MAX_CDX_HTTP_RETRIES
+            ).use { response ->
                 if (!response.isSuccessful) {
                     rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
                     return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("${cdxStage}_HTTP_${response.code}"))
@@ -291,12 +301,13 @@ class WaybackPriceHistoryClient(
      */
     private suspend fun executeCdxWithTransientRetry(
         client: OkHttpClient,
-        request: Request
+        request: Request,
+        maxRetries: Int = MAX_CDX_HTTP_RETRIES
     ): okhttp3.Response {
-        repeat(MAX_CDX_HTTP_RETRIES + 1) { attempt ->
+        repeat(maxRetries + 1) { attempt ->
             val response = client.newCall(request).execute()
             val shouldRetry = response.code in RETRYABLE_CDX_HTTP_CODES &&
-                attempt < MAX_CDX_HTTP_RETRIES
+                attempt < maxRetries
             if (!shouldRetry) return response
             response.close()
 
@@ -306,7 +317,7 @@ class WaybackPriceHistoryClient(
             val jitterMs = (System.nanoTime().ushr(1) % (CDX_RETRY_JITTER_MS + 1))
             delay(CDX_RETRY_DELAY_MS + (attempt * CDX_RETRY_DELAY_MS) + jitterMs)
         }
-        error("CDX retry loop exited unexpectedly")
+        error("CDX request loop exited unexpectedly")
     }
 
     /** Resolve recognisable merchant labels; never guess a site from generic labels. */
@@ -985,7 +996,8 @@ class WaybackPriceHistoryClient(
         private const val CDX_RETRY_JITTER_MS = 350L
         private val RETRYABLE_CDX_HTTP_CODES = setOf(500, 502, 503, 504)
         private const val DIRECT_CDX_TIMEOUT_SECONDS = 15L
-        private const val DOMAIN_CDX_TIMEOUT_SECONDS = 20L
+        // Keep the broad domain-index request aligned with the UI's strict four-second budget.
+        private const val DOMAIN_CDX_TIMEOUT_SECONDS = 4L
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 4
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 4
         private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 3L

@@ -177,9 +177,9 @@ class WaybackPriceHistoryClient(
             return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("${stage}_NO_CANDIDATES"))
         }
 
-        // Avoid a burst of per-product requests. Two concrete candidates, sampled over three
-        // dates, is enough to discover a usable history without overwhelming the public API.
-        val dates = availabilityTargetDates(now, lookbackDays, if (stage == "AVAILABILITY_EXACT") 3 else 3)
+        // Avoid bursts and stay within the UI's 10-second merchant-fallback budget:
+        // one exact URL gets three dates; up to two domain candidates get two dates each.
+        val dates = availabilityTargetDates(now, lookbackDays, if (stage == "AVAILABILITY_EXACT") 3 else 2)
         val probes = coroutineScope {
             urls.flatMap { originalUrl ->
                 dates.map { targetDate ->

@@ -513,8 +513,7 @@ class WaybackPriceHistoryClient(
             .addQueryParameter("filter", "original:$urlPattern")
             .addQueryParameter("from", formatUtc((now - DOMAIN_LOOKBACK_DAYS.toLong() * DAY_MS).coerceAtLeast(start), "yyyyMMdd"))
             .addQueryParameter("to", to)
-            .addQueryParameter("collapse", "urlkey")
-            .addQueryParameter("fl", "timestamp,original,statuscode,mimetype")
+            // Keep multiple timestamps for a URL; history needs multiple captures to build a curve.
             .addQueryParameter("limit", MAX_DOMAIN_INDEX_ROWS.toString())
             .build()
     }

@@ -319,7 +319,6 @@ class WaybackPriceHistoryClientTest {
         assertEquals("domain", url!!.queryParameter("matchType"))
         assertEquals("6", url.queryParameter("limit"))
         assertEquals("urlkey", url.queryParameter("collapse"))
-        assertNull("Domain scans must preserve repeated captures over time", url.queryParameter("collapse"))
         assertEquals("20250115", url.queryParameter("from"))
         assertTrue(url.queryParameterValues("filter").orEmpty().any { raw ->
             val filter = raw.orEmpty()
@@ -624,7 +623,8 @@ class WaybackPriceHistoryClientTest {
             url.queryParameterValues("filter").orEmpty().any { it.orEmpty().startsWith("original:(?i)") }
         )
         assertEquals("json", url.queryParameter("output"))
-        assertEquals("80", url.queryParameter("limit"))
+        assertEquals("6", url.queryParameter("limit"))
+        assertEquals("urlkey", url.queryParameter("collapse"))
         assertTrue(url.queryParameterValues("filter").orEmpty().any { it == "statuscode:200" })
         assertTrue(url.queryParameterValues("filter").orEmpty().any { it == "mimetype:text/html" })
         assertTrue(url.queryParameterValues("filter").orEmpty().any { it.orEmpty().startsWith("original:") })

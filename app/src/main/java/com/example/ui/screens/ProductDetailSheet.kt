@@ -130,6 +130,20 @@ fun ProductDetailSheet(
     } else {
         product.priceObservedAt
     }
+    val sharePrice = if (isDisplayingSavedArchivePrice) {
+        product.savedHistoricalPrice ?: product.currentPrice
+    } else {
+        product.currentPrice
+    }
+    val historyDayKey = System.currentTimeMillis() / 86_400_000L
+    val hasCurrentVerifiedHistory = remember(
+        product,
+        product.priceDisplayStatus,
+        historyDayKey
+    ) {
+        product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT &&
+            product.hasSufficientHistory
+    }
     val currentSourceLabel = if (!product.isPriceVerified && product.savedHistoricalPrice != null) {
         product.savedHistoricalPriceSource.takeIf { it.isNotBlank() } ?: "Historial archivado"
     } else if (!product.isPriceVerified) {
@@ -195,16 +209,20 @@ fun ProductDetailSheet(
                     IconButton(
                         onClick = {
                             val shareText = when {
-                                product.hasSufficientHistory ->
+                                hasCurrentVerifiedHistory ->
                                     "Precio observado para ${product.title}:\\n" +
-                                        "• Precio actual: ${String.format(spanishLocale, "%.2f", product.currentPrice)} € en ${product.currentStore.name}\\n" +
-                                        "• Mínimo observado en los datos disponibles: ${String.format(spanishLocale, "%.2f", product.athMinPrice)} € (${product.athMinDate} en ${product.athMinStore})\\n" +
+                                        "• Precio actual verificado: ${String.format(spanishLocale, "%.2f", product.currentPrice)} € en ${product.currentStore.name}\\n" +
+                                        "• Mínimo observado: ${String.format(spanishLocale, "%.2f", product.athMinPrice)} € (${product.athMinDate} en ${product.athMinStore})\\n" +
                                         "• Diagnóstico: ${product.verdict.badgeText} - ${product.verdict.explanation}"
-                                product.isPriceVerified ->
+                                product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT ->
                                     "Precio observado para ${product.title}: ${String.format(spanishLocale, "%.2f", product.currentPrice)} € en ${product.currentStore.name}. " +
-                                        "Aún no hay observaciones durante 90 días para afirmar un mínimo histórico o un descuento."
+                                        "Aún no hay cobertura histórica suficiente para afirmar un mínimo de largo plazo o un descuento real."
+                                product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION ->
+                                    "Último precio guardado para ${product.title}: ${String.format(spanishLocale, "%.2f", sharePrice)} €. " +
+                                        (displayedPriceObservedAt?.let { "Fecha: ${savedDateFormatter.format(Date(it))}. " }.orEmpty()) +
+                                        "Fuente: $currentSourceLabel. No confirma una oferta actual, stock ni envío."
                                 else ->
-                                    "Ficha sin precio verificado de Mínimo: ${product.title}.\\nNo contiene una oferta ni un historial real confirmados."
+                                    "Ficha sin precio verificado de Mínimo: ${product.title}.\\nNo hay una oferta actual validada ni un precio histórico confirmado que se pueda compartir."
                             }
                             val intent = Intent(Intent.ACTION_SEND).apply {
                                 type = "text/plain"
@@ -359,7 +377,7 @@ fun ProductDetailSheet(
 
                         // Do not infer a historical low from a single query.
                         Column(horizontalAlignment = Alignment.End) {
-                            if (product.hasSufficientHistory) {
+                            if (hasCurrentVerifiedHistory) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Box(
                                         modifier = Modifier
@@ -408,12 +426,12 @@ fun ProductDetailSheet(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    if (product.hasSufficientHistory || (product.isOfficialPvpVerified && product.officialPvp > 0.0)) {
+                    if (hasCurrentVerifiedHistory || (product.isOfficialPvpVerified && product.officialPvp > 0.0)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            if (product.hasSufficientHistory) {
+                            if (hasCurrentVerifiedHistory) {
                                 Column {
                                     Text(
                                         text = "Media de 90 días",
@@ -494,7 +512,7 @@ fun ProductDetailSheet(
                 StoreComparisonView(
                     offers = product.offers,
                     athPrice = product.athMinPrice,
-                    hasSufficientHistory = product.hasSufficientHistory,
+                    hasSufficientHistory = hasCurrentVerifiedHistory,
                     productTitle = product.title
                 )
             }

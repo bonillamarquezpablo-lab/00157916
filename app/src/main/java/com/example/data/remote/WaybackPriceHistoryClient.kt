@@ -198,6 +198,24 @@ class WaybackPriceHistoryClient(
         val successfulProbes = probes.count { !it.requestFailed }
         val probeDiagnostics = probes.mapNotNull { it.diagnosticCode }.toSet()
 
+        // A 429 ends this backfill immediately. Do not follow successful earlier probes with
+        // snapshot downloads while the archive has explicitly asked us to slow down.
+        if (probeDiagnostics.contains("WAYBACK_RATE_LIMITED")) {
+            rememberAttempt(
+                cacheKey,
+                now,
+                hasQuotes = false,
+                failed = true,
+                rateLimited = true
+            )
+            return WaybackBackfillResult(
+                capturesFound = captures.size,
+                available = successfulProbes > 0,
+                requestFailed = true,
+                diagnosticCodes = probeDiagnostics
+            )
+        }
+
         if (captures.isEmpty()) {
             val allFailed = successfulProbes == 0
             val diagnostics = linkedSetOf<String>().apply {

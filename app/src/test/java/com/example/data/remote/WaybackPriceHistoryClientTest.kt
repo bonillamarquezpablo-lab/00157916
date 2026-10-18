@@ -1063,7 +1063,7 @@ class WaybackPriceHistoryClientTest {
         assertEquals(listOf("www.shop.example", "shop.example"), urls.map { it.queryParameter("url") })
         assertTrue(urls.all { it.queryParameter("matchType") == "host" })
         assertTrue(urls.all { it.queryParameter("collapse") == null })
-        assertTrue(urls.all { it.queryParameter("limit") == "6" })
+        assertTrue(urls.all { it.queryParameter("limit") == "20" })
     }
 
     @Test

@@ -323,7 +323,7 @@ class WaybackPriceHistoryClient(
         } ?: return null
         if (!closest.optBoolean("available", false)) return null
         val rawTimestamp = closest.optString("timestamp")
-        if (!rawTimestamp.matches(Regex("""\\d{14}"""))) return null
+        if (!rawTimestamp.matches(Regex("""\d{14}"""))) return null
         val timestamp = runCatching {
             SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
                 isLenient = false

@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -331,19 +330,19 @@ fun MarketScreen(
                         expanded = showStoreMenu,
                         onDismissRequest = { showStoreMenu = false }
                     ) {
-                        // There can be hundreds of historical sellers in the database. Compose
-                        // only the visible options instead of building every menu row at once.
-                        LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
-                            item {
-                                DropdownMenuItem(
-                                    text = { Text("Todas las tiendas (${stores.size})") },
-                                    onClick = {
-                                        onStoreFilterSelect(null)
-                                        showStoreMenu = false
-                                    }
-                                )
-                            }
-                            items(stores, key = { it.id }) { store ->
+                        // DropdownMenu hosts content in a popup. Avoid nesting LazyColumn here:
+                        // LazyLayout does not support intrinsic measurement, which can crash when
+                        // an ancestor in the popup requests intrinsic dimensions. The popup's
+                        // measured height is bounded, so use a regular Column for these options.
+                        Column(modifier = Modifier.heightIn(max = 420.dp)) {
+                            DropdownMenuItem(
+                                text = { Text("Todas las tiendas (${stores.size})") },
+                                onClick = {
+                                    onStoreFilterSelect(null)
+                                    showStoreMenu = false
+                                }
+                            )
+                            stores.forEach { store ->
                                 DropdownMenuItem(
                                     text = {
                                         Row(verticalAlignment = Alignment.CenterVertically) {

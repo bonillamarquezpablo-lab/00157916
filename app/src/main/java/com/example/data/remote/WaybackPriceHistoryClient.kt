@@ -234,7 +234,7 @@ class WaybackPriceHistoryClient(
             cacheKey,
             now,
             hasQuotes = quotes.isNotEmpty(),
-            failed = quotes.isEmpty() && allSnapshotsFailed
+            failed = quotes.isEmpty() && anySnapshotFailed
         )
         return WaybackBackfillResult(
             quotes = quotes,

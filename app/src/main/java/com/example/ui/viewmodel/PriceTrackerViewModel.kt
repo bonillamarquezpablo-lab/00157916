@@ -977,7 +977,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         // merchant-domain field. Resolve the merchant from the saved store directory before
         // giving up, without making a paid query or changing the stored offer.
         val candidates = mutableListOf<FreeArchiveCandidate>()
-        run {
+        candidates.apply {
             product.offers.forEach { offer ->
                 val destination = offer.url.ifBlank {
                     if (offer.store.id == product.currentStore.id) product.storeUrl
@@ -1024,7 +1024,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     )
                 }
             }
-        }
         val orderedCandidates = candidates.sortedWith(
             compareBy<FreeArchiveCandidate> { if (it.directUrl != null) 0 else 1 }
                 .thenBy { it.merchantDomain.orEmpty() }

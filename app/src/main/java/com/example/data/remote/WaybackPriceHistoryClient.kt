@@ -286,8 +286,8 @@ class WaybackPriceHistoryClient(
             .addQueryParameter("timestamp", targetDate)
             .build()
         val availabilityHttp = http.newBuilder()
-            .readTimeout(3, TimeUnit.SECONDS)
-            .callTimeout(3, TimeUnit.SECONDS)
+            .readTimeout(2, TimeUnit.SECONDS)
+            .callTimeout(2, TimeUnit.SECONDS)
             .build()
         val request = Request.Builder().url(endpoint).header("User-Agent", USER_AGENT).get().build()
         return try {

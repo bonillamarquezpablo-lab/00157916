@@ -299,7 +299,12 @@ class WaybackPriceHistoryClient(
                 attempt < MAX_CDX_HTTP_RETRIES
             if (!shouldRetry) return response
             response.close()
-            delay(CDX_RETRY_DELAY_MS)
+
+            // The CDX index is shared public infrastructure. A short exponential pause plus
+            // jitter avoids synchronized repeat traffic across clients while retaining a strict
+            // single-retry ceiling for UI responsiveness.
+            val jitterMs = (System.nanoTime().ushr(1) % (CDX_RETRY_JITTER_MS + 1))
+            delay(CDX_RETRY_DELAY_MS + (attempt * CDX_RETRY_DELAY_MS) + jitterMs)
         }
         error("CDX retry loop exited unexpectedly")
     }
@@ -972,7 +977,8 @@ class WaybackPriceHistoryClient(
         // A larger read budget is needed on slow archive responses; concurrency and row caps
         // below still bound total work per product.
         private const val MAX_CDX_HTTP_RETRIES = 1
-        private const val CDX_RETRY_DELAY_MS = 900L
+        private const val CDX_RETRY_DELAY_MS = 500L
+        private const val CDX_RETRY_JITTER_MS = 350L
         private val RETRYABLE_CDX_HTTP_CODES = setOf(500, 502, 503, 504)
         private const val DIRECT_CDX_TIMEOUT_SECONDS = 15L
         private const val DOMAIN_CDX_TIMEOUT_SECONDS = 20L

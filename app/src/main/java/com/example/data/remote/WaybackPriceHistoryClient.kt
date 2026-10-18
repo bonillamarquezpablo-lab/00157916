@@ -55,9 +55,9 @@ data class WaybackBackfillResult(
 class WaybackPriceHistoryClient(
     context: Context,
     private val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(7, TimeUnit.SECONDS)
-        .callTimeout(9, TimeUnit.SECONDS)
+        .connectTimeout(4, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .callTimeout(5, TimeUnit.SECONDS)
         .build()
 ) {
     private val preferences = context.applicationContext.getSharedPreferences(
@@ -83,7 +83,7 @@ class WaybackPriceHistoryClient(
         }
         val cdxUrl = buildCdxUrl(originalUrl, now, lookbackDays)
             ?: return@withContext WaybackBackfillResult()
-        queryCdxAndFetchPrices(cdxUrl, expectedTitle, attempt, now)
+        queryCdxAndFetchPrices(cdxUrl, expectedTitle, attempt, now, maxSnapshots = MAX_DIRECT_SNAPSHOTS_PER_URL)
     }
 
     /**
@@ -109,7 +109,7 @@ class WaybackPriceHistoryClient(
         if (wasAttemptedRecently(attempt, now)) {
             return@withContext WaybackBackfillResult(skippedRecently = true)
         }
-        queryCdxAndFetchPrices(cdxUrl, expectedTitle, attempt, now)
+        queryCdxAndFetchPrices(cdxUrl, expectedTitle, attempt, now, maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP)
     }
 
     internal fun wasAttemptedRecently(key: String, now: Long): Boolean {
@@ -142,7 +142,8 @@ class WaybackPriceHistoryClient(
         cdxUrl: HttpUrl,
         expectedTitle: String,
         cacheKey: String,
-        now: Long
+        now: Long,
+        maxSnapshots: Int
     ): WaybackBackfillResult {
         val request = Request.Builder().url(cdxUrl).header("User-Agent", USER_AGENT).get().build()
         val captures = try {
@@ -156,6 +157,10 @@ class WaybackPriceHistoryClient(
                     rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
                     return WaybackBackfillResult(requestFailed = true)
                 }
+                if (!isValidCaptureIndexResponse(body)) {
+                    rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
+                    return WaybackBackfillResult(requestFailed = true)
+                }
                 parseCaptureIndex(body)
             }
         } catch (cancelled: CancellationException) {
@@ -165,7 +170,7 @@ class WaybackPriceHistoryClient(
             return WaybackBackfillResult(requestFailed = true)
         }
 
-        val sampled = sampleCaptures(captures, MAX_SNAPSHOTS_PER_URL)
+        val sampled = sampleCaptures(captures, maxSnapshots)
         val semaphore = Semaphore(MAX_CONCURRENT_SNAPSHOT_REQUESTS)
         val fetched = coroutineScope {
             sampled.map { capture ->
@@ -177,8 +182,13 @@ class WaybackPriceHistoryClient(
                             .header("User-Agent", USER_AGENT)
                             .get()
                             .build()
+                        // Snapshots are secondary lookups: keep each bounded so a slow archived
+                        // page cannot consume the full candidate deadline and prevent domain fallback.
+                        val snapshotHttp = http.newBuilder()
+                            .callTimeout(SNAPSHOT_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                            .build()
                         val html = try {
-                            http.newCall(snapshotRequest).execute().use { response ->
+                            snapshotHttp.newCall(snapshotRequest).execute().use { response ->
                                 if (response.isSuccessful) {
                                     readBodyLimited(response.body, MAX_SNAPSHOT_BODY_BYTES)
                                 } else null
@@ -518,6 +528,14 @@ class WaybackPriceHistoryClient(
     private fun buildSnapshotUrl(capture: WaybackCapture): String? {
         if (capture.timestamp <= 0L || !isEligibleDirectUrl(capture.originalUrl)) return null
         return "https://web.archive.org/web/" + capture.rawTimestamp + "id_/" + capture.originalUrl
+    }
+
+    internal fun isValidCaptureIndexResponse(body: String): Boolean {
+        val root = try { JSONArray(body) } catch (_: JSONException) { return false }
+        if (root.length() == 0) return true
+        val header = root.optJSONArray(0) ?: return false
+        val fields = (0 until header.length()).map { header.optString(it) }.toSet()
+        return "timestamp" in fields && "original" in fields
     }
 
     internal fun parseCaptureIndex(body: String): List<WaybackCapture> {
@@ -868,7 +886,9 @@ class WaybackPriceHistoryClient(
 
     companion object {
         const val DEFAULT_LOOKBACK_DAYS = 1600
-        const val MAX_SNAPSHOTS_PER_URL = 12
+        private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 4
+        private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 8
+        private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 3L
         private const val MAX_DOMAIN_INDEX_ROWS = 80
         private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L

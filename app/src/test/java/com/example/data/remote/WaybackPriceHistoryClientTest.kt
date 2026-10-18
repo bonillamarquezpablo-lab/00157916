@@ -491,4 +491,36 @@ class WaybackPriceHistoryClientTest {
         }
     }
 
+
+    @Test
+    fun resolvesSamsungEdgeAndCommonSellerDomainsFromSavedStoreNames() {
+        val client = newClient()
+        val googleUrl = "https://www.google.com/search?q=Samsung+Galaxy+S26+Edge"
+
+        assertEquals("samsung.com", client.resolveMerchantDomain("Samsung Shop España", googleUrl, "samsung.com/es"))
+        assertEquals("amazon.es", client.resolveMerchantDomain("Amazon España", googleUrl, "amazon.es"))
+        assertEquals("fnac.es", client.resolveMerchantDomain("Fnac España", googleUrl, "fnac.es"))
+
+        val s26 = client.buildDomainCdxUrl(
+            domain = "samsung.com",
+            expectedTitle = "Samsung Galaxy S26 Edge 256GB",
+            now = 1_800_000_000_000L
+        )
+        val s26Filter = s26?.queryParameterValues("filter").orEmpty()
+            .firstOrNull { it.orEmpty().startsWith("original:") }.orEmpty()
+        assertTrue(s26Filter.contains("galaxy"))
+        assertTrue(s26Filter.contains("26"))
+
+        val s25 = client.buildDomainCdxUrl(
+            domain = "samsung.com",
+            expectedTitle = "Samsung Galaxy S25 Edge 256GB",
+            now = 1_800_000_000_000L
+        )
+        val s25Filter = s25?.queryParameterValues("filter").orEmpty()
+            .firstOrNull { it.orEmpty().startsWith("original:") }.orEmpty()
+        assertTrue(s25Filter.contains("galaxy"))
+        assertTrue(s25Filter.contains("25"))
+    }
+
+
 }

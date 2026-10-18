@@ -226,31 +226,27 @@ class WaybackPriceHistoryClient(
     }
 
     /** Resolve recognisable merchant labels; never guess a site from generic labels. */
+    /** Resolve recognisable merchant labels; never guess a site from generic labels. */
     internal fun resolveMerchantDomain(
         storeName: String,
         sourceUrl: String = "",
         knownStoreDomain: String = ""
     ): String? {
         if (storeName.isBlank()) return null
-        val hostPattern = Regex(
-            """(?i)(?:https?://)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:es|com|net|org|eu|de|fr|it|nl|co\.uk))(?:[:/]|$)"""
-        )
-        val explicitHost = hostPattern.find(storeName.trim())?.groupValues?.getOrNull(1)
+        val explicitHost = Regex(
+            """(?i)(?:https?://)?(?:www\\.)?([a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.(?:es|com|net|org|eu|de|fr|it|nl|co\\.uk))(?:[:/]|$)"""
+        ).find(storeName.trim())?.groupValues?.getOrNull(1)
         if (explicitHost != null) return normalizeMerchantDomain(explicitHost)
-
-        // The saved Store object can come from Room's expanded directory, not just ALL_STORES.
-        // Prefer its trusted merchant domain over a Google Shopping intermediary URL.
         normalizeMerchantDomain(knownStoreDomain)?.let { return it }
-        Store.findKnownByName(storeName, sourceUrl)?.let { knownStore ->
-            normalizeMerchantDomain(knownStore.domain)?.let { return it }
+        Store.findKnownByName(storeName, sourceUrl)?.let {
+            normalizeMerchantDomain(it.domain)?.let { domain -> return domain }
         }
         if (sourceUrl.isNotBlank()) {
-            val sourceHost = runCatching { URI(sourceUrl).host }.getOrNull()
-            sourceHost?.let(::normalizeMerchantDomain)?.let { return it }
+            runCatching { URI(sourceUrl).host }.getOrNull()
+                ?.let(::normalizeMerchantDomain)?.let { return it }
         }
-
         val normalized = normalizeTitle(storeName)
-        val aliases = linkedMapOf(
+        val aliases = listOf(
             "pccomponentes" to "pccomponentes.com",
             "la manzanita" to "lamanzanita.es",
             "nike" to "nike.com",
@@ -297,12 +293,11 @@ class WaybackPriceHistoryClient(
             "dell" to "dell.com",
             "hp" to "hp.com"
         )
-        val match = aliases.entries.firstOrNull { (label, _) ->
+        val match = aliases.firstOrNull { (label, _) ->
             normalized == label || normalized.contains(label)
         } ?: return null
-        return normalizeMerchantDomain(match.value)
+        return normalizeMerchantDomain(match.second)
     }
-
     /**
      * If a Shopping provider hides the merchant URL/name, fall back only to a recognized
      * product brand's own store domain. This is a fallback source, not an assumption that the

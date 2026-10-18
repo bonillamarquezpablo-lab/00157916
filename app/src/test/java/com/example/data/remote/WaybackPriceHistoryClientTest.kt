@@ -75,6 +75,9 @@ class WaybackPriceHistoryClientTest {
             )
         ).joinToString(" | "))
         val targets = listOf(
+            // This retailer exposes structured product offers more consistently than Apple's
+            // JS-rendered product page; use it first to exercise a real EUR-price extraction.
+            "pccomponentes.com" to "Apple iPhone 16 128 GB Negro",
             "apple.com" to "iPhone 16",
             "samsung.com" to "Samsung Galaxy S25 Edge"
         )
@@ -151,6 +154,15 @@ class WaybackPriceHistoryClientTest {
         assertTrue(appleCandidates.size <= 6)
         assertTrue(appleCandidates.any { it.startsWith("https://www.apple.com/") })
         assertTrue(appleCandidates.any { it.startsWith("https://apple.com/") })
+
+        val pcCandidates = client.buildAvailabilityCandidateUrls(
+            "pccomponentes.com",
+            "Apple iPhone 16 128 GB Negro"
+        )
+        assertTrue(
+            "Known retailer product-search URL should be tried for structured listing metadata",
+            pcCandidates.first().startsWith("https://www.pccomponentes.com/search/")
+        )
 
         val samsungCandidates = client.buildAvailabilityCandidateUrls(
             "samsung.com",

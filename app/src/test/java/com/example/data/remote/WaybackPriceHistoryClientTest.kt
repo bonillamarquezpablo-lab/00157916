@@ -105,6 +105,61 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun parsesWaybackAvailabilityCaptureOnlyWhenMarkedAvailable() {
+        val client = newClient()
+        val available = """
+            {
+              "url":"www.apple.com/es/iphone-16/",
+              "archived_snapshots":{
+                "closest":{
+                  "status":"200",
+                  "available":true,
+                  "url":"https://web.archive.org/web/20250101120000/https://www.apple.com/es/iphone-16/",
+                  "timestamp":"20250101120000"
+                }
+              }
+            }
+        """.trimIndent()
+
+        val capture = client.parseAvailabilityCapture(
+            available,
+            "https://www.apple.com/es/iphone-16/"
+        )
+
+        assertNotNull(capture)
+        assertEquals("20250101120000", capture!!.rawTimestamp)
+        assertEquals("https://www.apple.com/es/iphone-16/", capture.originalUrl)
+        assertNull(
+            client.parseAvailabilityCapture(
+                """{"archived_snapshots":{"closest":{"available":false,"timestamp":"20250101120000"}}}""",
+                "https://www.apple.com/es/iphone-16/"
+            )
+        )
+    }
+
+    @Test
+    fun buildsBoundedProductSpecificAvailabilityCandidates() {
+        val client = newClient()
+        val appleCandidates = client.buildAvailabilityCandidateUrls("apple.com", "iPhone 16")
+        assertTrue(
+            "Spanish Apple product path should be tried before broad CDX domain scans",
+            appleCandidates.contains("https://www.apple.com/es/iphone-16/")
+        )
+        assertTrue(appleCandidates.size <= 6)
+        assertTrue(appleCandidates.all { it.startsWith("https://www.apple.com/") })
+
+        val samsungCandidates = client.buildAvailabilityCandidateUrls(
+            "samsung.com",
+            "Samsung Galaxy S25 Edge"
+        )
+        assertTrue(
+            "Samsung's localized product route should be included",
+            samsungCandidates.contains("https://www.samsung.com/es/smartphones/galaxy-s/galaxy-s25-edge/")
+        )
+        assertTrue(samsungCandidates.size <= 6)
+    }
+
+    @Test
     fun parsesOnlySuccessfulHtmlCapturesInTimestampOrder() {
         val client = newClient()
         val body = """

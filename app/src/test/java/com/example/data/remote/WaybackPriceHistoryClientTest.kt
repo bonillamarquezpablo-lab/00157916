@@ -7,6 +7,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
@@ -70,7 +73,7 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun cdxProductUrlFallbackRecoversPriceWhenAvailabilityFindsNoCaptures() = runBlocking {
+    fun cdxBatchLookupRecoversPriceAndDeduplicatesConcurrentLookups() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
         preferences.edit()
@@ -78,10 +81,9 @@ class WaybackPriceHistoryClientTest {
             .remove("wayback_last_availability_request_at")
             .commit()
 
-        val title = "Anker Prime 27K Power Bank Cascade Test"
+        val title = "Anker Prime 27K Power Bank Cascade Test ${System.currentTimeMillis()}"
         val archivedUrl = "https://www.shop.example/products/anker-prime-27k-power-bank"
         val requests = CopyOnWriteArrayList<String>()
-        val availabilityBody = """{"archived_snapshots":{"closest":{"available":false}}}"""
         val cdxBody = """
             [
               ["timestamp","original","statuscode","mimetype"],
@@ -102,9 +104,6 @@ class WaybackPriceHistoryClientTest {
             val hostAndPath = request.url.host + request.url.encodedPath
             requests += hostAndPath
             val (body, contentType) = when {
-                request.url.host == "archive.org" &&
-                    request.url.encodedPath == "/wayback/available" ->
-                    availabilityBody to "application/json; charset=utf-8"
                 request.url.host == "web.archive.org" &&
                     request.url.encodedPath.startsWith("/cdx/search/cdx") ->
                     cdxBody to "application/json; charset=utf-8"
@@ -125,20 +124,35 @@ class WaybackPriceHistoryClientTest {
 
         try {
             val client = WaybackPriceHistoryClient(context, http)
-            val result = withTimeout(12_000L) {
-                client.fetchHistoryByMerchantDomain(
-                    domain = "shop.example",
-                    expectedTitle = title,
-                    lookbackDays = 730
-                )
+            val results = withTimeout(12_000L) {
+                coroutineScope {
+                    listOf(
+                        async {
+                            client.fetchHistoryByMerchantDomain(
+                                domain = "shop.example",
+                                expectedTitle = title,
+                                lookbackDays = 730
+                            )
+                        },
+                        async {
+                            client.fetchHistoryByMerchantDomain(
+                                domain = "shop.example",
+                                expectedTitle = title,
+                                lookbackDays = 730
+                            )
+                        }
+                    ).awaitAll()
+                }
             }
+            val result = results.first { it.quotes.isNotEmpty() }
 
-            assertEquals("The fallback should verify the archived EUR price", 1, result.quotes.size)
+            assertEquals("The batched lookup should verify the archived EUR price", 1, result.quotes.size)
             assertEquals(79.99, result.quotes.single().price, 0.001)
             assertEquals("EUR", result.quotes.single().currency)
-            assertEquals(2, requests.count { it.startsWith("archive.org/wayback/available") })
-            assertEquals(1, requests.count { it.startsWith("web.archive.org/cdx/search/cdx") })
-            assertEquals(1, requests.count { it.startsWith("web.archive.org/web/") })
+            assertEquals("Availability must not issue per-date HTTP requests", 0, requests.count { it.startsWith("archive.org/wayback/available") })
+            assertEquals("Concurrent duplicate lookups must share one CDX request", 1, requests.count { it.startsWith("web.archive.org/cdx/search/cdx") })
+            assertEquals("The duplicate result should use the completed lookup cache", 1, results.count { it.skippedRecently })
+            assertEquals("Only one archived snapshot is needed for this one-capture fixture", 1, requests.count { it.startsWith("web.archive.org/web/") })
         } finally {
             preferences.edit()
                 .remove("wayback_rate_limit_until")

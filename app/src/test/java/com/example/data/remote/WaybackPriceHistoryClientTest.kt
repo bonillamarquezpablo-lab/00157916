@@ -1067,6 +1067,15 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun domainCdxQueryRejectsGenericOnlyTermsAndSingleBrandWords() {
+        val client = newClient()
+        assertNull(client.buildDomainCdxUrl("shop.example", "Producto genérico"))
+        assertNull(client.buildDomainCdxUrl("shop.example", "Producto demo"))
+        assertNull(client.buildDomainCdxUrl("shop.example", "Anker"))
+        assertNotNull(client.buildDomainCdxUrl("shop.example", "Anker Prime 27K Power Bank"))
+    }
+
+    @Test
     fun domainCdxQueryRejectsUnrecognisedOrGenericTargets() {
         val client = newClient()
         assertNull(client.buildDomainCdxUrl("https://google.com", "Anker Prime 27K Power Bank"))

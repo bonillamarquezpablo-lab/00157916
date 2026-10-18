@@ -21,6 +21,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,6 +54,17 @@ fun ProductImageView(
         "prod_coffee_machine" -> R.drawable.prod_coffee_machine
         else -> null
     }
+    val appContext = LocalContext.current.applicationContext
+    // Keep the same Coil request while a lazy-list row recomposes; rebuilding it on every
+    // bookmark/filter/state update adds avoidable allocations and image-loader work.
+    val remoteImageRequest = remember(appContext, product.imageUrl, localDrawableRes) {
+        product.imageUrl.takeIf { localDrawableRes == null && it.isNotBlank() }?.let { url ->
+            ImageRequest.Builder(appContext)
+                .data(url)
+                .crossfade(true)
+                .build()
+        }
+    }
 
     Box(
         modifier = modifier
@@ -67,12 +79,9 @@ fun ProductImageView(
                 contentScale = contentScale,
                 modifier = Modifier.fillMaxSize()
             )
-        } else if (product.imageUrl.isNotBlank()) {
+        } else if (remoteImageRequest != null) {
             SubcomposeAsyncImage(
-                model = ImageRequest.Builder(LocalContext.current)
-                    .data(product.imageUrl)
-                    .crossfade(true)
-                    .build(),
+                model = remoteImageRequest,
                 contentDescription = product.title,
                 contentScale = contentScale,
                 loading = {

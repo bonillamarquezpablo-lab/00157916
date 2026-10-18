@@ -72,7 +72,9 @@ class WaybackPriceHistoryClient(
         Context.MODE_PRIVATE
     )
     private val snapshotSemaphore = Semaphore(MAX_CONCURRENT_SNAPSHOT_REQUESTS)
-    private val availabilitySemaphore = Semaphore(MAX_CONCURRENT_AVAILABILITY_REQUESTS)
+    // All client instances share one permit: several product cards must not fan out against
+    // Internet Archive at the same time.
+    private val availabilitySemaphore = GLOBAL_AVAILABILITY_SEMAPHORE
 
     suspend fun fetchHistory(
         originalUrl: String,
@@ -82,6 +84,12 @@ class WaybackPriceHistoryClient(
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
         if (!preferences.getBoolean("enabled", true)) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("WAYBACK_DISABLED"))
+        }
+        activeRateLimitUntil(System.currentTimeMillis())?.let {
+            return@withContext WaybackBackfillResult(
+                requestFailed = true,
+                diagnosticCodes = setOf("WAYBACK_RATE_LIMITED")
+            )
         }
         if (!isEligibleDirectUrl(originalUrl)) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("DIRECT_URL_INVALID"))
@@ -169,7 +177,9 @@ class WaybackPriceHistoryClient(
             return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("${stage}_NO_CANDIDATES"))
         }
 
-        val dates = availabilityTargetDates(now, lookbackDays, if (stage == "AVAILABILITY_EXACT") 4 else 3)
+        // Avoid a burst of per-product requests. Two concrete candidates, sampled over three
+        // dates, is enough to discover a usable history without overwhelming the public API.
+        val dates = availabilityTargetDates(now, lookbackDays, if (stage == "AVAILABILITY_EXACT") 3 else 3)
         val probes = coroutineScope {
             urls.flatMap { originalUrl ->
                 dates.map { targetDate ->
@@ -295,8 +305,16 @@ class WaybackPriceHistoryClient(
             .build()
         val request = Request.Builder().url(endpoint).header("User-Agent", USER_AGENT).get().build()
         return try {
+            // The shared permit plus a persisted cooldown make a single HTTP 429 stop the
+            // remaining queued probes, including attempts started by another client instance.
+            activeRateLimitUntil(System.currentTimeMillis())?.let {
+                return AvailabilityProbe(requestFailed = true, diagnosticCode = "WAYBACK_RATE_LIMITED")
+            }
             availabilityHttp.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
+                if (response.code == 429) {
+                    activateRateLimit(response.header("Retry-After"), System.currentTimeMillis())
+                    AvailabilityProbe(requestFailed = true, diagnosticCode = "WAYBACK_RATE_LIMITED")
+                } else if (!response.isSuccessful) {
                     AvailabilityProbe(requestFailed = true, diagnosticCode = "${stage}_HTTP_${response.code}")
                 } else {
                     val body = readBodyLimited(response.body, MAX_AVAILABILITY_BODY_BYTES)
@@ -446,14 +464,53 @@ class WaybackPriceHistoryClient(
     internal fun wasAttemptedRecently(key: String, now: Long): Boolean {
         val lastAttempt = preferences.getLong(key, 0L)
         if (lastAttempt <= 0L || now < lastAttempt) return false
-        // A failed HTTP attempt should not block an explicit retry for 30 minutes.
-        // Failed requests are retriable immediately; only meaningful/negative completed
-        // lookups use a cache interval to avoid repeatedly scanning the same archive.
         val hadQuotes = preferences.getBoolean("${key}_has_quotes", false)
         val failed = preferences.getBoolean("${key}_failed", false)
-        if (failed && !hadQuotes) return false
-        val retryInterval = if (hadQuotes) RETRY_INTERVAL_MS else NEGATIVE_RETRY_INTERVAL_MS
+        // Repeating a failed request immediately was the main way to amplify HTTP 429s.
+        // Failed lookups get a short cooldown; a completed empty lookup gets six hours.
+        val retryInterval = when {
+            hadQuotes -> RETRY_INTERVAL_MS
+            failed -> FAILURE_RETRY_INTERVAL_MS
+            else -> NEGATIVE_RETRY_INTERVAL_MS
+        }
         return now - lastAttempt < retryInterval
+    }
+
+    internal fun computeRateLimitUntil(retryAfter: String?, now: Long): Long {
+        val fallback = now + DEFAULT_RATE_LIMIT_COOLDOWN_MS
+        val header = retryAfter?.trim().orEmpty()
+        if (header.isEmpty()) return fallback
+        val seconds = header.toLongOrNull()
+        val requestedUntil = if (seconds != null) {
+            now + seconds.coerceIn(0L, MAX_RATE_LIMIT_COOLDOWN_MS / 1000L) * 1000L
+        } else {
+            runCatching {
+                SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US).apply {
+                    isLenient = false
+                    timeZone = TimeZone.getTimeZone("GMT")
+                }.parse(header)?.time
+            }.getOrNull() ?: return fallback
+        }
+        return requestedUntil.coerceIn(
+            now + MIN_RATE_LIMIT_COOLDOWN_MS,
+            now + MAX_RATE_LIMIT_COOLDOWN_MS
+        )
+    }
+
+    private fun activateRateLimit(retryAfter: String?, now: Long): Long {
+        val until = maxOf(
+            preferences.getLong(KEY_RATE_LIMIT_UNTIL, 0L),
+            computeRateLimitUntil(retryAfter, now)
+        )
+        preferences.edit().putLong(KEY_RATE_LIMIT_UNTIL, until).apply()
+        return until
+    }
+
+    private fun activeRateLimitUntil(now: Long): Long? =
+        preferences.getLong(KEY_RATE_LIMIT_UNTIL, 0L).takeIf { it > now }
+
+    internal fun clearRateLimitForTests() {
+        preferences.edit().remove(KEY_RATE_LIMIT_UNTIL).apply()
     }
 
     private fun rememberAttempt(
@@ -1405,8 +1462,8 @@ class WaybackPriceHistoryClient(
             "com.sg", "com.tr", "co.za", "com.ar", "com.cn", "com.tw", "com.pl"
         )
         private const val MAX_CDX_HTTP_RETRIES = 1
-        private const val MAX_CONCURRENT_AVAILABILITY_REQUESTS = 6
-        private const val MAX_AVAILABILITY_URL_CANDIDATES = 6
+        private const val MAX_CONCURRENT_AVAILABILITY_REQUESTS = 1
+        private const val MAX_AVAILABILITY_URL_CANDIDATES = 2
         private const val MAX_AVAILABILITY_BODY_BYTES = 64 * 1024
         private const val CDX_RETRY_DELAY_MS = 500L
         private const val CDX_RETRY_JITTER_MS = 350L
@@ -1425,6 +1482,11 @@ class WaybackPriceHistoryClient(
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L
         const val NEGATIVE_RETRY_INTERVAL_MS = 6L * 60L * 60L * 1000L
         const val FAILURE_RETRY_INTERVAL_MS = 30L * 60L * 1000L
+        private const val MIN_RATE_LIMIT_COOLDOWN_MS = 60L * 1000L
+        private const val DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60L * 60L * 1000L
+        private const val MAX_RATE_LIMIT_COOLDOWN_MS = 6L * 60L * 60L * 1000L
+        private const val KEY_RATE_LIMIT_UNTIL = "wayback_rate_limit_until"
+        private val GLOBAL_AVAILABILITY_SEMAPHORE = Semaphore(1)
         private const val MAX_CDX_BODY_BYTES = 256 * 1024
         private const val MAX_SNAPSHOT_BODY_BYTES = 2 * 1024 * 1024
         const val DAY_MS = 24L * 60L * 60L * 1000L

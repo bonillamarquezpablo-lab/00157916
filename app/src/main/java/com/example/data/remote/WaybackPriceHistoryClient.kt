@@ -550,12 +550,12 @@ class WaybackPriceHistoryClient(
             .scheme("https")
             .host("web.archive.org")
             .addPathSegments("cdx/search/cdx")
-            // CDX domain mode has to scan the archive index for a retailer and has been
-            // returning intermittent 503/timeouts. Restrict it to a URL-prefix query containing
-            // the product's distinguishing path tokens before asking CDX for the small result set.
-            // Final archived-page title and EUR-price validation remains mandatory.
-            .addQueryParameter("url", "$normalizedDomain/.*")
-            .addQueryParameter("matchType", "regex")
+            // Use CDX's documented domain matcher so the index can use its domain-key range
+            // rather than applying an unsupported regex match mode to the entire index.
+            // Product-specific original-field filters below still narrow the returned captures;
+            // archived title and EUR-price validation remains mandatory.
+            .addQueryParameter("url", normalizedDomain)
+            .addQueryParameter("matchType", "domain")
             .addQueryParameter("output", "json")
             .addQueryParameter("fl", "timestamp,original,statuscode,mimetype")
             .addQueryParameter("filter", "statuscode:200")

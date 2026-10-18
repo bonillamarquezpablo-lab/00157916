@@ -418,6 +418,9 @@ class WaybackPriceHistoryClient(
             "hp.com" -> setOf("hp")
             else -> setOf(normalizedDomain.substringBefore('.'))
         }
+        val textTokens = tokens.filter { token ->
+            token.any(Char::isLetter) && !token.any(Char::isDigit) && token !in hostBrandTerms
+        }
         // Galaxy Edge pages may use URLs like galaxy-s26-edge, without a SKU.
         // Match title variants with either Galaxy 26 Edge or Galaxy S26 Edge.
         val normalizedTitle = normalizeTitle(expectedTitle)

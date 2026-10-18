@@ -112,8 +112,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         const val TRACKED_REFRESH_COOLDOWN_MS = 24L * 60L * 60L * 1000L
         const val MAX_TRACKED_REFRESH_PER_TAP = 10
         const val MAX_ARCHIVE_PAGES_PER_SEARCH = 2
-        const val MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS = 20_000L
-
+        // The CDX domain endpoint is frequently unavailable or rate-limited. Keep the exact
+        // page lookup first, but reserve only a short, separate budget for the broad fallback.
+        const val MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS = 12_000L
+        const val MAX_ARCHIVE_DOMAIN_FALLBACK_MS = 4_000L
     }
 
     private val database = AppDatabase.getInstance(application)
@@ -1532,28 +1534,45 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 for (candidate in candidates) {
                     // Bound each candidate's direct + merchant-domain lookup so slow public
                     // archive responses cannot leave the detail sheet spinning indefinitely.
-                    val attempts = withTimeoutOrNull(MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS) {
-                        val results = mutableListOf<com.example.data.remote.WaybackBackfillResult>()
-                        if (candidate.directUrl != null) {
-                            results += waybackPriceHistoryClient.fetchHistory(
+                    // Prefer the exact retailer URL because it is much cheaper than scanning
+                    // the whole domain. A failing CDX domain fallback must never consume the
+                    // entire per-store budget or starve the next candidate.
+                    val attempts = mutableListOf<com.example.data.remote.WaybackBackfillResult>()
+                    var candidateTimedOut = false
+                    if (candidate.directUrl != null) {
+                        val direct = withTimeoutOrNull(MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS) {
+                            waybackPriceHistoryClient.fetchHistory(
                                 originalUrl = candidate.directUrl,
                                 expectedTitle = candidate.title
                             )
                         }
-                        // If the exact URL yields no verified quote, try a bounded domain lookup too:
-                        // another archived product URL may carry price metadata even when this URL's
-                        // captures do not. Both paths have independent request and snapshot limits.
-                        if (candidate.merchantDomain != null &&
-                            results.none { it.quotes.isNotEmpty() }
-                        ) {
-                            results += waybackPriceHistoryClient.fetchHistoryByMerchantDomain(
+                        if (direct == null) {
+                            candidateTimedOut = true
+                            diagnosticCodes.add("CDX_EXACT_CANDIDATE_TIMEOUT")
+                        } else {
+                            attempts += direct
+                        }
+                    }
+                    // Try the broad fallback only if exact lookup did not find verified prices.
+                    // Its shorter independent timeout leaves time for result rendering and other stores.
+                    if (candidate.merchantDomain != null &&
+                        attempts.none { it.quotes.isNotEmpty() } &&
+                        !candidateTimedOut
+                    ) {
+                        val domainResult = withTimeoutOrNull(MAX_ARCHIVE_DOMAIN_FALLBACK_MS) {
+                            waybackPriceHistoryClient.fetchHistoryByMerchantDomain(
                                 domain = candidate.merchantDomain,
                                 expectedTitle = candidate.title
                             )
                         }
-                        results
+                        if (domainResult == null) {
+                            candidateTimedOut = true
+                            diagnosticCodes.add("CDX_DOMAIN_CANDIDATE_TIMEOUT")
+                        } else {
+                            attempts += domainResult
+                        }
                     }
-                    if (attempts == null) {
+                    if (candidateTimedOut && attempts.isEmpty()) {
                         timedOutCount++
                         diagnosticCodes.add("CANDIDATE_TIMEOUT")
                         continue

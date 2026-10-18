@@ -158,19 +158,18 @@ fun StoreComparisonView(
                                 softWrap = true
                             )
                             if (isBestCurrent) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(Color(0xFF059669))
-                                        .padding(horizontal = 5.dp, vertical = 3.dp)
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color(0xFF059669),
+                                    contentColor = Color.White
                                 ) {
                                     Text(
-                                        text = "MENOR PRECIO EN ESTA CONSULTA",
-                                        color = Color.White,
+                                        text = "MENOR PRECIO",
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.ExtraBold,
-                                        maxLines = 2,
-                                        softWrap = true
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
                             }

@@ -1083,7 +1083,9 @@ class WaybackPriceHistoryClient(
         ) {
             val modelNumber = Regex("""\bgalaxy\s+s?(\d{2})\s+edge\b""")
                 .find(normalizedTitle)?.groupValues?.getOrNull(1)
-            if (modelNumber != null) listOf("(?=.*galaxy)(?=.*edge)(?=.*$modelNumber)") else emptyList()
+            if (modelNumber != null) {
+                listOf("galaxy.*(?:s)?$modelNumber.*edge|galaxy.*edge.*(?:s)?$modelNumber")
+            } else emptyList()
         } else emptyList()
         // CDX's original-field filter is a regular expression, but look-ahead expressions
         // are not handled consistently by every archive index deployment. Use portable,
@@ -1627,7 +1629,7 @@ class WaybackPriceHistoryClient(
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 2
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 2
         private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 3L
-        private const val MAX_DOMAIN_INDEX_ROWS = 6
+        private const val MAX_DOMAIN_INDEX_ROWS = 20
         private const val DOMAIN_LOOKBACK_DAYS = 730
         private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L

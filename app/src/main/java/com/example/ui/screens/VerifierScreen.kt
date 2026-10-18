@@ -192,7 +192,7 @@ fun VerifierScreen(
         // Quick Examples for testing
         Column {
             Text(
-                text = "Pruebas con productos de muestra:",
+                text = "Ejemplos rápidos",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -209,14 +209,14 @@ fun VerifierScreen(
                         onInputChange("cecotec mambo")
                         onVerifyClick()
                     },
-                    label = { Text("Probar ficha demo", fontSize = 11.sp) }
+                    label = { Text("Cecotec Mambo", fontSize = 11.sp) }
                 )
                 SuggestionChip(
                     onClick = {
                         onInputChange("sony wh-1000xm5")
                         onVerifyClick()
                     },
-                    label = { Text("Buscar Sony demo", fontSize = 11.sp) }
+                    label = { Text("Sony WH-1000XM5", fontSize = 11.sp) }
                 )
             }
         }

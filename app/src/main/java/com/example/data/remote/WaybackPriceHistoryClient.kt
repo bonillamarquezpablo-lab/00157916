@@ -1,6 +1,7 @@
 package com.example.data.remote
 
 import android.content.Context
+import com.example.data.model.Store
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -41,7 +42,9 @@ data class WaybackBackfillResult(
     val capturesFound: Int = 0,
     val capturesChecked: Int = 0,
     val skippedRecently: Boolean = false,
-    val available: Boolean = false
+    val available: Boolean = false,
+    /** True when the archive request or every snapshot download failed; distinct from no captures. */
+    val requestFailed: Boolean = false
 )
 
 /**
@@ -148,12 +151,12 @@ class WaybackPriceHistoryClient(
             http.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
-                    return WaybackBackfillResult()
+                    return WaybackBackfillResult(requestFailed = true)
                 }
                 val body = readBodyLimited(response.body, MAX_CDX_BODY_BYTES)
                 if (body == null) {
                     rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
-                    return WaybackBackfillResult()
+                    return WaybackBackfillResult(requestFailed = true)
                 }
                 parseCaptureIndex(body)
             }
@@ -161,7 +164,7 @@ class WaybackPriceHistoryClient(
             throw cancelled
         } catch (_: Exception) {
             rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
-            return WaybackBackfillResult()
+            return WaybackBackfillResult(requestFailed = true)
         }
 
         val sampled = sampleCaptures(captures, MAX_SNAPSHOTS_PER_URL)
@@ -202,7 +205,7 @@ class WaybackPriceHistoryClient(
             }.awaitAll()
         }
 
-        // Cache useful histories for 30 days, but retry empty/ambiguous results after 7 days.
+        // Cache useful histories for 30 days, but allow an empty result to be retried after 6 hours.
         val quotes = fetched.mapNotNull { it.quote }
             .sortedBy { it.observedAt }
             .distinctBy { Triple(it.originalUrl, it.observedAt, it.price) }
@@ -217,18 +220,30 @@ class WaybackPriceHistoryClient(
             quotes = quotes,
             capturesFound = captures.size,
             capturesChecked = fetched.count { it.fetched },
-            available = true
+            available = true,
+            requestFailed = allSnapshotsFailed
         )
     }
 
     /** Resolve recognisable merchant labels; never guess a site from generic labels. */
-    internal fun resolveMerchantDomain(storeName: String, sourceUrl: String = ""): String? {
+    internal fun resolveMerchantDomain(
+        storeName: String,
+        sourceUrl: String = "",
+        knownStoreDomain: String = ""
+    ): String? {
         if (storeName.isBlank()) return null
         val hostPattern = Regex(
             """(?i)(?:https?://)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:es|com|net|org|eu|de|fr|it|nl|co\.uk))(?:[:/]|$)"""
         )
         val explicitHost = hostPattern.find(storeName.trim())?.groupValues?.getOrNull(1)
         if (explicitHost != null) return normalizeMerchantDomain(explicitHost)
+
+        // The saved Store object can come from Room's expanded directory, not just ALL_STORES.
+        // Prefer its trusted merchant domain over a Google Shopping intermediary URL.
+        normalizeMerchantDomain(knownStoreDomain)?.let { return it }
+        Store.findKnownByName(storeName, sourceUrl)?.let { knownStore ->
+            normalizeMerchantDomain(knownStore.domain)?.let { return it }
+        }
         if (sourceUrl.isNotBlank()) {
             val sourceHost = runCatching { URI(sourceUrl).host }.getOrNull()
             sourceHost?.let(::normalizeMerchantDomain)?.let { return it }
@@ -853,7 +868,7 @@ class WaybackPriceHistoryClient(
         private const val MAX_DOMAIN_INDEX_ROWS = 80
         private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L
-        const val NEGATIVE_RETRY_INTERVAL_MS = 7L * 24L * 60L * 60L * 1000L
+        const val NEGATIVE_RETRY_INTERVAL_MS = 6L * 60L * 60L * 1000L
         const val FAILURE_RETRY_INTERVAL_MS = 30L * 60L * 1000L
         private const val MAX_CDX_BODY_BYTES = 256 * 1024
         private const val MAX_SNAPSHOT_BODY_BYTES = 2 * 1024 * 1024

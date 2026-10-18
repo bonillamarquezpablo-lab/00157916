@@ -146,7 +146,8 @@ class WaybackPriceHistoryClientTest {
             appleCandidates.contains("https://www.apple.com/es/iphone-16/")
         )
         assertTrue(appleCandidates.size <= 6)
-        assertTrue(appleCandidates.all { it.startsWith("https://www.apple.com/") })
+        assertTrue(appleCandidates.any { it.startsWith("https://www.apple.com/") })
+        assertTrue(appleCandidates.any { it.startsWith("https://apple.com/") })
 
         val samsungCandidates = client.buildAvailabilityCandidateUrls(
             "samsung.com",

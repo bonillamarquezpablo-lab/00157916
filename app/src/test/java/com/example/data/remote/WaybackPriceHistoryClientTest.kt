@@ -39,12 +39,10 @@ class WaybackPriceHistoryClientTest {
         val client = newClient()
         // Exercise the real throttled client only. Raw preflight probes bypassed its cooldown
         // and pacing, adding unnecessary requests and potentially triggering HTTP 429 themselves.
+        // Keep the optional live probe to one product only. It must never scan several
+        // stores in one CI run; deterministic multi-path coverage belongs in mocked tests.
         val targets = listOf(
-            // This product page has a specific model, storage, and colour, avoiding variant
-            // ambiguity while exercising real EUR-price extraction from a retailer archive.
-            "pccomponentes.com" to "Samsung Galaxy S25 Edge 5G 12GB 512GB 6.7 Titanio Azul",
-            "apple.com" to "iPhone 16",
-            "samsung.com" to "Samsung Galaxy S25 Edge"
+            "pccomponentes.com" to "Samsung Galaxy S25 Edge 5G 12GB 512GB 6.7 Titanio Azul"
         )
         val outcomes = mutableListOf<String>()
         var verifiedQuoteFound = false
@@ -63,6 +61,7 @@ class WaybackPriceHistoryClientTest {
                 verifiedQuoteFound = true
                 break
             }
+            if (result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) break
         }
 
         println("LIVE_WAYBACK_SMOKE " + outcomes.joinToString(" | "))

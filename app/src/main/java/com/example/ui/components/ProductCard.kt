@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -133,12 +134,15 @@ fun ProductCard(
                             modifier = Modifier
                                 .clip(CircleShape)
                                 .background(if (product.isPriceVerified) product.currentStore.brandColor.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant)
+                                .widthIn(max = 176.dp)
                                 .padding(horizontal = 10.dp, vertical = 4.dp)
                         ) {
                             Text(
                                 text = if (product.isPriceVerified) product.currentStore.name else "Sin precio verificado",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                                 color = if (product.isPriceVerified) product.currentStore.brandColor else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }

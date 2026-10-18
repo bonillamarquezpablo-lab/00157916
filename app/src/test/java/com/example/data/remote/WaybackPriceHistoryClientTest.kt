@@ -289,7 +289,7 @@ class WaybackPriceHistoryClientTest {
             lookbackDays = 1600
         )
         assertNotNull(url)
-        assertEquals("domain", url!!.queryParameter("matchType"))
+        assertEquals("prefix", url!!.queryParameter("matchType"))
         assertEquals("40", url.queryParameter("limit"))
         assertNull("Domain scans must preserve repeated captures over time", url.queryParameter("collapse"))
         assertEquals("20250115", url.queryParameter("from"))

@@ -603,7 +603,7 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun rejectsAmbiguousJsonLdOffersInsteadOfChoosingTheFirstPrice() {
+    fun selectsLowestVerifiedEurOfferWhenExactProductHasMultipleOffers() {
         val client = newClient()
         val html = """
             <script type="application/ld+json">
@@ -623,7 +623,29 @@ class WaybackPriceHistoryClientTest {
             observedAt = 1_735_732_800_000L
         )
 
-        assertNull("Multiple incompatible offer prices must not become arbitrary historical evidence", quote)
+        assertNotNull(quote)
+        assertEquals("Select the lowest validated EUR offer, independent of JSON-LD order", 79.99, quote!!.price, 0.001)
+    }
+
+    @Test
+    fun rejectsRefurbishedCaptureForProductExpectedAsNewOrUnspecifiedCondition() {
+        val client = newClient()
+        val html = """
+            <script type="application/ld+json">
+            {"@type":"Product","name":"Apple iPhone 16 128 GB Negro Reacondicionado",
+             "offers":{"@type":"Offer","price":"699.99","priceCurrency":"EUR"}}
+            </script>
+        """.trimIndent()
+
+        assertNull(
+            client.parseArchivedPrice(
+                html = html,
+                expectedTitle = "Apple iPhone 16 128 GB Negro",
+                originalUrl = "https://shop.example/products/apple-iphone-16",
+                snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/products/apple-iphone-16",
+                observedAt = 1_735_732_800_000L
+            )
+        )
     }
 
     @Test

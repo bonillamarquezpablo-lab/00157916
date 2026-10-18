@@ -1529,7 +1529,20 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         skippedCount++
                         continue
                     }
-                    attempts.flatMap { it.diagnosticCodes }.forEach(diagnosticCodes::add)
+                    // Prefer diagnostics from the last-stage outcome. A domain fallback may
+                    // succeed after a direct URL's CDX failure; don't report the recovered failure
+                    // as if it were the final reason for not finding history.
+                    val latestResults = attempts.asReversed()
+                    val latestDiagnostic = latestResults.firstOrNull { result ->
+                        result.quotes.isNotEmpty() ||
+                            result.diagnosticCodes.any { it != "CACHE_SKIPPED" }
+                    }
+                    latestDiagnostic?.diagnosticCodes?.forEach(diagnosticCodes::add)
+                    if (latestDiagnostic == null) {
+                        attempts.flatMap { it.diagnosticCodes }
+                            .filter { it == "CACHE_SKIPPED" }
+                            .forEach(diagnosticCodes::add)
+                    }
                     val quotes = attempts.flatMap { it.quotes }
                         .distinctBy { Triple(it.originalUrl, it.observedAt, it.price) }
                     checkedCount += attempts.sumOf { it.capturesChecked }

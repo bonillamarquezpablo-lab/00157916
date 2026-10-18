@@ -125,6 +125,11 @@ class WaybackPriceHistoryClient(
         if (wasAttemptedRecently(attempt, now)) {
             return@withContext WaybackBackfillResult(skippedRecently = true, diagnosticCodes = setOf("CACHE_SKIPPED"))
         }
+
+        // CDX sometimes returns HTTP 500/503 for broad merchant indexes. Do not repeat the same
+        // failing query. Retry against the direct product URL variants already known by the caller,
+        // then only use the domain scan as the final fallback. This reduces pressure on CDX and
+        // avoids turning an unavailable broad index into a dead end.
         queryCdxAndFetchPrices(
             cdxUrl, expectedTitle, attempt, now,
             maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP,

@@ -1230,11 +1230,11 @@ class WaybackPriceHistoryClient(
             overlap.size.toDouble() / expectedTokens.size >= 0.72
     }
     private fun productConditionKey(title: String): String = when {
-        Regex("""\\b(reacondicionado|reacondicionada|refurbished|renewed)\\b""")
+        Regex("""\b(reacondicionado|reacondicionada|refurbished|renewed)\b""")
             .containsMatchIn(title) -> "refurbished"
-        Regex("""\\b(usado|usada|used|seminuevo|seminueva|segunda mano)\\b""")
+        Regex("""\b(usado|usada|used|seminuevo|seminueva|segunda mano)\b""")
             .containsMatchIn(title) -> "used"
-        Regex("""\\b(open box|open-box|caja abierta)\\b""")
+        Regex("""\b(open box|open-box|caja abierta)\b""")
             .containsMatchIn(title) -> "open-box"
         else -> "standard"
     }

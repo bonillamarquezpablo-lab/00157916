@@ -976,7 +976,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         // Some older Google Shopping rows contain a generic Google URL and an incomplete
         // merchant-domain field. Resolve the merchant from the saved store directory before
         // giving up, without making a paid query or changing the stored offer.
-        val candidates = buildList {
+        val candidateBuilder = mutableListOf<FreeArchiveCandidate>()
+        candidateBuilder.apply {
             product.offers.forEach { offer ->
                 val destination = offer.url.ifBlank {
                     if (offer.store.id == product.currentStore.id) product.storeUrl
@@ -999,7 +1000,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
             // A Google Shopping intermediary is not an archive target. If it is the only
             // saved destination, retry using the known seller name/domain from the saved row.
-            if (isGoogleShoppingUrl(product.storeUrl) || candidates.isEmpty()) {
+            if (isGoogleShoppingUrl(product.storeUrl) || candidateBuilder.isEmpty()) {
                 val savedStore = Store.findKnownByName(product.currentStore.name, currentDestination)
                     ?: Store.findKnownByName(product.currentStore.id.replace('_', ' '), currentDestination)
                 val fallbackDomain = savedStore?.domain
@@ -1023,7 +1024,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     )
                 }
             }
-        }.sortedWith(
+        }
+        val candidates = candidateBuilder.sortedWith(
             compareBy<FreeArchiveCandidate> { if (it.directUrl != null) 0 else 1 }
                 .thenBy { it.merchantDomain.orEmpty() }
         ).distinctBy {

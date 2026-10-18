@@ -546,6 +546,25 @@ class WaybackPriceHistoryClientTest {
 
  
     @Test
+    fun cdxQueriesHaveEnoughBoundedTimeForSlowArchiveResponses() {
+        val client = newClient()
+        val now = 1_800_000_000_000L
+        val exactUrl = client.buildCdxUrl(
+            "https://shop.example/products/anker-prime",
+            now,
+            365
+        )!!
+        val domainUrl = client.buildDomainCdxUrl(
+            "shop.example",
+            "Anker Prime 27K power bank",
+            now,
+            365
+        )!!
+        assertEquals("exact URL query must remain bounded", "exact", exactUrl.queryParameter("matchType"))
+        assertEquals("domain query must remain bounded", "domain", domainUrl.queryParameter("matchType"))
+    }
+
+    @Test
     fun classifiesWaybackNetworkFailuresWithoutLeakingExceptionText() {
         val client = newClient()
         assertEquals("CDX_EXACT_TIMEOUT", client.classifyNetworkFailure("CDX_EXACT", java.net.SocketTimeoutException("secret url")))

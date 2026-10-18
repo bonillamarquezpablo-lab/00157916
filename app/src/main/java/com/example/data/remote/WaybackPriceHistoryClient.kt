@@ -8,6 +8,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -85,34 +86,46 @@ class WaybackPriceHistoryClient(
         if (!preferences.getBoolean("enabled", true)) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("WAYBACK_DISABLED"))
         }
-        activeRateLimitUntil(System.currentTimeMillis())?.let {
-            return@withContext WaybackBackfillResult(
-                requestFailed = true,
-                diagnosticCodes = setOf("WAYBACK_RATE_LIMITED")
-            )
-        }
         if (!isEligibleDirectUrl(originalUrl)) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("DIRECT_URL_INVALID"))
         }
         if (expectedTitle.isBlank()) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("PRODUCT_TITLE_EMPTY"))
         }
-        val attempt = attemptKey("url-cascade-v2|$originalUrl|$expectedTitle")
-        if (wasAttemptedRecently(attempt, now)) {
-            return@withContext WaybackBackfillResult(skippedRecently = true, diagnosticCodes = setOf("CACHE_SKIPPED"))
+        val attempt = attemptKey("url-cdx-batch-v3|$originalUrl|$expectedTitle")
+        serializedArchiveLookup {
+            if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
+                return@serializedArchiveLookup WaybackBackfillResult(
+                    requestFailed = true,
+                    diagnosticCodes = setOf("WAYBACK_RATE_LIMITED")
+                )
+            }
+            if (wasAttemptedRecently(attempt, System.currentTimeMillis())) {
+                return@serializedArchiveLookup WaybackBackfillResult(
+                    skippedRecently = true,
+                    diagnosticCodes = setOf("CACHE_SKIPPED")
+                )
+            }
+
+            // One exact CDX request returns many timestamps at once. Prefer the clean URL variant
+            // without tracking/session parameters; take two distant captures for a useful graph.
+            val directUrl = buildDirectUrlCandidates(originalUrl).lastOrNull() ?: originalUrl
+            val cdxUrl = buildCdxUrl(directUrl, now, lookbackDays)
+                ?: return@serializedArchiveLookup WaybackBackfillResult(
+                    requestFailed = true,
+                    diagnosticCodes = setOf("DIRECT_URL_INVALID")
+                )
+            queryCdxAndFetchPrices(
+                cdxUrl = cdxUrl,
+                expectedTitle = expectedTitle,
+                cacheKey = attempt,
+                now = now,
+                maxSnapshots = MAX_DIRECT_SNAPSHOTS_PER_URL,
+                cdxTimeoutSeconds = DIRECT_CDX_TIMEOUT_SECONDS,
+                cdxStage = "CDX_EXACT",
+                snapshotTimeoutSeconds = DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS
+            )
         }
-        // Shopping links frequently append click/session parameters which were never archived.
-        // Probe the original URL first, then one deterministic tracking-free canonical variant.
-        queryAvailabilityAndFetchPrices(
-            candidateUrls = buildDirectUrlCandidates(originalUrl),
-            expectedTitle = expectedTitle,
-            cacheKey = attempt,
-            now = now,
-            lookbackDays = lookbackDays,
-            maxSnapshots = MAX_DIRECT_SNAPSHOTS_PER_URL,
-            maxCandidates = 2,
-            stage = "AVAILABILITY_EXACT"
-        )
     }
 
     /**
@@ -134,70 +147,69 @@ class WaybackPriceHistoryClient(
         if (expectedTitle.isBlank()) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("PRODUCT_TITLE_EMPTY"))
         }
-        val candidateUrls = buildAvailabilityCandidateUrls(normalizedDomain, expectedTitle)
-        if (candidateUrls.isEmpty()) {
-            return@withContext WaybackBackfillResult(diagnosticCodes = setOf("AVAILABILITY_CANDIDATES_EMPTY"))
-        }
-        val attempt = attemptKey("domain-cascade-v2|$normalizedDomain|$expectedTitle")
-        if (wasAttemptedRecently(attempt, now)) {
-            return@withContext WaybackBackfillResult(skippedRecently = true, diagnosticCodes = setOf("CACHE_SKIPPED"))
-        }
-        val availabilityResult = queryAvailabilityAndFetchPrices(
-            candidateUrls = candidateUrls,
-            expectedTitle = expectedTitle,
-            cacheKey = attempt,
-            now = now,
-            lookbackDays = lookbackDays,
-            maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP,
-            maxCandidates = MAX_AVAILABILITY_PROBE_CANDIDATES,
-            stage = "AVAILABILITY_DOMAIN"
-        )
-        if (availabilityResult.quotes.isNotEmpty() || availabilityResult.skippedRecently) {
-            return@withContext availabilityResult
-        }
-        if (availabilityResult.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ||
-            activeRateLimitUntil(System.currentTimeMillis()) != null
-        ) {
-            return@withContext availabilityResult
-        }
+        val attempt = attemptKey("domain-cdx-batch-v3|$normalizedDomain|$expectedTitle")
+        serializedArchiveLookup {
+            if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
+                return@serializedArchiveLookup WaybackBackfillResult(
+                    requestFailed = true,
+                    diagnosticCodes = setOf("WAYBACK_RATE_LIMITED")
+                )
+            }
+            if (wasAttemptedRecently(attempt, System.currentTimeMillis())) {
+                return@serializedArchiveLookup WaybackBackfillResult(
+                    skippedRecently = true,
+                    diagnosticCodes = setOf("CACHE_SKIPPED")
+                )
+            }
 
-        // If availability says there are no captures (or the endpoint timed out), switch APIs:
-        // the CDX index searches the retailer host for title/model tokens and returns real product
-        // URLs instead of guessing a page slug. Exactly one bounded host query, then <=2 snapshots.
-        val mayUseCdxFallback =
-            availabilityResult.diagnosticCodes.contains("AVAILABILITY_DOMAIN_NO_CAPTURES") ||
-                availabilityResult.diagnosticCodes.contains("AVAILABILITY_DOMAIN_TIMEOUT") ||
-                listOf(500, 502, 503, 504).any { code ->
-                    availabilityResult.diagnosticCodes.contains("AVAILABILITY_DOMAIN_HTTP_$code")
+            // Query CDX directly: one index response can contain multiple timestamps, avoiding
+            // repeated availability calls for individual dates. Try the apex host only if the
+            // www host returned a valid empty result; never keep probing after a timeout or 429.
+            val cdxUrls = buildDomainCdxHostUrls(
+                domain = normalizedDomain,
+                expectedTitle = expectedTitle,
+                now = now,
+                lookbackDays = lookbackDays
+            )?.take(MAX_DOMAIN_CDX_HOST_QUERIES).orEmpty()
+            if (cdxUrls.isEmpty()) {
+                return@serializedArchiveLookup WaybackBackfillResult(
+                    diagnosticCodes = setOf("DOMAIN_CDX_CANDIDATES_EMPTY")
+                )
+            }
+
+            var lastResult: WaybackBackfillResult? = null
+            for (cdxUrl in cdxUrls) {
+                if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
+                    return@serializedArchiveLookup WaybackBackfillResult(
+                        requestFailed = true,
+                        diagnosticCodes = setOf("WAYBACK_RATE_LIMITED")
+                    )
                 }
-        if (!mayUseCdxFallback) return@withContext availabilityResult
-
-        val cdxUrl = buildDomainCdxHostUrls(
-            domain = normalizedDomain,
-            expectedTitle = expectedTitle,
-            now = now,
-            lookbackDays = lookbackDays
-        )?.firstOrNull() ?: return@withContext availabilityResult
-
-        val cdxResult = queryCdxAndFetchPrices(
-            cdxUrl = cdxUrl,
-            expectedTitle = expectedTitle,
-            cacheKey = attempt,
-            now = now,
-            maxSnapshots = MAX_CDX_FALLBACK_SNAPSHOTS,
-            cdxTimeoutSeconds = CDX_FALLBACK_TIMEOUT_SECONDS,
-            cdxStage = "CDX_DOMAIN_FALLBACK",
-            snapshotTimeoutSeconds = CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS
-        )
-        if (cdxResult.quotes.isNotEmpty()) {
-            // Successful fallback should not leave a stale no-captures diagnostic visible.
-            return@withContext cdxResult.copy(diagnosticCodes = emptySet())
+                val result = queryCdxAndFetchPrices(
+                    cdxUrl = cdxUrl,
+                    expectedTitle = expectedTitle,
+                    cacheKey = attempt,
+                    now = now,
+                    maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP,
+                    cdxTimeoutSeconds = CDX_FALLBACK_TIMEOUT_SECONDS,
+                    cdxStage = "CDX_DOMAIN",
+                    snapshotTimeoutSeconds = CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS
+                )
+                lastResult = result
+                if (result.quotes.isNotEmpty()) {
+                    return@serializedArchiveLookup result.copy(diagnosticCodes = emptySet())
+                }
+                if (result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ||
+                    result.requestFailed ||
+                    result.capturesFound > 0 ||
+                    !result.diagnosticCodes.contains("CDX_NO_CAPTURES")
+                ) {
+                    return@serializedArchiveLookup result
+                }
+                // Only the confirmed empty www host permits one fallback to the apex host.
+            }
+            lastResult ?: WaybackBackfillResult(diagnosticCodes = setOf("CDX_NO_CAPTURES"))
         }
-        return@withContext cdxResult.copy(
-            available = availabilityResult.available || cdxResult.available,
-            requestFailed = availabilityResult.requestFailed || cdxResult.requestFailed,
-            diagnosticCodes = (availabilityResult.diagnosticCodes + cdxResult.diagnosticCodes).toSet()
-        )
     }
 
     /**
@@ -295,54 +307,15 @@ class WaybackPriceHistoryClient(
         }
 
         val sampled = sampleCaptures(captures, maxSnapshots)
-        val snapshotHttp = http.newBuilder()
-            .callTimeout(SNAPSHOT_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            .build()
-        val fetched = coroutineScope {
-            sampled.map { capture ->
-                async {
-                    snapshotSemaphore.withPermit {
-                        val snapshotUrl = buildSnapshotUrl(capture)
-                            ?: return@withPermit SnapshotFetch(false, null, "SNAPSHOT_URL_INVALID")
-                        val request = Request.Builder()
-                            .url(snapshotUrl)
-                            .header("User-Agent", USER_AGENT)
-                            .get()
-                            .build()
-                        try {
-                            snapshotHttp.newCall(request).execute().use { response ->
-                                if (!response.isSuccessful) {
-                                    SnapshotFetch(false, null, "SNAPSHOT_HTTP_${response.code}")
-                                } else {
-                                    val html = readBodyLimited(response.body, MAX_SNAPSHOT_BODY_BYTES)
-                                    if (html == null) {
-                                        SnapshotFetch(false, null, "SNAPSHOT_BODY_EMPTY_OR_LIMIT")
-                                    } else {
-                                        val quote = parseArchivedPrice(
-                                            html = html,
-                                            expectedTitle = expectedTitle,
-                                            originalUrl = capture.originalUrl,
-                                            snapshotUrl = snapshotUrl,
-                                            observedAt = capture.timestamp
-                                        )
-                                        SnapshotFetch(
-                                            fetched = true,
-                                            quote = quote,
-                                            diagnosticCode = if (quote == null) {
-                                                diagnoseArchivedPrice(html, expectedTitle)
-                                            } else null
-                                        )
-                                    }
-                                }
-                            }
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (failure: Exception) {
-                            SnapshotFetch(false, null, classifyNetworkFailure("SNAPSHOT", failure))
-                        }
-                    }
-                }
-            }.awaitAll()
+        val fetched = mutableListOf<SnapshotFetch>()
+        for (capture in sampled) {
+            val snapshot = fetchAndVerifySnapshot(
+                capture = capture,
+                expectedTitle = expectedTitle,
+                snapshotTimeoutSeconds = SNAPSHOT_CALL_TIMEOUT_SECONDS
+            )
+            fetched += snapshot
+            if (snapshot.diagnosticCode == "WAYBACK_RATE_LIMITED") break
         }
 
         val quotes = fetched.mapNotNull { it.quote }
@@ -362,7 +335,8 @@ class WaybackPriceHistoryClient(
             now,
             hasQuotes = quotes.isNotEmpty(),
             failed = failed,
-            rateLimited = probeDiagnostics.contains("WAYBACK_RATE_LIMITED")
+            rateLimited = probeDiagnostics.contains("WAYBACK_RATE_LIMITED") ||
+                fetched.any { it.diagnosticCode == "WAYBACK_RATE_LIMITED" }
         )
         return WaybackBackfillResult(
             quotes = quotes,
@@ -420,6 +394,65 @@ class WaybackPriceHistoryClient(
             throw cancelled
         } catch (failure: Exception) {
             AvailabilityProbe(requestFailed = true, diagnosticCode = classifyNetworkFailure(stage, failure))
+        }
+    }
+
+    private suspend fun fetchAndVerifySnapshot(
+        capture: WaybackCapture,
+        expectedTitle: String,
+        snapshotTimeoutSeconds: Long
+    ): SnapshotFetch {
+        val snapshotUrl = buildSnapshotUrl(capture)
+            ?: return SnapshotFetch(false, null, "SNAPSHOT_URL_INVALID")
+        val request = Request.Builder()
+            .url(snapshotUrl)
+            .header("User-Agent", USER_AGENT)
+            .get()
+            .build()
+        val snapshotHttp = http.newBuilder()
+            .readTimeout(snapshotTimeoutSeconds, TimeUnit.SECONDS)
+            .callTimeout(snapshotTimeoutSeconds, TimeUnit.SECONDS)
+            .build()
+
+        return availabilitySemaphore.withPermit {
+            val gate = awaitArchiveRequestTurn()
+            if (gate != null) {
+                return@withPermit SnapshotFetch(false, null, gate)
+            }
+            try {
+                snapshotHttp.newCall(request).execute().use { response ->
+                    if (response.code == 429) {
+                        activateRateLimit(response.header("Retry-After"), System.currentTimeMillis())
+                        SnapshotFetch(false, null, "WAYBACK_RATE_LIMITED")
+                    } else if (!response.isSuccessful) {
+                        SnapshotFetch(false, null, "SNAPSHOT_HTTP_${response.code}")
+                    } else {
+                        val html = readBodyLimited(response.body, MAX_SNAPSHOT_BODY_BYTES)
+                        if (html == null) {
+                            SnapshotFetch(false, null, "SNAPSHOT_BODY_EMPTY_OR_LIMIT")
+                        } else {
+                            val quote = parseArchivedPrice(
+                                html = html,
+                                expectedTitle = expectedTitle,
+                                originalUrl = capture.originalUrl,
+                                snapshotUrl = snapshotUrl,
+                                observedAt = capture.timestamp
+                            )
+                            SnapshotFetch(
+                                fetched = true,
+                                quote = quote,
+                                diagnosticCode = if (quote == null) {
+                                    diagnoseArchivedPrice(html, expectedTitle)
+                                } else null
+                            )
+                        }
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                SnapshotFetch(false, null, classifyNetworkFailure("SNAPSHOT", failure))
+            }
         }
     }
 
@@ -614,6 +647,15 @@ class WaybackPriceHistoryClient(
         return now - lastAttempt < retryInterval
     }
 
+    private suspend fun <T> serializedArchiveLookup(block: suspend () -> T): T {
+        GLOBAL_BACKFILL_MUTEX.lock()
+        return try {
+            block()
+        } finally {
+            GLOBAL_BACKFILL_MUTEX.unlock()
+        }
+    }
+
     private suspend fun awaitArchiveRequestTurn(): String? {
         if (activeRateLimitUntil(System.currentTimeMillis()) != null) return "WAYBACK_RATE_LIMITED"
         val now = System.currentTimeMillis()
@@ -775,55 +817,15 @@ class WaybackPriceHistoryClient(
         val captures = cdxOutcome.captures
 
         val sampled = sampleCaptures(captures, maxSnapshots)
-        // The fallback uses at most two snapshots and a shorter request cap to stay responsive.
-        val snapshotHttp = http.newBuilder()
-            .callTimeout(snapshotTimeoutSeconds, TimeUnit.SECONDS)
-            .build()
-        val fetched = coroutineScope {
-            sampled.map { capture ->
-                async {
-                    snapshotSemaphore.withPermit {
-                        val snapshotUrl = buildSnapshotUrl(capture)
-                            ?: return@withPermit SnapshotFetch(false, null, "SNAPSHOT_URL_INVALID")
-                        val snapshotRequest = Request.Builder()
-                            .url(snapshotUrl)
-                            .header("User-Agent", USER_AGENT)
-                            .get()
-                            .build()
-                        try {
-                            snapshotHttp.newCall(snapshotRequest).execute().use { response ->
-                                if (!response.isSuccessful) {
-                                    SnapshotFetch(false, null, "SNAPSHOT_HTTP_${response.code}")
-                                } else {
-                                    val html = readBodyLimited(response.body, MAX_SNAPSHOT_BODY_BYTES)
-                                    if (html == null) {
-                                        SnapshotFetch(false, null, "SNAPSHOT_BODY_EMPTY_OR_LIMIT")
-                                    } else {
-                                        SnapshotFetch(
-                                            fetched = true,
-                                            quote = parseArchivedPrice(
-                                                html = html,
-                                                expectedTitle = expectedTitle,
-                                                originalUrl = capture.originalUrl,
-                                                snapshotUrl = snapshotUrl,
-                                                observedAt = capture.timestamp
-                                            )
-                                        )
-                                    }
-                                }
-                            }
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (failure: Exception) {
-                            SnapshotFetch(
-                                fetched = false,
-                                quote = null,
-                                diagnosticCode = classifyNetworkFailure("SNAPSHOT", failure)
-                            )
-                        }
-                    }
-                }
-            }.awaitAll()
+        val fetched = mutableListOf<SnapshotFetch>()
+        for (capture in sampled) {
+            val snapshot = fetchAndVerifySnapshot(
+                capture = capture,
+                expectedTitle = expectedTitle,
+                snapshotTimeoutSeconds = snapshotTimeoutSeconds
+            )
+            fetched += snapshot
+            if (snapshot.diagnosticCode == "WAYBACK_RATE_LIMITED") break
         }
 
         // Cache useful histories for 30 days, but allow an empty result to be retried after 6 hours.
@@ -841,7 +843,8 @@ class WaybackPriceHistoryClient(
             cacheKey,
             now,
             hasQuotes = quotes.isNotEmpty(),
-            failed = quotes.isEmpty() && anySnapshotFailed
+            failed = quotes.isEmpty() && anySnapshotFailed,
+            rateLimited = diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
         )
         if (allSnapshotsFailed) diagnosticCodes.add("ALL_SNAPSHOTS_FAILED")
         return WaybackBackfillResult(
@@ -1610,18 +1613,20 @@ class WaybackPriceHistoryClient(
         private const val MAX_AVAILABILITY_URL_CANDIDATES = 6
         private const val MAX_AVAILABILITY_PROBE_CANDIDATES = 2
         private const val MAX_CDX_FALLBACK_SNAPSHOTS = 2
+        private const val MAX_DOMAIN_CDX_HOST_QUERIES = 2
         private const val CDX_FALLBACK_TIMEOUT_SECONDS = 4L
         private const val CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS = 2L
+        private const val DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS = 2L
         private const val MAX_AVAILABILITY_BODY_BYTES = 64 * 1024
         private const val CDX_RETRY_DELAY_MS = 500L
         private const val CDX_RETRY_JITTER_MS = 350L
         private val RETRYABLE_CDX_HTTP_CODES = setOf(500, 502, 503, 504)
-        private const val DIRECT_CDX_TIMEOUT_SECONDS = 15L
+        private const val DIRECT_CDX_TIMEOUT_SECONDS = 5L
         // Keep the broad domain-index request aligned with the UI's strict four-second budget.
         private const val DOMAIN_CDX_TIMEOUT_SECONDS = 4L
         private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 2L
         private const val MAX_DOMAIN_PRODUCT_URL_CANDIDATES = 2
-        private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 4
+        private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 2
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 4
         private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 3L
         private const val MAX_DOMAIN_INDEX_ROWS = 6
@@ -1637,6 +1642,7 @@ class WaybackPriceHistoryClient(
         private const val MAX_RATE_LIMIT_COOLDOWN_MS = 6L * 60L * 60L * 1000L
         private const val KEY_RATE_LIMIT_UNTIL = "wayback_rate_limit_until"
         private val GLOBAL_AVAILABILITY_SEMAPHORE = Semaphore(1)
+        private val GLOBAL_BACKFILL_MUTEX = Mutex()
         private const val MAX_CDX_BODY_BYTES = 256 * 1024
         private const val MAX_SNAPSHOT_BODY_BYTES = 2 * 1024 * 1024
         const val DAY_MS = 24L * 60L * 60L * 1000L

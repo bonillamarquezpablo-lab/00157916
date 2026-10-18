@@ -418,19 +418,17 @@ class WaybackPriceHistoryClient(
             "hp.com" -> setOf("hp")
             else -> setOf(normalizedDomain.substringBefore('.'))
         }
-        // Build model-family tokens from the original title. A standalone model number
-        // such as 25/26 is meaningful when paired with Galaxy, even though it is not a SKU.
+        // Galaxy Edge pages may use URLs like galaxy-s26-edge, without a SKU.
+        // Match title variants with either Galaxy 26 Edge or Galaxy S26 Edge.
         val normalizedTitle = normalizeTitle(expectedTitle)
-        val modelFamilyAlternatives = when {
-            normalizedDomain == "samsung.com" && Regex("""\\bgalaxy\\s+s?\\d{2}\\s+edge\\b""").containsMatchIn(normalizedTitle) -> {
-                val modelNumber = Regex("""\\bgalaxy\\s+s?(\\d{2})\\s+edge\\b""")
-                    .find(normalizedTitle)?.groupValues?.getOrNull(1)
-                if (modelNumber != null) listOf(
-                    "(?=.*galaxy)(?=.*edge)(?=.*$modelNumber)"
-                ) else emptyList()
-            }
-            else -> emptyList()
-        }
+        val modelFamilyAlternatives = if (
+            normalizedDomain == "samsung.com" &&
+            Regex("""\bgalaxy\s+s?\d{2}\s+edge\b""").containsMatchIn(normalizedTitle)
+        ) {
+            val modelNumber = Regex("""\bgalaxy\s+s?(\d{2})\s+edge\b""")
+                .find(normalizedTitle)?.groupValues?.getOrNull(1)
+            if (modelNumber != null) listOf("(?=.*galaxy)(?=.*edge)(?=.*$modelNumber)") else emptyList()
+        } else emptyList()
         // A product SKU/model code is the strongest URL hint, but some retailers use
         // short generic slugs and keep the SKU only in page metadata. Search by either a
         // distinctive model code or two title terms; strict page validators still apply.

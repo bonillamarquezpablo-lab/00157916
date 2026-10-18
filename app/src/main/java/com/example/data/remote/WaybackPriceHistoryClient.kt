@@ -521,10 +521,14 @@ class WaybackPriceHistoryClient(
         val modelAlternatives = modelTokens.take(2).map { token ->
             "(?=.*${urlTokenPattern(token)})"
         }
-        val textAlternatives = if (textTokens.size >= 2) {
+        // Domain scans are expensive: prefer distinctive model hints to an unconstrained
+        // title fallback. Only match two title words when no model token/family exists.
+        val textAlternatives = if (modelAlternatives.isEmpty() && modelFamilyAlternatives.isEmpty() &&
+            textTokens.size >= 2
+        ) {
             listOf("(?=.*${urlTokenPattern(textTokens[0])})(?=.*${urlTokenPattern(textTokens[1])})")
         } else emptyList()
-        val requiredLookaheads = (modelAlternatives + textAlternatives + modelFamilyAlternatives).distinct()
+        val requiredLookaheads = (modelAlternatives + modelFamilyAlternatives + textAlternatives).distinct()
         if (requiredLookaheads.isEmpty()) return null
         val start = (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
         val from = formatUtc(start, "yyyyMMdd")

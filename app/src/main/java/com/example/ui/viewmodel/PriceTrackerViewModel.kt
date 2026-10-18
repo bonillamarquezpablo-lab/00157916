@@ -1707,6 +1707,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             "SNAPSHOT_NETWORK" -> "$code (fallo de red al descargar la captura)"
                             "ALL_SNAPSHOTS_FAILED" -> "$code (ninguna captura se pudo descargar)"
                             "CANDIDATE_TIMEOUT" -> "$code (se agotó el tiempo total de la búsqueda de esta tienda)"
+                            "CDX_EXACT_CANDIDATE_TIMEOUT" -> "$code (la consulta exacta superó su límite de tiempo)"
+                            "CDX_DOMAIN_CANDIDATE_TIMEOUT" -> "$code (la búsqueda amplia por dominio superó su límite de tiempo)"
                             else -> code
                         }
                     }

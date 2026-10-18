@@ -662,12 +662,12 @@ class WaybackPriceHistoryClientTest {
                 .putBoolean("${key}_failed", false)
                 .commit()
             preferences.edit().putBoolean("${key}_failed", true).commit()
-            assertFalse(
-                "A failed network request can be retried immediately; only a completed negative lookup is cached",
+            assertTrue(
+                "A failed network request is briefly cached to avoid amplifying server throttling",
                 client.wasAttemptedRecently(key, lastAttempt + 10L * 60L * 1000L)
             )
             assertFalse(
-                "A failed network request remains retriable after thirty minutes",
+                "A failed network request can be retried after thirty minutes",
                 client.wasAttemptedRecently(key, lastAttempt + 31L * 60L * 1000L)
             )
 
@@ -702,6 +702,56 @@ class WaybackPriceHistoryClientTest {
         }
     }
 
+
+    @Test
+    fun rateLimitRetryAfterIsHonouredAndBounded() {
+        val client = newClient()
+        val now = 1_800_000_000_000L
+
+        assertEquals(now + 120_000L, client.computeRateLimitUntil("120", now))
+        assertEquals(
+            "A zero or expired retry delay still has a minimum pause",
+            now + 60_000L,
+            client.computeRateLimitUntil("0", now)
+        )
+        assertEquals(
+            "Unreasonable Retry-After values are capped at six hours",
+            now + 6L * 60L * 60L * 1000L,
+            client.computeRateLimitUntil("999999", now)
+        )
+        assertEquals(
+            "Missing or invalid headers use a one-hour default pause",
+            now + 60L * 60L * 1000L,
+            client.computeRateLimitUntil("not-a-date", now)
+        )
+    }
+
+    @Test
+    fun rateLimitCooldownIsPersistedAndPreventsNewRequestsAcrossClientInstances() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        val client = newClient()
+        client.clearRateLimitForTests()
+        try {
+            preferences.edit()
+                .putLong("wayback_rate_limit_until", System.currentTimeMillis() + 10L * 60L * 1000L)
+                .commit()
+
+            val secondClient = newClient()
+            val result = withTimeout(1_000L) {
+                secondClient.fetchHistory(
+                    originalUrl = "https://shop.example/product/anker-prime-27k",
+                    expectedTitle = "Anker Prime 27K Power Bank"
+                )
+            }
+
+            assertTrue(result.requestFailed)
+            assertTrue(result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED"))
+            assertTrue("The cooldown is shared by new client instances", result.quotes.isEmpty())
+        } finally {
+            preferences.edit().remove("wayback_rate_limit_until").commit()
+        }
+    }
 
     @Test
     fun resolvesSamsungEdgeAndCommonSellerDomainsFromSavedStoreNames() {

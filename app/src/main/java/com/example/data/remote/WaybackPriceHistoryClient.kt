@@ -410,13 +410,22 @@ class WaybackPriceHistoryClient(
             paths += "/product/$slug/"
             paths += "/p/$slug/"
         }
+        // Known retailer search URLs can contain Product/Offer JSON-LD for multiple items.
+        // Prefer that bounded, product-specific query over guessing more paths, but still validate
+        // the archived product title and EUR price before accepting any result.
+        val storeSearchUrl = Store.ALL_STORES.firstOrNull { store ->
+            normalizeMerchantDomain(store.domain) == normalizedDomain && store.supportsProductSearch
+        }?.searchUrlFor(expectedTitle)?.takeIf(::isEligibleDirectUrl)
         // Interleave www and apex hosts so a missing www archive does not consume the whole
         // candidate budget before the root host is tried.
-        return paths.flatMap { path ->
+        val guessedProductUrls = paths.flatMap { path ->
             hosts.map { host ->
                 HttpUrl.Builder().scheme("https").host(host).addPathSegments(path.trim('/')).addPathSegment("").build().toString()
             }
-        }.distinct().take(MAX_AVAILABILITY_URL_CANDIDATES)
+        }
+        return (listOfNotNull(storeSearchUrl) + guessedProductUrls)
+            .distinct()
+            .take(MAX_AVAILABILITY_URL_CANDIDATES)
     }
 
     private fun availabilityTargetDates(now: Long, lookbackDays: Int, count: Int): List<String> {

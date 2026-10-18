@@ -289,7 +289,7 @@ class WaybackPriceHistoryClientTest {
             lookbackDays = 1600
         )
         assertNotNull(url)
-        assertEquals("prefix", url!!.queryParameter("matchType"))
+        assertEquals("regex", url!!.queryParameter("matchType"))
         assertEquals("80", url.queryParameter("limit"))
         assertNull("Domain scans must preserve repeated captures over time", url.queryParameter("collapse"))
         assertEquals("20250115", url.queryParameter("from"))
@@ -559,7 +559,7 @@ class WaybackPriceHistoryClientTest {
             now,
             365
         )!!
-        assertEquals("domain query must remain bounded", "prefix", domainUrl.queryParameter("matchType"))
+        assertEquals("domain query must remain bounded", "regex", domainUrl.queryParameter("matchType"))
         assertEquals("product-specific path matching must be retained",
             true, domainUrl.queryParameterValues("filter").orEmpty().any { it?.startsWith("original:") == true })
     }
@@ -600,7 +600,7 @@ class WaybackPriceHistoryClientTest {
         assertTrue(url.queryParameterValues("filter").orEmpty().any { it == "statuscode:200" })
         assertTrue(url.queryParameterValues("filter").orEmpty().any { it == "mimetype:text/html" })
         assertTrue(url.queryParameterValues("filter").orEmpty().any { it.orEmpty().startsWith("original:") })
-        assertEquals("20250701", url.queryParameter("from"))
+        assertEquals("20250115", url.queryParameter("from"))
         assertEquals("20270115", url.queryParameter("to"))
     }
 

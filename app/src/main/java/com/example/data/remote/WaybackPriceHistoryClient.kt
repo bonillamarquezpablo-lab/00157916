@@ -375,8 +375,10 @@ class WaybackPriceHistoryClient(
             paths += "/product/$slug/"
             paths += "/p/$slug/"
         }
-        return hosts.flatMap { host ->
-            paths.map { path ->
+        // Interleave www and apex hosts so a missing www archive does not consume the whole
+        // candidate budget before the root host is tried.
+        return paths.flatMap { path ->
+            hosts.map { host ->
                 HttpUrl.Builder().scheme("https").host(host).addPathSegments(path.trim('/')).addPathSegment("").build().toString()
             }
         }.distinct().take(MAX_AVAILABILITY_URL_CANDIDATES)

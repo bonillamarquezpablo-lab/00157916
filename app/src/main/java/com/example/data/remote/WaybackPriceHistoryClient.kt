@@ -498,6 +498,8 @@ class WaybackPriceHistoryClient(
         val from = formatUtc(start, "yyyyMMdd")
         val to = formatUtc(now, "yyyyMMdd")
         val urlPattern = "(?i)(?:" + requiredLookaheads.joinToString("|") + ").*"
+        // Keep the CDX response narrow. Broad multi-year domain scans often time out on
+        // large retailers; direct URL lookups still use the full configured lookback.
         return HttpUrl.Builder()
             .scheme("https")
             .host("web.archive.org")
@@ -509,10 +511,10 @@ class WaybackPriceHistoryClient(
             .addQueryParameter("filter", "statuscode:200")
             .addQueryParameter("filter", "mimetype:text/html")
             .addQueryParameter("filter", "original:$urlPattern")
-            .addQueryParameter("from", from)
+            .addQueryParameter("from", formatUtc((now - DOMAIN_LOOKBACK_DAYS.toLong() * DAY_MS).coerceAtLeast(start), "yyyyMMdd"))
             .addQueryParameter("to", to)
-            // Do not collapse by timestamp here: this query spans many product URLs.
-            // Keeping multiple dates per URL is what makes a historical price series possible.
+            .addQueryParameter("collapse", "urlkey")
+            .addQueryParameter("fl", "timestamp,original,statuscode,mimetype")
             .addQueryParameter("limit", MAX_DOMAIN_INDEX_ROWS.toString())
             .build()
     }
@@ -942,7 +944,8 @@ class WaybackPriceHistoryClient(
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 4
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 4
         private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 3L
-        private const val MAX_DOMAIN_INDEX_ROWS = 80
+        private const val MAX_DOMAIN_INDEX_ROWS = 40
+        private const val DOMAIN_LOOKBACK_DAYS = 730
         private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L
         const val NEGATIVE_RETRY_INTERVAL_MS = 6L * 60L * 60L * 1000L

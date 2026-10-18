@@ -361,7 +361,7 @@ class WaybackPriceHistoryClient(
         }.getOrNull() ?: return null
         val archivedSnapshotUrl = closest.optString("url")
         val originalFromSnapshot = Regex(
-            """(?i)/web/\\d{14}(?:id_|if_)?/(https?://.+)$"""
+            """(?i)/web/\d{14}(?:id_|if_)?/(https?://.+)$"""
         ).find(archivedSnapshotUrl)?.groupValues?.getOrNull(1)
         val original = originalFromSnapshot?.takeIf(::isEligibleDirectUrl)
             ?: fallbackOriginalUrl.takeIf(::isEligibleDirectUrl)

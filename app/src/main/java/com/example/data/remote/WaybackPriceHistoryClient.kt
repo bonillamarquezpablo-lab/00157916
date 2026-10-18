@@ -511,7 +511,10 @@ class WaybackPriceHistoryClient(
             .host("web.archive.org")
             .addPathSegments("cdx/search/cdx")
             .addQueryParameter("url", "$normalizedDomain/")
-            .addQueryParameter("matchType", "domain")
+            // Domain mode is the expensive endpoint on large retailers. Use CDX's
+            // prefix matching against a product-specific path prefix where possible; the
+            // final archived-page title/price validator remains mandatory.
+            .addQueryParameter("matchType", "prefix")
             .addQueryParameter("output", "json")
             .addQueryParameter("fl", "timestamp,original,statuscode,mimetype")
             .addQueryParameter("filter", "statuscode:200")

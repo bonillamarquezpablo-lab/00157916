@@ -80,6 +80,7 @@ fun ProductCard(
         product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT &&
             product.isAtAth
     val observedAtFormatter = remember { SimpleDateFormat("dd/MM HH:mm", SPANISH_LOCALE) }
+    val savedDateFormatter = remember { SimpleDateFormat("dd/MM/yyyy", SPANISH_LOCALE) }
 
     Card(
         modifier = modifier
@@ -262,13 +263,25 @@ fun ProductCard(
                             color = Color(0xFF059669)
                         )
                     }
-                    if (product.priceDisplayStatus != com.example.data.model.PriceDisplayStatus.DEMONSTRATION && product.priceObservedAt != null) {
+                    val isDisplayingSavedArchivePrice =
+                        product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION &&
+                            !product.isPriceVerified && product.savedHistoricalPrice != null
+                    val displayedObservedAt = if (isDisplayingSavedArchivePrice) {
+                        product.savedHistoricalPriceObservedAt
+                    } else {
+                        product.priceObservedAt
+                    }
+                    if (product.priceDisplayStatus != com.example.data.model.PriceDisplayStatus.DEMONSTRATION &&
+                        displayedObservedAt != null
+                    ) {
                         Text(
-                            text = (if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION) {
-                                "Guardado "
+                            text = if (isDisplayingSavedArchivePrice) {
+                                "Precio guardado el " + savedDateFormatter.format(Date(displayedObservedAt))
+                            } else if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION) {
+                                "Guardado " + observedAtFormatter.format(Date(displayedObservedAt))
                             } else {
-                                "Consultado "
-                            }) + observedAtFormatter.format(Date(product.priceObservedAt)),
+                                "Consultado " + observedAtFormatter.format(Date(displayedObservedAt))
+                            },
                             fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

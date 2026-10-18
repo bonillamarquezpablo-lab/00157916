@@ -1586,16 +1586,18 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }
                     foundCount > 0 ->
                         "Se encontraron capturas con precios previos, pero no se pudieron vincular a la ficha del producto o ya existían esos registros diarios."
-                    timedOutCount > 0 ->
-                        "La consulta del archivo agotó el límite de tiempo para $timedOutCount tienda(s). No se ha gastado cuota de SerpApi; puedes volver a intentarlo más tarde."
+                    timedOutCount > 0 && requestFailedCount == 0 ->
+                        "La búsqueda histórica agotó el tiempo disponible para $timedOutCount tienda(s). Las consultas están limitadas para mantener la fluidez; prueba de nuevo más tarde. No se ha gastado cuota de SerpApi."
+                    requestFailedCount > 0 && checkedCount == 0 && successfulLookupsCount == 0 ->
+                        "Internet Archive no respondió correctamente o rechazó la consulta. Es un fallo de conexión/servicio, no una confirmación de que no existan capturas. No se ha gastado cuota de SerpApi; puedes volver a intentarlo."
                     requestFailedCount > 0 && capturesFoundCount > 0 && checkedCount == 0 ->
-                        "Internet Archive encontró $capturesFoundCount capturas, pero no pudo descargar las páginas. No se puede confirmar el precio histórico; inténtalo más tarde. No se ha gastado cuota de SerpApi."
-                    requestFailedCount > 0 && checkedCount == 0 ->
-                        "Internet Archive no respondió correctamente o rechazó la consulta. Es un fallo de conexión/servicio, no una confirmación de que no existan capturas. No se ha gastado cuota de SerpApi; puedes reintentar."
+                        "Se encontraron $capturesFoundCount capturas, pero fallaron las descargas. No se puede confirmar el precio histórico; inténtalo de nuevo. No se ha gastado cuota de SerpApi."
                     capturesFoundCount == 0 && successfulLookupsCount > 0 ->
-                        "Internet Archive respondió, pero no encontró capturas públicas de esas páginas en el período consultado. No hay precios antiguos verificables que mostrar y no se ha gastado cuota de SerpApi."
+                        "Internet Archive respondió correctamente, pero no encontró capturas públicas en el período consultado. No hay precios antiguos verificables que mostrar y no se ha gastado cuota de SerpApi."
                     checkedCount > 0 ->
                         "Se consultaron $checkedCount capturas gratuitas, pero ninguna publicó un precio EUR verificable que coincidiera con el producto exacto. No se han inventado precios."
+                    timedOutCount > 0 ->
+                        "La búsqueda histórica agotó el límite de tiempo en parte de las tiendas. No se ha gastado cuota de SerpApi; inténtalo de nuevo más tarde."
                     else ->
                         "No se recuperó histórico gratuito. Puede que el vendedor no haya sido identificado con un enlace directo o que la página no publique metadatos de precio verificables. No se ha gastado cuota de SerpApi."
                 }

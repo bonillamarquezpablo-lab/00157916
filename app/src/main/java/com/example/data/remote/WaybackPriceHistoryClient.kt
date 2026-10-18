@@ -880,7 +880,7 @@ class WaybackPriceHistoryClient(
     }
 
     /** Read bounded response bodies so unexpectedly large archived pages cannot spike app memory. */
-    private fun classifyNetworkFailure(stage: String, failure: Exception): String = when (failure) {
+    internal fun classifyNetworkFailure(stage: String, failure: Exception): String = when (failure) {
         is SocketTimeoutException, is InterruptedIOException -> "${stage}_TIMEOUT"
         is UnknownHostException -> "${stage}_DNS"
         is IOException -> "${stage}_NETWORK"

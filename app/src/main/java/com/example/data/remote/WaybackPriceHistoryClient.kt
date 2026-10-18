@@ -184,6 +184,10 @@ class WaybackPriceHistoryClient(
 
         val sampled = sampleCaptures(captures, maxSnapshots)
         val semaphore = Semaphore(MAX_CONCURRENT_SNAPSHOT_REQUESTS)
+        // Build the bounded snapshot client once per lookup and reuse its connection pool.
+        val snapshotHttp = http.newBuilder()
+            .callTimeout(SNAPSHOT_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .build()
         val fetched = coroutineScope {
             sampled.map { capture ->
                 async {
@@ -193,11 +197,6 @@ class WaybackPriceHistoryClient(
                             .url(snapshotUrl)
                             .header("User-Agent", USER_AGENT)
                             .get()
-                            .build()
-                        // Snapshots are secondary lookups: keep each bounded so a slow archived
-                        // page cannot consume the full candidate deadline and prevent domain fallback.
-                        val snapshotHttp = http.newBuilder()
-                            .callTimeout(SNAPSHOT_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                             .build()
                         val html = try {
                             snapshotHttp.newCall(snapshotRequest).execute().use { response ->
@@ -229,7 +228,8 @@ class WaybackPriceHistoryClient(
         val quotes = fetched.mapNotNull { it.quote }
             .sortedBy { it.observedAt }
             .distinctBy { Triple(it.originalUrl, it.observedAt, it.price) }
-        val allSnapshotsFailed = captures.isNotEmpty() && fetched.none { it.fetched }
+        val anySnapshotFailed = captures.isNotEmpty() && fetched.any { !it.fetched }
+        val allSnapshotsFailed = captures.isNotEmpty() && fetched.isNotEmpty() && fetched.none { it.fetched }
         rememberAttempt(
             cacheKey,
             now,
@@ -241,7 +241,7 @@ class WaybackPriceHistoryClient(
             capturesFound = captures.size,
             capturesChecked = fetched.count { it.fetched },
             available = true,
-            requestFailed = allSnapshotsFailed
+            requestFailed = anySnapshotFailed
         )
     }
 
@@ -898,7 +898,7 @@ class WaybackPriceHistoryClient(
     companion object {
         const val DEFAULT_LOOKBACK_DAYS = 1600
         private const val DIRECT_CDX_TIMEOUT_SECONDS = 5L
-        private const val DOMAIN_CDX_TIMEOUT_SECONDS = 11L
+        private const val DOMAIN_CDX_TIMEOUT_SECONDS = 7L
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 4
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 4
         private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 3L

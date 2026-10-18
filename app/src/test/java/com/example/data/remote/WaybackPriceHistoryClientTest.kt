@@ -451,12 +451,12 @@ class WaybackPriceHistoryClientTest {
                 .putBoolean("${key}_failed", false)
                 .commit()
             preferences.edit().putBoolean("${key}_failed", true).commit()
-            assertTrue(
-                "A transient network failure is briefly suppressed to avoid repeated requests",
+            assertFalse(
+                "A failed network request can be retried immediately; only a completed negative lookup is cached",
                 client.wasAttemptedRecently(key, lastAttempt + 10L * 60L * 1000L)
             )
             assertFalse(
-                "A transient network failure may be retried after thirty minutes",
+                "A failed network request remains retriable after thirty minutes",
                 client.wasAttemptedRecently(key, lastAttempt + 31L * 60L * 1000L)
             )
 

@@ -944,12 +944,15 @@ class WaybackPriceHistoryClient(
 
     companion object {
         const val DEFAULT_LOOKBACK_DAYS = 1600
-        private const val DIRECT_CDX_TIMEOUT_SECONDS = 5L
-        private const val DOMAIN_CDX_TIMEOUT_SECONDS = 10L
+        // CDX queries run in parallel for the exact URL and merchant-domain fallback.
+        // A larger read budget is needed on slow archive responses; concurrency and row caps
+        // below still bound total work per product.
+        private const val DIRECT_CDX_TIMEOUT_SECONDS = 15L
+        private const val DOMAIN_CDX_TIMEOUT_SECONDS = 20L
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 4
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 4
         private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 3L
-        private const val MAX_DOMAIN_INDEX_ROWS = 40
+        private const val MAX_DOMAIN_INDEX_ROWS = 80
         private const val DOMAIN_LOOKBACK_DAYS = 730
         private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L

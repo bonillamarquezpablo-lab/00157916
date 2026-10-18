@@ -72,6 +72,7 @@ class WaybackPriceHistoryClient(
         Context.MODE_PRIVATE
     )
     private val snapshotSemaphore = Semaphore(MAX_CONCURRENT_SNAPSHOT_REQUESTS)
+    private val availabilitySemaphore = Semaphore(MAX_CONCURRENT_AVAILABILITY_REQUESTS)
 
     suspend fun fetchHistory(
         originalUrl: String,
@@ -92,13 +93,15 @@ class WaybackPriceHistoryClient(
         if (wasAttemptedRecently(attempt, now)) {
             return@withContext WaybackBackfillResult(skippedRecently = true, diagnosticCodes = setOf("CACHE_SKIPPED"))
         }
-        val cdxUrl = buildCdxUrl(originalUrl, now, lookbackDays)
-            ?: return@withContext WaybackBackfillResult(diagnosticCodes = setOf("CDX_URL_BUILD_FAILED"))
-        queryCdxAndFetchPrices(
-            cdxUrl, expectedTitle, attempt, now,
+        queryAvailabilityAndFetchPrices(
+            candidateUrls = listOf(originalUrl),
+            expectedTitle = expectedTitle,
+            cacheKey = attempt,
+            now = now,
+            lookbackDays = lookbackDays,
             maxSnapshots = MAX_DIRECT_SNAPSHOTS_PER_URL,
-            cdxTimeoutSeconds = DIRECT_CDX_TIMEOUT_SECONDS,
-            cdxStage = "CDX_EXACT"
+            maxCandidates = 1,
+            stage = "AVAILABILITY_EXACT"
         )
     }
 
@@ -121,120 +124,274 @@ class WaybackPriceHistoryClient(
         if (expectedTitle.isBlank()) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("PRODUCT_TITLE_EMPTY"))
         }
-        val cdxUrls = buildDomainCdxHostUrls(normalizedDomain, expectedTitle, now, lookbackDays)
-            ?: return@withContext WaybackBackfillResult(diagnosticCodes = setOf("CDX_QUERY_NOT_BUILDABLE"))
+        val candidateUrls = buildAvailabilityCandidateUrls(normalizedDomain, expectedTitle)
+        if (candidateUrls.isEmpty()) {
+            return@withContext WaybackBackfillResult(diagnosticCodes = setOf("AVAILABILITY_CANDIDATES_EMPTY"))
+        }
         val attempt = attemptKey("domain|$normalizedDomain|$expectedTitle")
         if (wasAttemptedRecently(attempt, now)) {
             return@withContext WaybackBackfillResult(skippedRecently = true, diagnosticCodes = setOf("CACHE_SKIPPED"))
         }
+        queryAvailabilityAndFetchPrices(
+            candidateUrls = candidateUrls,
+            expectedTitle = expectedTitle,
+            cacheKey = attempt,
+            now = now,
+            lookbackDays = lookbackDays,
+            maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP,
+            maxCandidates = MAX_AVAILABILITY_URL_CANDIDATES,
+            stage = "AVAILABILITY_DOMAIN"
+        )
+    }
 
-        // Stage 1 is a bounded discovery over the store's likely product hosts (www + apex),
-        // not every subdomain. Each host query is capped at four seconds and they run together.
-        // Do not collapse by urlkey here: CDX documents that collapse on broad scans can be slow.
-        val discoveries = coroutineScope {
-            cdxUrls.map { cdxUrl ->
-                async {
-                    queryCdxIndexOnly(
-                        cdxUrl = cdxUrl,
-                        cdxTimeoutSeconds = DOMAIN_CDX_TIMEOUT_SECONDS,
-                        cdxStage = "CDX_DOMAIN"
-                    )
+    /**
+     * Use the fast availability endpoint to discover captures for exact product-page candidates.
+     * Broad CDX host/domain scans repeatedly time out even when Wayback itself is reachable.
+     * Query a few target dates per candidate, then verify the archived HTML before accepting prices.
+     */
+    private suspend fun queryAvailabilityAndFetchPrices(
+        candidateUrls: List<String>,
+        expectedTitle: String,
+        cacheKey: String,
+        now: Long,
+        lookbackDays: Int,
+        maxSnapshots: Int,
+        maxCandidates: Int,
+        stage: String
+    ): WaybackBackfillResult {
+        val urls = candidateUrls.asSequence()
+            .filter(::isEligibleDirectUrl)
+            .distinct()
+            .take(maxCandidates.coerceAtLeast(1))
+            .toList()
+        if (urls.isEmpty()) {
+            rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
+            return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("${stage}_NO_CANDIDATES"))
+        }
+
+        val dates = availabilityTargetDates(now, lookbackDays, if (stage == "AVAILABILITY_EXACT") 4 else 3)
+        val probes = coroutineScope {
+            urls.flatMap { originalUrl ->
+                dates.map { targetDate ->
+                    async {
+                        availabilitySemaphore.withPermit {
+                            queryAvailability(originalUrl, targetDate, stage)
+                        }
+                    }
                 }
             }.awaitAll()
         }
-        val discoveryFailures = discoveries.filter { it.requestFailed }
-        val validDiscoveries = discoveries.filter { it.available && !it.requestFailed }
-        if (validDiscoveries.isEmpty()) {
-            rememberAttempt(attempt, now, hasQuotes = false, failed = true)
-            return@withContext WaybackBackfillResult(
-                requestFailed = true,
-                diagnosticCodes = discoveryFailures.flatMapTo(linkedSetOf()) { it.diagnosticCodes }
-            )
-        }
+        val captures = probes.mapNotNull { it.capture }
+            .filter { it.timestamp <= now && it.timestamp >= (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L) }
+            .distinctBy { it.rawTimestamp to it.originalUrl }
+            .sortedBy { it.timestamp }
+        val successfulProbes = probes.count { !it.requestFailed }
+        val probeDiagnostics = probes.mapNotNull { it.diagnosticCode }.toSet()
 
-        val candidateUrls = selectDistinctProductUrls(validDiscoveries.flatMap { it.captures })
-        if (candidateUrls.isEmpty()) {
+        if (captures.isEmpty()) {
+            val allFailed = successfulProbes == 0
             val diagnostics = linkedSetOf<String>().apply {
-                discoveryFailures.forEach { addAll(it.diagnosticCodes) }
-                if (isEmpty()) add("CDX_NO_PRODUCT_URLS")
+                addAll(probeDiagnostics)
+                if (isEmpty()) add("${stage}_NO_CAPTURES")
+                else if (!allFailed) add("${stage}_NO_CAPTURES")
             }
-            rememberAttempt(
-                attempt,
-                now,
-                hasQuotes = false,
-                failed = discoveryFailures.isNotEmpty()
-            )
-            return@withContext WaybackBackfillResult(
-                available = true,
-                requestFailed = discoveryFailures.isNotEmpty(),
+            rememberAttempt(cacheKey, now, hasQuotes = false, failed = allFailed)
+            return WaybackBackfillResult(
+                available = successfulProbes > 0,
+                requestFailed = allFailed,
                 diagnosticCodes = diagnostics
             )
         }
 
-        // Stage 2 is narrow: each discovered URL gets its own exact CDX request so we can
-        // retrieve multiple dates for the same page. Two candidates run concurrently, while
-        // the shared snapshot semaphore below caps total Wayback downloads across the client.
-        val exactResults = coroutineScope {
-            candidateUrls.map { originalUrl ->
+        val sampled = sampleCaptures(captures, maxSnapshots)
+        val snapshotHttp = http.newBuilder()
+            .callTimeout(SNAPSHOT_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .build()
+        val fetched = coroutineScope {
+            sampled.map { capture ->
                 async {
-                    val exactAttempt = attemptKey("url|$originalUrl|$expectedTitle")
-                    if (wasAttemptedRecently(exactAttempt, now)) {
-                        val cachedQuotes = preferences.getBoolean("${exactAttempt}_has_quotes", false)
-                        WaybackBackfillResult(
-                            skippedRecently = true,
-                            available = cachedQuotes,
-                            diagnosticCodes = setOf("CACHE_SKIPPED")
-                        )
-                    } else {
-                        val exactCdxUrl = buildCdxUrl(
-                            originalUrl = originalUrl,
-                            now = now,
-                            lookbackDays = minOf(lookbackDays.coerceAtLeast(1), DOMAIN_LOOKBACK_DAYS)
-                        ) ?: return@async WaybackBackfillResult(
-                            requestFailed = true,
-                            diagnosticCodes = setOf("CDX_URL_BUILD_FAILED")
-                        )
-                        queryCdxAndFetchPrices(
-                            cdxUrl = exactCdxUrl,
-                            expectedTitle = expectedTitle,
-                            cacheKey = exactAttempt,
-                            now = now,
-                            maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP,
-                            cdxTimeoutSeconds = DOMAIN_EXACT_CDX_TIMEOUT_SECONDS,
-                            cdxStage = "CDX_DOMAIN_EXACT"
-                        )
+                    snapshotSemaphore.withPermit {
+                        val snapshotUrl = buildSnapshotUrl(capture)
+                            ?: return@withPermit SnapshotFetch(false, null, "SNAPSHOT_URL_INVALID")
+                        val request = Request.Builder()
+                            .url(snapshotUrl)
+                            .header("User-Agent", USER_AGENT)
+                            .get()
+                            .build()
+                        try {
+                            snapshotHttp.newCall(request).execute().use { response ->
+                                if (!response.isSuccessful) {
+                                    SnapshotFetch(false, null, "SNAPSHOT_HTTP_${response.code}")
+                                } else {
+                                    val html = readBodyLimited(response.body, MAX_SNAPSHOT_BODY_BYTES)
+                                    if (html == null) {
+                                        SnapshotFetch(false, null, "SNAPSHOT_BODY_EMPTY_OR_LIMIT")
+                                    } else {
+                                        SnapshotFetch(
+                                            fetched = true,
+                                            quote = parseArchivedPrice(
+                                                html = html,
+                                                expectedTitle = expectedTitle,
+                                                originalUrl = capture.originalUrl,
+                                                snapshotUrl = snapshotUrl,
+                                                observedAt = capture.timestamp
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (failure: Exception) {
+                            SnapshotFetch(false, null, classifyNetworkFailure("SNAPSHOT", failure))
+                        }
                     }
                 }
             }.awaitAll()
         }
 
-        val quotes = exactResults.flatMap { it.quotes }
+        val quotes = fetched.mapNotNull { it.quote }
             .sortedBy { it.observedAt }
             .distinctBy { Triple(it.originalUrl, it.observedAt, it.price) }
-        val cachedPositiveResult = exactResults.any { it.skippedRecently && it.available }
-        val hasKnownHistory = quotes.isNotEmpty() || cachedPositiveResult
-        val requestFailed = discoveryFailures.isNotEmpty() || exactResults.any { it.requestFailed }
-        rememberAttempt(
-            attempt,
-            now,
-            hasQuotes = hasKnownHistory,
-            failed = quotes.isEmpty() && !cachedPositiveResult && requestFailed
-        )
         val diagnostics = linkedSetOf<String>().apply {
-            discoveryFailures.forEach { addAll(it.diagnosticCodes) }
-            exactResults.forEach { addAll(it.diagnosticCodes) }
-            if (quotes.isEmpty() && isEmpty()) add("NO_VERIFIED_EUR_PRICE")
+            addAll(probeDiagnostics)
+            fetched.mapNotNullTo(this) { it.diagnosticCode }
+            if (quotes.isEmpty() && fetched.any { it.fetched }) add("NO_VERIFIED_EUR_PRICE")
+            else if (quotes.isEmpty() && isEmpty()) add("${stage}_NO_VERIFIED_PRICE")
         }
-        WaybackBackfillResult(
+        val anySnapshotFailed = fetched.any { !it.fetched }
+        val allSnapshotsFailed = fetched.isNotEmpty() && fetched.none { it.fetched }
+        val failed = quotes.isEmpty() && (successfulProbes == 0 || allSnapshotsFailed)
+        rememberAttempt(cacheKey, now, hasQuotes = quotes.isNotEmpty(), failed = failed)
+        return WaybackBackfillResult(
             quotes = quotes,
-            capturesFound = exactResults.sumOf { it.capturesFound },
-            capturesChecked = exactResults.sumOf { it.capturesChecked },
-            skippedRecently = exactResults.isNotEmpty() && exactResults.all { it.skippedRecently },
-            available = exactResults.any { it.available },
-            requestFailed = requestFailed,
+            capturesFound = captures.size,
+            capturesChecked = fetched.count { it.fetched },
+            available = successfulProbes > 0,
+            requestFailed = failed || (quotes.isEmpty() && anySnapshotFailed && successfulProbes == 0),
             diagnosticCodes = diagnostics
         )
     }
+
+    private suspend fun queryAvailability(
+        originalUrl: String,
+        targetDate: String,
+        stage: String
+    ): AvailabilityProbe {
+        val endpoint = HttpUrl.Builder()
+            .scheme("https")
+            .host("archive.org")
+            .addPathSegments("wayback/available")
+            .addQueryParameter("url", originalUrl)
+            .addQueryParameter("timestamp", targetDate)
+            .build()
+        val availabilityHttp = http.newBuilder()
+            .readTimeout(3, TimeUnit.SECONDS)
+            .callTimeout(3, TimeUnit.SECONDS)
+            .build()
+        val request = Request.Builder().url(endpoint).header("User-Agent", USER_AGENT).get().build()
+        return try {
+            availabilityHttp.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    AvailabilityProbe(requestFailed = true, diagnosticCode = "${stage}_HTTP_${response.code}")
+                } else {
+                    val body = readBodyLimited(response.body, MAX_AVAILABILITY_BODY_BYTES)
+                    if (body == null) {
+                        AvailabilityProbe(requestFailed = true, diagnosticCode = "${stage}_BODY_EMPTY_OR_LIMIT")
+                    } else {
+                        val capture = parseAvailabilityCapture(body, originalUrl)
+                        AvailabilityProbe(capture = capture)
+                    }
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            AvailabilityProbe(requestFailed = true, diagnosticCode = classifyNetworkFailure(stage, failure))
+        }
+    }
+
+    internal fun parseAvailabilityCapture(body: String, fallbackOriginalUrl: String): WaybackCapture? {
+        val closest = try {
+            JSONObject(body).optJSONObject("archived_snapshots")?.optJSONObject("closest")
+        } catch (_: JSONException) {
+            null
+        } ?: return null
+        if (!closest.optBoolean("available", false)) return null
+        val rawTimestamp = closest.optString("timestamp")
+        if (!rawTimestamp.matches(Regex("""\\d{14}"""))) return null
+        val timestamp = runCatching {
+            SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+                isLenient = false
+                timeZone = TimeZone.getTimeZone("UTC")
+            }.parse(rawTimestamp)?.time
+        }.getOrNull() ?: return null
+        val original = fallbackOriginalUrl.takeIf(::isEligibleDirectUrl) ?: return null
+        return WaybackCapture(rawTimestamp, timestamp, original)
+    }
+
+    internal fun buildAvailabilityCandidateUrls(domain: String, expectedTitle: String): List<String> {
+        val normalizedDomain = normalizeMerchantDomain(domain) ?: return emptyList()
+        if (expectedTitle.isBlank()) return emptyList()
+        val fullSlug = Normalizer.normalize(expectedTitle, Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "")
+            .lowercase(Locale.ROOT)
+            .replace("&", " and ")
+            .replace(Regex("[^a-z0-9]+"), "-")
+            .trim('-')
+        if (fullSlug.isBlank()) return emptyList()
+        val prefixes = when (normalizedDomain) {
+            "apple.com" -> listOf("apple")
+            "samsung.com" -> listOf("samsung")
+            "mi.com", "xiaomi.com" -> listOf("xiaomi", "redmi", "mi")
+            "sony.es", "sony.com" -> listOf("sony")
+            "nike.com" -> listOf("nike")
+            "adidas.com" -> listOf("adidas")
+            else -> emptyList()
+        }
+        val slugs = linkedSetOf(fullSlug)
+        prefixes.forEach { prefix ->
+            if (fullSlug.startsWith("$prefix-")) slugs += fullSlug.removePrefix("$prefix-")
+        }
+        val hosts = domainDiscoveryHosts(normalizedDomain)
+        val paths = linkedSetOf<String>()
+        if (normalizedDomain == "apple.com") {
+            slugs.filter { it.startsWith("iphone-") || it.startsWith("ipad-") || it.startsWith("macbook-") }
+                .forEach { paths += "/es/$it/" }
+        }
+        if (normalizedDomain == "samsung.com") {
+            slugs.filter { it.startsWith("galaxy-") }
+                .forEach { paths += "/es/smartphones/galaxy-s/$it/" }
+        }
+        slugs.forEach { slug ->
+            paths += "/$slug/"
+            paths += "/es/$slug/"
+            paths += "/es-es/$slug/"
+            paths += "/products/$slug/"
+            paths += "/product/$slug/"
+            paths += "/p/$slug/"
+        }
+        return hosts.flatMap { host ->
+            paths.map { path ->
+                HttpUrl.Builder().scheme("https").host(host).addPathSegments(path.trim('/')).build().toString()
+            }
+        }.distinct().take(MAX_AVAILABILITY_URL_CANDIDATES)
+    }
+
+    private fun availabilityTargetDates(now: Long, lookbackDays: Int, count: Int): List<String> {
+        val days = lookbackDays.coerceAtLeast(1).toLong()
+        return (0 until count.coerceAtLeast(1)).map { index ->
+            val offsetDays = if (count <= 1) 0L else days * index / (count - 1)
+            formatUtc((now - offsetDays * DAY_MS).coerceAtLeast(0L), "yyyyMMdd")
+        }.distinct()
+    }
+
+    private data class AvailabilityProbe(
+        val capture: WaybackCapture? = null,
+        val requestFailed: Boolean = false,
+        val diagnosticCode: String? = null
+    )
+
 
     internal fun wasAttemptedRecently(key: String, now: Long): Boolean {
         val lastAttempt = preferences.getLong(key, 0L)
@@ -1188,6 +1345,9 @@ class WaybackPriceHistoryClient(
             "com.sg", "com.tr", "co.za", "com.ar", "com.cn", "com.tw", "com.pl"
         )
         private const val MAX_CDX_HTTP_RETRIES = 1
+        private const val MAX_CONCURRENT_AVAILABILITY_REQUESTS = 6
+        private const val MAX_AVAILABILITY_URL_CANDIDATES = 6
+        private const val MAX_AVAILABILITY_BODY_BYTES = 64 * 1024
         private const val CDX_RETRY_DELAY_MS = 500L
         private const val CDX_RETRY_JITTER_MS = 350L
         private val RETRYABLE_CDX_HTTP_CODES = setOf(500, 502, 503, 504)

@@ -43,6 +43,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
+import java.text.Normalizer
 import java.text.SimpleDateFormat
 import java.util.Date
 
@@ -979,14 +980,26 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     if (offer.store.id == product.currentStore.id) product.storeUrl
                     else offer.store.officialUrl
                 }
-                buildFreeArchiveCandidate(product.title, offer.store.name, destination)?.let(::add)
+                buildFreeArchiveCandidate(
+                    title = product.title,
+                    storeName = offer.store.name,
+                    sourceUrl = destination,
+                    knownDomain = offer.store.domain
+                )?.let(::add)
             }
             val currentDestination = product.storeUrl.ifBlank { product.currentStore.officialUrl }
-            buildFreeArchiveCandidate(product.title, product.currentStore.name, currentDestination)?.let(::add)
-        }.distinctBy {
-            // Different direct product URLs on one merchant domain may represent distinct variants.
-            // Deduplicate exact URLs first; use the domain only for domain-only discovery candidates.
-            it.title.trim().lowercase(Locale.ROOT) + "|" + (it.directUrl ?: it.merchantDomain ?: "unknown")
+            buildFreeArchiveCandidate(
+                title = product.title,
+                storeName = product.currentStore.name,
+                sourceUrl = currentDestination,
+                knownDomain = product.currentStore.domain
+            )?.let(::add)
+        }.sortedWith(
+            compareBy<FreeArchiveCandidate> { if (it.directUrl != null) 0 else 1 }
+                .thenBy { it.merchantDomain.orEmpty() }
+        ).distinctBy {
+            // Search one page per retailer: a seller's alternate URL must not consume another slot.
+            it.title.trim().lowercase(Locale.ROOT) + "|" + (it.merchantDomain ?: it.directUrl ?: "unknown")
         }.take(MAX_ARCHIVE_PAGES_PER_SEARCH)
 
         if (candidates.isEmpty()) {
@@ -1308,43 +1321,51 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     private fun buildFreeArchiveCandidate(
         title: String,
         storeName: String,
-        sourceUrl: String
+        sourceUrl: String,
+        knownDomain: String = ""
     ): FreeArchiveCandidate? {
         if (title.isBlank()) return null
+        val genericProviderName = storeName.trim().lowercase(Locale.ROOT) in setOf(
+            "", "google", "google shopping", "google shopping españa", "serpapi", "serp api", "shopping"
+        )
+        val extractedUrl = extractDirectRetailerUrl(sourceUrl)
         val resolvedDomain = waybackPriceHistoryClient.resolveMerchantDomain(
             storeName = storeName,
-            sourceUrl = sourceUrl
+            sourceUrl = sourceUrl,
+            knownStoreDomain = knownDomain
         )
-        // A Google Shopping link can embed the final retailer URL. Only accept the extracted
-        // destination when its host matches the retailer identified by name/source; never trust
-        // an arbitrary Google redirect to a different shop.
-        val extractedUrl = extractDirectRetailerUrl(sourceUrl)
+        // Use an actual retailer URL embedded by Google when available. A known domain from
+        // the saved Store record is authoritative; when no domain is known, require the extracted
+        // registrable host to match the reported seller label (or the provider link to be generic).
         val directUrl = extractedUrl?.takeIf { candidateUrl ->
             if (!waybackPriceHistoryClient.isEligibleDirectUrl(candidateUrl)) {
                 false
             } else if (!isGoogleShoppingUrl(sourceUrl)) {
                 true
             } else {
-                val expectedDomain = resolvedDomain ?: return@takeIf false
                 val actualHost = runCatching {
                     java.net.URI(candidateUrl).host.orEmpty()
                         .lowercase(Locale.ROOT)
                         .removePrefix("www.")
                 }.getOrDefault("")
-                actualHost == expectedDomain || actualHost.endsWith(".$expectedDomain")
+                val expectedDomain = resolvedDomain
+                (expectedDomain != null &&
+                    (actualHost == expectedDomain || actualHost.endsWith(".$expectedDomain"))) ||
+                    genericProviderName || merchantNameMatchesHost(storeName, actualHost)
             }
         }
-        // Some Google Shopping rows expose only Google's intermediate URL and label the source
-        // as "Google Shopping", omitting the seller. If that happens, make a bounded fallback
-        // to a recognized brand's own website; the archived page still needs an exact title and
-        // EUR price, so this does not invent a quote or pretend to know the original seller.
-        val brandFallback = if (resolvedDomain == null) {
+        val directDomain = directUrl?.let { url ->
+            runCatching {
+                java.net.URI(url).host.orEmpty().lowercase(Locale.ROOT).removePrefix("www.")
+            }.getOrNull()?.takeIf { it.isNotBlank() }
+        }
+        // Only fall back to the manufacturer's own domain when neither the seller's saved
+        // domain nor an actual destination URL is available; do not search Sony's site for a
+        // product sold by an unidentified third-party retailer.
+        val brandFallback = if (resolvedDomain == null && directDomain == null) {
             waybackPriceHistoryClient.resolveBrandMerchant(title)
         } else null
-        val domain = resolvedDomain ?: brandFallback?.second
-        val genericProviderName = storeName.trim().lowercase(Locale.ROOT) in setOf(
-            "", "google", "google shopping", "google shopping españa", "serpapi", "serp api", "shopping"
-        )
+        val domain = resolvedDomain ?: directDomain ?: brandFallback?.second
         val effectiveStoreName = when {
             brandFallback != null -> brandFallback.first
             genericProviderName && directUrl != null -> ""
@@ -1357,6 +1378,35 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             directUrl = directUrl,
             merchantDomain = domain
         )
+    }
+
+    private fun merchantNameMatchesHost(storeName: String, host: String): Boolean {
+        if (storeName.isBlank() || host.isBlank()) return false
+        fun normalize(value: String): String = Normalizer.normalize(
+            value.lowercase(Locale.ROOT), Normalizer.Form.NFD
+        ).replace(Regex("\\p{Mn}+"), "")
+            .replace(Regex("[^a-z0-9]+"), " ")
+            .trim()
+            .replace(Regex("\\s+"), " ")
+
+        val ignored = setOf(
+            "store", "tienda", "shop", "online", "espana", "official", "oficial",
+            "espanol", "market", "marketplace", "the", "com"
+        )
+        val nameTokens = normalize(storeName).split(' ')
+            .filter { it.length >= 3 && it !in ignored }
+        if (nameTokens.isEmpty()) return false
+
+        // Compare the registrable-name labels, not arbitrary subdomains: pixmania.attacker.com
+        // must not pass merely because "pixmania" occurs somewhere before the real domain.
+        val labels = host.lowercase(Locale.ROOT).removePrefix("www.").split('.')
+        if (labels.size < 2) return false
+        val registrableLabel = when {
+            labels.size >= 3 && labels[labels.lastIndex - 1] in setOf("co", "com", "net", "org") &&
+                labels.last() in setOf("uk", "au", "nz", "jp", "in") -> labels[labels.lastIndex - 2]
+            else -> labels[labels.lastIndex - 1]
+        }.replace(Regex("[^a-z0-9]"), "")
+        return nameTokens.all { token -> registrableLabel.contains(token) }
     }
 
     private fun startFreeArchiveBackfill(
@@ -1407,6 +1457,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 var savedCount = 0
                 var checkedCount = 0
                 var foundCount = 0
+                var capturesFoundCount = 0
+                var successfulLookupsCount = 0
+                var requestFailedCount = 0
                 var skippedCount = 0
                 var timedOutCount = 0
                 val archiveDates = mutableListOf<Long>()
@@ -1444,6 +1497,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         .distinctBy { Triple(it.originalUrl, it.observedAt, it.price) }
                     checkedCount += attempts.sumOf { it.capturesChecked }
                     foundCount += quotes.size
+                    capturesFoundCount += attempts.sumOf { it.capturesFound }
+                    successfulLookupsCount += attempts.count { it.available }
+                    requestFailedCount += attempts.count { it.requestFailed }
                     quotes.map { it.observedAt }.let(archiveDates::addAll)
 
                     for ((archiveUrl, urlQuotes) in quotes.groupBy { it.originalUrl }) {
@@ -1499,12 +1555,18 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }
                     foundCount > 0 ->
                         "Se encontraron capturas con precios previos, pero no se pudieron vincular a la ficha del producto o ya existían esos registros diarios."
-                    checkedCount > 0 ->
-                        "Se consultaron $checkedCount capturas gratuitas, pero ninguna expuso un precio EUR verificable para el producto exacto. No se han rellenado datos ausentes."
                     timedOutCount > 0 ->
                         "La consulta del archivo agotó el límite de tiempo para $timedOutCount tienda(s). No se ha gastado cuota de SerpApi; puedes volver a intentarlo más tarde."
+                    requestFailedCount > 0 && capturesFoundCount > 0 && checkedCount == 0 ->
+                        "Internet Archive encontró $capturesFoundCount capturas, pero no pudo descargar las páginas. No se puede confirmar el precio histórico; inténtalo más tarde. No se ha gastado cuota de SerpApi."
+                    requestFailedCount > 0 && checkedCount == 0 ->
+                        "Falló la consulta a Internet Archive; no se puede distinguir un fallo temporal de la ausencia de capturas. No se ha gastado cuota de SerpApi. El sistema permitirá reintentar antes que una búsqueda con resultados útiles."
+                    capturesFoundCount == 0 && successfulLookupsCount > 0 ->
+                        "Internet Archive respondió, pero no encontró capturas públicas de esas páginas en el período consultado. No hay precios antiguos verificables que mostrar y no se ha gastado cuota de SerpApi."
+                    checkedCount > 0 ->
+                        "Se consultaron $checkedCount capturas gratuitas, pero ninguna publicó un precio EUR verificable que coincidiera con el producto exacto. No se han inventado precios."
                     else ->
-                        "No se recuperó histórico gratuito: puede que el comercio no esté archivado o que no publique el precio en metadatos verificables. No se ha gastado cuota de SerpApi."
+                        "No se recuperó histórico gratuito. Puede que el vendedor no haya sido identificado con un enlace directo o que la página no publique metadatos de precio verificables. No se ha gastado cuota de SerpApi."
                 }
                 appendArchiveNotice(query, provider, notice, targetProductId)
             } catch (cancelled: CancellationException) {

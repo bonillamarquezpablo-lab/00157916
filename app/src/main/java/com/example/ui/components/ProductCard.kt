@@ -41,7 +41,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -55,6 +54,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import com.example.data.model.Product
+import com.example.data.model.ProductCategory
 import com.example.data.model.Store
 import com.example.ui.theme.ProductCardShape
 import com.example.ui.theme.ProductImageShape
@@ -78,21 +78,22 @@ fun ProductCard(
             .clip(ProductCardShape)
             .border(
                 width = if (product.isAtAth) 1.5.dp else 1.dp,
-                color = if (product.isAtAth) Color(0xFF10B981).copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                color = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isAtAth) {
+                    Color(0xFF10B981).copy(alpha = 0.6f)
+                } else {
+                    MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                },
                 shape = ProductCardShape
             )
             .clickable(onClick = onClick)
             .testTag("product_card_${product.id}"),
         colors = CardDefaults.cardColors(
-            containerColor = if (product.isPriceFresh) {
-                lerp(MaterialTheme.colorScheme.surface, product.currentStore.brandColor, 0.05f)
-            } else {
-                MaterialTheme.colorScheme.surface
-            }
+            // Keep cards visually consistent; retailer colours belong in small metadata accents.
+            containerColor = MaterialTheme.colorScheme.surface
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(10.dp)) {
             // Top Section: Product Photo + Product Details
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -164,28 +165,34 @@ fun ProductCard(
 
                     Spacer(modifier = Modifier.height(4.dp))
 
-                    // Category & Rating
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = product.category.displayName,
-                            fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        if (product.isRatingVerified) {
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Icon(
-                                imageVector = Icons.Default.Star,
-                                contentDescription = null,
-                                tint = Color(0xFFEAB308),
-                                modifier = Modifier.size(11.dp)
-                            )
-                            Spacer(modifier = Modifier.width(2.dp))
-                            Text(
-                                text = "${product.rating}",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                    // "Todos" is a filter option, not a meaningful product category.
+                    if (product.category != ProductCategory.ALL || product.isRatingVerified) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (product.category != ProductCategory.ALL) {
+                                Text(
+                                    text = product.category.displayName,
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            if (product.isRatingVerified) {
+                                if (product.category != ProductCategory.ALL) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                }
+                                Icon(
+                                    imageVector = Icons.Default.Star,
+                                    contentDescription = "Valoración verificada",
+                                    tint = Color(0xFFEAB308),
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Text(
+                                    text = "${product.rating}",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                         }
                     }
                 }
@@ -196,31 +203,16 @@ fun ProductCard(
             // Evidence-based hero badge: never call the first quote a historical minimum.
             HeroPriceBadge(
                 state = product.priceBadgeState,
-                modifier = Modifier.fillMaxWidth(),
+                // A compact status chip is easier to scan than a full-width ribbon.
+                modifier = Modifier,
                 compact = true
             )
 
-            // Existing deal analysis certificate.
-            DealVerdictBadge(verdict = product.verdict, compact = false)
+            Spacer(modifier = Modifier.height(8.dp))
 
-            Spacer(modifier = Modifier.height(10.dp))
-
+            // The detail sheet contains the full verdict explanation. Avoid repeating that
+            // paragraph on every market card; the evidence chip and concise source line suffice.
             // Price Section
-            when (product.priceDisplayStatus) {
-                com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT -> Unit
-                com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION -> Text(
-                    text = "PRECIO GUARDADO · PENDIENTE DE REVALIDACIÓN",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.tertiary
-                )
-                com.example.data.model.PriceDisplayStatus.DEMONSTRATION -> Text(
-                    text = "DATOS DE DEMOSTRACIÓN · SIN PRECIO REAL VERIFICADO",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Bottom,
@@ -263,19 +255,13 @@ fun ProductCard(
                     }
                     if (product.priceDisplayStatus != com.example.data.model.PriceDisplayStatus.DEMONSTRATION && product.priceObservedAt != null) {
                         Text(
-                            text = "Consultado " + observedAtFormatter.format(Date(product.priceObservedAt)),
+                            text = (if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION) {
+                                "Guardado "
+                            } else {
+                                "Consultado "
+                            }) + observedAtFormatter.format(Date(product.priceObservedAt)),
                             fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION) {
-                        Text(
-                            text = if (!product.isPriceVerified && product.savedHistoricalPrice != null) {
-                                "Precio histórico guardado · ${product.savedHistoricalPriceObservedAt?.let { savedDateFormatter.format(Date(it)) } ?: "fecha desconocida"} · no es una oferta actual"
-                            } else product.priceFreshnessLabel,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.tertiary
                         )
                     }
                     if (product.priceDisplayStatus != com.example.data.model.PriceDisplayStatus.DEMONSTRATION) {
@@ -284,11 +270,13 @@ fun ProductCard(
                         } else product.priceSource.ifBlank { "buscador online" }
                         Text(
                             text = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION) {
-                                "Última fuente guardada: $savedSource · precio antiguo, no confirmado como actual."
+                                "Fuente guardada: $savedSource · precio no actual."
                             } else {
-                                "Fuente: $savedSource · confirma el precio final y el stock."
+                                "Fuente: $savedSource · confirma precio final y stock."
                             },
                             fontSize = 10.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -309,57 +297,48 @@ fun ProductCard(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Buscar ofertas en ${Store.ALL_STORES.size} tiendas",
+                    text = "Elegir tienda para buscar",
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 12.sp
                 )
             }
             Spacer(modifier = Modifier.height(10.dp))
 
-            // ATH Historical Banner
-            Box(
+            // One short history line; detailed evidence and the 90-day requirement live in
+            // the product sheet, so repeated cards stay scannable.
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(
-                        if (product.isAtAth) Color(0xFF10B981).copy(alpha = 0.12f)
-                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                    )
-                    .padding(horizontal = 10.dp, vertical = 7.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f))
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.TrendingDown,
-                            contentDescription = null,
-                            tint = if (product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (product.hasSufficientHistory) "Mínimo observado:" else "Historial:",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = if (product.hasSufficientHistory) "${String.format("%.2f", product.athMinPrice)} €" else "En construcción",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = if (product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-
-                    Text(
-                        text = if (product.hasSufficientHistory) "${product.athMinDate} (${product.athMinStore})" else if (product.isPriceVerified) "Se necesitan varias consultas durante 90 días" else "Sin historial verificable",
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.TrendingDown,
+                    contentDescription = null,
+                    tint = if (product.hasSufficientHistory && product.isAtAth) {
+                        Color(0xFF059669)
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.size(15.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (product.hasSufficientHistory) {
+                        "Mínimo observado: ${String.format("%.2f", product.athMinPrice)} €"
+                    } else if (product.isPriceVerified) {
+                        "Historial en curso · requiere 90 días"
+                    } else {
+                        "Sin historial verificable"
+                    },
+                    fontWeight = if (product.hasSufficientHistory) FontWeight.SemiBold else FontWeight.Normal,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }

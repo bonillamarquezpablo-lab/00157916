@@ -161,6 +161,54 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun cdxHttp429StopsFurtherRequestsAndPersistsRetryAfter() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .commit()
+        val requests = CopyOnWriteArrayList<String>()
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            requests += request.url.host + request.url.encodedPath
+            val contentType = "text/plain; charset=utf-8"
+            Response.Builder()
+                .request(request)
+                .protocol(Protocol.HTTP_1_1)
+                .code(429)
+                .message("Too Many Requests")
+                .header("Retry-After", "300")
+                .body("rate limited".toResponseBody(contentType.toMediaType()))
+                .build()
+        }.build()
+
+        try {
+            val client = WaybackPriceHistoryClient(context, http)
+            val title = "Anker Prime 27K Rate Limit Test ${System.currentTimeMillis()}"
+            val first = withTimeout(2_000L) {
+                client.fetchHistoryByMerchantDomain("shop.example", title, lookbackDays = 730)
+            }
+            assertTrue(first.requestFailed)
+            assertTrue(first.diagnosticCodes.contains("WAYBACK_RATE_LIMITED"))
+            assertEquals("A 429 must stop before trying another host or snapshot", 1, requests.size)
+
+            val until = preferences.getLong("wayback_rate_limit_until", 0L)
+            assertTrue("Retry-After must be persisted", until > System.currentTimeMillis() + 240_000L)
+            val second = withTimeout(1_000L) {
+                client.fetchHistoryByMerchantDomain("shop.example", title, lookbackDays = 730)
+            }
+            assertTrue(second.diagnosticCodes.contains("WAYBACK_RATE_LIMITED"))
+            assertEquals("The cooldown must prevent any immediate follow-up request", 1, requests.size)
+        } finally {
+            preferences.edit()
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .commit()
+        }
+    }
+
+    @Test
     fun parsesWaybackAvailabilityCaptureOnlyWhenMarkedAvailable() {
         val client = newClient()
         val available = """

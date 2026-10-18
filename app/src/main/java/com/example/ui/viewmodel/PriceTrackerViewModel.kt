@@ -1665,6 +1665,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         "Internet Archive encontró $capturesFoundCount capturas, pero las descargas fallaron. No se puede confirmar el precio histórico; puedes volver a intentarlo."
                     checkedCount > 0 && requestFailedCount > 0 ->
                         "Se revisaron $checkedCount capturas, pero algunas consultas fallaron. Los resultados son parciales; vuelve a intentarlo para completar el histórico."
+                    requestFailedCount > 0 && diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ->
+                        "Internet Archive ha limitado temporalmente las consultas (HTTP 429). Mínimo ha pausado las peticiones para evitar seguir saturando el servicio; inténtalo más tarde. Esto no significa que no existan capturas."
                     requestFailedCount > 0 ->
                         "Falló una o más consultas de Internet Archive. El diagnóstico de abajo indica la fase; esto no confirma que no existan capturas."
                     timedOutCount > 0 ->
@@ -1683,6 +1685,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         code.startsWith("CDX_DOMAIN_HTTP_") -> "$code (respuesta HTTP de la búsqueda por dominio)"
                         code.startsWith("SNAPSHOT_HTTP_") -> "$code (respuesta HTTP de una captura)"
                         else -> when (code) {
+                            "WAYBACK_RATE_LIMITED" -> "$code (HTTP 429: consultas pausadas temporalmente para respetar el límite de Internet Archive)"
                             "WAYBACK_DISABLED" -> "$code (búsqueda desactivada)"
                             "DIRECT_URL_INVALID" -> "$code (la URL guardada no es una página de comercio válida)"
                             "PRODUCT_TITLE_EMPTY" -> "$code (falta el nombre del producto)"

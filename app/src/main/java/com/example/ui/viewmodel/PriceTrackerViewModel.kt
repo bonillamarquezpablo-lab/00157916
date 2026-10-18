@@ -1507,7 +1507,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         }
                         // If the exact URL has no usable old prices (or only a Google Shopping link was
                         // provided), try a bounded, product-term-filtered lookup on the known merchant.
-                        if (candidate.merchantDomain != null && results.none { it.quotes.isNotEmpty() }) {
+                        // If the exact product URL had archived captures but none contained
+                        // verifiable EUR price metadata, don't immediately repeat a broad domain scan.
+                        // Domain fallback remains enabled when there were no captures or the exact
+                        // URL request failed, which covers Google Shopping-only seller links.
+                        if (candidate.merchantDomain != null &&
+                            results.none { it.quotes.isNotEmpty() } &&
+                            results.none { it.capturesFound > 0 }
+                        ) {
                             results += waybackPriceHistoryClient.fetchHistoryByMerchantDomain(
                                 domain = candidate.merchantDomain,
                                 expectedTitle = candidate.title

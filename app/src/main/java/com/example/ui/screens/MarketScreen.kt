@@ -80,6 +80,7 @@ fun MarketScreen(
 ) {
     var showSortMenu by remember { mutableStateOf(false) }
     var showStoreMenu by remember { mutableStateOf(false) }
+    val verifiedProductCount = remember(products) { products.count { it.isPriceVerified } }
 
     LazyColumn(
         modifier = modifier
@@ -90,24 +91,13 @@ fun MarketScreen(
         // Compact section heading: remove the large decorative banner so products and
         // filters appear sooner, with less drawing and less vertical scrolling.
         item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                Text(
-                    text = "Productos guardados",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "${stores.size} comercios con precios guardados",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            Text(
+                text = "Productos guardados",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
         }
 
         // Search Bar
@@ -468,7 +458,7 @@ fun MarketScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "${products.size} productos · ${products.count { it.isPriceVerified }} con precio verificado",
+                    text = "${products.size} productos · $verifiedProductCount con precio verificado",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

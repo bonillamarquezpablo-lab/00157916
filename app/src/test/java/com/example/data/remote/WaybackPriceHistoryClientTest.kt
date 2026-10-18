@@ -500,6 +500,10 @@ class WaybackPriceHistoryClientTest {
         assertEquals("samsung.com", client.resolveMerchantDomain("Samsung Shop España", googleUrl, "samsung.com/es"))
         assertEquals("amazon.es", client.resolveMerchantDomain("Amazon España", googleUrl, "amazon.es"))
         assertEquals("fnac.es", client.resolveMerchantDomain("Fnac España", googleUrl, "fnac.es"))
+        assertEquals(
+            "shop-example.co.uk",
+            client.resolveMerchantDomain("shop-example.co.uk")
+        )
 
         val s26 = client.buildDomainCdxUrl(
             domain = "samsung.com",

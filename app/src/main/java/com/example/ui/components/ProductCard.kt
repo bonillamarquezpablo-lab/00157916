@@ -70,7 +70,6 @@ fun ProductCard(
     var showStoreComparison by remember { mutableStateOf(false) }
     // Reuse date formatters across recompositions instead of allocating them repeatedly.
     val observedAtFormatter = remember { SimpleDateFormat("dd/MM HH:mm", Locale("es", "ES")) }
-    val savedDateFormatter = remember { SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")) }
 
     Card(
         modifier = modifier

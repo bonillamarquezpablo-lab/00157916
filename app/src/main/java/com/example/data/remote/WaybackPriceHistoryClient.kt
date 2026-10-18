@@ -107,8 +107,8 @@ class WaybackPriceHistoryClient(
 
     /**
      * Free fallback for Google Shopping results that expose only an intermediate Google link.
-     * It scans archived URL paths on a known merchant domain for product-specific terms, then
-     * accepts a point only when the archived page title and EUR metadata match the product.
+     * It probes a bounded set of likely product-page URLs through Wayback's availability API,
+     * then accepts a point only when archived title and EUR metadata match the product.
      */
     suspend fun fetchHistoryByMerchantDomain(
         domain: String,
@@ -300,7 +300,11 @@ class WaybackPriceHistoryClient(
                         AvailabilityProbe(requestFailed = true, diagnosticCode = "${stage}_BODY_EMPTY_OR_LIMIT")
                     } else {
                         val capture = parseAvailabilityCapture(body, originalUrl)
-                        AvailabilityProbe(capture = capture)
+                        if (runCatching { JSONObject(body) }.isFailure) {
+                            AvailabilityProbe(requestFailed = true, diagnosticCode = "${stage}_INVALID_RESPONSE")
+                        } else {
+                            AvailabilityProbe(capture = capture)
+                        }
                     }
                 }
             }
@@ -373,7 +377,7 @@ class WaybackPriceHistoryClient(
         }
         return hosts.flatMap { host ->
             paths.map { path ->
-                HttpUrl.Builder().scheme("https").host(host).addPathSegments(path.trim('/')).build().toString()
+                HttpUrl.Builder().scheme("https").host(host).addPathSegments(path.trim('/')).addPathSegment("").build().toString()
             }
         }.distinct().take(MAX_AVAILABILITY_URL_CANDIDATES)
     }
@@ -1357,7 +1361,7 @@ class WaybackPriceHistoryClient(
         private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 2L
         private const val MAX_DOMAIN_PRODUCT_URL_CANDIDATES = 2
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 4
-        private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 2
+        private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 4
         private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 3L
         private const val MAX_DOMAIN_INDEX_ROWS = 6
         private const val DOMAIN_LOOKBACK_DAYS = 730

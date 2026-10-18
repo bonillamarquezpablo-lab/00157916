@@ -94,6 +94,50 @@ jobs:
               print(f"Pruebas fallidas: {failures}")
           PY
 
+      - name: Sonda de recuperación real de histórico Wayback (no bloqueante)
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          MINIMO_WAYBACK_LIVE_SMOKE: "1"
+        shell: bash
+        run: |
+          set +e
+          gradle :app:testDebugUnitTest --tests 'com.example.data.remote.WaybackPriceHistoryClientTest.liveWaybackLookupFindsVerifiedEurQuoteWhenEnabled' --stacktrace --info
+          test_exit=$?
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import xml.etree.ElementTree as ET
+
+          test_name = "liveWaybackLookupFindsVerifiedEurQuoteWhenEnabled"
+          reports = sorted(Path("app/build/test-results/testDebugUnitTest").glob("TEST-*.xml"))
+          details = []
+          for report in reports:
+              try:
+                  root = ET.parse(report).getroot()
+              except (OSError, ET.ParseError):
+                  continue
+              for case in root.iter("testcase"):
+                  if case.get("name") != test_name:
+                      continue
+                  problem = case.find("failure")
+                  if problem is None:
+                      problem = case.find("error")
+                  status = "FAIL" if problem is not None else "PASS"
+                  output = (case.findtext("system-out", "") or "").strip()
+                  message = (problem.get("message") or "")[:1500] if problem is not None else ""
+                  details.append(f"{status}: {output} {message}".strip())
+
+          if not details:
+              details.append("NO_XML_RESULT: inspect the Gradle log for the live Wayback probe.")
+          for detail in details:
+              print(detail)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("## Live Wayback historical-price probe\n\n")
+              summary.write("\n".join(details) + "\n\n")
+          PY
+          exit "$test_exit"
+
       - name: Compilar pruebas instrumentadas Android
         run: gradle :app:compileDebugAndroidTestKotlin --stacktrace
 

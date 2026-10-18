@@ -2,11 +2,14 @@ package com.example.data.remote
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -17,6 +20,43 @@ import org.robolectric.annotation.Config
 class WaybackPriceHistoryClientTest {
     private fun newClient(): WaybackPriceHistoryClient =
         WaybackPriceHistoryClient(ApplicationProvider.getApplicationContext<Context>())
+
+    @Test
+    fun liveWaybackLookupFindsVerifiedEurQuoteWhenEnabled() = runBlocking {
+        assumeTrue(
+            "Live Wayback probe runs only in its dedicated CI step",
+            System.getenv("MINIMO_WAYBACK_LIVE_SMOKE") == "1"
+        )
+        val client = newClient()
+        val targets = listOf(
+            "apple.com" to "iPhone 16",
+            "samsung.com" to "Samsung Galaxy S25 Edge"
+        )
+        val outcomes = mutableListOf<String>()
+        var verifiedQuoteFound = false
+
+        for ((domain, title) in targets) {
+            val result = withTimeout(12_000L) {
+                client.fetchHistoryByMerchantDomain(
+                    domain = domain,
+                    expectedTitle = title,
+                    lookbackDays = 730
+                )
+            }
+            val diagnostics = result.diagnosticCodes.sorted().joinToString(",")
+            outcomes += "${domain}/${title}: quotes=${result.quotes.size}, captures=${result.capturesFound}, checked=${result.capturesChecked}, requestFailed=${result.requestFailed}, diagnostics=${diagnostics}"
+            if (result.quotes.isNotEmpty()) {
+                verifiedQuoteFound = true
+                break
+            }
+        }
+
+        println("LIVE_WAYBACK_SMOKE " + outcomes.joinToString(" | "))
+        assertTrue(
+            "No verified historical EUR quote recovered from live Wayback. " + outcomes.joinToString(" | "),
+            verifiedQuoteFound
+        )
+    }
 
     @Test
     fun parsesOnlySuccessfulHtmlCapturesInTimestampOrder() {

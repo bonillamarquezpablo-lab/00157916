@@ -704,6 +704,21 @@ class WaybackPriceHistoryClientTest {
 
 
     @Test
+    fun availabilityRequestsArePacedAndClockChangesCannotCreateLongWaits() {
+        val client = newClient()
+        val now = 1_800_000_000_000L
+
+        assertEquals(0L, client.computeAvailabilityDelayMs(0L, now))
+        assertEquals(1_000L, client.computeAvailabilityDelayMs(now, now + 500L))
+        assertEquals(0L, client.computeAvailabilityDelayMs(now, now + 2_000L))
+        assertEquals(
+            "A backwards clock adjustment must not pause requests for longer than one interval",
+            1_500L,
+            client.computeAvailabilityDelayMs(now, now - WaybackPriceHistoryClient.DAY_MS)
+        )
+    }
+
+    @Test
     fun rateLimitRetryAfterIsHonouredAndBounded() {
         val client = newClient()
         val now = 1_800_000_000_000L

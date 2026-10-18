@@ -1085,24 +1085,25 @@ class WaybackPriceHistoryClient(
                 .find(normalizedTitle)?.groupValues?.getOrNull(1)
             if (modelNumber != null) listOf("(?=.*galaxy)(?=.*edge)(?=.*$modelNumber)") else emptyList()
         } else emptyList()
-        // A product SKU/model code is the strongest URL hint, but some retailers use
-        // short generic slugs and keep the SKU only in page metadata. Search by either a
-        // distinctive model code or two title terms; strict page validators still apply.
-        val modelAlternatives = modelTokens.take(2).map { token ->
-            "(?=.*${urlTokenPattern(token)})"
-        }
-        // Some retailer URLs omit the full SKU. Add one tightly constrained title-path
-        // alternative so CDX can discover those captures without an unbounded domain scan.
-        // The archived-page parser still verifies product identity and a real EUR price.
+        // CDX's original-field filter is a regular expression, but look-ahead expressions
+        // are not handled consistently by every archive index deployment. Use portable,
+        // bounded alternatives instead. Model/SKU tokens get priority; when URLs omit them,
+        // accept either ordering of two distinctive title words. Archived-page validation
+        // below remains the final authority, so a loose URL match can never become a price.
+        val modelAlternatives = modelTokens.take(3).map { urlTokenPattern(it) }
         val textAlternatives = if (textTokens.size >= 2) {
-            listOf("(?=.*${urlTokenPattern(textTokens[0])})(?=.*${urlTokenPattern(textTokens[1])})")
-        } else emptyList()
-        val requiredLookaheads = (modelAlternatives + modelFamilyAlternatives + textAlternatives).distinct()
-        if (requiredLookaheads.isEmpty()) return null
+            val first = urlTokenPattern(textTokens[0])
+            val second = urlTokenPattern(textTokens[1])
+            listOf("$first.*$second", "$second.*$first")
+        } else {
+            textTokens.take(2).map { urlTokenPattern(it) }
+        }
+        val urlAlternatives = (modelAlternatives + modelFamilyAlternatives + textAlternatives).distinct()
+        if (urlAlternatives.isEmpty()) return null
         val start = (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
         val from = formatUtc(start, "yyyyMMdd")
         val to = formatUtc(now, "yyyyMMdd")
-        val urlPattern = "(?i)(?:" + requiredLookaheads.joinToString("|") + ").*"
+        val urlPattern = "(?i).*(?:" + urlAlternatives.joinToString("|") + ").*"
         // Keep the CDX response narrow. Broad multi-year domain scans often time out on
         // large retailers; direct URL lookups still use the full configured lookback.
         return HttpUrl.Builder()
@@ -1121,8 +1122,9 @@ class WaybackPriceHistoryClient(
             .addQueryParameter("filter", "original:$urlPattern")
             .addQueryParameter("from", formatUtc((now - DOMAIN_LOOKBACK_DAYS.toLong() * DAY_MS).coerceAtLeast(start), "yyyyMMdd"))
             .addQueryParameter("to", to)
-            // Keep the discovery response small without a potentially costly collapse scan.
-            // Duplicate captures are deduplicated in memory before exact-URL lookups.
+            // A small result window can be exhausted by unrelated captures before a
+            // matching product URL appears. The portable token filter stays bounded; return
+            // a few more index rows while keeping snapshot downloads capped separately.
             .addQueryParameter("limit", MAX_DOMAIN_INDEX_ROWS.toString())
             .build()
     }

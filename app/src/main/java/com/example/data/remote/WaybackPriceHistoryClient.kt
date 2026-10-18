@@ -205,7 +205,13 @@ class WaybackPriceHistoryClient(
                 if (isEmpty()) add("${stage}_NO_CAPTURES")
                 else if (!allFailed) add("${stage}_NO_CAPTURES")
             }
-            rememberAttempt(cacheKey, now, hasQuotes = false, failed = allFailed)
+            rememberAttempt(
+                cacheKey,
+                now,
+                hasQuotes = false,
+                failed = allFailed,
+                rateLimited = probeDiagnostics.contains("WAYBACK_RATE_LIMITED")
+            )
             return WaybackBackfillResult(
                 available = successfulProbes > 0,
                 requestFailed = allFailed,
@@ -276,7 +282,13 @@ class WaybackPriceHistoryClient(
         val anySnapshotFailed = fetched.any { !it.fetched }
         val allSnapshotsFailed = fetched.isNotEmpty() && fetched.none { it.fetched }
         val failed = quotes.isEmpty() && (successfulProbes == 0 || allSnapshotsFailed)
-        rememberAttempt(cacheKey, now, hasQuotes = quotes.isNotEmpty(), failed = failed)
+        rememberAttempt(
+            cacheKey,
+            now,
+            hasQuotes = quotes.isNotEmpty(),
+            failed = failed,
+            rateLimited = probeDiagnostics.contains("WAYBACK_RATE_LIMITED")
+        )
         return WaybackBackfillResult(
             quotes = quotes,
             capturesFound = captures.size,
@@ -477,8 +489,12 @@ class WaybackPriceHistoryClient(
         if (lastAttempt <= 0L || now < lastAttempt) return false
         val hadQuotes = preferences.getBoolean("${key}_has_quotes", false)
         val failed = preferences.getBoolean("${key}_failed", false)
-        // Repeating a failed request immediately was the main way to amplify HTTP 429s.
-        // Failed lookups get a short cooldown; a completed empty lookup gets six hours.
+        val rateLimited = preferences.getBoolean("${key}_rate_limited", false)
+        // Failed lookups are cached briefly. For an explicit HTTP 429, the global Retry-After
+        // cooldown is authoritative; let the same product retry as soon as that pause expires.
+        if (failed && !hadQuotes && rateLimited) {
+            return preferences.getLong(KEY_RATE_LIMIT_UNTIL, 0L) > now
+        }
         val retryInterval = when {
             hadQuotes -> RETRY_INTERVAL_MS
             failed -> FAILURE_RETRY_INTERVAL_MS
@@ -535,12 +551,14 @@ class WaybackPriceHistoryClient(
         key: String,
         now: Long,
         hasQuotes: Boolean,
-        failed: Boolean
+        failed: Boolean,
+        rateLimited: Boolean = false
     ) {
         preferences.edit()
             .putLong(key, now)
             .putBoolean("${key}_has_quotes", hasQuotes)
             .putBoolean("${key}_failed", failed)
+            .putBoolean("${key}_rate_limited", rateLimited)
             .apply()
     }
 

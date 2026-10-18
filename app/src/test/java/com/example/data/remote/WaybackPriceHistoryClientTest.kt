@@ -291,7 +291,7 @@ class WaybackPriceHistoryClientTest {
         assertNotNull(url)
         assertEquals("domain", url!!.queryParameter("matchType"))
         assertEquals("40", url.queryParameter("limit"))
-        assertEquals("urlkey", url.queryParameter("collapse"))
+        assertNull("Domain scans must preserve repeated captures over time", url.queryParameter("collapse"))
         assertEquals("20250115", url.queryParameter("from"))
         assertTrue(url.queryParameterValues("filter").orEmpty().any { raw ->
             val filter = raw.orEmpty()

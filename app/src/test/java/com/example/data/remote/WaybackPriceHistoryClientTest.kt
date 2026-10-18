@@ -384,6 +384,10 @@ class WaybackPriceHistoryClientTest {
         assertTrue(nikePathFilter.contains("max"))
         assertFalse(nikePathFilter.contains("zapatillas"))
         assertFalse("The host brand itself usually is not in product URL paths", nikePathFilter.contains("nike"))
+        assertFalse(
+            "Distinctive model identifiers should not be combined with extra generic word alternatives",
+            nikePathFilter.contains("(?=.*air)(?=.*max)")
+        )
     }
 
 

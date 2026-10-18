@@ -15,6 +15,12 @@ on:
       - "SECURITY.md"
       - ".github/dependabot.yml"
   workflow_dispatch:
+    inputs:
+      run_wayback_smoke:
+        description: "Ejecutar una única comprobación en vivo contra Internet Archive"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -94,7 +100,8 @@ jobs:
               print(f"Pruebas fallidas: {failures}")
           PY
 
-      - name: Sonda de recuperación real de histórico Wayback (no bloqueante)
+      - name: Sonda de recuperación real de histórico Wayback (solo ejecución manual opcional)
+        if: github.event_name == 'workflow_dispatch' && inputs.run_wayback_smoke == true
         continue-on-error: true
         timeout-minutes: 2
         env:

@@ -976,8 +976,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         // Some older Google Shopping rows contain a generic Google URL and an incomplete
         // merchant-domain field. Resolve the merchant from the saved store directory before
         // giving up, without making a paid query or changing the stored offer.
-        val candidateBuilder = mutableListOf<FreeArchiveCandidate>()
-        candidateBuilder.apply {
+        val candidates = mutableListOf<FreeArchiveCandidate>()
+        run {
             product.offers.forEach { offer ->
                 val destination = offer.url.ifBlank {
                     if (offer.store.id == product.currentStore.id) product.storeUrl
@@ -1000,7 +1000,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
             // A Google Shopping intermediary is not an archive target. If it is the only
             // saved destination, retry using the known seller name/domain from the saved row.
-            if (isGoogleShoppingUrl(product.storeUrl) || candidateBuilder.isEmpty()) {
+            if (isGoogleShoppingUrl(product.storeUrl) || candidates.isEmpty()) {
                 val savedStore = Store.findKnownByName(product.currentStore.name, currentDestination)
                     ?: Store.findKnownByName(product.currentStore.id.replace('_', ' '), currentDestination)
                 val fallbackDomain = savedStore?.domain
@@ -1025,7 +1025,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
             }
         }
-        val candidates = candidateBuilder.sortedWith(
+        val orderedCandidates = candidates.sortedWith(
             compareBy<FreeArchiveCandidate> { if (it.directUrl != null) 0 else 1 }
                 .thenBy { it.merchantDomain.orEmpty() }
         ).distinctBy {
@@ -1033,7 +1033,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             it.title.trim().lowercase(Locale.ROOT) + "|" + (it.merchantDomain ?: it.directUrl ?: "unknown")
         }.take(MAX_ARCHIVE_PAGES_PER_SEARCH)
 
-        if (candidates.isEmpty()) {
+        if (orderedCandidates.isEmpty()) {
             _uiState.value = current.copy(
                 isSearchingFreeHistory = false,
                 freeHistoryStatus = "Mínimo no pudo identificar la tienda de esta oferta para buscar capturas gratuitas. No se ha gastado cuota de SerpApi."
@@ -1047,7 +1047,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             freeHistoryProductId = product.id
         )
         startFreeArchiveBackfillCandidates(
-            candidates = candidates,
+            candidates = orderedCandidates,
             query = product.title,
             provider = current.onlineSearchProvider,
             targetProductId = product.id

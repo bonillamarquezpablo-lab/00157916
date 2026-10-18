@@ -1277,9 +1277,25 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     } else if (!gameSupplementRequired) {
                         // Ordinary non-gaming searches and broad searches that already returned GAME
                         // can cache the provider response as usual.
-                        providerReport.rawResponse?.let { rawResponse ->
+                        val rawCached = providerReport.rawResponse?.let { rawResponse ->
                             withContext(Dispatchers.IO) {
-                                onlineSearchCache.writeRaw(searchCacheProviderKey(provider), query, rawResponse)
+                                onlineSearchCache.writeRaw(
+                                    searchCacheProviderKey(provider),
+                                    query,
+                                    rawResponse
+                                )
+                            }
+                        } ?: false
+                        if (!rawCached) {
+                            // Oversized or malformed raw responses fall back to compact accepted offers.
+                            // This preserves the useful cache without storing megabytes in SharedPreferences
+                            // or triggering another paid provider search on the next visit.
+                            withContext(Dispatchers.IO) {
+                                onlineSearchCache.write(
+                                    searchCacheProviderKey(provider),
+                                    query,
+                                    results
+                                )
                             }
                         }
                     } else {

@@ -28,6 +28,38 @@ class WaybackPriceHistoryClientTest {
             System.getenv("MINIMO_WAYBACK_LIVE_SMOKE") == "1"
         )
         val client = newClient()
+        val probeHttp = okhttp3.OkHttpClient.Builder()
+            .connectTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+            .callTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+        fun probe(label: String, url: String): String {
+            val startedAt = System.nanoTime()
+            return try {
+                probeHttp.newCall(
+                    okhttp3.Request.Builder()
+                        .url(url)
+                        .header("User-Agent", "MinimoPriceHistory/1.0 live diagnostic")
+                        .get()
+                        .build()
+                ).execute().use { response ->
+                    val body = response.body?.string().orEmpty().take(100).replace("\\n", " ")
+                    val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L
+                    "$label status=${response.code}, elapsedMs=${elapsedMs}, body=${body}"
+                }
+            } catch (failure: Exception) {
+                val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L
+                "$label exception=${failure.javaClass.simpleName}, elapsedMs=${elapsedMs}"
+            }
+        }
+        val simpleProbeUrl = "https://web.archive.org/cdx/search/cdx?url=archive.org%2Fabout%2F&matchType=prefix&output=json&limit=2&fl=timestamp%2Coriginal%2Cstatuscode%2Cmimetype"
+        val simpleHostProbeUrl = "https://web.archive.org/cdx/search/cdx?url=www.apple.com&matchType=host&output=json&limit=2&fl=timestamp%2Coriginal%2Cstatuscode%2Cmimetype"
+        println("LIVE_CDX_PREFLIGHT " + listOf(
+            probe("simple-prefix", simpleProbeUrl),
+            probe("apple-host-unfiltered", simpleHostProbeUrl)
+        ).joinToString(" | "))
+        val actualAppleQueries = client.buildDomainCdxHostUrls("apple.com", "iPhone 16", lookbackDays = 730)
+        println("LIVE_CDX_FILTERED_QUERY " + actualAppleQueries.orEmpty().joinToString(" | ") { probe("apple-product-filter", it.toString()) })
         val targets = listOf(
             "apple.com" to "iPhone 16",
             "samsung.com" to "Samsung Galaxy S25 Edge"

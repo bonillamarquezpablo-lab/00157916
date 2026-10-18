@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.util.Locale
 import com.example.data.model.Product
 
 @Composable
@@ -42,12 +43,33 @@ fun SetAlertDialog(
     onDismiss: () -> Unit,
     onSaveAlert: (Double?) -> Unit
 ) {
-    var targetPriceText by remember {
+    val spanishLocale = remember { Locale("es", "ES") }
+    val hasCurrentVerifiedPrice =
+        product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT
+    val hasCurrentVerifiedHistory = hasCurrentVerifiedPrice && product.hasSufficientHistory
+    val isDisplayingSavedArchivePrice =
+        product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION &&
+            !product.isPriceVerified && product.savedHistoricalPrice != null
+    val savedPrice = when {
+        isDisplayingSavedArchivePrice -> product.savedHistoricalPrice
+        product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION &&
+            product.isPriceVerified -> product.currentPrice
+        else -> null
+    }
+    var targetPriceText by remember(
+        product.id,
+        product.alertTargetPrice,
+        product.priceDisplayStatus,
+        product.currentPrice,
+        product.athMinPrice,
+        product.savedHistoricalPrice
+    ) {
         mutableStateOf(
-            product.alertTargetPrice?.let { String.format("%.2f", it) }
+            product.alertTargetPrice?.let { String.format(spanishLocale, "%.2f", it) }
                 ?: when {
-                    product.hasSufficientHistory -> String.format("%.2f", product.athMinPrice)
-                    product.isPriceVerified -> String.format("%.2f", product.currentPrice)
+                    hasCurrentVerifiedHistory -> String.format(spanishLocale, "%.2f", product.athMinPrice)
+                    hasCurrentVerifiedPrice -> String.format(spanishLocale, "%.2f", product.currentPrice)
+                    savedPrice != null -> String.format(spanishLocale, "%.2f", savedPrice)
                     else -> ""
                 }
         )
@@ -67,7 +89,7 @@ fun SetAlertDialog(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Guardar Seguimiento de Precio",
+                    text = "Alerta de precio",
                     fontWeight = FontWeight.Bold,
                     fontSize = 17.sp
                 )
@@ -84,15 +106,24 @@ fun SetAlertDialog(
 
                 Text(
                     text = when {
-                        product.hasSufficientHistory ->
-                            "Precio observado: ${String.format("%.2f", product.currentPrice)} €\nMínimo observado en los datos disponibles: ${String.format("%.2f", product.athMinPrice)} €.\n\nEl objetivo se guarda en este móvil. Con una clave SerpApi válida y conexión a Internet, Mínimo revisa automáticamente hasta 3 productos seguidos al día. Android puede retrasar la comprobación; para recibir avisos, activa las notificaciones y concede permiso."
-                        product.isPriceVerified ->
-                            "Precio observado: ${String.format("%.2f", product.currentPrice)} €. Aún no hay suficientes datos para calcular un mínimo histórico.\n\nEl objetivo se guarda en este móvil. Con una clave SerpApi válida y conexión a Internet, Mínimo revisa automáticamente hasta 3 productos seguidos al día. Android puede retrasar la comprobación; para recibir avisos, activa las notificaciones y concede permiso."
+                        hasCurrentVerifiedHistory ->
+                            "Precio actual verificado: ${String.format(spanishLocale, "%.2f", product.currentPrice)} €. Mínimo observado: ${String.format(spanishLocale, "%.2f", product.athMinPrice)} €."
+                        hasCurrentVerifiedPrice ->
+                            "Precio actual verificado: ${String.format(spanishLocale, "%.2f", product.currentPrice)} €. El historial aún está en construcción."
+                        savedPrice != null ->
+                            "Último precio guardado: ${String.format(spanishLocale, "%.2f", savedPrice ?: product.currentPrice)} €. No es una oferta actual."
                         else ->
-                            "Esta ficha aún no tiene un precio actual verificado. Puedes guardar un objetivo; con una clave SerpApi válida y conexión a Internet, Mínimo revisa automáticamente hasta 3 productos seguidos al día. Android puede retrasar la comprobación; para recibir avisos, activa las notificaciones y concede permiso."
+                            "Todavía no hay un precio verificado. Puedes establecer un objetivo manualmente."
                     },
                     fontSize = 12.sp,
                     lineHeight = 16.sp
+                )
+
+                Text(
+                    text = "El objetivo se guarda en este móvil. Las revisiones automáticas requieren una clave SerpApi válida y conexión; Android puede retrasarlas. Activa las notificaciones para recibir avisos.",
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 OutlinedTextField(
@@ -107,30 +138,37 @@ fun SetAlertDialog(
                 )
 
                 // Only offer a historic-low preset after sufficient history exists.
-                if (product.isPriceVerified) {
+                if (hasCurrentVerifiedPrice || savedPrice != null) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        if (product.hasSufficientHistory) {
+                        if (hasCurrentVerifiedHistory) {
                             SuggestionChip(
                                 onClick = {
-                                    targetPriceText = String.format("%.2f", product.athMinPrice)
+                                    targetPriceText = String.format(spanishLocale, "%.2f", product.athMinPrice)
                                 },
                                 label = { Text("Mínimo observado", fontSize = 10.sp) }
                             )
                             SuggestionChip(
                                 onClick = {
-                                    targetPriceText = String.format("%.2f", product.athMinPrice * 0.95)
+                                    targetPriceText = String.format(spanishLocale, "%.2f", product.athMinPrice * 0.95)
                                 },
                                 label = { Text("-5% del mínimo observado", fontSize = 10.sp) }
                             )
-                        } else {
+                        } else if (hasCurrentVerifiedPrice) {
                             SuggestionChip(
                                 onClick = {
-                                    targetPriceText = String.format("%.2f", product.currentPrice)
+                                    targetPriceText = String.format(spanishLocale, "%.2f", product.currentPrice)
                                 },
                                 label = { Text("Precio actual", fontSize = 10.sp) }
+                            )
+                        } else if (savedPrice != null) {
+                            SuggestionChip(
+                                onClick = {
+                                    targetPriceText = String.format(spanishLocale, "%.2f", savedPrice ?: product.currentPrice)
+                                },
+                                label = { Text("Último guardado", fontSize = 10.sp) }
                             )
                         }
                     }

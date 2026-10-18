@@ -55,9 +55,9 @@ data class WaybackBackfillResult(
 class WaybackPriceHistoryClient(
     context: Context,
     private val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(6, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
-        .callTimeout(7, TimeUnit.SECONDS)
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(7, TimeUnit.SECONDS)
+        .callTimeout(9, TimeUnit.SECONDS)
         .build()
 ) {
     private val preferences = context.applicationContext.getSharedPreferences(
@@ -115,15 +115,13 @@ class WaybackPriceHistoryClient(
     internal fun wasAttemptedRecently(key: String, now: Long): Boolean {
         val lastAttempt = preferences.getLong(key, 0L)
         if (lastAttempt <= 0L || now < lastAttempt) return false
-        // Empty searches should be retried sooner than useful archived histories.
-        // Legacy cache entries without this flag are treated as negative results.
+        // A failed HTTP attempt should not block an explicit retry for 30 minutes.
+        // Failed requests are retriable immediately; only meaningful/negative completed
+        // lookups use a cache interval to avoid repeatedly scanning the same archive.
         val hadQuotes = preferences.getBoolean("${key}_has_quotes", false)
         val failed = preferences.getBoolean("${key}_failed", false)
-        val retryInterval = when {
-            hadQuotes -> RETRY_INTERVAL_MS
-            failed -> FAILURE_RETRY_INTERVAL_MS
-            else -> NEGATIVE_RETRY_INTERVAL_MS
-        }
+        if (failed && !hadQuotes) return false
+        val retryInterval = if (hadQuotes) RETRY_INTERVAL_MS else NEGATIVE_RETRY_INTERVAL_MS
         return now - lastAttempt < retryInterval
     }
 

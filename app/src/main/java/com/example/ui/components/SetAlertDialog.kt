@@ -56,14 +56,9 @@ fun SetAlertDialog(
             product.isPriceVerified -> product.currentPrice
         else -> null
     }
-    var targetPriceText by remember(
-        product.id,
-        product.alertTargetPrice,
-        product.priceDisplayStatus,
-        product.currentPrice,
-        product.athMinPrice,
-        product.savedHistoricalPrice
-    ) {
+    // Initialize once for this product. A background refresh must not overwrite a target
+    // price the user has already started typing.
+    var targetPriceText by remember(product.id) {
         mutableStateOf(
             product.alertTargetPrice?.let { String.format(spanishLocale, "%.2f", it) }
                 ?: when {

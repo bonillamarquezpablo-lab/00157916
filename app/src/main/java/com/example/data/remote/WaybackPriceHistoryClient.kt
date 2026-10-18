@@ -521,11 +521,10 @@ class WaybackPriceHistoryClient(
         val modelAlternatives = modelTokens.take(2).map { token ->
             "(?=.*${urlTokenPattern(token)})"
         }
-        // Domain scans are expensive: prefer distinctive model hints to an unconstrained
-        // title fallback. Only match two title words when no model token/family exists.
-        val textAlternatives = if (modelAlternatives.isEmpty() && modelFamilyAlternatives.isEmpty() &&
-            textTokens.size >= 2
-        ) {
+        // Some retailer URLs omit the full SKU. Add one tightly constrained title-path
+        // alternative so CDX can discover those captures without an unbounded domain scan.
+        // The archived-page parser still verifies product identity and a real EUR price.
+        val textAlternatives = if (textTokens.size >= 2) {
             listOf("(?=.*${urlTokenPattern(textTokens[0])})(?=.*${urlTokenPattern(textTokens[1])})")
         } else emptyList()
         val requiredLookaheads = (modelAlternatives + modelFamilyAlternatives + textAlternatives).distinct()

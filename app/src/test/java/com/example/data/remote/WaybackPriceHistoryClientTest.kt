@@ -591,6 +591,10 @@ class WaybackPriceHistoryClientTest {
         assertEquals("/cdx/search/cdx", url.encodedPath)
         assertEquals("shop.example/.*", url.queryParameter("url"))
         assertEquals("regex", url.queryParameter("matchType"))
+        assertTrue(
+            "The CDX original-field filter must limit URLs to distinguishing title/model tokens",
+            url.queryParameterValues("filter").orEmpty().any { it.orEmpty().startsWith("original:(?i)") }
+        )
         assertEquals("json", url.queryParameter("output"))
         assertEquals("80", url.queryParameter("limit"))
         assertTrue(url.queryParameterValues("filter").orEmpty().any { it == "statuscode:200" })

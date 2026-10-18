@@ -60,6 +60,20 @@ class WaybackPriceHistoryClientTest {
         ).joinToString(" | "))
         val actualAppleQueries = client.buildDomainCdxHostUrls("apple.com", "iPhone 16", lookbackDays = 730)
         println("LIVE_CDX_FILTERED_QUERY " + actualAppleQueries.orEmpty().joinToString(" | ") { probe("apple-product-filter", it.toString()) })
+        println("LIVE_AVAILABILITY_PREFLIGHT " + listOf(
+            probe(
+                "availability-baseline",
+                "https://archive.org/wayback/available?url=archive.org%2Fabout%2F&timestamp=20240101"
+            ),
+            probe(
+                "availability-apple-product",
+                "https://archive.org/wayback/available?url=www.apple.com%2Fiphone-16%2F&timestamp=20240101"
+            ),
+            probe(
+                "availability-samsung-product",
+                "https://archive.org/wayback/available?url=www.samsung.com%2Fes%2Fsmartphones%2Fgalaxy-s%2Fgalaxy-s25-edge%2F&timestamp=20240101"
+            )
+        ).joinToString(" | "))
         val targets = listOf(
             "apple.com" to "iPhone 16",
             "samsung.com" to "Samsung Galaxy S25 Edge"

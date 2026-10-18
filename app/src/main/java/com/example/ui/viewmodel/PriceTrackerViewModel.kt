@@ -1512,8 +1512,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         // Domain fallback remains enabled when there were no captures or the exact
                         // URL request failed, which covers Google Shopping-only seller links.
                         if (candidate.merchantDomain != null &&
-                            results.none { it.quotes.isNotEmpty() } &&
-                            results.none { it.capturesFound > 0 }
+                            results.none { it.quotes.isNotEmpty() }
                         ) {
                             results += waybackPriceHistoryClient.fetchHistoryByMerchantDomain(
                                 domain = candidate.merchantDomain,
@@ -1582,7 +1581,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
                 val notice = when {
                     skippedCount == candidates.size ->
-                        "Estas consultas gratuitas ya se comprobaron recientemente. La caché evita repetirlas mientras siga vigente, según si había precios útiles o si la consulta falló."
+                        "Estas consultas gratuitas ya se comprobaron recientemente. La caché evita repetir búsquedas completadas sin resultados útiles."
                     savedCount > 0 -> {
                         val oldest = archiveDates.minOrNull()?.let { timestamp ->
                             SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(timestamp))
@@ -1593,18 +1592,16 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }
                     foundCount > 0 ->
                         "Se encontraron capturas con precios previos, pero no se pudieron vincular a la ficha del producto o ya existían esos registros diarios."
-                    timedOutCount > 0 && requestFailedCount == 0 ->
-                        "La búsqueda histórica agotó el tiempo disponible para $timedOutCount tienda(s). Las consultas están limitadas para mantener la fluidez; prueba de nuevo más tarde. No se ha gastado cuota de SerpApi."
-                    requestFailedCount > 0 && checkedCount == 0 && successfulLookupsCount == 0 ->
-                        "Internet Archive no respondió correctamente o rechazó la consulta. Es un fallo de conexión/servicio, no una confirmación de que no existan capturas. No se ha gastado cuota de SerpApi; puedes volver a intentarlo."
                     requestFailedCount > 0 && capturesFoundCount > 0 && checkedCount == 0 ->
-                        "Se encontraron $capturesFoundCount capturas, pero fallaron las descargas. No se puede confirmar el precio histórico; inténtalo de nuevo. No se ha gastado cuota de SerpApi."
+                        "Internet Archive encontró $capturesFoundCount capturas, pero no logró descargar ninguna. No se puede confirmar el precio histórico; inténtalo de nuevo. No se ha gastado cuota de SerpApi."
+                    requestFailedCount > 0 ->
+                        "Una o más consultas o descargas de Internet Archive fallaron. Esto no confirma que no existan capturas; puedes volver a intentarlo. No se ha gastado cuota de SerpApi."
+                    timedOutCount > 0 ->
+                        "La búsqueda histórica agotó el tiempo disponible para $timedOutCount tienda(s). Las consultas están limitadas para mantener la fluidez; prueba de nuevo más tarde. No se ha gastado cuota de SerpApi."
                     capturesFoundCount == 0 && successfulLookupsCount > 0 ->
                         "Internet Archive respondió correctamente, pero no encontró capturas públicas en el período consultado. No hay precios antiguos verificables que mostrar y no se ha gastado cuota de SerpApi."
                     checkedCount > 0 ->
                         "Se consultaron $checkedCount capturas gratuitas, pero ninguna publicó un precio EUR verificable que coincidiera con el producto exacto. No se han inventado precios."
-                    timedOutCount > 0 ->
-                        "La búsqueda histórica agotó el límite de tiempo en parte de las tiendas. No se ha gastado cuota de SerpApi; inténtalo de nuevo más tarde."
                     else ->
                         "No se recuperó histórico gratuito. Puede que el vendedor no haya sido identificado con un enlace directo o que la página no publique metadatos de precio verificables. No se ha gastado cuota de SerpApi."
                 }

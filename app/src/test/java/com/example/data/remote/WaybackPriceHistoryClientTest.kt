@@ -75,9 +75,9 @@ class WaybackPriceHistoryClientTest {
             )
         ).joinToString(" | "))
         val targets = listOf(
-            // This retailer exposes structured product offers more consistently than Apple's
-            // JS-rendered product page; use it first to exercise a real EUR-price extraction.
-            "pccomponentes.com" to "Apple iPhone 16 128 GB Negro",
+            // This product page has a specific model, storage, and colour, avoiding variant
+            // ambiguity while exercising real EUR-price extraction from a retailer archive.
+            "pccomponentes.com" to "Samsung Galaxy S25 Edge 5G 12GB 512GB 6.7 Titanio Azul",
             "apple.com" to "iPhone 16",
             "samsung.com" to "Samsung Galaxy S25 Edge"
         )

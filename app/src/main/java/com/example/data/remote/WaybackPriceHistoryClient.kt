@@ -1938,6 +1938,21 @@ class WaybackPriceHistoryClient(
                     "No hay una segunda captura que evaluar porque el índice no devolvió capturas.",
                     diagnosticStep = 14
                 )
+                emitWaybackTrace(
+                    onTrace, 12, WaybackTraceStatus.SKIPPED,
+                    "Verificación del producto omitida: CDX respondió, pero no devolvió ninguna captura del período.",
+                    diagnosticStep = 15
+                )
+                emitWaybackTrace(
+                    onTrace, 13, WaybackTraceStatus.SKIPPED,
+                    "Extracción del precio omitida: no hay HTML de una captura para analizar.",
+                    diagnosticStep = 16
+                )
+                emitWaybackTrace(
+                    onTrace, 13, WaybackTraceStatus.SKIPPED,
+                    "Validación del importe omitida: no se obtuvo un precio porque el índice estaba vacío.",
+                    diagnosticStep = 17
+                )
             }
             sampled.size == 1 -> {
                 emitWaybackTrace(

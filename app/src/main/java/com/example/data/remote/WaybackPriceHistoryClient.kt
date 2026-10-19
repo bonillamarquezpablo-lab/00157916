@@ -1626,15 +1626,19 @@ class WaybackPriceHistoryClient(
     }
 
     private fun normalizeMerchantDomain(value: String): String? {
-        val raw = value.trim().removePrefix("https://").removePrefix("http://")
-        val uri = runCatching { URI("https://$raw") }.getOrNull() ?: return null
-        val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
-        if (!host.matches(Regex("""(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}(?:\.[a-z]{2,})?"""))) {
+        val raw = value.trim().trimEnd('.', ',', ';')
+        if (raw.isBlank()) return null
+        // URI schemes are case-insensitive. Treat full URLs and bare host/path values uniformly;
+        // parsing the host also safely removes ports, paths, query strings and fragments.
+        val absolute = if (Regex("""(?i)^https?://""").containsMatchIn(raw)) raw else "https://$raw"
+        val uri = runCatching { URI(absolute) }.getOrNull() ?: return null
+        val host = uri.host?.lowercase(Locale.ROOT)?.trimEnd('.')?.removePrefix("www.").orEmpty()
+        if (!host.matches(Regex("""(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}"""))) {
             return null
         }
-        if (host == "google.com" || host.endsWith(".google.com") || host.endsWith(".google.es") ||
-            host == "bing.com" || host.endsWith(".bing.com") || host == "web.archive.org" ||
-            host == "archive.org"
+        if (host == "google.com" || host.endsWith(".google.com") || host == "google.es" ||
+            host.endsWith(".google.es") || host == "bing.com" || host.endsWith(".bing.com") ||
+            host == "web.archive.org" || host == "archive.org"
         ) return null
         return host
     }

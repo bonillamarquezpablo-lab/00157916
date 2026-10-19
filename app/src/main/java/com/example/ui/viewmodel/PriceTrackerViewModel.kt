@@ -113,7 +113,7 @@ internal fun mergeWaybackDiagnosticStatus(
     else -> incoming
 }
 
-private fun isSupersededWaybackSkipDetail(detailLine: String): Boolean {
+internal fun isSupersededWaybackSkipDetail(detailLine: String): Boolean {
     val message = detailLine.substringAfter("] ", detailLine).trim().lowercase(Locale.ROOT)
     return message.startsWith("no ejecutado:") ||
         message.startsWith("extracción no ejecutada:") ||

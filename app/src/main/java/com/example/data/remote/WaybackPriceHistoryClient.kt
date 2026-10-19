@@ -578,7 +578,8 @@ class WaybackPriceHistoryClient(
             onTrace, 7,
             if (captures.isNotEmpty()) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
             if (captures.isNotEmpty()) "Availability API devolvió ${captures.size} captura(s) válida(s)."
-            else "La alternativa respondió sin capturas utilizables; candidatos probados: ${probes.size}."
+            else "Availability respondió, pero no encontró capturas para las ${probes.size} URL candidata(s) probadas.",
+            diagnosticStep = 7
         )
         val successfulProbes = probes.count { !it.requestFailed }
         val probeDiagnostics = probes.mapNotNull { it.diagnosticCode }.toSet()
@@ -1376,8 +1377,11 @@ class WaybackPriceHistoryClient(
             }
         }
         if (cdxOutcome.requestFailed) {
-            emitWaybackTrace(onTrace, 7, WaybackTraceStatus.SKIPPED,
-                "No se pudo extraer una lista de capturas del índice.")
+            emitWaybackTrace(
+                onTrace, 7, WaybackTraceStatus.SKIPPED,
+                "No se pudo extraer una lista de capturas porque CDX no devolvió una respuesta utilizable.",
+                diagnosticStep = 8
+            )
             val rateLimited = cdxOutcome.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
             rememberAttempt(cacheKey, now, hasQuotes = false, failed = true, rateLimited = rateLimited)
             return WaybackBackfillResult(
@@ -1390,7 +1394,8 @@ class WaybackPriceHistoryClient(
             onTrace, 7,
             if (indexCaptures.isNotEmpty()) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
             if (indexCaptures.isNotEmpty()) "Índice parseado: ${indexCaptures.size} fila(s) de captura válida(s) antes de aplicar límites del historial; máximo a revisar ${maxSnapshots}."
-            else "El índice respondió, pero no devolvió filas de captura utilizables."
+            else "CDX respondió correctamente, pero no devolvió filas de captura utilizables.",
+            diagnosticStep = 8
         )
 
         val distinctCandidateUrls = indexCaptures.map { it.originalUrl }.distinct()
@@ -1654,7 +1659,10 @@ class WaybackPriceHistoryClient(
             .addQueryParameter("from", from)
             .addQueryParameter("to", to)
             .addQueryParameter("collapse", "timestamp:6")
-            .addQueryParameter("limit", "100")
+            // The monthly collapse yields ~24 rows for the normal two-year history window.
+            // A 60-row cap preserves over four years of monthly snapshots without transferring
+            // excess rows when the archive contains unusually dense history.
+            .addQueryParameter("limit", "60")
             .build()
     }
 
@@ -2279,7 +2287,10 @@ class WaybackPriceHistoryClient(
         private const val CDX_RETRY_DELAY_MS = 500L
         private const val CDX_RETRY_JITTER_MS = 350L
         private val RETRYABLE_CDX_HTTP_CODES = setOf(500, 502, 503, 504)
-        private const val DIRECT_CDX_TIMEOUT_SECONDS = 5L
+        // Historical backfill only: allow one additional second for a slow CDX response.
+        // The ViewModel still caps a whole retailer candidate at 12 seconds, so this does not
+        // delay primary shopping searches or permit unbounded archive requests.
+        private const val DIRECT_CDX_TIMEOUT_SECONDS = 6L
         // This last-resort host scan only runs if no product URL can be built. Keep it
         // short enough to leave time for the two bounded Availability probes.
         private const val DOMAIN_CDX_TIMEOUT_SECONDS = 3L

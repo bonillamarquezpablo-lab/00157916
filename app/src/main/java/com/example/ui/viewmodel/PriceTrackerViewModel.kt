@@ -180,10 +180,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         const val MAX_ARCHIVE_PAGES_PER_SEARCH = 2
         // The CDX domain endpoint is frequently unavailable or rate-limited. Keep the exact
         // page lookup first, but reserve only a short, separate budget for the broad fallback.
-        const val MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS = 12_000L
-        // At most three 4-second Availability probes and up to two 5-second snapshot downloads,
-        // with a hard outer cap and scheduling margin. This is only the manual history path.
-        const val MAX_ARCHIVE_DOMAIN_FALLBACK_MS = 20_000L
+        const val MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS = 16_000L
+        // Availability probes and archived HTML downloads have separate bounded network timeouts.
+        // Reserve enough time for two captures plus request pacing; this affects only manual history.
+        const val MAX_ARCHIVE_DOMAIN_FALLBACK_MS = 28_000L
     }
 
     private val database = AppDatabase.getInstance(application)
@@ -2397,12 +2397,3 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     fun clearVerifierResult() {
         _uiState.value = _uiState.value.copy(verifierResult = null, verifierInput = "")
     }
-
-    fun clearSnackbarMessage() {
-        _uiState.value = _uiState.value.copy(snackbarMessage = null)
-    }
-
-    private fun showSnackbar(msg: String) {
-        _uiState.value = _uiState.value.copy(snackbarMessage = msg)
-    }
-}

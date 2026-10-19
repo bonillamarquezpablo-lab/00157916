@@ -424,6 +424,21 @@ class ExampleRobolectricTest {
             assertTrue(filtered.filter { it.price > 1.99 }.none { it.isSuspiciousPrice })
             assertEquals("The cheapest trusted offer is used for group best-price calculations", 39.99,
                 groupOnlineShoppingResults(filtered).single().cheapestOffer.price, 0.001)
+
+            // The suspicious low quote must remain inspectable but cannot become the saved current price.
+            repository.recordOnlineSearchResults(
+                results = filtered,
+                sourceType = "GOOGLE_SHOPPING",
+                searchQuery = "Anker Power Bank 20000mAh"
+            )
+            val savedProduct = database.productDao().getAllProductsSnapshot().single()
+            assertEquals("A suspicious low offer must not contaminate the current price", 39.99, savedProduct.currentPrice, 0.001)
+            assertTrue("Only trusted offers determine verified current price", savedProduct.isPriceVerified)
+            assertTrue(
+                "The 1.99 € anomaly stays in the audit trail, not verified price history",
+                database.priceObservationDao().observeVerifiedHistory(savedProduct.id).first()
+                    .none { it.price == 1.99 }
+            )
         } finally {
             database.close()
         }

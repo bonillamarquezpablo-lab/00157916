@@ -2319,10 +2319,10 @@ class WaybackPriceHistoryClient(
         // Broad host scans are a last resort; retain a short bound so they cannot starve
         // Availability fallback or delay the primary shopping-search experience.
         private const val CDX_FALLBACK_TIMEOUT_SECONDS = 3L
-        // Snapshot downloads follow public archived pages and are slower than the JSON availability
-        // probe. Keep each attempt bounded but allow common 3-4 second responses.
-        private const val CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS = 5L
-        private const val DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS = 4L
+        // Snapshot downloads are the slowest stage on archived retailer pages. Keep each request
+        // bounded, but allow a 7-second response before classifying it as a transient timeout.
+        private const val CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS = 7L
+        private const val DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS = 7L
         private const val MAX_AVAILABILITY_BODY_BYTES = 64 * 1024
         private const val CDX_RETRY_DELAY_MS = 500L
         private const val CDX_RETRY_JITTER_MS = 350L
@@ -2336,12 +2336,12 @@ class WaybackPriceHistoryClient(
         private const val DOMAIN_CDX_TIMEOUT_SECONDS = 3L
         // Product-specific CDX lookup is narrower than scanning every URL on a retailer host.
         // Product URL prefix lookup only. The broader host scan remains at 3 seconds.
-        private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 4L
+        private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 5L
         private const val MAX_DOMAIN_PRODUCT_URL_CANDIDATES = 2
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 2
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 2
         // Used only by historical backfill, never by the primary shopping search.
-        private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 5L
+        private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 7L
         private const val MAX_DOMAIN_INDEX_ROWS = 20
         private const val DOMAIN_LOOKBACK_DAYS = 730
         private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4

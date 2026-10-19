@@ -1519,6 +1519,89 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun readsScooterTitleFromH1AndVisibleEuroPriceWithoutStructuredMetadata() {
+        val client = newClient()
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head></head><body>
+                  <div class="pdp-product-title">
+                    <h1 itemprop="name">Mi Electric Scooter 4 Ultra Grey</h1>
+                  </div>
+                  <div class="product-price"><span class="price__amount">449,99</span> €</div>
+                </body></html>
+            """.trimIndent(),
+            expectedTitle = "Xiaomi Electric Scooter 4 Ultra Gris",
+            originalUrl = "https://www.mi.com/es/product/xiaomi-electric-scooter-4-ultra/",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://www.mi.com/es/product/xiaomi-electric-scooter-4-ultra/",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("H1 title plus a scoped visible EUR price should work without JSON-LD", quote)
+        assertEquals(449.99, quote!!.price, 0.001)
+        assertEquals("EUR", quote.currency)
+    }
+
+    @Test
+    fun rejectsScooterProCaptureForExpectedUltraVariant() {
+        val client = newClient()
+        val quote = client.parseArchivedPrice(
+            html = """
+                <script type="application/ld+json">
+                {"@type":"Product","name":"Xiaomi Mi Electric Scooter 4 Pro Black",
+                 "offers":{"@type":"Offer","price":"399.99","priceCurrency":"EUR"}}
+                </script>
+            """.trimIndent(),
+            expectedTitle = "Xiaomi Electric Scooter 4 Ultra Black",
+            originalUrl = "https://shop.example/products/xiaomi-electric-scooter-4",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/products/xiaomi-electric-scooter-4",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNull("A similar product family is not enough when Pro/Ultra variants differ", quote)
+    }
+
+    @Test
+    fun rejectsSamsungGalaxyS26BaseCaptureForExpectedPlusVariant() {
+        val client = newClient()
+        val quote = client.parseArchivedPrice(
+            html = """
+                <script type="application/ld+json">
+                {"@type":"Product","name":"Samsung Galaxy S26",
+                 "offers":{"@type":"Offer","price":"899.99","priceCurrency":"EUR"}}
+                </script>
+            """.trimIndent(),
+            expectedTitle = "Samsung Galaxy S26+",
+            originalUrl = "https://shop.example/samsung-galaxy-s26-plus",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/samsung-galaxy-s26-plus",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNull("Galaxy S26+ must not be confused with the base Galaxy S26", quote)
+    }
+
+    @Test
+    fun inheritsEurCurrencyFromProductWhenJsonLdOfferOmitsCurrency() {
+        val client = newClient()
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head><title>Xiaomi Mi 10 Pro</title>
+                <script type="application/ld+json">
+                {"@type":"Product","name":"Xiaomi Mi 10 Pro","priceCurrency":"EUR",
+                 "offers":{"@type":"Offer","price":"183.71"}}
+                </script></head></html>
+            """.trimIndent(),
+            expectedTitle = "Xiaomi Mi 10 Pro",
+            originalUrl = "https://shop.example/xiaomi-mi-10-pro",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/xiaomi-mi-10-pro",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("An inherited product currency should be applied to its Offer", quote)
+        assertEquals(183.71, quote!!.price, 0.001)
+        assertEquals("EUR", quote.currency)
+    }
+
+    @Test
     fun archivedMetaTitleDecodesNumericSpanishHtmlEntities() {
         val client = newClient()
         val quote = client.parseArchivedPrice(

@@ -539,19 +539,100 @@ class WaybackPriceHistoryClient(
             return fallback.copy(diagnosticCodes = emptySet())
         }
 
+        // Availability may answer correctly but miss a capture on the guessed URL. Once the
+        // bounded API probes are exhausted, try one distinct product-shaped CDX prefix. This is
+        // deliberately after Availability and uses a 3-second ceiling, so the extra discovery
+        // route cannot consume the whole per-store budget. Archived title + EUR price validation
+        // remains mandatory before any quote is accepted.
+        var alternateResult: WaybackBackfillResult? = null
+        if (!fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") &&
+            activeRateLimitUntil(System.currentTimeMillis()) == null
+        ) {
+            val alternateUrl = buildAvailabilityCandidateUrls(normalizedDomain, expectedTitle)
+                .firstOrNull { it != preferredUrl && isEligibleDirectUrl(it) }
+            val alternateCdxUrl = alternateUrl?.let { buildCdxUrl(it, now, lookbackDays) }
+            if (alternateUrl != null && alternateCdxUrl != null) {
+                emitWaybackTrace(
+                    onTrace, 6, WaybackTraceStatus.RUNNING,
+                    "Availability no encontró un precio verificable; se comprueba una URL alternativa mediante CDX antes de cerrar la búsqueda."
+                )
+                val alternateCacheKey = attemptKey(
+                    "domain-alternate-product-prefix-v1|$normalizedDomain|$expectedTitle|$alternateUrl"
+                )
+                val candidateResult = queryCdxAndFetchPrices(
+                    cdxUrl = alternateCdxUrl,
+                    expectedTitle = expectedTitle,
+                    cacheKey = alternateCacheKey,
+                    now = now,
+                    lookbackDays = lookbackDays,
+                    maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP,
+                    cdxTimeoutSeconds = ALTERNATE_PRODUCT_CDX_TIMEOUT_SECONDS,
+                    cdxStage = "CDX_ALTERNATE_PREFIX",
+                    snapshotTimeoutSeconds = CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS,
+                    onTrace = onTrace
+                )
+                alternateResult = candidateResult
+                when {
+                    candidateResult.quotes.isNotEmpty() -> {
+                        rememberAttempt(cacheKey, now, hasQuotes = true, failed = false)
+                        emitWaybackTrace(
+                            onTrace, 6, WaybackTraceStatus.PASSED,
+                            "La URL alternativa encontró ${candidateResult.quotes.size} precio(s) histórico(s) verificado(s)."
+                        )
+                        return candidateResult.copy(diagnosticCodes = emptySet())
+                    }
+                    candidateResult.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") -> {
+                        emitWaybackTrace(
+                            onTrace, 6, WaybackTraceStatus.SKIPPED,
+                            "CDX alternativo recibió HTTP 429; se detienen las consultas para respetar la pausa global."
+                        )
+                    }
+                    candidateResult.capturesFound > 0 -> {
+                        emitWaybackTrace(
+                            onTrace, 6, WaybackTraceStatus.PASSED,
+                            "La URL alternativa encontró ${candidateResult.capturesFound} captura(s), pero ninguna produjo un precio verificable."
+                        )
+                    }
+                    candidateResult.requestFailed -> {
+                        emitWaybackTrace(
+                            onTrace, 6, WaybackTraceStatus.PASSED,
+                            "Availability respondió sin capturas; la consulta CDX alternativa falló (${candidateResult.diagnosticCodes.joinToString(", ")})."
+                        )
+                    }
+                    else -> {
+                        emitWaybackTrace(
+                            onTrace, 6, WaybackTraceStatus.PASSED,
+                            "Availability y la consulta CDX alternativa respondieron, pero no encontraron capturas utilizables."
+                        )
+                    }
+                }
+            }
+        }
+
+        val combined = if (alternateResult == null) {
+            fallback
+        } else {
+            fallback.copy(
+                capturesFound = fallback.capturesFound + alternateResult.capturesFound,
+                capturesChecked = fallback.capturesChecked + alternateResult.capturesChecked,
+                available = fallback.available || alternateResult.available,
+                requestFailed = fallback.requestFailed && alternateResult.requestFailed,
+                diagnosticCodes = fallback.diagnosticCodes + alternateResult.diagnosticCodes
+            )
+        }
         rememberAttempt(
             cacheKey,
             now,
             hasQuotes = false,
-            failed = true,
-            rateLimited = fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
+            failed = combined.requestFailed,
+            rateLimited = combined.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
         )
-        // An empty-but-valid Availability response is not a transport failure. Preserve
-        // that distinction so step 6 reports the fallback's real outcome and step 7 reports
-        // only that no capture was available for the tested URLs.
-        return fallback.copy(
-            requestFailed = fallback.requestFailed,
-            diagnosticCodes = fallback.diagnosticCodes + failureCodes
+        // Preserve the distinction between a valid empty response and a transport failure. The
+        // result includes diagnostics from both bounded recovery routes, even when neither yields
+        // a verified EUR price.
+        return combined.copy(
+            requestFailed = combined.requestFailed,
+            diagnosticCodes = combined.diagnosticCodes + failureCodes
         )
     }
 
@@ -724,6 +805,34 @@ class WaybackPriceHistoryClient(
                 if (isEmpty()) add("${stage}_NO_CAPTURES")
                 else if (!allFailed) add("${stage}_NO_CAPTURES")
             }
+            val noCaptureDetail = if (allFailed) {
+                "No se descargó ninguna captura porque todas las consultas Availability fallaron."
+            } else {
+                "Availability respondió, pero no encontró capturas en las URL consultadas dentro del período."
+            }
+            emitWaybackTrace(
+                onTrace, 8, WaybackTraceStatus.SKIPPED, noCaptureDetail, diagnosticStep = 11
+            )
+            emitWaybackTrace(
+                onTrace, 9, WaybackTraceStatus.SKIPPED,
+                "No hay HTML de captura 1 que evaluar: no se encontró ninguna captura.",
+                diagnosticStep = 12
+            )
+            emitWaybackTrace(
+                onTrace, 10, WaybackTraceStatus.SKIPPED,
+                "No se encontró una segunda captura independiente porque Availability no devolvió capturas.",
+                diagnosticStep = 13
+            )
+            emitWaybackTrace(
+                onTrace, 11, WaybackTraceStatus.SKIPPED,
+                "Evaluación de la captura 2 omitida porque Availability no encontró una captura.",
+                diagnosticStep = 14
+            )
+            emitWaybackTrace(
+                onTrace, 14, WaybackTraceStatus.SKIPPED,
+                "Consolidación omitida: no hay precios que consolidar porque no se descargó ninguna captura.",
+                diagnosticStep = 18
+            )
             rememberAttempt(
                 cacheKey,
                 now,
@@ -751,6 +860,18 @@ class WaybackPriceHistoryClient(
             fetched += snapshot
             if (snapshot.diagnosticCode == "WAYBACK_RATE_LIMITED") break
         }
+        if (sampled.size == 1) {
+            emitWaybackTrace(
+                onTrace, 10, WaybackTraceStatus.SKIPPED,
+                "No se encontró una segunda captura independiente en Availability; solo se recuperó 1 captura dentro del período.",
+                diagnosticStep = 13
+            )
+            emitWaybackTrace(
+                onTrace, 11, WaybackTraceStatus.SKIPPED,
+                "Evaluación de la captura 2 omitida porque Availability solo devolvió una captura.",
+                diagnosticStep = 14
+            )
+        }
 
         val quotes = fetched.mapNotNull { it.quote }
             .sortedBy { it.observedAt }
@@ -761,6 +882,18 @@ class WaybackPriceHistoryClient(
             if (quotes.isEmpty() && fetched.any { it.fetched }) add("NO_VERIFIED_EUR_PRICE")
             else if (quotes.isEmpty() && isEmpty()) add("${stage}_NO_VERIFIED_PRICE")
         }
+        val verifiedBeforeDedup = fetched.mapNotNull { it.quote }.sortedBy { it.observedAt }
+        val duplicatesRemoved = verifiedBeforeDedup.size - quotes.size
+        emitWaybackTrace(
+            onTrace, 14,
+            when {
+                quotes.isNotEmpty() -> WaybackTraceStatus.PASSED
+                captures.isEmpty() -> WaybackTraceStatus.SKIPPED
+                else -> WaybackTraceStatus.FAILED
+            },
+            "Consolidación histórica por Availability: ${fetched.count { it.fetched }} HTML descargado(s), ${verifiedBeforeDedup.size} precio(s) verificado(s), ${duplicatesRemoved} duplicado(s) eliminado(s).",
+            diagnosticStep = 18
+        )
         val anySnapshotFailed = fetched.any { !it.fetched }
         val allSnapshotsFailed = fetched.isNotEmpty() && fetched.none { it.fetched }
         val failed = quotes.isEmpty() && (successfulProbes == 0 || allSnapshotsFailed)
@@ -1523,6 +1656,31 @@ class WaybackPriceHistoryClient(
                 "Extracción no ejecutada: CDX no entregó una respuesta utilizable. Causa del paso 6: ${cdxOutcome.diagnosticCodes.joinToString(", ")}.",
                 diagnosticStep = 8
             )
+            emitWaybackTrace(
+                onTrace, 8, WaybackTraceStatus.SKIPPED,
+                "No se pudo iniciar la descarga de la captura 1 porque el índice CDX no respondió correctamente.",
+                diagnosticStep = 11
+            )
+            emitWaybackTrace(
+                onTrace, 9, WaybackTraceStatus.SKIPPED,
+                "No hay HTML de captura 1 que evaluar: CDX no proporcionó una captura utilizable.",
+                diagnosticStep = 12
+            )
+            emitWaybackTrace(
+                onTrace, 10, WaybackTraceStatus.SKIPPED,
+                "No existe una segunda captura para descargar: CDX no devolvió una lista utilizable.",
+                diagnosticStep = 13
+            )
+            emitWaybackTrace(
+                onTrace, 11, WaybackTraceStatus.SKIPPED,
+                "No hay una segunda captura que evaluar porque el índice CDX no respondió.",
+                diagnosticStep = 14
+            )
+            emitWaybackTrace(
+                onTrace, 14, WaybackTraceStatus.SKIPPED,
+                "Consolidación omitida: no se pudo descargar ninguna captura de CDX.",
+                diagnosticStep = 18
+            )
             val rateLimited = cdxOutcome.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
             rememberAttempt(cacheKey, now, hasQuotes = false, failed = true, rateLimited = rateLimited)
             return WaybackBackfillResult(
@@ -1584,6 +1742,42 @@ class WaybackPriceHistoryClient(
             )
             fetched += snapshot
             if (snapshot.diagnosticCode == "WAYBACK_RATE_LIMITED") break
+        }
+        when {
+            sampled.isEmpty() -> {
+                emitWaybackTrace(
+                    onTrace, 8, WaybackTraceStatus.SKIPPED,
+                    "No se descargó la captura 1: la respuesta CDX no contenía capturas válidas dentro del período.",
+                    diagnosticStep = 11
+                )
+                emitWaybackTrace(
+                    onTrace, 9, WaybackTraceStatus.SKIPPED,
+                    "No hay HTML de captura 1 que evaluar porque no había capturas disponibles.",
+                    diagnosticStep = 12
+                )
+                emitWaybackTrace(
+                    onTrace, 10, WaybackTraceStatus.SKIPPED,
+                    "No se encontró una segunda captura independiente para descargar (0 capturas disponibles).",
+                    diagnosticStep = 13
+                )
+                emitWaybackTrace(
+                    onTrace, 11, WaybackTraceStatus.SKIPPED,
+                    "No hay una segunda captura que evaluar porque el índice no devolvió capturas.",
+                    diagnosticStep = 14
+                )
+            }
+            sampled.size == 1 -> {
+                emitWaybackTrace(
+                    onTrace, 10, WaybackTraceStatus.SKIPPED,
+                    "No se encontró una segunda captura independiente en el índice; solo había 1 captura válida dentro del período.",
+                    diagnosticStep = 13
+                )
+                emitWaybackTrace(
+                    onTrace, 11, WaybackTraceStatus.SKIPPED,
+                    "Evaluación de la captura 2 omitida porque no había una segunda captura disponible.",
+                    diagnosticStep = 14
+                )
+            }
         }
 
         // Cache useful histories for 30 days, but allow an empty result to be retried after 6 hours.
@@ -2771,6 +2965,7 @@ class WaybackPriceHistoryClient(
         // Give the public index up to 7 seconds on slower responses; no retry is added here,
         // and the bounded Availability fallback remains in place if CDX does not answer.
         private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 7L
+        private const val ALTERNATE_PRODUCT_CDX_TIMEOUT_SECONDS = 3L
         private const val MAX_DOMAIN_PRODUCT_URL_CANDIDATES = 2
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 2
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 2

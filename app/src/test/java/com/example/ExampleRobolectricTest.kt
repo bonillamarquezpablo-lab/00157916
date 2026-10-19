@@ -3676,7 +3676,79 @@ class ExampleRobolectricTest {
 
 
     @Test
-    fun `main store directory only includes merchants with valid saved prices`() = runBlocking<Unit> {
+    fun \`legacy verified quote is rechecked against canonical product title\`() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries().build()
+        try {
+            val now = System.currentTimeMillis()
+            database.productDao().insert(
+                ProductEntity(
+                    id = "legacy-bike-derailleur",
+                    title = "Cambio trasero Shimano Altus M2000 caja larga bicicleta MTB 9V",
+                    brand = "Shimano",
+                    category = "SPORTS",
+                    currentPrice = 1400.0,
+                    athMinPrice = 1400.0,
+                    athMinDate = "Sin datos",
+                    athMinStore = "PcComponentes",
+                    athMaxPrice = 1400.0,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "pc_componentes",
+                    storeUrl = "https://www.pccomponentes.com/",
+                    ean = "",
+                    isPriceVerified = true
+                )
+            )
+            // Simulate a legacy row that was marked verified before the category-specific price
+            // guard shipped and whose seller title is too generic to trigger the guard on its own.
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "legacy-bike-derailleur",
+                    storeId = "pc_componentes",
+                    price = 1400.0,
+                    observedAt = now,
+                    sourceUrl = "https://www.pccomponentes.com/shimano-altus",
+                    sourceName = "Google Shopping",
+                    isVerified = true,
+                    productTitle = "Shimano Altus M2000 9V",
+                    storeName = "PcComponentes",
+                    evidenceType = "live"
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+
+            val product = withTimeout(10_000L) {
+                repository.allProductsStream.first { products ->
+                    products.any { it.id == "legacy-bike-derailleur" }
+                }.first { it.id == "legacy-bike-derailleur" }
+            }
+            assertFalse(
+                "A legacy price implausible for the canonical product must not verify the product",
+                product.isPriceVerified
+            )
+            assertTrue(
+                "The implausible legacy quote must not appear as a green best-price store offer",
+                product.offers.isEmpty()
+            )
+            assertTrue(
+                "A store supported only by the implausible quote must stay out of the trusted store list",
+                repository.storesWithSavedPricesStream.first().isEmpty()
+            )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun \`main store directory only includes merchants with valid saved prices\`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,

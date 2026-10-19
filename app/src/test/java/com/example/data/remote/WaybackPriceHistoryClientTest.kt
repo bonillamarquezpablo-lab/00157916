@@ -310,6 +310,92 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun domainCdxTimeoutFallsBackToAvailabilityAndSavesVerifiedPrice() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .commit()
+
+        val title = "Anker Prime 27K Power Bank Fallback Test ${System.currentTimeMillis()}"
+        val requests = CopyOnWriteArrayList<String>()
+        val archivedHtml = """
+            <html><head>
+              <script type="application/ld+json">
+                {"@type":"Product","name":"$title",
+                 "offers":{"@type":"Offer","price":"79.99","priceCurrency":"EUR"}}
+              </script>
+            </head><body></body></html>
+        """.trimIndent()
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            val hostAndPath = request.url.host + request.url.encodedPath
+            requests += hostAndPath
+            when {
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    // Reproduce the exact failure seen on the phone: domain CDX times out.
+                    throw java.net.SocketTimeoutException("simulated CDX domain timeout")
+                }
+                request.url.host == "archive.org" &&
+                    request.url.encodedPath == "/wayback/available" -> {
+                    val originalUrl = request.url.queryParameter("url")
+                        ?: throw AssertionError("Availability request has no product URL")
+                    val snapshotUrl = "https://web.archive.org/web/20250101120000id_/$originalUrl"
+                    val body = """
+                        {"archived_snapshots":{"closest":{
+                          "available":true,"timestamp":"20250101120000","url":"$snapshotUrl"
+                        }}}
+                    """.trimIndent()
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(body.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/web/") -> {
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "text/html; charset=utf-8")
+                        .body(archivedHtml.toResponseBody("text/html; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                else -> throw AssertionError("Unexpected Wayback request: $hostAndPath")
+            }
+        }.build()
+
+        try {
+            val result = withTimeout(10_000L) {
+                WaybackPriceHistoryClient(context, http).fetchHistoryByMerchantDomain(
+                    domain = "shop.example",
+                    expectedTitle = title,
+                    lookbackDays = 730
+                )
+            }
+            assertTrue(
+                "A CDX_DOMAIN_TIMEOUT must still try the product-specific Availability API",
+                requests.contains("archive.org/wayback/available")
+            )
+            assertTrue("The verified archived EUR price should be recovered", result.quotes.isNotEmpty())
+            assertEquals(79.99, result.quotes.single().price, 0.001)
+            assertTrue(requests.any { it.startsWith("web.archive.org/web/") })
+        } finally {
+            preferences.edit()
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .commit()
+        }
+    }
+
+    @Test
     fun parsesOnlySuccessfulHtmlCapturesInTimestampOrder() {
         val client = newClient()
         val body = """

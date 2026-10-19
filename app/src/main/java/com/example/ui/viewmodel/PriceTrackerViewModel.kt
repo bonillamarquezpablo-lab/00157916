@@ -1741,16 +1741,45 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         } else {
                             attempts += domainResult
                             if (diagnosticProductId != null) {
+                                val fallbackDiagnostics = domainResult.diagnosticCodes.filter { code ->
+                                    code == "WAYBACK_RATE_LIMITED" ||
+                                        code.startsWith("DOMAIN_AVAILABILITY_FALLBACK_")
+                                }
+                                val fallbackTransportFailed = fallbackDiagnostics.any { code ->
+                                    code == "WAYBACK_RATE_LIMITED" ||
+                                        code.contains("_TIMEOUT") ||
+                                        code.contains("_DNS") ||
+                                        code.contains("_NETWORK") ||
+                                        code.contains("_HTTP_") ||
+                                        code.endsWith("_UNEXPECTED_ERROR") ||
+                                        code.endsWith("_INVALID_RESPONSE") ||
+                                        code.endsWith("_BODY_EMPTY_OR_LIMIT") ||
+                                        code.endsWith("_NO_CANDIDATES")
+                                }
+                                // The combined result retains CDX_DOMAIN_TIMEOUT even if the
+                                // Availability API itself answered correctly. Step 6 must describe
+                                // the fallback's outcome; step 7 distinguishes a genuine empty
+                                // capture list from a transport failure.
+                                val fallbackReturnedNoCaptures =
+                                    fallbackDiagnostics.contains("DOMAIN_AVAILABILITY_FALLBACK_NO_CAPTURES")
+                                val step6Succeeded = domainResult.quotes.isNotEmpty() ||
+                                    domainResult.capturesFound > 0 ||
+                                    fallbackReturnedNoCaptures ||
+                                    !fallbackTransportFailed
                                 reportWaybackDiagnostic(
                                     diagnosticProductId, 6,
-                                    if (domainResult.requestFailed) WaybackTraceStatus.FAILED else WaybackTraceStatus.PASSED,
+                                    if (step6Succeeded) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
                                     when {
                                         domainResult.quotes.isNotEmpty() ->
                                             "Alternativa por dominio devolvió ${domainResult.quotes.size} precio(s) verificado(s)."
-                                        domainResult.requestFailed ->
-                                            "Alternativa por dominio terminó con error: ${domainResult.diagnosticCodes.joinToString(", ").take(180)}."
+                                        fallbackReturnedNoCaptures ->
+                                            "La alternativa respondió correctamente, pero no encontró capturas; revisa el paso 7."
+                                        domainResult.capturesFound > 0 ->
+                                            "La alternativa encontró capturas; revisa los pasos 8–14 para saber por qué no se aceptó un precio."
+                                        fallbackTransportFailed ->
+                                            "La alternativa por dominio falló: ${fallbackDiagnostics.joinToString(", ").take(180)}."
                                         else ->
-                                            "Alternativa por dominio respondió sin precio verificado; revisa los pasos 7–14."
+                                            "Alternativa por dominio ejecutada; no devolvió precio verificado. Revisa los pasos 7–14."
                                     }
                                 )
                             }

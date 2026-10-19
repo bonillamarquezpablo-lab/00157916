@@ -1542,6 +1542,29 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun choosesCurrentScooterPriceInsteadOfCrossedOutPreviousPrice() {
+        val client = newClient()
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><body>
+                  <h1>Xiaomi Mi Electric Scooter 4 Ultra Grey</h1>
+                  <div class="product-price">
+                    <del class="old-price">499,99 €</del>
+                    <span class="current-price">449,99 €</span>
+                  </div>
+                </body></html>
+            """.trimIndent(),
+            expectedTitle = "Xiaomi Electric Scooter 4 Ultra Gris",
+            originalUrl = "https://shop.example/xiaomi-electric-scooter-4-ultra",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/xiaomi-electric-scooter-4-ultra",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull(quote)
+        assertEquals("The displayed selling price must win over crossed-out list price", 449.99, quote!!.price, 0.001)
+    }
+
+    @Test
     fun rejectsScooterProCaptureForExpectedUltraVariant() {
         val client = newClient()
         val quote = client.parseArchivedPrice(

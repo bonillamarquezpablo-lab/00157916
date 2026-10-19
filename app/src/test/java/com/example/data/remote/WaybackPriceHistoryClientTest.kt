@@ -1110,6 +1110,28 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun archivedMetaTitleDecodesNumericSpanishHtmlEntities() {
+        val client = newClient()
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head>
+                  <meta property="og:title" content="Xiaomi Redmi 17 Edici&#243;n Especial">
+                  <meta property="product:price:amount" content="299,99">
+                  <meta property="product:price:currency" content="EUR">
+                </head><body></body></html>
+            """.trimIndent(),
+            expectedTitle = "Xiaomi Redmi 17 Edición Especial",
+            originalUrl = "https://shop.example/products/xiaomi-redmi-17",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/products/xiaomi-redmi-17",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("Numeric HTML entities must be decoded before product-title matching", quote)
+        assertEquals(299.99, quote!!.price, 0.001)
+        assertEquals("EUR", quote.currency)
+    }
+
+    @Test
     fun negativeArchiveCacheRetriesAfterSixHoursButPositiveCacheWaitsThirty() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)

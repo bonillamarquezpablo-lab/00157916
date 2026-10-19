@@ -347,10 +347,15 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             // If this same stage later really runs or fails on another route, remove obsolete
             // "not executed" messages from earlier CDX-only attempts. Keep genuine failures from
             // other attempts as audit detail; only stale skip explanations are superseded.
-            val oldDetailLines = if (status == WaybackTraceStatus.PASSED || status == WaybackTraceStatus.FAILED) {
-                old.detail.lines().filterNot(::isSupersededWaybackSkipDetail)
-            } else {
-                old.detail.lines()
+            val oldDetailLines = when {
+                status == WaybackTraceStatus.PASSED || status == WaybackTraceStatus.FAILED ->
+                    old.detail.lines().filterNot(::isSupersededWaybackSkipDetail)
+                status == WaybackTraceStatus.SKIPPED && old.status == WaybackTraceStatus.RUNNING ->
+                    old.detail.lines().filterNot { line ->
+                        line.contains("Se activa la alternativa por dominio", ignoreCase = true) ||
+                            line.contains("se activa la alternativa limitada", ignoreCase = true)
+                    }
+                else -> old.detail.lines()
             }
             val retainedOldDetail = oldDetailLines.joinToString("\n")
             val combinedDetail = when {
@@ -1976,11 +1981,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             attempts += domainResult
                             if (diagnosticProductId != null) {
                                 val fallbackDiagnostics = domainResult.diagnosticCodes.filter { code ->
-                                    code == "WAYBACK_RATE_LIMITED" ||
-                                        code.startsWith("DOMAIN_AVAILABILITY_FALLBACK_")
+                                    code != "CDX_DIRECT_URL_ALREADY_QUERIED" &&
+                                        code != "CACHE_SKIPPED" &&
+                                        code != "CACHE_SKIPPED_AFTER_FAILURE"
                                 }
                                 val fallbackTransportFailed = fallbackDiagnostics.any { code ->
                                     code == "WAYBACK_RATE_LIMITED" ||
+                                        code == "DOMAIN_UNRESOLVED" ||
                                         code.contains("_TIMEOUT") ||
                                         code.contains("_DNS") ||
                                         code.contains("_NETWORK") ||
@@ -1988,34 +1995,48 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                         code.endsWith("_UNEXPECTED_ERROR") ||
                                         code.endsWith("_INVALID_RESPONSE") ||
                                         code.endsWith("_BODY_EMPTY_OR_LIMIT") ||
-                                        code.endsWith("_NO_CANDIDATES")
+                                        code.endsWith("_NO_CANDIDATES") ||
+                                        code.endsWith("_CANDIDATES_EMPTY")
                                 }
-                                // The combined result retains CDX_DOMAIN_TIMEOUT even if the
-                                // Availability API itself answered correctly. Step 6 must describe
-                                // the fallback's outcome; step 7 distinguishes a genuine empty
-                                // capture list from a transport failure.
+                                // A recent cache entry is not a successful fallback: no new API
+                                // request was made. Likewise, an unresolvable merchant string means
+                                // no domain lookup started at all. Only label a real response as
+                                // passed; keep an empty-but-valid Availability response distinct.
                                 val fallbackReturnedNoCaptures =
                                     fallbackDiagnostics.contains("DOMAIN_AVAILABILITY_FALLBACK_NO_CAPTURES")
-                                val step6Succeeded = domainResult.quotes.isNotEmpty() ||
-                                    domainResult.capturesFound > 0 ||
-                                    fallbackReturnedNoCaptures ||
-                                    !fallbackTransportFailed
+                                val domainWasCached = domainResult.skippedRecently ||
+                                    domainResult.diagnosticCodes.any {
+                                        it == "CACHE_SKIPPED" || it == "CACHE_SKIPPED_AFTER_FAILURE"
+                                    }
+                                val domainWasUnresolved =
+                                    domainResult.diagnosticCodes.contains("DOMAIN_UNRESOLVED")
+                                val step7Status = when {
+                                    domainWasCached -> WaybackTraceStatus.SKIPPED
+                                    domainWasUnresolved || (fallbackTransportFailed && !fallbackReturnedNoCaptures &&
+                                        domainResult.capturesFound == 0 && domainResult.quotes.isEmpty()) ->
+                                        WaybackTraceStatus.FAILED
+                                    else -> WaybackTraceStatus.PASSED
+                                }
                                 reportWaybackDiagnostic(
                                     diagnosticProductId, 7,
-                                    if (step6Succeeded) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
+                                    step7Status,
                                     when {
+                                        domainWasCached ->
+                                            "Alternativa omitida: ya existe un intento reciente en caché; no se enviaron nuevas peticiones."
+                                        domainWasUnresolved ->
+                                            "Alternativa no ejecutada: no se pudo resolver un dominio válido de tienda (DOMAIN_UNRESOLVED)."
                                         domainResult.quotes.isNotEmpty() ->
                                             "Alternativa por dominio devolvió ${domainResult.quotes.size} precio(s) verificado(s)."
                                         fallbackReturnedNoCaptures && fallbackTransportFailed ->
-                                            "Availability devolvió respuestas válidas sin capturas, pero también falló alguna URL candidata: ${fallbackDiagnostics.joinToString(", ").take(180)}. Revisa el detalle del paso 7."
+                                            "Availability respondió, pero no encontró capturas y alguna consulta falló: ${fallbackDiagnostics.joinToString(", ").take(180)}."
                                         fallbackReturnedNoCaptures ->
-                                            "La alternativa respondió correctamente, pero no encontró capturas; revisa el paso 7."
+                                            "La alternativa respondió correctamente, pero no encontró capturas."
                                         domainResult.capturesFound > 0 ->
-                                            "La alternativa encontró capturas; revisa los pasos 8–14 para saber por qué no se aceptó un precio."
+                                            "La alternativa encontró ${domainResult.capturesFound} captura(s); revisa los pasos 8–17 para saber por qué no se aceptó un precio."
                                         fallbackTransportFailed ->
-                                            "La alternativa por dominio falló: ${fallbackDiagnostics.joinToString(", ").take(180)}."
+                                            "La alternativa falló durante una consulta: ${fallbackDiagnostics.joinToString(", ").take(180)}."
                                         else ->
-                                            "Alternativa por dominio ejecutada; no devolvió precio verificado. Revisa los pasos 7–14."
+                                            "Alternativa ejecutada: no devolvió un precio verificado. Revisa los pasos 8–17."
                                     }
                                 )
                             }

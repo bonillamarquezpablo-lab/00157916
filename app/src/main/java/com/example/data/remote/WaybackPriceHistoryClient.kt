@@ -239,15 +239,24 @@ class WaybackPriceHistoryClient(
                 if (result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) {
                     return@serializedArchiveLookup result
                 }
-                // IMPORTANT: handle the timeout before the generic requestFailed return.
-                // Otherwise this fallback is unreachable for the exact CDX_DOMAIN_TIMEOUT
-                // reported by the user's device, and the button stops without trying availability.
-                if (result.requestFailed &&
-                    result.diagnosticCodes.contains("CDX_DOMAIN_TIMEOUT")
-                ) {
+                // Handle transient CDX server/network failures before the generic return.
+                // Do not issue another broad index query: switch to a small, product-specific
+                // Availability fallback and let the shared request gate enforce pacing/cooldown.
+                val transientDomainFailure = result.diagnosticCodes.any { code ->
+                    code == "CDX_DOMAIN_TIMEOUT" ||
+                        (code.startsWith("CDX_DOMAIN_HTTP_") &&
+                            code.substringAfterLast('_').toIntOrNull()
+                                ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true)
+                }
+                if (result.requestFailed && transientDomainFailure) {
+                    val failureLabel = if (result.diagnosticCodes.contains("CDX_DOMAIN_TIMEOUT")) {
+                        "CDX de dominio agotó el tiempo"
+                    } else {
+                        "CDX de dominio devolvió un error temporal (${result.diagnosticCodes.joinToString(", ")})"
+                    }
                     emitWaybackTrace(
                         onTrace, 6, WaybackTraceStatus.RUNNING,
-                        "CDX de dominio agotó el tiempo. Se activa la alternativa limitada de Availability API."
+                        "$failureLabel. Se activa la alternativa limitada de Availability API."
                     )
                     // Reuse the direct retailer URL already present on the offer when it is
                     // safe to query. Domain discovery often guesses slugs incorrectly; probing
@@ -301,7 +310,7 @@ class WaybackPriceHistoryClient(
                         )
                         return@serializedArchiveLookup fallback.copy(
                             requestFailed = true,
-                            diagnosticCodes = fallback.diagnosticCodes + "CDX_DOMAIN_TIMEOUT"
+                            diagnosticCodes = fallback.diagnosticCodes + result.diagnosticCodes
                         )
                     }
                     rememberAttempt(attempt, now, hasQuotes = false, failed = true)

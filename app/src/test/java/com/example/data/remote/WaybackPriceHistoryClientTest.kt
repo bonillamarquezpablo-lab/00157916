@@ -276,6 +276,19 @@ class WaybackPriceHistoryClientTest {
                         it.detail.contains("omitió por caché")
                 }
             )
+            assertTrue(
+                "Identity validation must be explicitly skipped without archived HTML",
+                traceEvents.any {
+                    it.diagnosticStep == 15 && it.status == WaybackTraceStatus.SKIPPED &&
+                        it.detail.contains("no se descargó ninguna captura")
+                }
+            )
+            assertTrue(
+                "Price extraction must be explicitly skipped without archived HTML",
+                traceEvents.any {
+                    it.diagnosticStep == 16 && it.status == WaybackTraceStatus.SKIPPED
+                }
+            )
         } finally {
             preferences.edit()
                 .remove(cacheKey)
@@ -286,6 +299,42 @@ class WaybackPriceHistoryClientTest {
                 .remove("wayback_last_availability_request_at")
                 .commit()
         }
+    }
+
+    @Test
+    fun unresolvedMerchantDomainReportsNoRequestInsteadOfAnUnexecutedGenericChain() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val traceEvents = CopyOnWriteArrayList<WaybackTraceEvent>()
+        val client = WaybackPriceHistoryClient(context)
+        val result = client.fetchHistoryByMerchantDomain(
+            domain = "Google Shopping",
+            expectedTitle = "Apple iPhone 15 256 GB Amarillo",
+            onTrace = { traceEvents += it }
+        )
+
+        assertTrue(result.diagnosticCodes.contains("DOMAIN_UNRESOLVED"))
+        assertTrue(
+            "CDX request must say no request was sent because the merchant domain was invalid",
+            traceEvents.any {
+                it.diagnosticStep == 5 && it.status == WaybackTraceStatus.SKIPPED &&
+                    it.detail.contains("DOMAIN_UNRESOLVED")
+            }
+        )
+        assertTrue(
+            "Fallback must say it failed to start, not that it successfully executed",
+            traceEvents.any {
+                it.diagnosticStep == 7 && it.status == WaybackTraceStatus.FAILED &&
+                    it.detail.contains("DOMAIN_UNRESOLVED")
+            }
+        )
+        assertTrue(
+            "Identity, price and EUR checks must be skipped when no capture was queried",
+            (15..17).all { step ->
+                traceEvents.any {
+                    it.diagnosticStep == step && it.status == WaybackTraceStatus.SKIPPED
+                }
+            }
+        )
     }
 
     @Test

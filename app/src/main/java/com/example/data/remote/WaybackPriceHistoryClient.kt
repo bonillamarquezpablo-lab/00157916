@@ -875,6 +875,43 @@ class WaybackPriceHistoryClient(
         return WaybackCapture(rawTimestamp, timestamp, original)
     }
 
+    /**
+     * Manufacturer product URLs usually identify a model family, not its memory or colour SKU.
+     * Strip those variant-only words when generating canonical Apple/Samsung product-page
+     * candidates; exact merchant URLs, when available, are still tried first.
+     */
+    private fun canonicalRetailerProductSlug(slug: String): String {
+        val words = slug.split('-').filter { it.isNotBlank() }
+        val simpleColors = setOf(
+            "black", "white", "blue", "pink", "yellow", "green", "purple", "red",
+            "silver", "gold", "gray", "grey", "midnight", "starlight", "graphite",
+            "ultramarine", "teal", "indigo", "violet", "lavender", "coral", "titanium"
+        )
+        val colorPairs = setOf(
+            "space gray", "space black", "natural titanium", "desert titanium",
+            "white titanium", "black titanium", "blue titanium", "purple titanium",
+            "alpine green", "sierra blue", "deep purple"
+        )
+        val result = mutableListOf<String>()
+        var index = 0
+        while (index < words.size) {
+            val word = words[index]
+            val next = words.getOrNull(index + 1)
+            val pair = next?.let { "$word $it" }
+            when {
+                pair in colorPairs -> index += 2
+                Regex("""^\d{1,4}(?:gb|tb)$""").matches(word) -> index += 1
+                Regex("""^\d{1,4}$""").matches(word) && next in setOf("gb", "tb") -> index += 2
+                word in simpleColors -> index += 1
+                else -> {
+                    result += word
+                    index += 1
+                }
+            }
+        }
+        return result.joinToString("-").replace(Regex("-+"), "-").trim('-')
+    }
+
     internal fun buildAvailabilityCandidateUrls(domain: String, expectedTitle: String): List<String> {
         val normalizedDomain = normalizeMerchantDomain(domain) ?: return emptyList()
         if (expectedTitle.isBlank()) return emptyList()
@@ -901,10 +938,22 @@ class WaybackPriceHistoryClient(
         val hosts = domainDiscoveryHosts(normalizedDomain)
         val paths = linkedSetOf<String>()
         if (normalizedDomain == "apple.com") {
+            // Apple canonical product pages omit storage and colour (e.g. /es/iphone-15/).
+            // Put the normalised model-family URL ahead of SKU-shaped guesses.
+            val canonicalAppleSlug = canonicalRetailerProductSlug(fullSlug).removePrefix("apple-")
+            if (canonicalAppleSlug.startsWith("iphone-") ||
+                canonicalAppleSlug.startsWith("ipad-") ||
+                canonicalAppleSlug.startsWith("macbook-")
+            ) {
+                paths += "/es/$canonicalAppleSlug/"
+            }
             slugs.filter { it.startsWith("iphone-") || it.startsWith("ipad-") || it.startsWith("macbook-") }
                 .forEach { paths += "/es/$it/" }
         }
         if (normalizedDomain == "samsung.com") {
+            val canonicalSamsungSlugs = slugs.map(::canonicalRetailerProductSlug).distinct()
+            canonicalSamsungSlugs.filter { it.startsWith("galaxy-") }
+                .forEach { paths += "/es/smartphones/galaxy-s/$it/" }
             slugs.filter { it.startsWith("galaxy-") }
                 .forEach { paths += "/es/smartphones/galaxy-s/$it/" }
 

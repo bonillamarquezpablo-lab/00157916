@@ -113,6 +113,26 @@ internal fun mergeWaybackDiagnosticStatus(
     else -> incoming
 }
 
+private fun isSupersededWaybackSkipDetail(detailLine: String): Boolean {
+    val message = detailLine.substringAfter("] ", detailLine).trim().lowercase(Locale.ROOT)
+    return message.startsWith("no ejecutado:") ||
+        message.startsWith("extracción no ejecutada:") ||
+        message.startsWith("no se pudo iniciar la descarga") ||
+        message.startsWith("no hay html de captura") ||
+        message.startsWith("no hay una segunda captura que evaluar") ||
+        message.startsWith("no existe una segunda captura para descargar") ||
+        message.startsWith("evaluación de la captura 2 omitida") ||
+        message.startsWith("consolidación omitida:") ||
+        message.startsWith("no hay url candidatas que normalizar") ||
+        message.startsWith("no había fechas de capturas") ||
+        message.startsWith("no hay fechas que validar") ||
+        message.startsWith("no se pudo validar el período") ||
+        message.startsWith("normalización omitida") ||
+        message.startsWith("validación de fechas omitida") ||
+        message.startsWith("no se encontró una segunda captura independiente") ||
+        message.startsWith("no había capturas disponibles")
+}
+
 private val WAYBACK_DIAGNOSTIC_TITLES = listOf(
     "Solicitud iniciada (botón pulsado)",
     "Ficha local y URL principal recuperadas",
@@ -324,11 +344,20 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             val mergedStatus = mergeWaybackDiagnosticStatus(old.status, status)
             val redundantSkip = status == WaybackTraceStatus.SKIPPED &&
                 old.status in setOf(WaybackTraceStatus.PASSED, WaybackTraceStatus.FAILED)
+            // If this same stage later really runs or fails on another route, remove obsolete
+            // "not executed" messages from earlier CDX-only attempts. Keep genuine failures from
+            // other attempts as audit detail; only stale skip explanations are superseded.
+            val oldDetailLines = if (status == WaybackTraceStatus.PASSED || status == WaybackTraceStatus.FAILED) {
+                old.detail.lines().filterNot(::isSupersededWaybackSkipDetail)
+            } else {
+                old.detail.lines()
+            }
+            val retainedOldDetail = oldDetailLines.joinToString("\n")
             val combinedDetail = when {
-                detailLine.isBlank() || redundantSkip -> old.detail
-                old.detail.isBlank() -> detailLine
-                old.detail.lines().any { it == detailLine } -> old.detail
-                else -> (old.detail.lines() + detailLine).takeLast(5).joinToString("\n")
+                detailLine.isBlank() || redundantSkip -> retainedOldDetail
+                retainedOldDetail.isBlank() -> detailLine
+                oldDetailLines.any { it == detailLine } -> retainedOldDetail
+                else -> (oldDetailLines + detailLine).takeLast(5).joinToString("\n")
             }
             rows[index] = old.copy(
                 status = mergedStatus,

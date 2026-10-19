@@ -110,6 +110,16 @@ private fun emitCachedLookupSkippedTrace(
         diagnosticStep = 8
     )
     emitWaybackTrace(
+        listener, 7, WaybackTraceStatus.SKIPPED,
+        "No ejecutado: no hay capturas nuevas que normalizar porque no se consultó el índice por caché.",
+        diagnosticStep = 9
+    )
+    emitWaybackTrace(
+        listener, 7, WaybackTraceStatus.SKIPPED,
+        "No ejecutado: no hay fechas de capturas que validar porque no se consultó el índice por caché.",
+        diagnosticStep = 10
+    )
+    emitWaybackTrace(
         listener, 8, WaybackTraceStatus.SKIPPED,
         "No ejecutado: no hay una captura nueva que descargar; la consulta fue omitida por caché.",
         diagnosticStep = 11
@@ -391,6 +401,16 @@ class WaybackPriceHistoryClient(
                     onTrace, 7, WaybackTraceStatus.SKIPPED,
                     "No ejecutado: no se consultó un índice porque el dominio de tienda no se pudo resolver.",
                     diagnosticStep = 8
+                )
+                emitWaybackTrace(
+                    onTrace, 7, WaybackTraceStatus.SKIPPED,
+                    "No ejecutado: no hay capturas que normalizar porque el dominio de tienda no se pudo resolver.",
+                    diagnosticStep = 9
+                )
+                emitWaybackTrace(
+                    onTrace, 7, WaybackTraceStatus.SKIPPED,
+                    "No ejecutado: no hay fechas de capturas que validar porque el dominio no se pudo resolver.",
+                    diagnosticStep = 10
                 )
                 emitWaybackTrace(
                     onTrace, 8, WaybackTraceStatus.SKIPPED,
@@ -1813,6 +1833,16 @@ class WaybackPriceHistoryClient(
                 onTrace, 7, WaybackTraceStatus.SKIPPED,
                 "Extracción no ejecutada: CDX no entregó una respuesta utilizable. Causa del paso 6: ${cdxOutcome.diagnosticCodes.joinToString(", ")}.",
                 diagnosticStep = 8
+            )
+            emitWaybackTrace(
+                onTrace, 7, WaybackTraceStatus.SKIPPED,
+                "Normalización omitida: no hubo filas CDX utilizables que normalizar.",
+                diagnosticStep = 9
+            )
+            emitWaybackTrace(
+                onTrace, 7, WaybackTraceStatus.SKIPPED,
+                "Validación de fechas omitida: CDX no devolvió una lista válida de capturas.",
+                diagnosticStep = 10
             )
             emitWaybackTrace(
                 onTrace, 8, WaybackTraceStatus.SKIPPED,

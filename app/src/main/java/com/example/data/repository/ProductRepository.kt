@@ -1723,6 +1723,17 @@ class ProductRepository(
         stores: List<Store>,
         merchantHost: String?
     ): Store? {
+        // Resolve aliases before checking generated seller IDs so multiple AliExpress labels
+        // contribute to one marketplace chip instead of cluttering the UI.
+        val aliExpressStore = stores.firstOrNull { it.id == Store.ALIEXPRESS_PLAZA.id }
+        val aliExpressNameMatch =
+            Store.findKnownByName(observation.storeName)?.id == Store.ALIEXPRESS_PLAZA.id
+        val aliExpressHostMatch = merchantHost?.let { host ->
+            host == "aliexpress.com" || host.endsWith(".aliexpress.com")
+        } == true
+        if (aliExpressStore != null && (aliExpressNameMatch || aliExpressHostMatch)) {
+            return aliExpressStore
+        }
         stores.firstOrNull { it.id == observation.storeId }?.let { return it }
         merchantHost?.let { host ->
             stores.firstOrNull { store ->
@@ -1765,11 +1776,17 @@ class ProductRepository(
             .replace(Regex("\\s+"), " ")
 
     private fun observationStore(observation: PriceObservationEntity, stores: List<Store>): Store {
-        stores.firstOrNull { it.id == observation.storeId }?.let { return it }
+        Store.findKnownByName(observation.storeName)?.takeIf {
+            it.id == Store.ALIEXPRESS_PLAZA.id
+        }?.let { return it }
         val host = parseHttpUri(observation.sourceUrl)?.host
             ?.lowercase(Locale.ROOT)
             ?.removePrefix("www.")
             .orEmpty()
+        if (host == "aliexpress.com" || host.endsWith(".aliexpress.com")) {
+            return Store.ALIEXPRESS_PLAZA
+        }
+        stores.firstOrNull { it.id == observation.storeId }?.let { return it }
         if (host.isNotBlank()) {
             stores.firstOrNull { store ->
                 val storeHost = store.domain.substringBefore('/').removePrefix("www.").lowercase(Locale.ROOT)

@@ -365,6 +365,31 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun aliExpressSellerAliasesResolveToOneCanonicalMarketplace() {
+        val aliases = listOf(
+            "AliExpress - AliExpress-239640258",
+            "AliExpress - AliExpress-249437169",
+            "retailer_aliexpress_239640258"
+        )
+
+        aliases.forEach { alias ->
+            assertEquals(
+                "All AliExpress marketplace seller aliases should use one canonical store",
+                Store.ALIEXPRESS_PLAZA.id,
+                Store.findByName(alias).id
+            )
+        }
+        assertEquals(
+            Store.ALIEXPRESS_PLAZA.id,
+            Store.findKnownByName("AliExpress - AliExpress-239640258")?.id
+        )
+        assertEquals(
+            Store.ALIEXPRESS_PLAZA.id,
+            Store.findKnownByName("Marketplace", "https://www.aliexpress.com/item/example")?.id
+        )
+    }
+
+    @Test
     fun testSpanishStoresDatabaseIntegrity() {
         val storeEntities = SpanishMarketData.getInitialStoreEntities()
         assertTrue("Store entities should contain at least 30 stores", storeEntities.size >= 30)

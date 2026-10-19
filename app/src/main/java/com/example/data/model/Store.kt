@@ -182,6 +182,17 @@ data class Store(
             val sourceHost = runCatching {
                 URI(sourceUrl).host?.lowercase(Locale.ROOT)?.removePrefix("www.")
             }.getOrNull().orEmpty()
+
+            // Google Shopping can expose distinct seller IDs for the same AliExpress marketplace.
+            // Resolve those labels/domains to one canonical store for browsing and filtering.
+            val isAliExpressAlias = normalizedName == "aliexpress" ||
+                normalizedName.startsWith("aliexpress ") ||
+                normalizedName.startsWith("retailer aliexpress ") ||
+                normalizedName.contains(" aliexpress ")
+            val isAliExpressDomain = sourceHost == "aliexpress.com" ||
+                sourceHost.endsWith(".aliexpress.com")
+            if (isAliExpressAlias || isAliExpressDomain) return ALIEXPRESS_PLAZA
+
             return ALL_STORES.firstOrNull { store ->
                 val storeName = normalizeStoreIdentifier(store.name)
                 val storeId = normalizeStoreIdentifier(store.id.replace('_', ' '))
@@ -209,6 +220,8 @@ data class Store(
          */
         fun findByName(name: String): Store {
             findKnownByName(name)?.let { return it }
+            // Historical rows may keep generated retailer IDs that include the marketplace name.
+            if (normalizeStoreIdentifier(name).contains("aliexpress")) return ALIEXPRESS_PLAZA
 
             // Some repository rows keep a generated ID such as "retailer_anker_com".
             // Recover the domain when possible so a newer known retailer still resolves correctly.

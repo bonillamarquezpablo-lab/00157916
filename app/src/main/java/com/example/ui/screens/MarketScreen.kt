@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -53,6 +54,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Product
@@ -94,7 +96,7 @@ fun MarketScreen(
         item {
             Text(
                 text = "Productos guardados",
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -106,7 +108,7 @@ fun MarketScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .padding(horizontal = 16.dp, vertical = 5.dp)
             ) {
                 OutlinedTextField(
                     value = uiState.searchQuery,
@@ -138,7 +140,7 @@ fun MarketScreen(
                         }
                     },
                     singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
+                    shape = MaterialTheme.shapes.medium,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = MaterialTheme.colorScheme.surface,
                         unfocusedContainerColor = MaterialTheme.colorScheme.surface
@@ -189,8 +191,8 @@ fun MarketScreen(
                             onClick = { onStoreFilterSelect(null) },
                             label = { Text("Todas (${stores.size})", fontSize = 11.sp) },
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color(0xFF047857),
-                                selectedLabelColor = Color.White
+                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary
                             )
                         )
                     }
@@ -212,12 +214,19 @@ fun MarketScreen(
                                             .background(store.brandColor)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text(store.name, fontSize = 11.sp)
+                                    Text(
+                                        text = store.name,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.widthIn(max = 160.dp)
+                                    )
                                 }
                             },
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = store.brandColor.copy(alpha = 0.2f),
-                                selectedLabelColor = MaterialTheme.colorScheme.onSurface
+                                selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer
                             ),
                             modifier = Modifier.testTag("store_chip_${store.id}")
                         )
@@ -511,7 +520,7 @@ fun MarketScreen(
             }
         } else {
             items(products, key = { it.id }) { product ->
-                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp)) {
                     ProductCard(
                         product = product,
                         onClick = { onProductClick(product) },

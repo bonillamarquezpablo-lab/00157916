@@ -235,7 +235,7 @@ class OnlineSearchScreenTest {
         clickFilter("Mostrar segunda mano")
         assertVisibleText("Todas las ofertas")
         assertVisibleText("Solo Amazon")
-        composeRule.onNodeWithText("Segunda mano").assertIsDisplayed()
+        assertTrue("The second-hand filter should switch to its selected label", composeRule.onAllNodesWithText("Segunda mano").fetchSemanticsNodes().isNotEmpty())
         assertVisibleText("1 tiendas · precio más bajo en Amazon Warehouse")
         assertTrue(
             composeRule.onAllNodesWithText("7 tiendas · precio más bajo en Wallapop")

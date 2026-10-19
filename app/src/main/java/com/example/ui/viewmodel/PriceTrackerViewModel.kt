@@ -96,7 +96,7 @@ private val WAYBACK_DIAGNOSTIC_TITLES = listOf(
     "Solicitud iniciada (botón pulsado)",
     "Ficha local y URL principal recuperadas",
     "URL normalizada y destinos candidatos preparados",
-    "Control de cuota, pausa HTTP 429 y caché",
+    "Precontrol de pausa global y preparación de consulta",
     "Petición enviada al índice CDX",
     "Respuesta CDX recibida y clasificada",
     "Fallback: CDX alternativo / Availability API",
@@ -1270,6 +1270,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         )
 
         if (orderedCandidates.isEmpty()) {
+            reportWaybackDiagnostic(
+                product.id, 4, WaybackTraceStatus.SKIPPED,
+                "No se envió ninguna petición porque no se identificó un destino válido."
+            )
             _uiState.value = _uiState.value.copy(
                 isSearchingFreeHistory = false,
                 freeHistoryStatus = "Mínimo no pudo identificar la tienda de esta oferta para buscar capturas gratuitas. No se ha gastado cuota de SerpApi.",
@@ -1279,6 +1283,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             return
         }
 
+        reportWaybackDiagnostic(
+            product.id, 4, WaybackTraceStatus.PASSED,
+            "Precontrol completado: no hay pausa global activa. La consulta puede continuar; caché y límites se comprueban por destino."
+        )
         _uiState.value = _uiState.value.copy(
             isSearchingFreeHistory = true,
             freeHistoryStatus = "Buscando páginas históricas gratuitas; esta consulta no consume cuota de SerpApi.",

@@ -342,12 +342,19 @@ class WaybackPriceHistoryClientTest {
                     request.url.encodedPath == "/wayback/available" -> {
                     val originalUrl = request.url.queryParameter("url")
                         ?: throw AssertionError("Availability request has no product URL")
-                    val snapshotUrl = "https://web.archive.org/web/20250101120000id_/$originalUrl"
-                    val body = """
-                        {"archived_snapshots":{"closest":{
-                          "available":true,"timestamp":"20250101120000","url":"$snapshotUrl"
-                        }}}
-                    """.trimIndent()
+                    val availabilityProbeNumber = requests.count { it == "archive.org/wayback/available" }
+                    // The first candidate has no capture; the second has a valid historical
+                    // snapshot. This protects against stopping after a retailer search URL fails.
+                    val body = if (availabilityProbeNumber == 1) {
+                        """{"archived_snapshots":{"closest":{"available":false}}}"""
+                    } else {
+                        val snapshotUrl = "https://web.archive.org/web/20250101120000id_/$originalUrl"
+                        """
+                            {"archived_snapshots":{"closest":{
+                              "available":true,"timestamp":"20250101120000","url":"$snapshotUrl"
+                            }}}
+                        """.trimIndent()
+                    }
                     Response.Builder()
                         .request(request)
                         .protocol(Protocol.HTTP_1_1)
@@ -383,6 +390,10 @@ class WaybackPriceHistoryClientTest {
             assertTrue(
                 "A CDX_DOMAIN_TIMEOUT must still try the product-specific Availability API",
                 requests.contains("archive.org/wayback/available")
+            )
+            assertTrue(
+                "If the first candidate has no capture, the bounded second candidate must be tried",
+                requests.count { it == "archive.org/wayback/available" } >= 2
             )
             assertTrue("The verified archived EUR price should be recovered", result.quotes.isNotEmpty())
             assertEquals(79.99, result.quotes.single().price, 0.001)

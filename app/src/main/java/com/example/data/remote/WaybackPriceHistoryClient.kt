@@ -597,7 +597,7 @@ class WaybackPriceHistoryClient(
             probeDiagnostics.contains("WAYBACK_RATE_LIMITED") ->
                 "Availability se detuvo al recibir HTTP 429; no se enviaron más consultas."
             captures.isNotEmpty() ->
-                "Availability encontró ${captures.size} captura(s) en ${probes.size} URL(s) probadas; ${failedProbeCount} intento(s) fallido(s). Se conserva el detalle del error sin descartar las capturas válidas."
+                "Availability encontró ${captures.size} captura(s) en ${probes.size} URL(s) probadas; ${failedProbeCount} intento(s) fallido(s): ${probeDiagnostics.joinToString(", ").take(180)}. Se conservan las capturas válidas."
             successfulProbes > 0 ->
                 "Availability respondió correctamente en ${successfulProbes} URL(s), pero no encontró capturas. ${failedProbeCount} intento(s) fallido(s): ${probeDiagnostics.joinToString(", ").take(180)}."
             else ->

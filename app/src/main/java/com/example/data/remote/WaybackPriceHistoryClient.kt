@@ -239,6 +239,10 @@ class WaybackPriceHistoryClient(
                 if (result.requestFailed &&
                     result.diagnosticCodes.contains("CDX_DOMAIN_TIMEOUT")
                 ) {
+                    emitWaybackTrace(
+                        onTrace, 6, WaybackTraceStatus.RUNNING,
+                        "CDX de dominio agotó el tiempo. Se activa la alternativa limitada de Availability API."
+                    )
                     // Reuse the direct retailer URL already present on the offer when it is
                     // safe to query. Domain discovery often guesses slugs incorrectly; probing
                     // the known URL first avoids spending the bounded fallback on an unrelated
@@ -261,7 +265,19 @@ class WaybackPriceHistoryClient(
                             // The shared request gate still serializes/paces these free probes.
                             maxCandidates = MAX_AVAILABILITY_PROBE_CANDIDATES,
                             stage = "DOMAIN_AVAILABILITY_FALLBACK",
-                            probeOlderCapture = false
+                            probeOlderCapture = false,
+                            onTrace = onTrace
+                        )
+                        emitWaybackTrace(
+                            onTrace, 6,
+                            if (fallback.quotes.isNotEmpty() || !fallback.requestFailed) WaybackTraceStatus.PASSED
+                            else WaybackTraceStatus.FAILED,
+                            when {
+                                fallback.quotes.isNotEmpty() -> "Fallback completado: se recuperó un precio verificable."
+                                fallback.capturesFound > 0 -> "Fallback completado: hay capturas; falta verificar precio/producto."
+                                fallback.requestFailed -> "Fallback ejecutado pero falló: ${fallback.diagnosticCodes.joinToString(", ").take(180)}."
+                                else -> "Fallback respondió, pero no encontró capturas utilizables."
+                            }
                         )
                         if (fallback.quotes.isNotEmpty()) {
                             return@serializedArchiveLookup fallback.copy(diagnosticCodes = emptySet())
@@ -493,60 +509,174 @@ class WaybackPriceHistoryClient(
     private suspend fun fetchAndVerifySnapshot(
         capture: WaybackCapture,
         expectedTitle: String,
-        snapshotTimeoutSeconds: Long
+        snapshotTimeoutSeconds: Long,
+        snapshotOrdinal: Int = 1,
+        onTrace: ((WaybackTraceEvent) -> Unit)? = null
     ): SnapshotFetch {
+        val downloadStep = if (snapshotOrdinal <= 1) 8 else 10
+        val evaluateStep = if (snapshotOrdinal <= 1) 9 else 11
+        val snapshotLabel = if (snapshotOrdinal <= 1) "captura 1" else "captura 2"
+        emitWaybackTrace(onTrace, downloadStep, WaybackTraceStatus.RUNNING,
+            "Descarga HTML de la $snapshotLabel iniciada; URL completa omitida.")
         val snapshotUrl = buildSnapshotUrl(capture)
-            ?: return SnapshotFetch(false, null, "SNAPSHOT_URL_INVALID")
-        val request = Request.Builder()
-            .url(snapshotUrl)
-            .header("User-Agent", USER_AGENT)
-            .get()
-            .build()
+        if (snapshotUrl == null) {
+            emitWaybackTrace(onTrace, downloadStep, WaybackTraceStatus.FAILED, "No se pudo construir la URL archivada.")
+            emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.SKIPPED, "No se descargó HTML para evaluar.")
+            skipArchiveValidationTrace(onTrace, "La URL del snapshot no era válida.")
+            return SnapshotFetch(false, null, "SNAPSHOT_URL_INVALID")
+        }
+        val request = Request.Builder().url(snapshotUrl).header("User-Agent", USER_AGENT).get().build()
         val snapshotHttp = http.newBuilder()
             .readTimeout(snapshotTimeoutSeconds, TimeUnit.SECONDS)
             .callTimeout(snapshotTimeoutSeconds, TimeUnit.SECONDS)
             .build()
+        val startedAt = System.nanoTime()
 
         return availabilitySemaphore.withPermit {
             val gate = awaitArchiveRequestTurn()
             if (gate != null) {
+                emitWaybackTrace(onTrace, downloadStep, WaybackTraceStatus.FAILED, "Descarga bloqueada por control de ritmo: $gate.")
+                emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.SKIPPED, "No hubo HTML que evaluar.")
+                skipArchiveValidationTrace(onTrace, "La descarga quedó bloqueada antes de recibir HTML.")
                 return@withPermit SnapshotFetch(false, null, gate)
             }
             try {
                 snapshotHttp.newCall(request).execute().use { response ->
+                    val elapsed = ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(0L)
                     if (response.code == 429) {
                         activateRateLimit(response.header("Retry-After"), System.currentTimeMillis())
+                        emitWaybackTrace(onTrace, downloadStep, WaybackTraceStatus.FAILED, "HTTP 429: Internet Archive pidió frenar las consultas.", elapsed)
+                        emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.FAILED, "El servidor limitó la descarga; no se pudo analizar el HTML.")
+                        skipArchiveValidationTrace(onTrace, "HTTP 429; validación cancelada para respetar el límite.")
                         SnapshotFetch(false, null, "WAYBACK_RATE_LIMITED")
                     } else if (!response.isSuccessful) {
-                        SnapshotFetch(false, null, "SNAPSHOT_HTTP_${response.code}")
+                        val code = "SNAPSHOT_HTTP_${response.code}"
+                        emitWaybackTrace(onTrace, downloadStep, WaybackTraceStatus.FAILED, "La descarga respondió $code.", elapsed)
+                        emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.FAILED, "No se recibió una página HTML utilizable.")
+                        skipArchiveValidationTrace(onTrace, "La descarga devolvió un código HTTP no satisfactorio.")
+                        SnapshotFetch(false, null, code)
                     } else {
                         val html = readBodyLimited(response.body, MAX_SNAPSHOT_BODY_BYTES)
                         if (html == null) {
+                            emitWaybackTrace(onTrace, downloadStep, WaybackTraceStatus.FAILED, "HTTP ${response.code}; contenido vacío o por encima del límite permitido.", elapsed)
+                            emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.FAILED, "No se pudo evaluar el HTML descargado.")
+                            skipArchiveValidationTrace(onTrace, "El cuerpo HTML estaba vacío o superaba el límite seguro.")
                             SnapshotFetch(false, null, "SNAPSHOT_BODY_EMPTY_OR_LIMIT")
                         } else {
-                            val quote = parseArchivedPrice(
-                                html = html,
-                                expectedTitle = expectedTitle,
-                                originalUrl = capture.originalUrl,
-                                snapshotUrl = snapshotUrl,
-                                observedAt = capture.timestamp
-                            )
-                            SnapshotFetch(
-                                fetched = true,
-                                quote = quote,
-                                diagnosticCode = if (quote == null) {
-                                    diagnoseArchivedPrice(html, expectedTitle)
-                                } else null
-                            )
+                            emitWaybackTrace(onTrace, downloadStep, WaybackTraceStatus.PASSED, "HTTP ${response.code}; HTML recibido (${html.length} caracteres, contenido no registrado).", elapsed)
+                            val barrier = detectArchivedHtmlBarrier(html)
+                            if (barrier != null) {
+                                emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.FAILED, "La captura parece bloqueada: $barrier.")
+                                skipArchiveValidationTrace(onTrace, "Se detectó una barrera; no se intentó validar título ni precio.")
+                                SnapshotFetch(true, null, barrier)
+                            } else {
+                                emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.PASSED, "HTML recibido y sin marcadores comunes de cookies, CAPTCHA o bloqueo.")
+                                val quote = parseArchivedPrice(
+                                    html = html,
+                                    expectedTitle = expectedTitle,
+                                    originalUrl = capture.originalUrl,
+                                    snapshotUrl = snapshotUrl,
+                                    observedAt = capture.timestamp
+                                )
+                                reportArchiveFieldTrace(onTrace, html, expectedTitle, quote)
+                                SnapshotFetch(
+                                    fetched = true,
+                                    quote = quote,
+                                    diagnosticCode = if (quote == null) diagnoseArchivedPrice(html, expectedTitle) else null
+                                )
+                            }
                         }
                     }
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
-                SnapshotFetch(false, null, classifyNetworkFailure("SNAPSHOT", failure))
+                val code = classifyNetworkFailure("SNAPSHOT", failure)
+                val elapsed = ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(0L)
+                emitWaybackTrace(onTrace, downloadStep, WaybackTraceStatus.FAILED, "Descarga fallida: $code.", elapsed)
+                emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.FAILED, "No fue posible evaluar el HTML.")
+                skipArchiveValidationTrace(onTrace, "La descarga terminó con error de red.")
+                SnapshotFetch(false, null, code)
             }
         }
+    }
+
+    private fun detectArchivedHtmlBarrier(html: String): String? {
+        val head = html.take(160_000).lowercase(Locale.ROOT)
+        return when {
+            "cf-chl-" in head || "cloudflare ray id" in head || "checking your browser" in head ->
+                "CLOUDFLARE_CHALLENGE"
+            "captcha" in head || "verify you are human" in head || "prove you are human" in head ||
+                "robot check" in head -> "CAPTCHA_OR_ROBOT_CHECK"
+            "access denied" in head || "request blocked" in head || "temporarily blocked" in head ->
+                "ACCESS_DENIED_OR_BLOCKED"
+            Regex("""(?is)<title[^>]*>\\s*(404|page not found|página no encontrada|not found)\\b""")
+                .containsMatchIn(head) -> "ARCHIVED_PAGE_404"
+            else -> null
+        }
+    }
+
+    private fun reportArchiveFieldTrace(
+        onTrace: ((WaybackTraceEvent) -> Unit)?,
+        html: String,
+        expectedTitle: String,
+        quote: ArchivedPriceQuote?
+    ) {
+        val jsonLd = extractJsonLdProductOffers(html)
+        val pageTitle = readMeta(html, setOf("og:title"))
+            ?: readMeta(html, setOf("twitter:title"))
+            ?: Regex("""(?is)<title[^>]*>(.*?)</title>""").find(html)?.groupValues?.getOrNull(1)?.let(::decodeHtml)
+        val titles = (jsonLd.map { it.first } + listOfNotNull(pageTitle)).filter { it.isNotBlank() }
+        val titleMatches = titles.any { isMatchingProductTitle(expectedTitle, it) }
+        emitWaybackTrace(
+            onTrace, 12,
+            if (titles.isEmpty()) WaybackTraceStatus.FAILED
+            else if (titleMatches) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
+            when {
+                titles.isEmpty() -> "No se encontró título en JSON-LD, og:title, twitter:title ni <title>."
+                titleMatches -> "Título/modelo de la página coincide con el producto seleccionado."
+                else -> "Se encontró título, pero no coincide con el producto o su variante."
+            }
+        )
+
+        val metaPrice = listOf("product:price:amount", "og:price:amount", "price", "product:price")
+            .firstNotNullOfOrNull { key -> readMeta(html, setOf(key))?.let(::parsePositivePrice) }
+        val metaCurrency = listOf("product:price:currency", "og:price:currency", "pricecurrency")
+            .firstNotNullOfOrNull { key -> readMeta(html, setOf(key)) }?.uppercase(Locale.ROOT)
+        val hasPriceCandidate = jsonLd.isNotEmpty() || metaPrice != null
+        emitWaybackTrace(
+            onTrace, 13,
+            if (hasPriceCandidate) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
+            when {
+                jsonLd.isNotEmpty() -> "Precio detectado en metadatos JSON-LD (${jsonLd.size} oferta(s))."
+                metaPrice != null -> "Precio numérico detectado en metadatos de la página."
+                else -> "No se encontró precio numérico en JSON-LD ni metadatos compatibles."
+            }
+        )
+        val prices = jsonLd.map { it.second } + listOfNotNull(metaPrice)
+        val numericValid = prices.any { it.isFinite() && it in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE }
+        val euroValid = jsonLd.any { it.third.equals("EUR", ignoreCase = true) } ||
+            (metaPrice != null && metaCurrency.equals("EUR", ignoreCase = true))
+        val valid = numericValid && euroValid
+        emitWaybackTrace(
+            onTrace, 14,
+            if (valid) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
+            when {
+                valid && quote != null -> "Precio validado: moneda EUR y rango permitido; identidad aceptada."
+                valid -> "Importe EUR válido, pero otro filtro impidió aceptarlo (revisa el paso 12)."
+                !numericValid -> "No hay importe numérico positivo dentro del rango permitido."
+                else -> "Se detectó un importe, pero no se confirmó la moneda EUR."
+            }
+        )
+    }
+
+    private fun skipArchiveValidationTrace(
+        onTrace: ((WaybackTraceEvent) -> Unit)?,
+        detail: String
+    ) {
+        emitWaybackTrace(onTrace, 12, WaybackTraceStatus.SKIPPED, detail)
+        emitWaybackTrace(onTrace, 13, WaybackTraceStatus.SKIPPED, detail)
+        emitWaybackTrace(onTrace, 14, WaybackTraceStatus.SKIPPED, detail)
     }
 
     private fun diagnoseArchivedPrice(html: String, expectedTitle: String): String {

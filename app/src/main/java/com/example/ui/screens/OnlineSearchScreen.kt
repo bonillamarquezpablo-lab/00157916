@@ -85,14 +85,17 @@ internal fun buildOnlineSearchDisplayGroups(
     results: List<SerpApiShoppingResult>,
     query: String,
     showSecondHand: Boolean,
-    amazonOnly: Boolean
+    amazonOnly: Boolean,
+    showAccessories: Boolean = false
 ): List<OnlineSearchDisplayGroup> {
     val filtered = results.filter { result ->
         (showSecondHand || !result.isSecondHand) &&
             (!amazonOnly || result.isAmazonOffer)
     }
     val treatAccessoriesSeparately = !isAccessorySearchQuery(query)
-    val accessories = if (treatAccessoriesSeparately) {
+    // Accessory matches stay in the raw snapshot but are hidden from main results by default.
+    // Users can reveal them explicitly; a cheap case must not masquerade as the requested device.
+    val accessories = if (treatAccessoriesSeparately && showAccessories) {
         filtered.filter { it.isAccessoryOffer }
     } else {
         emptyList()
@@ -162,6 +165,24 @@ fun OnlineSearchScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val showAccessoryResults = remember(state.onlineSearchQuery, state.onlineSearchProvider) {
+        androidx.compose.runtime.mutableStateOf(false)
+    }
+    val showStatusDetails = remember(state.onlineSearchQuery, state.onlineSearchProvider) {
+        androidx.compose.runtime.mutableStateOf(false)
+    }
+    val accessoryResultCount = remember(
+        state.onlineSearchResults,
+        state.onlineSearchQuery,
+        state.onlineSearchShowSecondHand,
+        state.onlineSearchAmazonOnly
+    ) {
+        if (isAccessorySearchQuery(state.onlineSearchQuery)) 0 else state.onlineSearchResults.count { offer ->
+            offer.isAccessoryOffer &&
+                (state.onlineSearchShowSecondHand || !offer.isSecondHand) &&
+                (!state.onlineSearchAmazonOnly || offer.isAmazonOffer)
+        }
+    }
     // Grouping and sorting can be CPU-heavy on a tablet. Do the work off the UI thread,
     // and build only the currently requested view (all sellers or Amazon-only). Building both
     // lists for every search doubled CPU work and allocations even when one list was never shown.
@@ -170,14 +191,16 @@ fun OnlineSearchScreen(
         state.onlineSearchResults,
         state.onlineSearchQuery,
         state.onlineSearchShowSecondHand,
-        state.onlineSearchAmazonOnly
+        state.onlineSearchAmazonOnly,
+        showAccessoryResults.value
     ) {
         value = withContext(Dispatchers.Default) {
             buildOnlineSearchDisplayGroups(
                 results = state.onlineSearchResults,
                 query = state.onlineSearchQuery,
                 showSecondHand = state.onlineSearchShowSecondHand,
-                amazonOnly = state.onlineSearchAmazonOnly
+                amazonOnly = state.onlineSearchAmazonOnly,
+                showAccessories = showAccessoryResults.value
             )
         }
     }
@@ -274,16 +297,17 @@ fun OnlineSearchScreen(
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
             ) {
-                Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(25.dp))
-                        Spacer(Modifier.width(9.dp))
-                        Text("Buscador online", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
-                    }
-                    Text("Consulta Google Shopping o Amazon.es. Las ofertas aceptadas se guardan en Mercado; los precios se verifican en la tienda.")
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Google Shopping y Amazon.es · ofertas públicas; confirma el precio final en la tienda.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
                     OutlinedTextField(
                         value = state.onlineSearchQuery,
                         onValueChange = onQueryChange,
@@ -291,7 +315,7 @@ fun OnlineSearchScreen(
                         label = { Text("¿Qué producto buscas?") },
                         placeholder = { Text("Ej. teclado Hall, Volkswagen Polo 9N3, Anker Prime") },
                         singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(12.dp),
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { onSearch() })
@@ -336,7 +360,7 @@ fun OnlineSearchScreen(
                             ) {
                                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(5.dp))
-                                Text("Actualizar resultados ahora (puede consumir cuota)", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("Actualizar · puede consumir cuota", maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         } else {
                             Spacer(Modifier.weight(1f))
@@ -349,9 +373,11 @@ fun OnlineSearchScreen(
                         }
                     }
                     Text(
-                        "Se consulta el catálogo público, no tus cupones ni precios personalizados de Prime.",
+                        "Catálogo público; no incluye cupones ni precios personalizados de Prime.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     TextButton(
                         onClick = { openAmazonSearch(context, state.onlineSearchQuery) },
@@ -370,17 +396,34 @@ fun OnlineSearchScreen(
         }
         state.onlineSearchStatus?.let { status ->
             item {
+                // Older status snapshots can contain literal "\n" text. Normalize them for display.
+                val readableStatus = status.replace("\\n", "\n")
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                 ) {
-                    Text(
-                        status,
-                        modifier = Modifier.padding(12.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Column(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            readableStatus,
+                            modifier = Modifier.fillMaxWidth(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = if (showStatusDetails.value) 20 else 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (readableStatus.length > 110 || readableStatus.contains('\n')) {
+                            TextButton(
+                                onClick = { showStatusDetails.value = !showStatusDetails.value },
+                                contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp)
+                            ) {
+                                Text(if (showStatusDetails.value) "Ocultar detalles" else "Detalles de búsqueda")
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -452,12 +495,27 @@ fun OnlineSearchScreen(
                                 label = { Text("Solo Amazon") }
                             )
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             FilterChip(
                                 selected = state.onlineSearchShowSecondHand,
                                 onClick = { onShowSecondHandChange(!state.onlineSearchShowSecondHand) },
                                 label = { Text("Mostrar segunda mano") }
                             )
+                            if (accessoryResultCount > 0) {
+                                FilterChip(
+                                    selected = showAccessoryResults.value,
+                                    onClick = { showAccessoryResults.value = !showAccessoryResults.value },
+                                    label = {
+                                        Text(
+                                            if (showAccessoryResults.value) "Ocultar accesorios"
+                                            else "Mostrar accesorios ($accessoryResultCount)"
+                                        )
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -548,6 +606,8 @@ fun OnlineSearchScreen(
                         Text(
                             if (selectedStoreKey.value != null)
                                 "No hay ofertas de esa tienda para esta versión en los resultados devueltos por el proveedor. Selecciona «Todas las tiendas» para quitar el filtro. Mínimo no inventa precios."
+                            else if (accessoryResultCount > 0 && !showAccessoryResults.value)
+                                "No se ha identificado el producto principal. Solo hay accesorios relacionados; usa «Mostrar accesorios» para revisarlos sin confundirlos con el artículo buscado."
                             else if (state.onlineSearchProvider == OnlineSearchProvider.AMAZON)
                                 "Amazon.es no ha devuelto productos con precio en euros para esta búsqueda."
                             else

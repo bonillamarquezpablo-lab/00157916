@@ -2185,20 +2185,26 @@ class WaybackPriceHistoryClient(
      */
     private fun readItemPropValue(html: String, name: String): String? {
         val wanted = name.lowercase(Locale.ROOT)
-        val elements = Regex("""(?is)<([a-z][a-z0-9:-]*)\b([^>]*)>(.*?)</\1\s*>""")
+        val openingTags = Regex("""(?is)<([a-z][a-z0-9:-]*)\b([^>]*)>""")
         val attributeRegex = Regex("""(?is)([a-z_:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""")
-        for (match in elements.findAll(html)) {
+        val voidTags = setOf("meta", "input", "img", "br", "hr", "link", "source", "area", "embed", "track", "wbr")
+        for (match in openingTags.findAll(html)) {
+            val tagName = match.groupValues[1].lowercase(Locale.ROOT)
             val attributes = attributeRegex.findAll(match.groupValues[2]).associate { attr ->
                 val raw = attr.groups[2]?.value ?: attr.groups[3]?.value ?: attr.groups[4]?.value.orEmpty()
                 attr.groupValues[1].lowercase(Locale.ROOT) to decodeHtml(raw).trim()
             }
-            val itemProp = attributes["itemprop"]?.lowercase(Locale.ROOT)
-            if (itemProp != wanted) continue
+            if (attributes["itemprop"]?.lowercase(Locale.ROOT) != wanted) continue
             val explicit = sequenceOf("content", "value", "data-price", "data-value")
                 .mapNotNull { attributes[it] }
                 .firstOrNull { it.isNotBlank() }
             if (explicit != null) return explicit
-            val text = decodeHtml(Regex("""(?is)<[^>]+>""").replace(match.groupValues[3], " "))
+            if (tagName in voidTags) continue
+            val contentStart = match.range.last + 1
+            val closingTag = Regex("</" + Regex.escape(tagName) + """\s*>""", RegexOption.IGNORE_CASE)
+                .find(html, contentStart) ?: continue
+            val innerHtml = html.substring(contentStart, closingTag.range.first)
+            val text = decodeHtml(Regex("""(?is)<[^>]+>""").replace(innerHtml, " "))
                 .replace(Regex("""\s+"""), " ")
                 .trim()
             if (text.isNotBlank() && text.length <= 120) return text

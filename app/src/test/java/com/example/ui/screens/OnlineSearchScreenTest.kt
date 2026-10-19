@@ -7,6 +7,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
@@ -209,11 +210,12 @@ class OnlineSearchScreenTest {
         }
         fun clickFilter(text: String) {
             if (text.contains("accesorios", ignoreCase = true)) {
-                composeRule.onNodeWithTag("filter-second-hand-row").performScrollTo()
+                searchList.performScrollToNode(hasTestTag("filter-second-hand-row"))
+                composeRule.onNodeWithText(text).performScrollTo().performClick()
             } else {
                 searchList.performScrollToNode(hasText(text))
+                composeRule.onNodeWithText(text).performClick()
             }
-            composeRule.onNodeWithText(text).performClick()
         }
 
         // OFF + Todos: new shops and Amazon remain; Wallapop and Warehouse are hidden.
@@ -238,7 +240,7 @@ class OnlineSearchScreenTest {
         )
 
         // ON + Solo Amazon: Amazon Warehouse is appended as a separate labelled card.
-        composeRule.onNodeWithTag("filter-second-hand-row").performScrollTo()
+        searchList.performScrollToNode(hasTestTag("filter-second-hand-row"))
         composeRule.onNodeWithTag("filter-second-hand").performScrollTo().performClick()
         composeRule.onNodeWithTag("filter-second-hand").assertIsSelected()
         assertVisibleText("Todas las ofertas")

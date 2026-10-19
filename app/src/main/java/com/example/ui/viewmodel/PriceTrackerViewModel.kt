@@ -53,6 +53,33 @@ import java.util.Date
 
 enum class OnlineSearchProvider { GOOGLE_SHOPPING, AMAZON }
 
+/**
+ * Refine only two known ambiguous catalogue searches. This remains one provider request and keeps
+ * the original text as the relevance key so the broader wording does not over-filter result titles.
+ */
+internal fun optimizedOnlineShoppingQuery(query: String, provider: OnlineSearchProvider): String {
+    if (provider != OnlineSearchProvider.GOOGLE_SHOPPING) return query
+    val normalized = Normalizer.normalize(query.trim().lowercase(Locale.ROOT), Normalizer.Form.NFD)
+        .replace(Regex("\\p{Mn}+"), "")
+        .replace(Regex("[^a-z0-9]+"), " ")
+        .trim()
+        .replace(Regex("\\s+"), " ")
+    return when (normalized) {
+        "shimano" -> "Shimano bicycle components cycling"
+        "anker prime" -> "Anker Prime power bank"
+        else -> query
+    }
+}
+
+private fun onlineSearchQueryOptimizationNotice(query: String, provider: OnlineSearchProvider): String =
+    when (optimizedOnlineShoppingQuery(query, provider)) {
+        "Shimano bicycle components cycling" ->
+            "Búsqueda afinada a componentes de ciclismo en una sola consulta; no añade gasto de cuota."
+        "Anker Prime power bank" ->
+            "Búsqueda afinada a baterías Anker Prime en una sola consulta; no añade gasto de cuota."
+        else -> ""
+    }
+
 enum class SerpApiActionType { UPDATE_TRACKED, COMPARE_STORES }
 
 data class WaybackDiagnosticEntry(
@@ -1262,6 +1289,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             return
         }
 
+        val providerQuery = optimizedOnlineShoppingQuery(query, provider)
+        // Include the tuned wording in the local cache identity so older broad-query snapshots
+        // don't hide improved results. This is still one search, not an extra provider call.
+        val cacheQuery = if (providerQuery == query) query else "$query|$providerQuery"
+        val queryOptimizationNotice = onlineSearchQueryOptimizationNotice(query, provider)
+
         val searchingMessage = when (provider) {
             OnlineSearchProvider.AMAZON -> "Consultando resultados públicos de Amazon.es…"
             OnlineSearchProvider.GOOGLE_SHOPPING -> "Buscando ofertas en Google Shopping España…"
@@ -1285,7 +1318,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     // Cache lookup comes first: saved results remain usable even if the quota is empty
                     // or the API key was removed after the previous search.
                     val cached = if (bypassCache) null else withContext(Dispatchers.IO) {
-                        onlineSearchCache.read(searchCacheProviderKey(provider), query)
+                        onlineSearchCache.read(searchCacheProviderKey(provider), cacheQuery)
                     }
                     if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
                     if (cached != null && (cached.rawResponse != null || cached.results.isNotEmpty())) {
@@ -1336,7 +1369,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             onlineHistoryNotice(savedObservations, safeCachedResults.size)
                         } else ""
                         val filterNotice = onlineFilterNotice(cachedDiscarded)
-                        val status = listOf(base, cacheNotice, filterNotice, historyNotice)
+                        val status = listOf(base, queryOptimizationNotice, cacheNotice, filterNotice, historyNotice)
                             .map { it.trim() }
                             .filter { it.isNotBlank() }
                             .joinToString("\n\n")
@@ -1399,7 +1432,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
                     val providerReport = when (provider) {
                         OnlineSearchProvider.GOOGLE_SHOPPING ->
-                            serpApiClient.searchOnlineWithDiagnostics(token, query)
+                            serpApiClient.searchOnlineWithDiagnostics(token, providerQuery, relevanceQuery = query)
                         OnlineSearchProvider.AMAZON ->
                             serpApiClient.searchAmazonOnlineWithDiagnostics(token, query)
                     }
@@ -1470,7 +1503,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     // the primary raw response so accepted/rejected offers can be reclassified.
                     if (gameSupplementSucceeded) {
                         withContext(Dispatchers.IO) {
-                            onlineSearchCache.write(searchCacheProviderKey(provider), query, providerResults)
+                            onlineSearchCache.write(searchCacheProviderKey(provider), cacheQuery, providerResults)
                         }
                     } else if (!gameSupplementRequired) {
                         // Ordinary non-gaming searches and broad searches that already returned GAME
@@ -1479,7 +1512,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             withContext(Dispatchers.IO) {
                                 onlineSearchCache.writeRaw(
                                     searchCacheProviderKey(provider),
-                                    query,
+                                    cacheQuery,
                                     rawResponse
                                 )
                             }
@@ -1502,7 +1535,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         // general-only cache for 24 hours and never retry the missing retailer.
                         if (!bypassCache) {
                             withContext(Dispatchers.IO) {
-                                onlineSearchCache.invalidate(searchCacheProviderKey(provider), query)
+                                onlineSearchCache.invalidate(searchCacheProviderKey(provider), cacheQuery)
                             }
                         }
                     }
@@ -1534,10 +1567,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     val historyNote = if (results.isNotEmpty()) {
                         onlineHistoryNotice(savedObservations, results.size)
                     } else ""
-                    val message = listOf(base, coverageNote, quotaNote, gameSupplementNote, filterNote, historyNote)
+                    val message = listOf(base, queryOptimizationNotice, coverageNote, quotaNote, gameSupplementNote, filterNote, historyNote)
                         .map { it.trim() }
                         .filter { it.isNotBlank() }
-                        .joinToString("\\n\\n")
+                        .joinToString("\n\n")
                     if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
                     lastDisplayedSearchIdentity = onlineSearchIdentity(provider, query)
                     _uiState.value = _uiState.value.copy(

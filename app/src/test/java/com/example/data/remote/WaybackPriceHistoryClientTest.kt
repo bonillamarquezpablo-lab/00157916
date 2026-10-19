@@ -20,6 +20,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import com.example.ui.viewmodel.mergeWaybackDiagnosticStatus
+import com.example.ui.viewmodel.isSupersededWaybackSkipDetail
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -54,6 +55,24 @@ class WaybackPriceHistoryClientTest {
             "A later successful attempt may recover a previously failed stage",
             WaybackTraceStatus.PASSED,
             mergeWaybackDiagnosticStatus(WaybackTraceStatus.FAILED, WaybackTraceStatus.PASSED)
+        )
+        assertTrue(
+            "A CDX-only skip message must disappear once Availability downloads that capture",
+            isSupersededWaybackSkipDetail(
+                "[00:40:02] No se pudo iniciar la descarga de la captura 1 porque el índice CDX no respondió correctamente."
+            )
+        )
+        assertTrue(
+            "A stale extraction skip must be removed after another route extracts captures",
+            isSupersededWaybackSkipDetail(
+                "[00:40:02] Extracción no ejecutada: CDX no entregó una respuesta utilizable."
+            )
+        )
+        assertFalse(
+            "A real product-identity mismatch must remain visible",
+            isSupersededWaybackSkipDetail(
+                "[00:40:07] No coincide la identidad del producto: el título archivado pertenece a otra variante."
+            )
         )
     }
 

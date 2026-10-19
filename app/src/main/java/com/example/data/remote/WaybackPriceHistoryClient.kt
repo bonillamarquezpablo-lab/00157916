@@ -2108,8 +2108,13 @@ class WaybackPriceHistoryClient(
             is JSONObject -> {
                 val name = value.optString("name").takeIf { it.isNotBlank() && it != "null" }
                 val offers = value.opt("offers")
+                val productCurrency = value.optString("priceCurrency")
+                    .takeIf { it.isNotBlank() && it != "null" }
+                    ?: value.optJSONObject("priceSpecification")?.optString("priceCurrency")
+                        ?.takeIf { it.isNotBlank() && it != "null" }
+                    .orEmpty()
                 if (!name.isNullOrBlank() && offers != null) {
-                    collectOfferPrices(offers).forEach { (price, currency) ->
+                    collectOfferPrices(offers, productCurrency).forEach { (price, currency) ->
                         out += Triple(name, price, currency)
                     }
                 }
@@ -2123,15 +2128,17 @@ class WaybackPriceHistoryClient(
         }
     }
 
-    private fun collectOfferPrices(value: Any?): List<Pair<Double, String>> {
+    private fun collectOfferPrices(value: Any?, inheritedCurrency: String = ""): List<Pair<Double, String>> {
         val found = mutableListOf<Pair<Double, String>>()
-        fun visit(node: Any?) {
+        fun visit(node: Any?, parentCurrency: String) {
             when (node) {
                 is JSONObject -> {
                     val specification = node.optJSONObject("priceSpecification")
-                    val currency = node.optString("priceCurrency")
+                    val localCurrency = node.optString("priceCurrency")
                         .takeIf { it.isNotBlank() && it != "null" }
-                        ?: specification?.optString("priceCurrency").orEmpty()
+                        ?: specification?.optString("priceCurrency")
+                            ?.takeIf { it.isNotBlank() && it != "null" }
+                    val currency = localCurrency ?: parentCurrency
                     // Product pages often expose a ProductGroup/AggregateOffer with lowPrice
                     // instead of a single Offer.price. Use the explicit aggregate minimum only
                     // when a normal price is absent; the product-title, EUR and range checks still
@@ -2145,30 +2152,81 @@ class WaybackPriceHistoryClient(
                     val keys = node.keys()
                     while (keys.hasNext()) {
                         val key = keys.next()
-                        if (key !in setOf("price", "priceCurrency", "priceSpecification")) visit(node.opt(key))
+                        if (key !in setOf("price", "priceCurrency", "priceSpecification")) visit(node.opt(key), currency)
                     }
                 }
-                is JSONArray -> for (i in 0 until node.length()) visit(node.opt(i))
+                is JSONArray -> for (i in 0 until node.length()) visit(node.opt(i), parentCurrency)
             }
         }
-        visit(value)
+        visit(value, inheritedCurrency.uppercase(Locale.ROOT))
         return found
     }
 
     private fun extractArchivedPageTitles(html: String): List<String> {
-        val titles = listOfNotNull(
-            readMeta(html, setOf("og:title")),
-            readMeta(html, setOf("twitter:title")),
-            readMeta(html, setOf("title")),
-            readMeta(html, setOf("headline")),
-            Regex("""(?is)<title[^>]*>(.*?)</title>""")
-                .find(html)?.groupValues?.getOrNull(1)?.let(::decodeHtml)
-        )
+        val titles = buildList {
+            addAll(listOfNotNull(
+                readMeta(html, setOf("og:title")),
+                readMeta(html, setOf("twitter:title")),
+                readMeta(html, setOf("title")),
+                readMeta(html, setOf("headline")),
+                readItemPropValue(html, "name"),
+                readItemPropValue(html, "headline"),
+                Regex("""(?is)<title[^>]*>(.*?)</title>""")
+                    .find(html)?.groupValues?.getOrNull(1)?.let(::decodeHtml)
+            ))
+            addAll(extractHtmlProductTitleCandidates(html))
+        }
         return titles.asSequence()
-            .map { decodeHtml(it).trim() }
-            .filter { it.isNotBlank() }
+            .map { decodeHtml(it).replace(Regex("""\\s+"""), " ").trim() }
+            .filter { it.length in 3..180 }
             .distinctBy(::normalizeTitle)
+            .take(16)
             .toList()
+    }
+
+    /**
+     * Recover visible product headings and common product-title elements when old pages do not
+     * expose Open Graph or JSON-LD titles. The result is only a candidate: identity and variant
+     * checks still decide whether any captured price can be saved.
+     */
+    private fun extractHtmlProductTitleCandidates(html: String): List<String> {
+        val output = mutableListOf<String>()
+        val openingTags = Regex("""(?is)<([a-z][a-z0-9:-]*)\\b([^>]*)>""")
+        val attributeRegex = Regex("""(?is)([a-z_:.-]+)\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))""")
+        val voidTags = setOf("meta", "input", "img", "br", "hr", "link", "source", "area", "embed", "track", "wbr")
+        val productSelector = Regex("""(?i)(product[-_ ]?(?:title|name)|producttitle|productname|pdp[-_ ]?title|itemprop.*(?:name|headline))""")
+        val opening = openingTags.findAll(html)
+        for (match in opening) {
+            if (output.size >= 12) break
+            val tagName = match.groupValues[1].lowercase(Locale.ROOT)
+            val attrs = attributeRegex.findAll(match.groupValues[2]).associate { attr ->
+                val raw = attr.groups[2]?.value ?: attr.groups[3]?.value ?: attr.groups[4]?.value.orEmpty()
+                attr.groupValues[1].lowercase(Locale.ROOT) to decodeHtml(raw).trim()
+            }
+            val itemProps = attrs["itemprop"].orEmpty().lowercase(Locale.ROOT).split(Regex("""\\s+"""))
+            val selectorText = listOf("class", "id", "data-testid", "data-test", "data-qa")
+                .mapNotNull { attrs[it] }
+                .joinToString(" ")
+            val isTitleElement = tagName in setOf("h1", "h2", "h3") ||
+                itemProps.any { it in setOf("name", "headline") } ||
+                productSelector.containsMatchIn(selectorText)
+            if (!isTitleElement || tagName in voidTags) {
+                sequenceOf("data-product-title", "data-product-name")
+                    .mapNotNull { attrs[it] }
+                    .firstOrNull { it.length in 3..180 }
+                    ?.let(output::add)
+                continue
+            }
+            val contentStart = match.range.last + 1
+            val close = Regex("</" + Regex.escape(tagName) + """\\s*>""", RegexOption.IGNORE_CASE)
+                .find(html, contentStart) ?: continue
+            var inner = html.substring(contentStart, close.range.first)
+            inner = Regex("""(?is)<(script|style|noscript)\\b[^>]*>.*?</\\1\\s*>""").replace(inner, " ")
+            val text = decodeHtml(Regex("""(?is)<[^>]+>""").replace(inner, " "))
+                .replace(Regex("""\\s+"""), " ").trim()
+            if (text.length in 3..180) output += text
+        }
+        return output.distinctBy(::normalizeTitle)
     }
 
     private fun readMeta(html: String, names: Set<String>): String? {

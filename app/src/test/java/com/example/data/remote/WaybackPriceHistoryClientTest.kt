@@ -1580,6 +1580,35 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun parsesProductAndOfferLinkedByIdInsideJsonLdGraph() {
+        val client = newClient()
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head>
+                <script type="application/ld+json">
+                {
+                  "@context":"https://schema.org",
+                  "@graph":[
+                    {"@type":"Product","@id":"https://shop.example/items/scooter#product",
+                     "name":"Xiaomi Electric Scooter 4 Ultra Black"},
+                    {"@type":"Offer","itemOffered":{"@id":"https://shop.example/items/scooter#product"},
+                     "price":"449.99","priceCurrency":"EUR"}
+                  ]
+                }
+                </script></head></html>
+            """.trimIndent(),
+            expectedTitle = "Xiaomi Mi Electric Scooter 4 Ultra Black",
+            originalUrl = "https://shop.example/items/scooter",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/items/scooter",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("A product linked to a separate Offer in JSON-LD @graph should be recognized", quote)
+        assertEquals(449.99, quote!!.price, 0.001)
+        assertEquals("EUR", quote.currency)
+    }
+
+    @Test
     fun inheritsEurCurrencyFromProductWhenJsonLdOfferOmitsCurrency() {
         val client = newClient()
         val quote = client.parseArchivedPrice(

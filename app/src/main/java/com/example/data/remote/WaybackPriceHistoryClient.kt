@@ -672,12 +672,15 @@ class WaybackPriceHistoryClient(
             onTrace, 7,
             when {
                 captures.isNotEmpty() -> WaybackTraceStatus.PASSED
+                probeDiagnostics.contains("WAYBACK_RATE_LIMITED") -> WaybackTraceStatus.SKIPPED
                 successfulProbes > 0 -> WaybackTraceStatus.SKIPPED
                 else -> WaybackTraceStatus.FAILED
             },
             when {
                 captures.isNotEmpty() ->
                     "Fechas Availability validadas: ${captures.size} captura(s) dentro de los últimos ${lookbackDays.coerceAtLeast(1)} días; ${outsideWindowCount} descartada(s) fuera del intervalo."
+                probeDiagnostics.contains("WAYBACK_RATE_LIMITED") ->
+                    "Validación de fechas omitida por HTTP 429: se respeta la pausa global; no se interpreta como ausencia de capturas."
                 successfulProbes > 0 ->
                     "No había fechas de capturas para validar; la API respondió sin capturas disponibles."
                 else ->

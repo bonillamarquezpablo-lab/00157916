@@ -8,6 +8,7 @@ import com.example.data.local.AppDatabase
 import com.example.data.remote.OnlineSearchCache
 import com.example.data.remote.OnlineSearchQuotaGuard
 import com.example.data.remote.WaybackPriceHistoryClient
+import com.example.data.remote.diagnosticIndexForWaybackTrace
 import com.example.data.remote.summarizeCdxStep5Events
 import com.example.data.remote.WaybackTraceEvent
 import com.example.data.remote.WaybackTraceStatus
@@ -93,12 +94,15 @@ data class WaybackDiagnosticEntry(
 
 private val WAYBACK_DIAGNOSTIC_TITLES = listOf(
     "Solicitud iniciada (botón pulsado)",
-    "URL principal recuperada de la ficha local",
+    "Ficha local y URL principal recuperadas",
     "URL normalizada y destinos candidatos preparados",
+    "Control de cuota, pausa HTTP 429 y caché",
     "Petición enviada al índice CDX",
     "Respuesta CDX recibida y clasificada",
-    "Fallback 1: CDX alternativo / Availability API",
-    "Extracción de capturas candidatas",
+    "Fallback: CDX alternativo / Availability API",
+    "Extracción de filas de capturas del índice",
+    "Normalización y deduplicación de URL candidatas",
+    "Validación de fechas y período histórico",
     "Descarga del HTML de la captura 1",
     "Evaluación de barreras del HTML 1",
     "Descarga del HTML de la captura 2",
@@ -106,7 +110,9 @@ private val WAYBACK_DIAGNOSTIC_TITLES = listOf(
     "Verificación del título e identidad del producto",
     "Extracción del precio",
     "Validación del importe y moneda EUR",
-    "Guardado local y actualización de la ficha/gráfica"
+    "Consolidación de precios y eliminación de duplicados",
+    "Guardado del histórico en la base de datos local",
+    "Actualización de la ficha/gráfica y resultado final"
 )
 
 data class SerpApiActionConfirmation(
@@ -255,6 +261,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             product.id, 3, WaybackTraceStatus.RUNNING,
             "Preparando destinos de tienda y eliminando intermediarios o redirecciones cuando se puede."
         )
+        reportWaybackDiagnostic(
+            product.id, 4, WaybackTraceStatus.RUNNING,
+            "Comprobando configuración, caché y pausa global antes de solicitar datos al archivo."
+        )
     }
 
     private fun reportWaybackDiagnostic(
@@ -264,7 +274,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         detail: String,
         durationMs: Long? = null
     ) {
-        if (step !in 1..15) return
+        if (step !in 1..20) return
         val time = SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(Date())
         val detailLine = "[$time] " + detail.trim() + (durationMs?.let { " · ${it} ms" } ?: "")
         // Trace callbacks can arrive from Dispatchers.IO while the ViewModel updates UI state.
@@ -291,7 +301,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     }
 
     private fun recordWaybackTrace(productId: String, event: WaybackTraceEvent) {
-        reportWaybackDiagnostic(productId, event.step, event.status, event.detail, event.durationMs)
+        reportWaybackDiagnostic(
+            productId,
+            diagnosticIndexForWaybackTrace(event),
+            event.status,
+            event.detail,
+            event.durationMs
+        )
     }
 
     private fun finishWaybackDiagnostic(
@@ -302,7 +318,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         val initial = _uiState.value
         if (initial.waybackDiagnosticProductId != productId || initial.waybackDiagnosticSteps.isEmpty()) return
         for (row in initial.waybackDiagnosticSteps) {
-            if (row.step == 15) continue
+            if (row.step == 20) continue
             when (row.status) {
                 WaybackTraceStatus.PENDING ->
                     reportWaybackDiagnostic(
@@ -317,7 +333,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 else -> Unit
             }
         }
-        reportWaybackDiagnostic(productId, 15, finalStatus, finalDetail)
+        reportWaybackDiagnostic(productId, 20, finalStatus, finalDetail)
     }
 
     init {
@@ -1174,6 +1190,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 product.id, 3, WaybackTraceStatus.SKIPPED,
                 "Pausa global de Internet Archive activa; no se envió otra petición."
             )
+            reportWaybackDiagnostic(
+                product.id, 4, WaybackTraceStatus.SKIPPED,
+                "La pausa global bloqueó la petición antes de consultar CDX o Availability."
+            )
             finishWaybackDiagnostic(
                 product.id, WaybackTraceStatus.SKIPPED,
                 "Reintento no enviado durante la pausa global. ${status}"
@@ -1847,7 +1867,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     ) {
                         if (diagnosticProductId != null) {
                             reportWaybackDiagnostic(
-                                diagnosticProductId, 6, WaybackTraceStatus.RUNNING,
+                                diagnosticProductId, 7, WaybackTraceStatus.RUNNING,
                                 "Se activa la alternativa por dominio; se mantienen la caché y los límites de consultas."
                             )
                         }
@@ -1867,7 +1887,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             diagnosticCodes.add("CDX_DOMAIN_CANDIDATE_TIMEOUT")
                             if (diagnosticProductId != null) {
                                 reportWaybackDiagnostic(
-                                    diagnosticProductId, 6, WaybackTraceStatus.FAILED,
+                                    diagnosticProductId, 7, WaybackTraceStatus.FAILED,
                                     "La alternativa por dominio superó el límite de tiempo local."
                                 )
                             }
@@ -1900,7 +1920,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                     fallbackReturnedNoCaptures ||
                                     !fallbackTransportFailed
                                 reportWaybackDiagnostic(
-                                    diagnosticProductId, 6,
+                                    diagnosticProductId, 7,
                                     if (step6Succeeded) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
                                     when {
                                         domainResult.quotes.isNotEmpty() ->
@@ -1954,6 +1974,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     requestFailedCount += attempts.count { it.requestFailed }
                     quotes.map { it.observedAt }.let(archiveDates::addAll)
 
+                    if (diagnosticProductId != null && quotes.isNotEmpty()) {
+                        reportWaybackDiagnostic(
+                            diagnosticProductId, 19, WaybackTraceStatus.RUNNING,
+                            "Preparando ${quotes.size} observación(es) de precio ya verificadas para guardar localmente."
+                        )
+                    }
                     for ((archiveUrl, urlQuotes) in quotes.groupBy { it.originalUrl }) {
                         val newlySaved = repository.recordArchivedPriceHistory(
                             expectedTitle = candidate.title,
@@ -2003,13 +2029,52 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
 
                 if (diagnosticProductId != null) {
+                    val persistenceStatus = when {
+                        savedCount > 0 || foundCount > 0 -> WaybackTraceStatus.PASSED
+                        else -> WaybackTraceStatus.SKIPPED
+                    }
+                    val persistenceDetail = when {
+                        savedCount > 0 ->
+                            "Guardado completado: ${savedCount} nuevo(s) punto(s) de precio histórico en la base local."
+                        foundCount > 0 ->
+                            "Se verificaron ${foundCount} punto(s); no se añadieron duplicados porque los registros ya existían."
+                        else ->
+                            "No se guardaron registros: ninguna captura produjo un precio verificado."
+                    }
+                    reportWaybackDiagnostic(
+                        diagnosticProductId, 19, persistenceStatus, persistenceDetail
+                    )
+                    val gateStatus = when {
+                        diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ||
+                            diagnosticCodes.contains("CACHE_SKIPPED") ||
+                            diagnosticCodes.contains("CACHE_SKIPPED_AFTER_FAILURE") ->
+                            WaybackTraceStatus.SKIPPED
+                        diagnosticCodes.contains("WAYBACK_DISABLED") ||
+                            diagnosticCodes.contains("DIRECT_URL_INVALID") ||
+                            diagnosticCodes.contains("DOMAIN_UNRESOLVED") ->
+                            WaybackTraceStatus.FAILED
+                        else -> WaybackTraceStatus.PASSED
+                    }
+                    reportWaybackDiagnostic(
+                        diagnosticProductId, 4, gateStatus,
+                        when (gateStatus) {
+                            WaybackTraceStatus.SKIPPED ->
+                                "Consulta omitida por pausa HTTP 429 o caché; no se enviaron peticiones duplicadas."
+                            WaybackTraceStatus.FAILED ->
+                                "No se superó la validación previa. Diagnóstico: ${diagnosticCodes.filter {
+                                    it in setOf("WAYBACK_DISABLED", "DIRECT_URL_INVALID", "DOMAIN_UNRESOLVED")
+                                }.joinToString(", ")}."
+                            else ->
+                                "La consulta pasó las comprobaciones de configuración, destino y control de repetición; los errores de red se detallan en los pasos CDX."
+                        }
+                    )
                     val cdxSummary = synchronized(cdxStep5Events) {
                         summarizeCdxStep5Events(cdxStep5Events.toList())
                     }
                     if (cdxSummary != null) {
                         reportWaybackDiagnostic(
                             diagnosticProductId,
-                            cdxSummary.step,
+                            diagnosticIndexForWaybackTrace(cdxSummary),
                             cdxSummary.status,
                             cdxSummary.detail,
                             cdxSummary.durationMs
@@ -2049,7 +2114,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     else ->
                         "No se recuperó histórico gratuito. Comprueba el diagnóstico de Wayback para conocer la fase que falló."
                 }
-                val diagnosticLabels = diagnosticCodes.take(5).map { code ->
+                val diagnosticLabels = diagnosticCodes.distinct().take(8).map { code ->
                     when {
                         code.startsWith("CDX_DOMAIN_EXACT_HTTP_") -> "$code (respuesta HTTP de la consulta exacta de una URL candidata)"
                         code.startsWith("CDX_EXACT_HTTP_") -> "$code (respuesta HTTP de la búsqueda por URL exacta)"

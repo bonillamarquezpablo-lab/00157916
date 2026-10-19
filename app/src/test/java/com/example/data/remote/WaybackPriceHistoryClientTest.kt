@@ -1599,6 +1599,47 @@ class WaybackPriceHistoryClientTest {
 
 
     @Test
+    fun expandedDiagnosticMapsLegacyClientStagesToTheirDetailedUiPhases() {
+        assertEquals(5, diagnosticIndexForWaybackTrace(WaybackTraceEvent(4, WaybackTraceStatus.PASSED, "CDX enviada")))
+        assertEquals(6, diagnosticIndexForWaybackTrace(WaybackTraceEvent(5, WaybackTraceStatus.PASSED, "Respuesta válida")))
+        assertEquals(7, diagnosticIndexForWaybackTrace(WaybackTraceEvent(6, WaybackTraceStatus.PASSED, "Fallback")))
+        assertEquals(8, diagnosticIndexForWaybackTrace(WaybackTraceEvent(7, WaybackTraceStatus.PASSED, "Capturas extraídas")))
+        assertEquals(11, diagnosticIndexForWaybackTrace(WaybackTraceEvent(8, WaybackTraceStatus.PASSED, "HTML 1")))
+        assertEquals(12, diagnosticIndexForWaybackTrace(WaybackTraceEvent(9, WaybackTraceStatus.PASSED, "Barreras 1")))
+        assertEquals(13, diagnosticIndexForWaybackTrace(WaybackTraceEvent(10, WaybackTraceStatus.PASSED, "HTML 2")))
+        assertEquals(14, diagnosticIndexForWaybackTrace(WaybackTraceEvent(11, WaybackTraceStatus.PASSED, "Barreras 2")))
+        assertEquals(15, diagnosticIndexForWaybackTrace(WaybackTraceEvent(12, WaybackTraceStatus.PASSED, "Identidad")))
+        assertEquals(16, diagnosticIndexForWaybackTrace(WaybackTraceEvent(13, WaybackTraceStatus.PASSED, "Precio")))
+        assertEquals(17, diagnosticIndexForWaybackTrace(WaybackTraceEvent(14, WaybackTraceStatus.PASSED, "EUR")))
+    }
+
+    @Test
+    fun additionalDiagnosticPhasesCanBeMappedWithoutChangingInternalTransportPhase() {
+        val candidateUrls = WaybackTraceEvent(
+            step = 7,
+            status = WaybackTraceStatus.PASSED,
+            detail = "URL candidatas únicas: 2",
+            diagnosticStep = 9
+        )
+        val timeWindow = WaybackTraceEvent(
+            step = 7,
+            status = WaybackTraceStatus.PASSED,
+            detail = "Fechas dentro del período: 3",
+            diagnosticStep = 10
+        )
+        val consolidated = WaybackTraceEvent(
+            step = 14,
+            status = WaybackTraceStatus.PASSED,
+            detail = "Precios verificados: 2; duplicados: 0",
+            diagnosticStep = 18
+        )
+        assertEquals(7, candidateUrls.step)
+        assertEquals(9, diagnosticIndexForWaybackTrace(candidateUrls))
+        assertEquals(10, diagnosticIndexForWaybackTrace(timeWindow))
+        assertEquals(18, diagnosticIndexForWaybackTrace(consolidated))
+    }
+
+    @Test
     fun stepFiveRemainsPassedWhenValidEmptyCdxResponseIsFollowedBySecondaryTimeout() {
         val result = summarizeCdxStep5Events(
             listOf(

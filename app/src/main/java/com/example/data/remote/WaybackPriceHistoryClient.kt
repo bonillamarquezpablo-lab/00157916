@@ -57,10 +57,13 @@ enum class WaybackTraceStatus { PENDING, RUNNING, PASSED, FAILED, SKIPPED }
 
 /** Local-only event; complete URLs, headers, API keys and HTML are deliberately omitted. */
 data class WaybackTraceEvent(
+    // Stable internal client phase; kept unchanged for transport-level tests.
     val step: Int,
     val status: WaybackTraceStatus,
     val detail: String,
-    val durationMs: Long? = null
+    val durationMs: Long? = null,
+    // Optional phase number in the expanded on-device report. This is local diagnostic metadata.
+    val diagnosticStep: Int? = null
 )
 
 private fun emitWaybackTrace(
@@ -68,10 +71,30 @@ private fun emitWaybackTrace(
     step: Int,
     status: WaybackTraceStatus,
     detail: String,
-    durationMs: Long? = null
+    durationMs: Long? = null,
+    diagnosticStep: Int? = null
 ) {
     if (listener == null) return
-    runCatching { listener(WaybackTraceEvent(step, status, detail, durationMs)) }
+    runCatching { listener(WaybackTraceEvent(step, status, detail, durationMs, diagnosticStep)) }
+}
+
+/** Translate stable client phase IDs into the clearer 20-stage on-device diagnostic. */
+internal fun diagnosticIndexForWaybackTrace(event: WaybackTraceEvent): Int {
+    event.diagnosticStep?.takeIf { it in 1..20 }?.let { return it }
+    return when (event.step) {
+        4 -> 5  // CDX request sent
+        5 -> 6  // CDX response classified
+        6 -> 7  // fallback
+        7 -> 8  // capture index extraction
+        8 -> 11 // HTML capture 1 download
+        9 -> 12 // HTML capture 1 barriers
+        10 -> 13 // HTML capture 2 download
+        11 -> 14 // HTML capture 2 barriers
+        12 -> 15 // product identity
+        13 -> 16 // price extraction
+        14 -> 17 // amount/currency validation
+        else -> event.step.coerceIn(1, 20)
+    }
 }
 
 /**
@@ -118,7 +141,8 @@ internal fun summarizeCdxStep5Events(events: List<WaybackTraceEvent>): WaybackTr
             step = 5,
             status = WaybackTraceStatus.PASSED,
             detail = detail,
-            durationMs = lastValid.durationMs
+            durationMs = lastValid.durationMs,
+            diagnosticStep = 6
         )
     }
 
@@ -128,7 +152,8 @@ internal fun summarizeCdxStep5Events(events: List<WaybackTraceEvent>): WaybackTr
             step = 5,
             status = WaybackTraceStatus.FAILED,
             detail = "No se consiguió una respuesta CDX válida en ${failures.size} intento(s). Último diagnóstico: ${lastFailure.detail.take(180)}",
-            durationMs = lastFailure.durationMs
+            durationMs = lastFailure.durationMs,
+            diagnosticStep = 6
         )
     }
 
@@ -1356,12 +1381,45 @@ class WaybackPriceHistoryClient(
                 diagnosticCodes = cdxOutcome.diagnosticCodes
             )
         }
-        val captures = cdxOutcome.captures
+        val indexCaptures = cdxOutcome.captures
         emitWaybackTrace(
             onTrace, 7,
-            if (captures.isNotEmpty()) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
-            if (captures.isNotEmpty()) "Índice parseado: ${captures.size} captura(s) válida(s); límite ${maxSnapshots}."
-            else "El índice respondió, pero no devolvió capturas válidas."
+            if (indexCaptures.isNotEmpty()) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
+            if (indexCaptures.isNotEmpty()) "Índice parseado: ${indexCaptures.size} fila(s) de captura válida(s) antes de aplicar límites del historial; máximo a revisar ${maxSnapshots}."
+            else "El índice respondió, pero no devolvió filas de captura utilizables."
+        )
+
+        val distinctCandidateUrls = indexCaptures.map { it.originalUrl }.distinct()
+        emitWaybackTrace(
+            onTrace, 7,
+            when {
+                indexCaptures.isEmpty() -> WaybackTraceStatus.SKIPPED
+                distinctCandidateUrls.isNotEmpty() -> WaybackTraceStatus.PASSED
+                else -> WaybackTraceStatus.FAILED
+            },
+            "Candidatas normalizadas: ${distinctCandidateUrls.size} URL(s) únicas a partir de ${indexCaptures.size} fila(s); límite de descargas ${maxSnapshots}. No se registran las URL completas.",
+            diagnosticStep = 9
+        )
+
+        val windowStart = (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
+        val captures = indexCaptures.filter { it.timestamp in windowStart..now }
+        val outsideWindowCount = indexCaptures.size - captures.size
+        emitWaybackTrace(
+            onTrace, 7,
+            when {
+                indexCaptures.isEmpty() -> WaybackTraceStatus.SKIPPED
+                captures.isNotEmpty() -> WaybackTraceStatus.PASSED
+                else -> WaybackTraceStatus.FAILED
+            },
+            when {
+                indexCaptures.isEmpty() ->
+                    "No hay fechas que validar porque el índice no devolvió filas de captura."
+                captures.isNotEmpty() ->
+                    "Fechas comprobadas: ${captures.size} captura(s) dentro de los últimos ${lookbackDays.coerceAtLeast(1)} días; ${outsideWindowCount} descartada(s) fuera del intervalo solicitado."
+                else ->
+                    "El índice devolvió ${indexCaptures.size} fila(s), pero ninguna fecha cae dentro del período solicitado de ${lookbackDays.coerceAtLeast(1)} días."
+            },
+            diagnosticStep = 10
         )
 
         val sampled = sampleCaptures(captures, maxSnapshots)
@@ -1379,9 +1437,21 @@ class WaybackPriceHistoryClient(
         }
 
         // Cache useful histories for 30 days, but allow an empty result to be retried after 6 hours.
-        val quotes = fetched.mapNotNull { it.quote }
+        val verifiedQuotesBeforeDedup = fetched.mapNotNull { it.quote }
             .sortedBy { it.observedAt }
+        val quotes = verifiedQuotesBeforeDedup
             .distinctBy { Triple(it.originalUrl, it.observedAt, it.price) }
+        val duplicatesRemoved = verifiedQuotesBeforeDedup.size - quotes.size
+        emitWaybackTrace(
+            onTrace, 14,
+            when {
+                quotes.isNotEmpty() -> WaybackTraceStatus.PASSED
+                captures.isEmpty() -> WaybackTraceStatus.SKIPPED
+                else -> WaybackTraceStatus.FAILED
+            },
+            "Consolidación histórica: ${fetched.count { it.fetched }} HTML descargado(s), ${verifiedQuotesBeforeDedup.size} precio(s) verificado(s), ${duplicatesRemoved} duplicado(s) eliminado(s).",
+            diagnosticStep = 18
+        )
         val anySnapshotFailed = captures.isNotEmpty() && fetched.any { !it.fetched }
         val allSnapshotsFailed = captures.isNotEmpty() && fetched.isNotEmpty() && fetched.none { it.fetched }
         val diagnosticCodes = linkedSetOf<String>().apply {

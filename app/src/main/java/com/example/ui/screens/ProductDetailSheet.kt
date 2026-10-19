@@ -593,7 +593,7 @@ fun ProductDetailSheet(
                 ) {
                     Text(
                         if (showWaybackDiagnostics) "Ocultar diagnóstico Wayback"
-                        else "Ver diagnóstico Wayback · 15 pasos"
+                        else "Ver diagnóstico Wayback · ${waybackDiagnosticSteps.size} pasos"
                     )
                 }
                 if (showWaybackDiagnostics || isSearchingFreeHistory) {
@@ -615,12 +615,33 @@ fun ProductDetailSheet(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(
-                                "Telemetría local de Wayback",
+                                "Diagnóstico local de Wayback",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp
                             )
+                            val activeDiagnosticStep = waybackDiagnosticSteps.firstOrNull {
+                                it.status == WaybackTraceStatus.RUNNING
+                            }
+                            val firstFailedDiagnosticStep = waybackDiagnosticSteps.firstOrNull {
+                                it.status == WaybackTraceStatus.FAILED
+                            }
+                            val diagnosisSummary = when {
+                                activeDiagnosticStep != null ->
+                                    "Fase en curso: ${activeDiagnosticStep.step}. ${activeDiagnosticStep.title}"
+                                firstFailedDiagnosticStep != null ->
+                                    "Primer fallo detectado: paso ${firstFailedDiagnosticStep.step}. ${firstFailedDiagnosticStep.title}"
+                                waybackDiagnosticSteps.any { it.status == WaybackTraceStatus.PASSED } ->
+                                    "No hay una fase marcada como fallida en este momento."
+                                else -> "Esperando resultado del diagnóstico."
+                            }
                             Text(
-                                "Observa la búsqueda solicitada: no lanza peticiones adicionales. Se ocultan URLs completas, parámetros y contenido HTML.",
+                                diagnosisSummary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                "20 fases, sin consultas adicionales: el informe registra límites, CDX, capturas, HTML, validación y guardado. Se ocultan URLs completas, parámetros y contenido HTML.",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

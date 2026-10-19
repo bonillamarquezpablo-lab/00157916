@@ -1451,6 +1451,74 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun parsesXiaomiMi10ProWhenArchivedColourIsTranslatedAndPriceUsesMicrodata() {
+        val client = newClient()
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head>
+                  <meta property="og:title" content="Mi 10 Pro 5G Grey - Xiaomi">
+                  <meta itemprop="priceCurrency" content="EUR">
+                </head><body>
+                  <div itemprop="offers">
+                    <span itemprop="price">183,71</span>
+                  </div>
+                </body></html>
+            """.trimIndent(),
+            expectedTitle = "Xiaomi Mi 10 Pro Gris",
+            originalUrl = "https://www.mi.com/es/product/mi-10-pro/",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://www.mi.com/es/product/mi-10-pro/",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("A matching Xiaomi Mi model with translated grey colour and Schema.org microdata should parse", quote)
+        assertEquals(183.71, quote!!.price, 0.001)
+        assertEquals("EUR", quote.currency)
+    }
+
+    @Test
+    fun parsesXiaomiMi10ProAggregateOfferLowPrice() {
+        val client = newClient()
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head><title>Xiaomi Mi 10 Pro 5G Gray</title>
+                <script type="application/ld+json">
+                {"@type":"Product","name":"Xiaomi Mi 10 Pro 5G Gray",
+                 "offers":{"@type":"AggregateOffer","lowPrice":"183.71",
+                           "highPrice":"219.00","priceCurrency":"EUR"}}
+                </script></head></html>
+            """.trimIndent(),
+            expectedTitle = "Xiaomi Mi 10 Pro Gris",
+            originalUrl = "https://www.mi.com/es/product/mi-10-pro/",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://www.mi.com/es/product/mi-10-pro/",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("AggregateOffer.lowPrice is a real structured offer value", quote)
+        assertEquals(183.71, quote!!.price, 0.001)
+        assertEquals("EUR", quote.currency)
+    }
+
+    @Test
+    fun rejectsXiaomiMi10ProCaptureWithExplicitlyDifferentColour() {
+        val client = newClient()
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head>
+                <script type="application/ld+json">
+                {"@type":"Product","name":"Xiaomi Mi 10 Pro 5G Black",
+                 "offers":{"@type":"Offer","price":"183.71","priceCurrency":"EUR"}}
+                </script></head></html>
+            """.trimIndent(),
+            expectedTitle = "Xiaomi Mi 10 Pro Gris",
+            originalUrl = "https://www.mi.com/es/product/mi-10-pro/",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://www.mi.com/es/product/mi-10-pro/",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNull("A grey product must not accept a capture explicitly labelled black", quote)
+    }
+
+    @Test
     fun archivedMetaTitleDecodesNumericSpanishHtmlEntities() {
         val client = newClient()
         val quote = client.parseArchivedPrice(

@@ -213,6 +213,60 @@ class WaybackPriceHistoryClient(
                 )
             }
 
+            // Prefer a product-specific CDX query before scanning a whole retailer host.
+            // The broad host+regex query is expensive on large archives and has timed out on-device.
+            // One exact URL can still return multiple historical timestamps. If it times out, use
+            // the bounded Availability fallback instead of immediately repeating a broad scan.
+            val productUrlCandidate = (
+                listOfNotNull(preferredUrl?.takeIf(::isEligibleDirectUrl)) +
+                    buildAvailabilityCandidateUrls(normalizedDomain, expectedTitle)
+                ).distinct().firstOrNull()
+            if (productUrlCandidate != null) {
+                val exactCdxUrl = buildCdxUrl(productUrlCandidate, now, lookbackDays)
+                if (exactCdxUrl != null) {
+                    val exactAttemptKey = attemptKey(
+                        "domain-product-exact-v1|$normalizedDomain|$expectedTitle|$productUrlCandidate"
+                    )
+                    val exactResult = queryCdxAndFetchPrices(
+                        cdxUrl = exactCdxUrl,
+                        expectedTitle = expectedTitle,
+                        cacheKey = exactAttemptKey,
+                        now = now,
+                        maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP,
+                        cdxTimeoutSeconds = DOMAIN_EXACT_CDX_TIMEOUT_SECONDS,
+                        cdxStage = "CDX_PRODUCT_EXACT",
+                        snapshotTimeoutSeconds = CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS,
+                        onTrace = onTrace
+                    )
+                    if (exactResult.quotes.isNotEmpty()) {
+                        rememberAttempt(attempt, now, hasQuotes = true, failed = false)
+                        return@serializedArchiveLookup exactResult.copy(diagnosticCodes = emptySet())
+                    }
+                    if (exactResult.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) {
+                        rememberAttempt(attempt, now, hasQuotes = false, failed = true, rateLimited = true)
+                        return@serializedArchiveLookup exactResult
+                    }
+                    val exactTransientFailure = exactResult.diagnosticCodes.any { code ->
+                        code.endsWith("_TIMEOUT") ||
+                            (code.contains("_HTTP_") &&
+                                code.substringAfterLast('_').toIntOrNull()
+                                    ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true)
+                    }
+                    if (exactResult.requestFailed && exactTransientFailure) {
+                        return@serializedArchiveLookup runDomainAvailabilityFallback(
+                            normalizedDomain = normalizedDomain,
+                            expectedTitle = expectedTitle,
+                            preferredUrl = preferredUrl,
+                            now = now,
+                            lookbackDays = lookbackDays,
+                            cacheKey = attempt,
+                            failureCodes = exactResult.diagnosticCodes,
+                            onTrace = onTrace
+                        )
+                    }
+                }
+            }
+
             var lastResult: WaybackBackfillResult? = null
             for (cdxUrl in cdxUrls) {
                 if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
@@ -239,9 +293,8 @@ class WaybackPriceHistoryClient(
                 if (result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) {
                     return@serializedArchiveLookup result
                 }
-                // Handle transient CDX server/network failures before the generic return.
-                // Do not issue another broad index query: switch to a small, product-specific
-                // Availability fallback and let the shared request gate enforce pacing/cooldown.
+                // Do not repeat broad CDX scans after a transient server/network failure.
+                // Move to the bounded product-specific Availability fallback instead.
                 val transientDomainFailure = result.diagnosticCodes.any { code ->
                     code == "CDX_DOMAIN_TIMEOUT" ||
                         (code.startsWith("CDX_DOMAIN_HTTP_") &&
@@ -249,72 +302,16 @@ class WaybackPriceHistoryClient(
                                 ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true)
                 }
                 if (result.requestFailed && transientDomainFailure) {
-                    val failureLabel = if (result.diagnosticCodes.contains("CDX_DOMAIN_TIMEOUT")) {
-                        "CDX de dominio agotó el tiempo"
-                    } else {
-                        "CDX de dominio devolvió un error temporal (${result.diagnosticCodes.joinToString(", ")})"
-                    }
-                    emitWaybackTrace(
-                        onTrace, 6, WaybackTraceStatus.RUNNING,
-                        "$failureLabel. Se activa la alternativa limitada de Availability API."
+                    return@serializedArchiveLookup runDomainAvailabilityFallback(
+                        normalizedDomain = normalizedDomain,
+                        expectedTitle = expectedTitle,
+                        preferredUrl = preferredUrl,
+                        now = now,
+                        lookbackDays = lookbackDays,
+                        cacheKey = attempt,
+                        failureCodes = result.diagnosticCodes,
+                        onTrace = onTrace
                     )
-                    // Reuse the direct retailer URL already present on the offer when it is
-                    // safe to query. Domain discovery often guesses slugs incorrectly; probing
-                    // the known URL first avoids spending the bounded fallback on an unrelated
-                    // search or category URL. One generated candidate remains as a fallback.
-                    val candidateUrls = (
-                        listOfNotNull(preferredUrl?.takeIf(::isEligibleDirectUrl)) +
-                            buildAvailabilityCandidateUrls(normalizedDomain, expectedTitle)
-                        ).distinct().take(MAX_AVAILABILITY_URL_CANDIDATES)
-                    if (candidateUrls.isNotEmpty()) {
-                        val fallback = queryAvailabilityAndFetchPrices(
-                            candidateUrls = candidateUrls,
-                            expectedTitle = expectedTitle,
-                            cacheKey = attempt,
-                            now = now,
-                            lookbackDays = lookbackDays,
-                            maxSnapshots = MAX_CDX_FALLBACK_SNAPSHOTS,
-                            // Try at most two product-specific URL candidates. The first
-                            // candidate is often the retailer's search page; one unavailable
-                            // archive there must not prevent a second plausible product path.
-                            // The shared request gate still serializes/paces these free probes.
-                            maxCandidates = MAX_AVAILABILITY_PROBE_CANDIDATES,
-                            stage = "DOMAIN_AVAILABILITY_FALLBACK",
-                            probeOlderCapture = false,
-                            onTrace = onTrace
-                        )
-                        emitWaybackTrace(
-                            onTrace, 6,
-                            if (fallback.quotes.isNotEmpty() || !fallback.requestFailed) WaybackTraceStatus.PASSED
-                            else WaybackTraceStatus.FAILED,
-                            when {
-                                fallback.quotes.isNotEmpty() -> "Fallback completado: se recuperó un precio verificable."
-                                fallback.capturesFound > 0 -> "Fallback completado: hay capturas; falta verificar precio/producto."
-                                fallback.requestFailed -> "Fallback ejecutado pero falló: ${fallback.diagnosticCodes.joinToString(", ").take(180)}."
-                                else -> "Fallback respondió, pero no encontró capturas utilizables."
-                            }
-                        )
-                        if (fallback.quotes.isNotEmpty()) {
-                            return@serializedArchiveLookup fallback.copy(diagnosticCodes = emptySet())
-                        }
-                        // queryAvailabilityAndFetchPrices may treat an empty but valid
-                        // availability response as a negative result. The domain-index timeout
-                        // still failed, so preserve it as a short-lived failure, not a six-hour
-                        // "no captures" cache entry.
-                        rememberAttempt(
-                            attempt,
-                            now,
-                            hasQuotes = false,
-                            failed = true,
-                            rateLimited = fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
-                        )
-                        return@serializedArchiveLookup fallback.copy(
-                            requestFailed = true,
-                            diagnosticCodes = fallback.diagnosticCodes + result.diagnosticCodes
-                        )
-                    }
-                    rememberAttempt(attempt, now, hasQuotes = false, failed = true)
-                    return@serializedArchiveLookup result
                 }
                 if (
                     result.requestFailed ||
@@ -333,6 +330,85 @@ class WaybackPriceHistoryClient(
      * Legacy availability-based candidate lookup retained for the narrowly scoped parser tests.
      * Production entry points prefer batched CDX queries to avoid one network call per target date.
      */
+    private suspend fun runDomainAvailabilityFallback(
+        normalizedDomain: String,
+        expectedTitle: String,
+        preferredUrl: String?,
+        now: Long,
+        lookbackDays: Int,
+        cacheKey: String,
+        failureCodes: Set<String>,
+        onTrace: ((WaybackTraceEvent) -> Unit)?
+    ): WaybackBackfillResult {
+        val failureLabel = when {
+            failureCodes.contains("CDX_DOMAIN_TIMEOUT") ->
+                "CDX de dominio agotó el tiempo"
+            failureCodes.any { it.contains("CDX_PRODUCT_EXACT") && it.endsWith("_TIMEOUT") } ->
+                "CDX de URL de producto agotó el tiempo"
+            else ->
+                "CDX devolvió un error temporal (${failureCodes.joinToString(", ")})"
+        }
+        emitWaybackTrace(
+            onTrace, 6, WaybackTraceStatus.RUNNING,
+            "$failureLabel. Se activa la alternativa limitada de Availability API."
+        )
+
+        val candidateUrls = (
+            listOfNotNull(preferredUrl?.takeIf(::isEligibleDirectUrl)) +
+                buildAvailabilityCandidateUrls(normalizedDomain, expectedTitle)
+            ).distinct().take(MAX_AVAILABILITY_URL_CANDIDATES)
+        if (candidateUrls.isEmpty()) {
+            rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
+            return WaybackBackfillResult(requestFailed = true, diagnosticCodes = failureCodes)
+        }
+
+        val fallback = queryAvailabilityAndFetchPrices(
+            candidateUrls = candidateUrls,
+            expectedTitle = expectedTitle,
+            cacheKey = cacheKey,
+            now = now,
+            lookbackDays = lookbackDays,
+            maxSnapshots = MAX_CDX_FALLBACK_SNAPSHOTS,
+            maxCandidates = MAX_AVAILABILITY_PROBE_CANDIDATES,
+            stage = "DOMAIN_AVAILABILITY_FALLBACK",
+            probeOlderCapture = false,
+            onTrace = onTrace
+        )
+        emitWaybackTrace(
+            onTrace, 6,
+            if (fallback.quotes.isNotEmpty() || !fallback.requestFailed) {
+                WaybackTraceStatus.PASSED
+            } else {
+                WaybackTraceStatus.FAILED
+            },
+            when {
+                fallback.quotes.isNotEmpty() ->
+                    "Fallback completado: se recuperó un precio verificable."
+                fallback.capturesFound > 0 ->
+                    "Fallback completado: hay capturas; falta verificar precio/producto."
+                fallback.requestFailed ->
+                    "Fallback ejecutado pero falló: ${fallback.diagnosticCodes.joinToString(", ").take(180)}."
+                else ->
+                    "Fallback respondió, pero no encontró capturas utilizables."
+            }
+        )
+        if (fallback.quotes.isNotEmpty()) {
+            return fallback.copy(diagnosticCodes = emptySet())
+        }
+
+        rememberAttempt(
+            cacheKey,
+            now,
+            hasQuotes = false,
+            failed = true,
+            rateLimited = fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
+        )
+        return fallback.copy(
+            requestFailed = true,
+            diagnosticCodes = fallback.diagnosticCodes + failureCodes
+        )
+    }
+
     private suspend fun queryAvailabilityAndFetchPrices(
         candidateUrls: List<String>,
         expectedTitle: String,
@@ -1977,7 +2053,8 @@ class WaybackPriceHistoryClient(
         private const val DIRECT_CDX_TIMEOUT_SECONDS = 5L
         // Keep the broad domain-index request aligned with the UI's strict four-second budget.
         private const val DOMAIN_CDX_TIMEOUT_SECONDS = 4L
-        private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 2L
+        // Product-specific CDX lookup is narrower than scanning every URL on a retailer host.
+        private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 3L
         private const val MAX_DOMAIN_PRODUCT_URL_CANDIDATES = 2
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 2
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 2

@@ -1306,15 +1306,16 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             if (isGoogleShoppingUrl(product.storeUrl) || candidateBuilder.isEmpty()) {
                 val savedStore = Store.findKnownByName(product.currentStore.name, currentDestination)
                     ?: Store.findKnownByName(product.currentStore.id.replace('_', ' '), currentDestination)
-                val fallbackDomain = savedStore?.domain
-                    ?.takeIf { it.isNotBlank() && !it.endsWith(".invalid") }
                 val fallbackStore = savedStore ?: product.currentStore
+                // Never copy Store.domain directly into a candidate. Older saved rows may contain
+                // a display/provider label instead of a host (for example "Google Shopping").
+                // Re-resolve it through the same strict hostname normalizer used by the client.
                 val resolved = waybackPriceHistoryClient.resolveMerchantDomain(
-                    storeName = product.currentStore.name,
-                    sourceUrl = "",
-                    knownStoreDomain = fallbackDomain.orEmpty()
+                    storeName = fallbackStore.name,
+                    sourceUrl = currentDestination,
+                    knownStoreDomain = savedStore?.domain.orEmpty()
                 )
-                val domain = fallbackDomain ?: resolved
+                val domain = resolved
                     ?: waybackPriceHistoryClient.resolveBrandMerchant(product.title)?.second
                 if (domain != null) {
                     add(

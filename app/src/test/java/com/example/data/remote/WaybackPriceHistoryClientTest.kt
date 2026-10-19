@@ -80,7 +80,7 @@ class WaybackPriceHistoryClientTest {
             .remove("wayback_last_availability_request_at")
             .commit()
 
-        val title = "Anker Prime 27K Power Bank Cascade Test ${System.currentTimeMillis()}"
+        val title = "Anker Prime 27K Power Bank Edición Española Cascade Test ${System.currentTimeMillis()}"
         val archivedUrl = "https://www.shop.example/products/anker-prime-27k-power-bank"
         val requests = CopyOnWriteArrayList<String>()
         val cdxBody = """
@@ -110,7 +110,7 @@ class WaybackPriceHistoryClientTest {
                     cdxBody to "application/json; charset=utf-8"
                 request.url.host == "web.archive.org" &&
                     request.url.encodedPath.startsWith("/web/") ->
-                    archivedHtml to "text/html; charset=utf-8"
+                    archivedHtml to "text/html; charset=iso-8859-1"
                 else -> throw AssertionError("Unexpected Wayback request: $hostAndPath")
             }
             Response.Builder()
@@ -842,6 +842,10 @@ class WaybackPriceHistoryClientTest {
         assertTrue(client.isEligibleDirectUrl("https://shop.example/wheels/autec-zenit"))
         assertFalse(client.isEligibleDirectUrl("https://www.google.com/shopping/product/123456"))
         assertFalse(client.isEligibleDirectUrl("https://shop.example/"))
+        assertFalse(
+            "Credentialed URLs must never be sent to the public archive",
+            client.isEligibleDirectUrl("https://user:secret@shop.example/product")
+        )
     }
     @Test
     fun parsesDotOnlyEuropeanThousandsSeparatorInArchivedMetadata() {

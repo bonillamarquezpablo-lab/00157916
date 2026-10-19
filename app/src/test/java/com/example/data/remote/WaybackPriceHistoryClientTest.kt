@@ -1764,6 +1764,29 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun stepSixReportsRecoveryWhenCdxTimesOutButAvailabilityFindsCaptures() {
+        val result = summarizeCdxStep5Events(
+            events = listOf(
+                WaybackTraceEvent(
+                    step = 5,
+                    status = WaybackTraceStatus.FAILED,
+                    detail = "CDX_PRODUCT_PREFIX: CDX_PRODUCT_PREFIX_TIMEOUT.",
+                    durationMs = 5_002L
+                )
+            ),
+            availabilityRecovered = true,
+            availabilityCapturesFound = 1
+        )
+
+        assertNotNull(result)
+        assertEquals(WaybackTraceStatus.PASSED, result!!.status)
+        assertEquals(6, diagnosticIndexForWaybackTrace(result))
+        assertTrue(result.detail.contains("CDX_PRODUCT_PREFIX_TIMEOUT"))
+        assertTrue(result.detail.contains("Availability respondió y encontró 1 captura(s)"))
+        assertTrue(result.detail.contains("validación del precio"))
+    }
+
+    @Test
     fun stepFiveUsesLatestValidResponseAndKeepsAdditionalFailureVisible() {
         val result = summarizeCdxStep5Events(
             listOf(

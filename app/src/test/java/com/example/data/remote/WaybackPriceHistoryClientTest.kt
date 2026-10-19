@@ -301,6 +301,16 @@ class WaybackPriceHistoryClientTest {
         assertTrue(appleCandidates.any { it.startsWith("https://www.apple.com/") })
         assertTrue(appleCandidates.any { it.startsWith("https://apple.com/") })
 
+        val appleStorageColorCandidates = client.buildAvailabilityCandidateUrls(
+            domain = "apple.com",
+            expectedTitle = "Apple iPhone 15 128 GB Negro"
+        )
+        assertEquals(
+            "Apple's canonical model URL must ignore storage and colour variants",
+            "https://www.apple.com/es/iphone-15/",
+            appleStorageColorCandidates.first()
+        )
+
         val pcCandidates = client.buildAvailabilityCandidateUrls(
             "pccomponentes.com",
             "Apple iPhone 16 128 GB Negro"
@@ -360,6 +370,16 @@ class WaybackPriceHistoryClientTest {
         )
         assertTrue(standardCandidates.size <= 6)
         assertTrue(ultraCandidates.size <= 6)
+
+        val storageColourUltraCandidates = client.buildAvailabilityCandidateUrls(
+            domain = "samsung.com",
+            expectedTitle = "Samsung Galaxy S26 Ultra 256GB Titanium Black"
+        )
+        assertEquals(
+            "Samsung's canonical model URL must ignore storage and colour variants",
+            "https://www.samsung.com/es/smartphones/galaxy-s/galaxy-s26-ultra/",
+            storageColourUltraCandidates.first()
+        )
     }
 
     @Test

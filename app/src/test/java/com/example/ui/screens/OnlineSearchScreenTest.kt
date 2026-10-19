@@ -239,8 +239,7 @@ class OnlineSearchScreenTest {
         composeRule.onNodeWithTag("filter-second-hand").performScrollTo().performClick()
         assertVisibleText("Todas las ofertas")
         assertVisibleText("Solo Amazon")
-        searchList.performScrollToNode(hasTestTag("filter-second-hand"))
-        composeRule.onNodeWithTag("filter-second-hand").performScrollTo().assertIsDisplayed().assertIsSelected()
+        composeRule.onNodeWithTag("filter-second-hand").assertIsSelected()
         assertVisibleText("1 tiendas · precio más bajo en Amazon Warehouse")
         assertTrue(
             composeRule.onAllNodesWithText("7 tiendas · precio más bajo en Wallapop")

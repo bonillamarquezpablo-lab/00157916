@@ -2462,7 +2462,7 @@ class WaybackPriceHistoryClient(
             .replace(Regex("\\p{M}+"), "")
             // Preserve the plus suffix on phone models such as Galaxy S26+; punctuation
             // removal otherwise makes it indistinguishable from the base S26 variant.
-            .replace(Regex("""\\b(s\\d{1,2})\\s*\\+"""), "$1 plus")
+            .replace(Regex("""\b(s\d{1,2})\s*\+"""), "$1 plus")
             .replace(Regex("[^a-z0-9]+"), " ")
             .trim()
             .replace(Regex("\\s+"), " ")

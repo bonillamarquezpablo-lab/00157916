@@ -683,6 +683,127 @@ class WaybackPriceHistoryClientTest {
                         it.detail.contains("HTML recibido")
                 }
             )
+            assertTrue(
+                "Step 13 must explain when a second capture does not exist",
+                traceEvents.any {
+                    it.diagnosticStep == 13 && it.status == WaybackTraceStatus.SKIPPED &&
+                        it.detail.contains("solo se recuperó 1 captura")
+                }
+            )
+        } finally {
+            preferences.edit()
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .commit()
+        }
+    }
+
+    @Test
+    fun triesAlternateProductCdxAfterAvailabilityReturnsNoCaptures() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .commit()
+
+        val title = "Anker Prime 27K Power Bank Alternate CDX Recovery " + System.currentTimeMillis()
+        val preferredUrl = "https://shop.example/products/anker-prime-27k-original.html"
+        val client = WaybackPriceHistoryClient(context, OkHttpClient())
+        val alternateUrl = client.buildAvailabilityCandidateUrls("shop.example", title)
+            .firstOrNull { it != preferredUrl }
+            ?: throw AssertionError("Expected at least one product URL variant for the CDX fallback")
+        val cdxTargets = CopyOnWriteArrayList<String>()
+        val availabilityUrls = CopyOnWriteArrayList<String>()
+        val traceEvents = CopyOnWriteArrayList<WaybackTraceEvent>()
+        val archivedHtml = """
+            <html><head>
+              <script type="application/ld+json">
+                {"@type":"Product","name":"$title",
+                 "offers":{"@type":"Offer","price":"79.99","priceCurrency":"EUR"}}
+              </script>
+            </head><body></body></html>
+        """.trimIndent()
+        val cdxBody = """
+            [
+              ["timestamp","original","statuscode","mimetype"],
+              ["20250101120000","$alternateUrl","200","text/html"]
+            ]
+        """.trimIndent()
+
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            when {
+                request.url.host == "archive.org" &&
+                    request.url.encodedPath == "/wayback/available" -> {
+                    availabilityUrls += request.url.queryParameter("url").orEmpty()
+                    val body = """{"archived_snapshots":{"closest":{"available":false}}}"""
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(body.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    cdxTargets += request.url.queryParameter("url").orEmpty()
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(cdxBody.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/web/") -> {
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "text/html; charset=utf-8")
+                        .body(archivedHtml.toResponseBody("text/html; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                else -> throw AssertionError("Unexpected Wayback request: " + request.url.host + request.url.encodedPath)
+            }
+        }.build()
+
+        try {
+            val result = withTimeout(20_000L) {
+                WaybackPriceHistoryClient(context, http).fetchHistoryByMerchantDomain(
+                    domain = "shop.example",
+                    expectedTitle = title,
+                    lookbackDays = 730,
+                    preferredUrl = preferredUrl,
+                    preferredUrlAlreadyQueried = true,
+                    onTrace = { event -> traceEvents += event }
+                )
+            }
+
+            assertTrue("The bounded Availability fallback must be attempted first", availabilityUrls.size >= 2)
+            assertEquals("A different product-shaped URL must be queried through CDX", alternateUrl, cdxTargets.last())
+            assertEquals(79.99, result.quotes.single().price, 0.001)
+            assertEquals(alternateUrl, result.quotes.single().originalUrl)
+            assertTrue(
+                "The alternate CDX result must be parsed into a real capture",
+                traceEvents.any {
+                    it.diagnosticStep == 8 && it.status == WaybackTraceStatus.PASSED &&
+                        it.detail.contains("CDX parseado correctamente")
+                }
+            )
+            assertTrue(
+                "If only one capture exists, step 13 must explain the skip rather than claim the chain stopped",
+                traceEvents.any {
+                    it.diagnosticStep == 13 && it.status == WaybackTraceStatus.SKIPPED &&
+                        it.detail.contains("solo había 1 captura válida")
+                }
+            )
         } finally {
             preferences.edit()
                 .remove("wayback_rate_limit_until")

@@ -1584,6 +1584,42 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun rejectsXboxSeriesXCaptureForExpectedSeriesS() {
+        val client = newClient()
+        val quote = client.parseArchivedPrice(
+            html = """
+                <script type="application/ld+json">
+                {"@type":"Product","name":"Xbox Series X 1TB",
+                 "offers":{"@type":"Offer","price":"499.99","priceCurrency":"EUR"}}
+                </script>
+            """.trimIndent(),
+            expectedTitle = "Xbox Series S 1TB",
+            originalUrl = "https://shop.example/xbox-series-s",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/xbox-series-s",
+            observedAt = 1_735_732_800_000L
+        )
+        assertNull("Xbox Series S and Series X are separate product models", quote)
+    }
+
+    @Test
+    fun rejectsNvidiaSuperCaptureForExpectedTiGraphicsCard() {
+        val client = newClient()
+        val quote = client.parseArchivedPrice(
+            html = """
+                <script type="application/ld+json">
+                {"@type":"Product","name":"NVIDIA GeForce RTX 4070 Super",
+                 "offers":{"@type":"Offer","price":"649.99","priceCurrency":"EUR"}}
+                </script>
+            """.trimIndent(),
+            expectedTitle = "NVIDIA GeForce RTX 4070 Ti",
+            originalUrl = "https://shop.example/rtx-4070-ti",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/rtx-4070-ti",
+            observedAt = 1_735_732_800_000L
+        )
+        assertNull("RTX 4070 Ti and RTX 4070 Super are different variants", quote)
+    }
+
+    @Test
     fun rejectsSamsungGalaxyS26BaseCaptureForExpectedPlusVariant() {
         val client = newClient()
         val quote = client.parseArchivedPrice(

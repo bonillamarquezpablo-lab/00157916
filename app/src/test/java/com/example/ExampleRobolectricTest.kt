@@ -158,6 +158,72 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun impossibleSmartphoneObservationCannotRemainVerifiedCurrentPrice() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries().build()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val observedAt = System.currentTimeMillis()
+            database.productDao().insert(
+                ProductEntity(
+                    id = "samsung_galaxy_a57",
+                    title = "Samsung Galaxy A57 Azul Marino 256GB",
+                    brand = "Samsung",
+                    category = "SMARTPHONES",
+                    currentPrice = 9_300.0,
+                    athMinPrice = 9_300.0,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "Samsung Shop España",
+                    athMaxPrice = 9_300.0,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "samsung_store",
+                    storeUrl = "https://www.samsung.com/es/",
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = scope
+            )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = "samsung_galaxy_a57",
+                    storeId = "samsung_store",
+                    price = 9_300.0,
+                    observedAt = observedAt,
+                    sourceUrl = "https://www.samsung.com/es/smartphones/galaxy-a57/",
+                    sourceName = "Google Shopping",
+                    isVerified = true,
+                    productTitle = "Samsung Galaxy A57 Azul Marino 256GB",
+                    storeName = "Samsung Shop España",
+                    sourceType = "Google Shopping"
+                )
+            )
+            database.productDao().updatePriceVerification("samsung_galaxy_a57", true)
+
+            val product = withTimeout(10_000) {
+                repository.allProductsStream.first { rows -> rows.any { it.id == "samsung_galaxy_a57" } }
+                    .first { it.id == "samsung_galaxy_a57" }
+            }
+            assertFalse("A 9,300 € phone observation must not validate a current price", product.isPriceVerified)
+            assertEquals(
+                com.example.data.model.PriceDisplayStatus.DEMONSTRATION,
+                product.priceDisplayStatus
+            )
+            assertEquals(null, product.savedHistoricalPrice)
+            assertTrue("The impossible quote must not create a history point", product.priceHistory.isEmpty())
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun `followed products appear in the tracked refresh stream and can be unfollowed`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(

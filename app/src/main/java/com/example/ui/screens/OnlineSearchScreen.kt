@@ -497,7 +497,8 @@ fun OnlineSearchScreen(
                             )
                         }
                         Row(
-                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            modifier = Modifier.testTag("filter-second-hand-row")
+                                .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             FilterChip(

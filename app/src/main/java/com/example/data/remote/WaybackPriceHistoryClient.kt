@@ -1245,18 +1245,19 @@ class WaybackPriceHistoryClient(
                 }.getOrDefault(false)
             }
             val canonicalSet = canonicalSamsungUrls.toSet()
-            // The caller only probes two URLs. Put one canonical model page first and the real
-            // retailer search URL second; otherwise www + apex guesses consume the entire budget
-            // and the useful search fallback is never tried.
-            listOfNotNull(canonicalSamsungUrls.firstOrNull(), storeSearchUrl) +
-                canonicalSamsungUrls.drop(1) +
+            // Try up to three canonical model routes before a generic retailer search page.
+            // Product-specific captures are much more likely to expose the right model and price.
+            canonicalSamsungUrls.take(3) +
+                listOfNotNull(storeSearchUrl) +
+                canonicalSamsungUrls.drop(3) +
                 guessedProductUrls.filterNot { it in canonicalSet }
         } else {
-            // A retailer search URL is often not archived (or contains no product metadata).
-            // Prefer one product-shaped URL first, but retain the real search URL as the next
-            // fallback. Since the caller probes at most two URLs and may prepend the known offer
-            // URL, this ordering ensures the second probe is not wasted on a generic search page.
-            listOfNotNull(guessedProductUrls.firstOrNull(), storeSearchUrl) + guessedProductUrls.drop(1)
+            // Search pages often archive generic headings without a product-scoped price. Try
+            // several product-shaped routes first; keep the store's real search URL as a bounded
+            // fallback instead of spending one of the first two alternate probes on it.
+            guessedProductUrls.take(3) +
+                listOfNotNull(storeSearchUrl) +
+                guessedProductUrls.drop(3)
         }
         return orderedCandidates.distinct().take(MAX_AVAILABILITY_URL_CANDIDATES)
     }
@@ -2382,7 +2383,7 @@ class WaybackPriceHistoryClient(
         private const val MAX_CONCURRENT_AVAILABILITY_REQUESTS = 1
         private const val MAX_AVAILABILITY_URL_CANDIDATES = 6
         private const val MAX_AVAILABILITY_PROBE_CANDIDATES = 2
-        private const val MAX_DOMAIN_AVAILABILITY_PROBE_CANDIDATES = 3
+        private const val MAX_DOMAIN_AVAILABILITY_PROBE_CANDIDATES = 5
         private const val MAX_CDX_FALLBACK_SNAPSHOTS = 2
         private const val MAX_DOMAIN_CDX_HOST_QUERIES = 2
         // This runs in the background history backfill, not in the main search UI.

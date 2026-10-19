@@ -541,6 +541,9 @@ class ProductRepository(
             """\b(iphone|redmi|poco|pixel|oneplus|realme|oppo|vivo|honor|smartphone|galaxy\s+(s|a|z|m)\s?\d{1,2})\b"""
         ).containsMatchIn(normalized)
         if (smartphone && price < 45.0) return false
+        // A phone at several thousand euros is almost always a parsing/variant error.
+        // Keep the offer visible for inspection, but never use it as a current price or history point.
+        if (smartphone && price > 3_500.0) return false
 
         val tablet = Regex("""\b(ipad|tablet|galaxy\s+tab|lenovo\s+tab)\b""")
             .containsMatchIn(normalized)
@@ -1640,6 +1643,7 @@ class ProductRepository(
                     isEligibleHistoryTitle(observation.productTitle) &&
                     isSafeCatalogTitleMatch(observation.productTitle, title) &&
                     !isPromotionalBulkListing(observation.productTitle, "") &&
+                    isPlausibleHistoryPrice(observation.productTitle, observation.price) &&
                     parseHttpUri(observation.sourceUrl) != null &&
                     !observation.sourceUrl.contains("google.com/search", ignoreCase = true) &&
                     !observation.sourceUrl.contains("web.archive.org", ignoreCase = true)
@@ -1715,7 +1719,8 @@ class ProductRepository(
             observation.observedAt in 1L..System.currentTimeMillis() &&
             observation.productTitle.isNotBlank() &&
             isEligibleHistoryTitle(observation.productTitle) &&
-            !isPromotionalBulkListing(observation.productTitle, "")
+            !isPromotionalBulkListing(observation.productTitle, "") &&
+            isPlausibleHistoryPrice(observation.productTitle, observation.price)
     }
 
     private fun configuredStoreForObservation(

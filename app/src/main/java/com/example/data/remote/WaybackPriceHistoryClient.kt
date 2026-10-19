@@ -1,6 +1,7 @@
 package com.example.data.remote
 
 import android.content.Context
+import android.text.Html
 import com.example.data.model.Store
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -1639,7 +1640,7 @@ class WaybackPriceHistoryClient(
         ).findAll(html).map { it.groupValues[1] }
         val output = mutableListOf<Triple<String, Double, String>>()
         for (script in scripts) {
-            val json = try { JSONTokener(decodeHtml(script)).nextValue() } catch (_: Exception) { null }
+            val json = try { JSONTokener(script).nextValue() } catch (_: Exception) { null }
             visitJsonLd(json, output)
         }
         return output
@@ -1829,16 +1830,8 @@ class WaybackPriceHistoryClient(
             .trim()
             .replace(Regex("\\s+"), " ")
 
-    private fun decodeHtml(value: String): String = value
-        .replace("&amp;", "&", ignoreCase = true)
-        .replace("&quot;", "\"", ignoreCase = true)
-        .replace("&#39;", "'", ignoreCase = true)
-        .replace("&apos;", "'", ignoreCase = true)
-        .replace("&lt;", "<", ignoreCase = true)
-        .replace("&gt;", ">", ignoreCase = true)
-        .replace("&#x2F;", "/", ignoreCase = true)
-        .replace("&#x27;", "'", ignoreCase = true)
-        .replace("&nbsp;", " ", ignoreCase = true)
+    private fun decodeHtml(value: String): String =
+        Html.fromHtml(value, Html.FROM_HTML_MODE_LEGACY).toString()
 
     private fun parsePositivePrice(raw: String?): Double? {
         if (raw.isNullOrBlank()) return null

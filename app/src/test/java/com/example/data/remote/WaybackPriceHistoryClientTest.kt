@@ -557,18 +557,17 @@ class WaybackPriceHistoryClientTest {
                         ?: throw AssertionError("Availability request has no product URL")
                     availabilityUrls += originalUrl
                     val availabilityProbeNumber = availabilityUrls.size
-                    // The known direct retailer URL has no capture; the next bounded candidate
-                    // has one. Verify the fallback tries the actual offer URL first, then moves on.
-                    val body = if (availabilityProbeNumber == 1) {
-                        """{"archived_snapshots":{"closest":{"available":false}}}"""
-                    } else {
-                        val snapshotUrl = "https://web.archive.org/web/20250101120000id_/$originalUrl"
-                        """
-                            {"archived_snapshots":{"closest":{
-                              "available":true,"timestamp":"20250101120000","url":"$snapshotUrl"
-                            }}}
-                        """.trimIndent()
+                    // First candidate simulates a transient per-URL timeout. The bounded
+                    // fallback must continue to the second candidate instead of aborting early.
+                    if (availabilityProbeNumber == 1) {
+                        throw java.net.SocketTimeoutException("simulated first Availability URL timeout")
                     }
+                    val snapshotUrl = "https://web.archive.org/web/20250101120000id_/$originalUrl"
+                    val body = """
+                        {"archived_snapshots":{"closest":{
+                          "available":true,"timestamp":"20250101120000","url":"$snapshotUrl"
+                        }}}
+                    """.trimIndent()
                     Response.Builder()
                         .request(request)
                         .protocol(Protocol.HTTP_1_1)
@@ -631,7 +630,8 @@ class WaybackPriceHistoryClientTest {
                 traceEvents.any {
                     it.diagnosticStep == 7 &&
                         it.status == WaybackTraceStatus.PASSED &&
-                        it.detail.contains("Availability API devolvió 1 captura(s) válida(s)")
+                        it.detail.contains("Availability encontró 1 captura(s)") &&
+                        it.detail.contains("DOMAIN_AVAILABILITY_FALLBACK_TIMEOUT")
                 }
             )
             assertTrue(

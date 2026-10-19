@@ -169,6 +169,7 @@ class WaybackPriceHistoryClient(
         now: Long = System.currentTimeMillis(),
         lookbackDays: Int = DEFAULT_LOOKBACK_DAYS,
         preferredUrl: String? = null,
+        preferredUrlAlreadyQueried: Boolean = false,
         onTrace: ((WaybackTraceEvent) -> Unit)? = null
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
         if (!preferences.getBoolean("enabled", true)) {
@@ -213,60 +214,75 @@ class WaybackPriceHistoryClient(
                 )
             }
 
-            // Prefer a product-specific CDX query before scanning a whole retailer host.
-            // The broad host+regex query is expensive on large archives and has timed out on-device.
-            // One exact URL can still return multiple historical timestamps. If it times out, use
-            // the bounded Availability fallback instead of immediately repeating a broad scan.
-            val productUrlCandidate = (
-                listOfNotNull(preferredUrl?.takeIf(::isEligibleDirectUrl)) +
-                    buildAvailabilityCandidateUrls(normalizedDomain, expectedTitle)
-                ).distinct().firstOrNull()
+            // Google Shopping can already trigger a direct-URL CDX lookup immediately before
+            // this fallback. Do not spend another identical index request or a broad host scan
+            // after that lookup returned no usable price: the two known URLs can be checked via
+            // Availability within the local time budget. This is also more reliable when a site
+            // archived a slash/variant URL different from the product link.
+            val generatedProductUrls = buildAvailabilityCandidateUrls(normalizedDomain, expectedTitle)
+            val productUrlCandidates = (
+                listOfNotNull(preferredUrl?.takeIf(::isEligibleDirectUrl)) + generatedProductUrls
+            ).distinct()
+            val productUrlCandidate = productUrlCandidates.firstOrNull()
+            if (preferredUrlAlreadyQueried && preferredUrl != null) {
+                return@serializedArchiveLookup runDomainAvailabilityFallback(
+                    normalizedDomain = normalizedDomain,
+                    expectedTitle = expectedTitle,
+                    preferredUrl = preferredUrl,
+                    now = now,
+                    lookbackDays = lookbackDays,
+                    cacheKey = attempt,
+                    failureCodes = setOf("CDX_DIRECT_URL_ALREADY_QUERIED"),
+                    onTrace = onTrace
+                )
+            }
             if (productUrlCandidate != null) {
-                val exactCdxUrl = buildCdxUrl(productUrlCandidate, now, lookbackDays)
-                if (exactCdxUrl != null) {
-                    val exactAttemptKey = attemptKey(
-                        "domain-product-exact-v1|$normalizedDomain|$expectedTitle|$productUrlCandidate"
+                val productCdxUrl = buildCdxUrl(productUrlCandidate, now, lookbackDays)
+                if (productCdxUrl != null) {
+                    val productAttemptKey = attemptKey(
+                        "domain-product-prefix-v2|$normalizedDomain|$expectedTitle|$productUrlCandidate"
                     )
-                    val exactResult = queryCdxAndFetchPrices(
-                        cdxUrl = exactCdxUrl,
+                    val productResult = queryCdxAndFetchPrices(
+                        cdxUrl = productCdxUrl,
                         expectedTitle = expectedTitle,
-                        cacheKey = exactAttemptKey,
+                        cacheKey = productAttemptKey,
                         now = now,
                         maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP,
                         cdxTimeoutSeconds = DOMAIN_EXACT_CDX_TIMEOUT_SECONDS,
-                        cdxStage = "CDX_PRODUCT_EXACT",
+                        cdxStage = "CDX_PRODUCT_PREFIX",
                         snapshotTimeoutSeconds = CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS,
                         onTrace = onTrace
                     )
-                    if (exactResult.quotes.isNotEmpty()) {
+                    if (productResult.quotes.isNotEmpty()) {
                         rememberAttempt(attempt, now, hasQuotes = true, failed = false)
-                        return@serializedArchiveLookup exactResult.copy(diagnosticCodes = emptySet())
+                        return@serializedArchiveLookup productResult.copy(diagnosticCodes = emptySet())
                     }
-                    if (exactResult.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) {
+                    if (productResult.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) {
                         rememberAttempt(attempt, now, hasQuotes = false, failed = true, rateLimited = true)
-                        return@serializedArchiveLookup exactResult
+                        return@serializedArchiveLookup productResult
                     }
-                    val exactTransientFailure = exactResult.diagnosticCodes.any { code ->
-                        code.endsWith("_TIMEOUT") ||
-                            (code.contains("_HTTP_") &&
-                                code.substringAfterLast('_').toIntOrNull()
-                                    ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true)
-                    }
-                    if (exactResult.requestFailed && exactTransientFailure) {
-                        return@serializedArchiveLookup runDomainAvailabilityFallback(
-                            normalizedDomain = normalizedDomain,
-                            expectedTitle = expectedTitle,
-                            preferredUrl = preferredUrl,
-                            now = now,
-                            lookbackDays = lookbackDays,
-                            cacheKey = attempt,
-                            failureCodes = exactResult.diagnosticCodes,
-                            onTrace = onTrace
-                        )
-                    }
+                    // Whether the product-prefix query returned a valid empty index or a
+                    // transient/non-fatal index error, go to the bounded Availability fallback
+                    // now. The broad host+regex CDX request routinely takes 6-7 seconds and was
+                    // consuming the remaining 10-second local budget before Availability could run.
+                    return@serializedArchiveLookup runDomainAvailabilityFallback(
+                        normalizedDomain = normalizedDomain,
+                        expectedTitle = expectedTitle,
+                        preferredUrl = preferredUrl ?: productUrlCandidate,
+                        now = now,
+                        lookbackDays = lookbackDays,
+                        cacheKey = attempt,
+                        failureCodes = productResult.diagnosticCodes.ifEmpty {
+                            setOf("CDX_PRODUCT_PREFIX_NO_VERIFIED_PRICE")
+                        },
+                        onTrace = onTrace
+                    )
                 }
             }
 
+            // Only when no product-shaped URL can be generated do we try a broad host scan.
+            // Keep this request short: if the archive is slow, the bounded availability fallback
+            // must still have time to run before the ViewModel's per-candidate deadline.
             var lastResult: WaybackBackfillResult? = null
             for (cdxUrl in cdxUrls) {
                 if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
@@ -341,12 +357,16 @@ class WaybackPriceHistoryClient(
         onTrace: ((WaybackTraceEvent) -> Unit)?
     ): WaybackBackfillResult {
         val failureLabel = when {
+            failureCodes.contains("CDX_DIRECT_URL_ALREADY_QUERIED") ->
+                "La URL directa ya se comprobó; se buscan variantes archivadas"
+            failureCodes.contains("CDX_NO_CAPTURES") ->
+                "La consulta de producto no encontró capturas; se prueban otras URL"
             failureCodes.contains("CDX_DOMAIN_TIMEOUT") ->
                 "CDX de dominio agotó el tiempo"
-            failureCodes.any { it.contains("CDX_PRODUCT_EXACT") && it.endsWith("_TIMEOUT") } ->
+            failureCodes.any { it.contains("CDX_PRODUCT_PREFIX") && it.endsWith("_TIMEOUT") } ->
                 "CDX de URL de producto agotó el tiempo"
             else ->
-                "CDX devolvió un error temporal (${failureCodes.joinToString(", ")})"
+                "La consulta CDX no devolvió un precio verificable; se prueban otras URL"
         }
         emitWaybackTrace(
             onTrace, 6, WaybackTraceStatus.RUNNING,
@@ -403,8 +423,11 @@ class WaybackPriceHistoryClient(
             failed = true,
             rateLimited = fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
         )
+        // An empty-but-valid Availability response is not a transport failure. Preserve
+        // that distinction so step 6 reports the fallback's real outcome and step 7 reports
+        // only that no capture was available for the tested URLs.
         return fallback.copy(
-            requestFailed = true,
+            requestFailed = fallback.requestFailed,
             diagnosticCodes = fallback.diagnosticCodes + failureCodes
         )
     }
@@ -1485,7 +1508,10 @@ class WaybackPriceHistoryClient(
             .host("web.archive.org")
             .addPathSegments("cdx/search/cdx")
             .addQueryParameter("url", originalUrl)
-            .addQueryParameter("matchType", "exact")
+            // Prefix matching handles archived canonical variants such as a trailing slash,
+            // locale folder or child variant URL. The HTML product-title + EUR-price verifier is
+            // still mandatory, so a neighbouring product cannot be accepted by URL similarity.
+            .addQueryParameter("matchType", "prefix")
             .addQueryParameter("output", "json")
             .addQueryParameter("fl", "timestamp,original,statuscode,mimetype")
             .addQueryParameter("filter", "statuscode:200")
@@ -2109,11 +2135,9 @@ class WaybackPriceHistoryClient(
         // This runs in the background history backfill, not in the main search UI.
         // Four seconds accommodates ordinary CDX latency while staying inside the ViewModel's
         // independent 10-second cap for the whole domain fallback.
-        // This timeout is used only by the explicit historical lookup after product-specific
-        // URLs have been tried. It does not run on the primary shopping-search path.
-        // The public CDX index regularly needs more than four seconds for host-scoped filters;
-        // keep one bounded request long enough to return instead of immediately falling back.
-        private const val CDX_FALLBACK_TIMEOUT_SECONDS = 6L
+        // Broad host scans are a last resort; retain a short bound so they cannot starve
+        // Availability fallback or delay the primary shopping-search experience.
+        private const val CDX_FALLBACK_TIMEOUT_SECONDS = 3L
         private const val CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS = 2L
         private const val DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS = 2L
         private const val MAX_AVAILABILITY_BODY_BYTES = 64 * 1024
@@ -2121,8 +2145,9 @@ class WaybackPriceHistoryClient(
         private const val CDX_RETRY_JITTER_MS = 350L
         private val RETRYABLE_CDX_HTTP_CODES = setOf(500, 502, 503, 504)
         private const val DIRECT_CDX_TIMEOUT_SECONDS = 5L
-        // Keep the broad domain-index request bounded to the same historical-only budget.
-        private const val DOMAIN_CDX_TIMEOUT_SECONDS = 6L
+        // This last-resort host scan only runs if no product URL can be built. Keep it
+        // short enough to leave time for the two bounded Availability probes.
+        private const val DOMAIN_CDX_TIMEOUT_SECONDS = 3L
         // Product-specific CDX lookup is narrower than scanning every URL on a retailer host.
         private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 3L
         private const val MAX_DOMAIN_PRODUCT_URL_CANDIDATES = 2

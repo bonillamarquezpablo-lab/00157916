@@ -266,16 +266,22 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun directUrlCandidatesTrySlashVariantWhenThereAreNoTrackingParameters() {
+    fun directUrlCandidatesTrySlashVariantOnlyForQuerylessPages() {
         val client = newClient()
-        val candidates = client.buildDirectUrlCandidates("https://shop.example/product/anker-prime")
-
+        val queryless = client.buildDirectUrlCandidates("https://shop.example/product/anker-prime")
         assertEquals(
             listOf(
                 "https://shop.example/product/anker-prime",
                 "https://shop.example/product/anker-prime/"
             ),
-            candidates
+            queryless
+        )
+
+        val variantUrl = "https://shop.example/product/anker-prime?sku=27k"
+        assertEquals(
+            "A meaningful product query must not be rewritten as a different slash URL",
+            listOf(variantUrl),
+            client.buildDirectUrlCandidates(variantUrl)
         )
     }
 
@@ -309,6 +315,16 @@ class WaybackPriceHistoryClientTest {
             samsungCandidates.contains("https://www.samsung.com/es/smartphones/galaxy-s/galaxy-s25-edge/")
         )
         assertTrue(samsungCandidates.size <= 6)
+        val samsungSearchUrl = com.example.data.model.Store.ALL_STORES
+            .firstOrNull { it.domain.contains("samsung.com", ignoreCase = true) && it.supportsProductSearch }
+            ?.searchUrlFor("Samsung Galaxy S25 Edge")
+        if (samsungSearchUrl != null) {
+            assertEquals(
+                "The actual Samsung search page must survive the two-candidate fallback budget",
+                samsungSearchUrl,
+                samsungCandidates[1]
+            )
+        }
     }
 
     @Test

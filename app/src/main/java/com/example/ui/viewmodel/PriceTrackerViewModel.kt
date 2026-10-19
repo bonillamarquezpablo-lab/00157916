@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CancellationException
@@ -217,26 +218,29 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         durationMs: Long? = null
     ) {
         if (step !in 1..15) return
-        val state = _uiState.value
-        if (state.waybackDiagnosticProductId != productId) return
-        val rows = state.waybackDiagnosticSteps.toMutableList()
-        val index = rows.indexOfFirst { it.step == step }
-        if (index < 0) return
-        val old = rows[index]
         val time = SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(Date())
         val detailLine = "[$time] " + detail.trim() + (durationMs?.let { " · ${it} ms" } ?: "")
-        val combinedDetail = when {
-            detailLine.isBlank() -> old.detail
-            old.detail.isBlank() -> detailLine
-            old.detail.lines().any { it == detailLine } -> old.detail
-            else -> (old.detail.lines() + detailLine).takeLast(5).joinToString("\n")
+        // Trace callbacks can arrive from Dispatchers.IO while the ViewModel updates UI state.
+        // Apply each event atomically so concurrent updates cannot erase earlier diagnostic rows.
+        _uiState.update { state ->
+            if (state.waybackDiagnosticProductId != productId) return@update state
+            val rows = state.waybackDiagnosticSteps.toMutableList()
+            val index = rows.indexOfFirst { it.step == step }
+            if (index < 0) return@update state
+            val old = rows[index]
+            val combinedDetail = when {
+                detailLine.isBlank() -> old.detail
+                old.detail.isBlank() -> detailLine
+                old.detail.lines().any { it == detailLine } -> old.detail
+                else -> (old.detail.lines() + detailLine).takeLast(5).joinToString("\n")
+            }
+            rows[index] = old.copy(
+                status = status,
+                detail = combinedDetail,
+                durationMs = durationMs ?: old.durationMs
+            )
+            state.copy(waybackDiagnosticSteps = rows)
         }
-        rows[index] = old.copy(
-            status = status,
-            detail = combinedDetail,
-            durationMs = durationMs ?: old.durationMs
-        )
-        _uiState.value = state.copy(waybackDiagnosticSteps = rows)
     }
 
     private fun recordWaybackTrace(productId: String, event: WaybackTraceEvent) {
@@ -1188,7 +1192,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             return
         }
 
-        _uiState.value = current.copy(
+        _uiState.value = _uiState.value.copy(
             isSearchingFreeHistory = true,
             freeHistoryStatus = "Buscando páginas históricas gratuitas; esta consulta no consume cuota de SerpApi.",
             freeHistoryProductId = product.id

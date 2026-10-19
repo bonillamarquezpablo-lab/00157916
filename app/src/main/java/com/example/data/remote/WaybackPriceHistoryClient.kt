@@ -234,6 +234,11 @@ class WaybackPriceHistoryClient(
                         if (fallback.quotes.isNotEmpty()) {
                             return@serializedArchiveLookup fallback.copy(diagnosticCodes = emptySet())
                         }
+                        // queryAvailabilityAndFetchPrices may treat an empty but valid
+                        // availability response as a negative result. The domain-index timeout
+                        // still failed, so preserve it as a short-lived failure, not a six-hour
+                        // "no captures" cache entry.
+                        rememberAttempt(attempt, now, hasQuotes = false, failed = true)
                         return@serializedArchiveLookup fallback.copy(
                             requestFailed = true,
                             diagnosticCodes = fallback.diagnosticCodes + "CDX_DOMAIN_TIMEOUT"

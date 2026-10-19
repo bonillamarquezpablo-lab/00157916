@@ -953,6 +953,9 @@ class WaybackPriceHistoryClient(
         val pageTitles = extractArchivedPageTitles(html)
         val titles = (jsonLd.map { it.first } + pageTitles).filter { it.isNotBlank() }
         val titleMatches = titles.any { isMatchingProductTitle(expectedTitle, it) }
+        val expectedTitleForTrace = expectedTitle.replace(Regex("""\s+"""), " ").trim().take(100)
+        val detectedTitlesForTrace = titles.take(3)
+            .joinToString(" | ") { it.replace(Regex("""\s+"""), " ").trim().take(100) }
         emitWaybackTrace(
             onTrace, 12,
             if (titles.isEmpty()) WaybackTraceStatus.FAILED
@@ -960,7 +963,7 @@ class WaybackPriceHistoryClient(
             when {
                 titles.isEmpty() -> "No se encontró título en JSON-LD, og:title, twitter:title ni <title>."
                 titleMatches -> "Título/modelo de la página coincide con el producto seleccionado."
-                else -> "Se encontró título, pero no coincide con el producto o su variante."
+                else -> "No coincide la identidad. Producto esperado: «$expectedTitleForTrace». Título(s) archivado(s): «$detectedTitlesForTrace». No se aceptará un precio de otra variante."
             }
         )
 

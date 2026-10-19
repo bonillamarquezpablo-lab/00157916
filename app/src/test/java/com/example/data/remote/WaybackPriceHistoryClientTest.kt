@@ -603,7 +603,7 @@ class WaybackPriceHistoryClientTest {
         try {
             val result = withTimeout(20_000L) {
                 WaybackPriceHistoryClient(context, http).fetchHistoryByMerchantDomain(
-                    domain = "shop.example",
+                    domain = "pccomponentes.com",
                     expectedTitle = title,
                     lookbackDays = 730,
                     preferredUrl = preferredUrl,

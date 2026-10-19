@@ -83,6 +83,7 @@ class WaybackPriceHistoryClientTest {
         val title = "Anker Prime 27K Power Bank Edición Española Cascade Test ${System.currentTimeMillis()}"
         val archivedUrl = "https://www.shop.example/products/anker-prime-27k-power-bank"
         val requests = CopyOnWriteArrayList<String>()
+        val cdxMatchTypes = CopyOnWriteArrayList<String>()
         val cdxBody = """
             [
               ["timestamp","original","statuscode","mimetype"],
@@ -106,8 +107,10 @@ class WaybackPriceHistoryClientTest {
             requests += hostAndPath
             val (body, contentType) = when {
                 request.url.host == "web.archive.org" &&
-                    request.url.encodedPath.startsWith("/cdx/search/cdx") ->
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    cdxMatchTypes += request.url.queryParameter("matchType").orEmpty()
                     cdxBody to "application/json; charset=utf-8"
+                }
                 request.url.host == "web.archive.org" &&
                     request.url.encodedPath.startsWith("/web/") ->
                     archivedHtml to "text/html; charset=iso-8859-1"
@@ -152,6 +155,7 @@ class WaybackPriceHistoryClientTest {
             assertEquals("EUR", result.quotes.single().currency)
             assertEquals("Availability must not issue per-date HTTP requests", 0, requests.count { it.startsWith("archive.org/wayback/available") })
             assertEquals("Concurrent duplicate lookups must share one CDX request", 1, requests.count { it.startsWith("web.archive.org/cdx/search/cdx") })
+            assertEquals("The product URL should be queried exactly before a broad host scan", "exact", cdxMatchTypes.single())
             assertEquals("The duplicate result should use the completed lookup cache", 1, results.count { it.skippedRecently })
             assertEquals("Only one archived snapshot is needed for this one-capture fixture", 1, requests.count { it.startsWith("web.archive.org/web/") })
         } finally {
@@ -441,7 +445,7 @@ class WaybackPriceHistoryClientTest {
                 )
             }
             assertTrue(
-                "A CDX_DOMAIN_TIMEOUT must still try the product-specific Availability API",
+                "A product-specific CDX timeout must still try the bounded Availability API",
                 requests.contains("archive.org/wayback/available")
             )
             assertEquals("The exact saved retailer URL must be the first Availability candidate", preferredUrl, availabilityUrls.first())
@@ -554,7 +558,7 @@ class WaybackPriceHistoryClientTest {
             assertTrue("The original HTTP 500 must remain visible in diagnostics",
                 traceEvents.any {
                     it.step == 5 && it.status == WaybackTraceStatus.FAILED &&
-                        it.detail.contains("CDX_DOMAIN_HTTP_500")
+                        it.detail.contains("CDX_PRODUCT_EXACT_HTTP_500")
                 })
             assertTrue("The fallback must complete successfully",
                 traceEvents.any { it.step == 6 && it.status == WaybackTraceStatus.PASSED })

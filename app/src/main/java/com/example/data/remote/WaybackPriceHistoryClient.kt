@@ -2568,10 +2568,9 @@ class WaybackPriceHistoryClient(
     private fun canonicalizeArchiveTitle(normalizedTitle: String): String {
         // Xiaomi's global/European catalogue commonly alternates between "Xiaomi" and "Mi"
         // for the same electric-scooter family. Normalize only this explicit product phrase.
-        var canonical = normalizedTitle.replace(
-            Regex("""\bmi\s+electric\s+scooter\b"""),
-            "xiaomi electric scooter"
-        )
+        var canonical = normalizedTitle
+            .replace(Regex("""\bxiaomi\s+mi\s+electric\s+scooter\b"""), "xiaomi electric scooter")
+            .replace(Regex("""\bmi\s+electric\s+scooter\b"""), "xiaomi electric scooter")
         // These regional prefixes are only interchangeable for Samsung model identifiers.
         if (!Regex("""\bsamsung\b""").containsMatchIn(canonical)) return canonical
         canonical = canonical

@@ -587,10 +587,13 @@ class WaybackPriceHistoryClient(
             // no verifiable EUR price. Continue to the next candidate so its snapshot can be
             // validated too; maxCandidates/maxSnapshots bound both traffic and total work.
         }
-        val captures = probes.mapNotNull { it.capture }
-            .filter { it.timestamp <= now && it.timestamp >= (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L) }
+        val allAvailabilityCaptures = probes.mapNotNull { it.capture }
             .distinctBy { it.rawTimestamp to it.originalUrl }
+        val windowStart = (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
+        val captures = allAvailabilityCaptures
+            .filter { it.timestamp in windowStart..now }
             .sortedBy { it.timestamp }
+        val outsideWindowCount = allAvailabilityCaptures.size - captures.size
         val successfulProbes = probes.count { !it.requestFailed }
         val failedProbeCount = probes.count { it.requestFailed }
         val probeDiagnostics = probes.mapNotNull { it.diagnosticCode }.toSet()
@@ -612,6 +615,57 @@ class WaybackPriceHistoryClient(
         emitWaybackTrace(
             onTrace, 7, availabilityTraceStatus, availabilityTraceDetail,
             diagnosticStep = 7
+        )
+
+        // Availability is a separate capture source from the CDX index. Reflect its successful
+        // rows in the same detailed report so a CDX timeout does not leave steps 8–10 falsely
+        // marked as unexecuted when the fallback has already returned usable captures.
+        val captureExtractionStatus = when {
+            captures.isNotEmpty() -> WaybackTraceStatus.PASSED
+            probeDiagnostics.contains("WAYBACK_RATE_LIMITED") -> WaybackTraceStatus.SKIPPED
+            successfulProbes > 0 -> WaybackTraceStatus.SKIPPED
+            else -> WaybackTraceStatus.FAILED
+        }
+        emitWaybackTrace(
+            onTrace, 7, captureExtractionStatus,
+            when {
+                captures.isNotEmpty() ->
+                    "Availability API devolvió ${captures.size} captura(s) válidas dentro del período solicitado."
+                probeDiagnostics.contains("WAYBACK_RATE_LIMITED") ->
+                    "Extracción omitida: HTTP 429; se respeta la pausa global."
+                successfulProbes > 0 ->
+                    "Availability respondió correctamente, pero no devolvió capturas utilizables."
+                else ->
+                    "Extracción fallida: ninguna consulta Availability produjo una respuesta utilizable."
+            },
+            diagnosticStep = 8
+        )
+        emitWaybackTrace(
+            onTrace, 7,
+            if (captures.isNotEmpty()) WaybackTraceStatus.PASSED else WaybackTraceStatus.SKIPPED,
+            if (captures.isNotEmpty()) {
+                "Candidatas Availability normalizadas y deduplicadas: ${captures.map { it.originalUrl }.distinct().size} URL(s) únicas."
+            } else {
+                "No hay URL candidatas que normalizar porque Availability no aportó capturas dentro del período."
+            },
+            diagnosticStep = 9
+        )
+        emitWaybackTrace(
+            onTrace, 7,
+            when {
+                captures.isNotEmpty() -> WaybackTraceStatus.PASSED
+                successfulProbes > 0 -> WaybackTraceStatus.SKIPPED
+                else -> WaybackTraceStatus.FAILED
+            },
+            when {
+                captures.isNotEmpty() ->
+                    "Fechas Availability validadas: ${captures.size} captura(s) dentro de los últimos ${lookbackDays.coerceAtLeast(1)} días; ${outsideWindowCount} descartada(s) fuera del intervalo."
+                successfulProbes > 0 ->
+                    "No había fechas de capturas para validar; la API respondió sin capturas disponibles."
+                else ->
+                    "No se pudo validar el período porque ninguna consulta Availability respondió correctamente."
+            },
+            diagnosticStep = 10
         )
 
         // A 429 ends this backfill immediately. Do not follow successful earlier probes with

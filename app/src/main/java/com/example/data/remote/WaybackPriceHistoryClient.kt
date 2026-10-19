@@ -2287,6 +2287,18 @@ class WaybackPriceHistoryClient(
         if (e.isBlank() || a.isBlank()) return false
         if (productConditionKey(e) != productConditionKey(a)) return false
 
+        // Colours are optional in some archived headings, but explicit conflicting colours
+        // must never be treated as the same SKU. Normalize common Spanish/English/Italian names.
+        val expectedColourFamily = productColourFamily(e)
+        val archivedColourFamily = productColourFamily(a)
+        if (expectedColourFamily != null && archivedColourFamily != null &&
+            expectedColourFamily != archivedColourFamily
+        ) return false
+
+        // Trim/model suffixes (Pro, Ultra, Max, etc.) are meaningful for phones and scooters.
+        // Require the same explicit trim markers on both titles to avoid cross-variant prices.
+        if (productModelVariantTokens(e) != productModelVariantTokens(a)) return false
+
         // Xiaomi archive titles frequently omit a colour suffix or translate "Gris" to
         // "Grey/Gray/Grigio". Treat the exact Mi model as the identity anchor, while refusing
         // any conflicting numeric/storage variant or an explicitly different colour.
@@ -2358,14 +2370,20 @@ class WaybackPriceHistoryClient(
 
     private fun productColourFamily(normalizedTitle: String): String? {
         val tokens = normalizedTitle.split(' ').toSet()
-        return when {
-            tokens.any { it in setOf("gris", "grey", "gray", "grigio") } -> "grey"
-            tokens.any { it in setOf("negro", "negra", "black", "nero") } -> "black"
-            tokens.any { it in setOf("blanco", "blanca", "white", "bianco") } -> "white"
-            tokens.any { it in setOf("azul", "blue", "bleu") } -> "blue"
-            tokens.any { it in setOf("verde", "green") } -> "green"
-            else -> null
-        }
+        val matches = linkedSetOf<String>()
+        if (tokens.any { it in setOf("gris", "grey", "gray", "grigio", "silver", "plata", "argento") }) matches += "grey"
+        if (tokens.any { it in setOf("negro", "negra", "black", "nero") }) matches += "black"
+        if (tokens.any { it in setOf("blanco", "blanca", "white", "bianco") }) matches += "white"
+        if (tokens.any { it in setOf("azul", "blue", "bleu") }) matches += "blue"
+        if (tokens.any { it in setOf("verde", "green", "verde") }) matches += "green"
+        if (tokens.any { it in setOf("rojo", "roja", "red", "rosso") }) matches += "red"
+        if (tokens.any { it in setOf("amarillo", "amarilla", "yellow", "giallo") }) matches += "yellow"
+        if (tokens.any { it in setOf("rosa", "pink", "rose") }) matches += "pink"
+        if (tokens.any { it in setOf("morado", "morada", "purple", "violet", "violeta") }) matches += "purple"
+        if (tokens.any { it in setOf("dorado", "dorada", "gold", "oro") }) matches += "gold"
+        if (tokens.any { it in setOf("naranja", "orange", "arancione") }) matches += "orange"
+        if (tokens.any { it in setOf("marron", "brown", "cafe", "beige", "arena", "sand") }) matches += "brown"
+        return matches.singleOrNull()
     }
 
     private fun productConditionKey(title: String): String = when {
@@ -2379,9 +2397,15 @@ class WaybackPriceHistoryClient(
     }
 
     private fun canonicalizeArchiveTitle(normalizedTitle: String): String {
+        // Xiaomi's global/European catalogue commonly alternates between "Xiaomi" and "Mi"
+        // for the same electric-scooter family. Normalize only this explicit product phrase.
+        var canonical = normalizedTitle.replace(
+            Regex("""\bmi\s+electric\s+scooter\b"""),
+            "xiaomi electric scooter"
+        )
         // These regional prefixes are only interchangeable for Samsung model identifiers.
-        if (!Regex("""\bsamsung\b""").containsMatchIn(normalizedTitle)) return normalizedTitle
-        return normalizedTitle
+        if (!Regex("""\bsamsung\b""").containsMatchIn(canonical)) return canonical
+        canonical = canonical
             // Normalize only known Samsung TV regional model prefixes in compact alphanumeric
             // identifiers (e.g. TQ48S95HAEXXC vs QE48S95HAEXXC); retain size and suffix.
             .replace(Regex("""\b(?:tq|qe)(?=\d{2}[a-z0-9]{5,})"""), "")
@@ -2389,14 +2413,27 @@ class WaybackPriceHistoryClient(
             .replace(Regex("""\b(?:2k|4k|8k|uhd|fhd|fullhd)\b"""), " ")
             .replace(Regex("""\s+"""), " ")
             .trim()
-            // Samsung catalogue titles sometimes include an explicit region code in one title
-            // but omit it in the other; identity matching below still guards diagonal/model.
+        return canonical
     }
 
     /**
-     * Variant-defining tokens that must survive a fuzzy title match. Mixed alphanumeric model
-     * codes and standalone numbers with at least two digits are treated as distinguishing values.
-     * Generic words still use the looser overlap rule above.
+     * Explicit model/trim names that distinguish common product lines. We compare the set
+     * rather than only checking overlap, so "Scooter 4 Pro" cannot match "Scooter 4 Ultra"
+     * and "Galaxy S26 Pro" cannot silently match "Galaxy S26 Pro Max".
+     */
+    private fun productModelVariantTokens(normalizedTitle: String): Set<String> {
+        val qualifiers = setOf(
+            "pro", "ultra", "lite", "plus", "max", "mini", "edge", "fe", "se",
+            "air", "sport", "gt", "prime", "active", "essential", "neo", "note",
+            "fold", "flip", "play", "classic", "racing", "performance", "master",
+            "touring", "urban", "city", "offroad"
+        )
+        return normalizedTitle.split(' ').filter { it in qualifiers }.toSet()
+    }
+
+    /**
+     * Variant-defining numeric tokens must survive a fuzzy title match. Capacity and model
+     * numbers are required when present in the selected product title.
      */
     private fun requiredVariantTokens(normalizedTitle: String): Set<String> {
         val unitRegex = Regex("""\b(\d+)\s+(gb|tb|mb|mah|wh|w|hz|mm|cm|inch|inches)\b""")

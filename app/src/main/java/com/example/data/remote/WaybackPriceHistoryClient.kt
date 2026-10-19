@@ -986,7 +986,9 @@ class WaybackPriceHistoryClient(
             when {
                 jsonLd.isNotEmpty() -> "Precio detectado en metadatos JSON-LD (${jsonLd.size} oferta(s))."
                 metaPrice != null -> "Precio numérico detectado en metadatos de la página."
-                else -> "No se encontró precio numérico en JSON-LD ni metadatos compatibles."
+                visiblePrice != null -> "Precio visible detectado en un bloque de precio del producto y con moneda EUR."
+                quote != null -> "Precio histórico verificado para el producto."
+                else -> "No se encontró precio numérico en datos estructurados, metadatos ni bloques de precio reconocidos."
             }
         )
         val prices = jsonLd.map { it.second } + listOfNotNull(metaPrice, visiblePrice, quote?.price)
@@ -1031,7 +1033,7 @@ class WaybackPriceHistoryClient(
             readMeta(document, setOf(key)) ?: readItemPropValue(document, key)
         }?.uppercase(Locale.ROOT)
         if (pageTitles.isEmpty() && jsonLd.isEmpty()) return "ARCHIVE_TITLE_MISSING"
-        val visiblePrice = if (jsonLd.isEmpty() && metaPrice == null) extractVisibleProductPrice(document, metaCurrency) else null
+        val visiblePrice = extractVisibleProductPrice(document, metaCurrency)
         if (metaPrice == null && jsonLd.isEmpty() && visiblePrice == null) return "ARCHIVE_PRICE_METADATA_MISSING"
         val candidates = jsonLd +
             (if (pageTitles.isNotEmpty() && metaPrice != null && !metaCurrency.isNullOrBlank()) {
@@ -2069,7 +2071,8 @@ class WaybackPriceHistoryClient(
         snapshotUrl: String,
         observedAt: Long
     ): ArchivedPriceQuote? {
-        if (document.body().text().isBlank() && document.select("script[type=application/ld+json]").isEmpty()) return null
+        // The product price/title may exist only in <head> metadata or JSON-LD, so an empty
+        // rendered body is not enough to reject an archived document.
         if (expectedTitle.isBlank() || observedAt <= 0L) return null
         val jsonLdCandidates = extractJsonLdProductOffers(document)
         val pageTitles = extractArchivedPageTitles(document)

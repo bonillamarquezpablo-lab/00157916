@@ -384,7 +384,7 @@ class WaybackPriceHistoryClient(
             ?: run {
                 emitWaybackTrace(
                     onTrace, 4, WaybackTraceStatus.SKIPPED,
-                    "No ejecutado: no se envió CDX porque no se pudo identificar un dominio de tienda válido.",
+                    "No ejecutado: no se envió CDX porque no se pudo identificar un dominio de tienda válido (DOMAIN_UNRESOLVED).",
                     diagnosticStep = 5
                 )
                 emitWaybackTrace(

@@ -2496,10 +2496,9 @@ class WaybackPriceHistoryClient(
         private const val CDX_RETRY_DELAY_MS = 500L
         private const val CDX_RETRY_JITTER_MS = 350L
         private val RETRYABLE_CDX_HTTP_CODES = setOf(500, 502, 503, 504)
-        // Historical backfill only: allow one additional second for a slow CDX response.
-        // The ViewModel still caps a whole retailer candidate at 12 seconds, so this does not
-        // delay primary shopping searches or permit unbounded archive requests.
-        private const val DIRECT_CDX_TIMEOUT_SECONDS = 6L
+        // Historical backfill only: allow two additional seconds for a slow direct CDX response.
+        // No retry is added; the bounded Availability fallback and per-candidate cap remain in force.
+        private const val DIRECT_CDX_TIMEOUT_SECONDS = 7L
         // This last-resort host scan only runs if no product URL can be built. Keep it
         // short enough to leave time for the two bounded Availability probes.
         private const val DOMAIN_CDX_TIMEOUT_SECONDS = 3L

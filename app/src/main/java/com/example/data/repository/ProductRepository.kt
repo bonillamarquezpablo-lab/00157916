@@ -471,7 +471,10 @@ class ProductRepository(
     private fun isEuroCurrency(currency: String): Boolean =
         currency.trim().equals("EUR", ignoreCase = true)
 
-    private fun isEligibleObservationForHistory(observation: PriceObservationEntity): Boolean {
+    private fun isEligibleObservationForHistory(
+        observation: PriceObservationEntity,
+        canonicalProductTitle: String = observation.productTitle
+    ): Boolean {
         val archiveBacked = isArchiveBackedObservation(observation)
         val isHistoricalInsight = observation.evidenceType.equals("google_insights", ignoreCase = true)
         val now = System.currentTimeMillis()
@@ -522,7 +525,7 @@ class ProductRepository(
             isEligibleHistoryTitle(observation.productTitle) &&
             !isPromotionalBulkListing(observation.productTitle, "") &&
             isEligibleSeller(observation.storeName, merchantUrl) &&
-            isPlausibleHistoryPrice(observation.productTitle, observation.price)
+            isPlausibleHistoryPrice(canonicalProductTitle, observation.price)
     }
 
     /**
@@ -1547,11 +1550,10 @@ class ProductRepository(
                 observation.evidenceType.equals("google_insights", ignoreCase = true) ||
                 observation.observedAt >= HISTORY_START_TIMESTAMP
             eligibleDate &&
-                isEligibleObservationForHistory(observation) &&
-                // Re-check each observation against the canonical catalogue title as well as the
-                // retailer's title. This keeps old, incorrectly verified rows from resurfacing as
-                // current offers after a stricter price-quality policy ships.
-                isPlausibleHistoryPrice(this.title, observation.price)
+                // Use the canonical product name for price plausibility. This avoids compiling
+                // and running the category regexes twice per Room observation and prevents a
+                // generic legacy seller title from legitimizing a mismatched extreme price.
+                isEligibleObservationForHistory(observation, canonicalProductTitle = this.title)
         }.sortedBy { it.observedAt }
         // Only current search observations establish the live price. Historical-provider points
         // remain visible on the chart but can never replace the current quote.

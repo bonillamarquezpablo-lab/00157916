@@ -502,7 +502,7 @@ fun OnlineSearchScreen(
                             FilterChip(
                                 selected = state.onlineSearchShowSecondHand,
                                 onClick = { onShowSecondHandChange(!state.onlineSearchShowSecondHand) },
-                                label = { Text(if (state.onlineSearchShowSecondHand) "Segunda mano" else "Mostrar segunda mano") }
+                                label = { Text("Mostrar segunda mano") }
                             )
                             if (accessoryResultCount > 0) {
                                 FilterChip(

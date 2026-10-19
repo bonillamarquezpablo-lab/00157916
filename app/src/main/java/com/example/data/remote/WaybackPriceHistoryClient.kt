@@ -809,6 +809,30 @@ class WaybackPriceHistoryClient(
         if (normalizedDomain == "samsung.com") {
             slugs.filter { it.startsWith("galaxy-") }
                 .forEach { paths += "/es/smartphones/galaxy-s/$it/" }
+
+            // Saved product titles are sometimes shortened by shopping providers to
+            // "Samsung S26" or "Samsung S26 Ultra", omitting "Galaxy". Derive the
+            // canonical Samsung product path from the model code before trying generic
+            // slugs such as /s26/, which are very unlikely to be archived product pages.
+            val samsungModel = Regex(
+                """(?i)\bS\s*(\d{1,2})(?:\s*(Ultra|Plus|FE|Edge))?\b"""
+            ).find(expectedTitle)
+            if (samsungModel != null) {
+                val modelNumber = samsungModel.groupValues[1]
+                val variant = samsungModel.groupValues.getOrNull(2)
+                    .orEmpty()
+                    .lowercase(Locale.ROOT)
+                    .ifBlank {
+                        if (Regex("""(?i)\bS\s*\d{1,2}\s*\+""").containsMatchIn(expectedTitle)) {
+                            "plus"
+                        } else {
+                            ""
+                        }
+                    }
+                val modelSlug = "galaxy-s$modelNumber" +
+                    if (variant.isNotBlank()) "-$variant" else ""
+                paths.add("/es/smartphones/galaxy-s/$modelSlug/")
+            }
         }
         slugs.forEach { slug ->
             paths += "/$slug/"
@@ -831,9 +855,15 @@ class WaybackPriceHistoryClient(
                 HttpUrl.Builder().scheme("https").host(host).addPathSegments(path.trim('/')).addPathSegment("").build().toString()
             }
         }
-        return (listOfNotNull(storeSearchUrl) + guessedProductUrls)
-            .distinct()
-            .take(MAX_AVAILABILITY_URL_CANDIDATES)
+        // For Samsung, try canonical model pages before a broad search page: the
+        // product page is more likely to expose its own historical price metadata.
+        // Other merchants retain their existing search-first behaviour.
+        val orderedCandidates = if (normalizedDomain == "samsung.com") {
+            guessedProductUrls + listOfNotNull(storeSearchUrl)
+        } else {
+            listOfNotNull(storeSearchUrl) + guessedProductUrls
+        }
+        return orderedCandidates.distinct().take(MAX_AVAILABILITY_URL_CANDIDATES)
     }
 
     private fun availabilityTargetDates(now: Long, lookbackDays: Int, count: Int): List<String> {

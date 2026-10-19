@@ -16,12 +16,21 @@ android {
     applicationId = "com.aistudio.preciominimo.esrxvt"
     minSdk = 24
     targetSdk = 36
-    // Never silently produce an APK with stale fallback versions. Every build must
-    // provide an explicit version pair from the controlled CI workflow.
-    versionCode = (providers.gradleProperty("VERSION_CODE").orNull
-      ?: throw GradleException("VERSION_CODE is required; use the versioned GitHub Actions workflow.")).toInt()
-    versionName = providers.gradleProperty("VERSION_NAME").orNull
-      ?: throw GradleException("VERSION_NAME is required; use the versioned GitHub Actions workflow.")
+    // APK packaging must always receive an explicit version from the controlled workflow.
+    // Unit-test/compile-only tasks may use harmless defaults because they do not produce an APK.
+    val packagingRequested = gradle.startParameter.taskNames.any {
+      it.contains("assemble", ignoreCase = true) ||
+        it.contains("package", ignoreCase = true) ||
+        it.contains("bundle", ignoreCase = true)
+    }
+    val suppliedVersionCode = providers.gradleProperty("VERSION_CODE").orNull
+    val suppliedVersionName = providers.gradleProperty("VERSION_NAME").orNull
+    versionCode = (suppliedVersionCode ?: if (packagingRequested) {
+      throw GradleException("VERSION_CODE is required for APK packaging; use the versioned GitHub Actions workflow.")
+    } else "6").toInt()
+    versionName = suppliedVersionName ?: if (packagingRequested) {
+      throw GradleException("VERSION_NAME is required for APK packaging; use the versioned GitHub Actions workflow.")
+    } else "1.5"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

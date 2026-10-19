@@ -173,7 +173,7 @@ class WaybackPriceHistoryClient(
         if (expectedTitle.isBlank()) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("PRODUCT_TITLE_EMPTY"))
         }
-        val attempt = attemptKey("domain-cdx-batch-v3|$normalizedDomain|$expectedTitle")
+        val attempt = attemptKey("domain-cdx-batch-v4|$normalizedDomain|$expectedTitle")
         serializedArchiveLookup {
             if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
                 return@serializedArchiveLookup WaybackBackfillResult(
@@ -859,7 +859,18 @@ class WaybackPriceHistoryClient(
         // product page is more likely to expose its own historical price metadata.
         // Other merchants retain their existing search-first behaviour.
         val orderedCandidates = if (normalizedDomain == "samsung.com") {
-            guessedProductUrls + listOfNotNull(storeSearchUrl)
+            val canonicalSamsungUrls = guessedProductUrls.filter { candidate ->
+                runCatching {
+                    URI(candidate).rawPath.orEmpty()
+                        .startsWith("/es/smartphones/galaxy-s/")
+                }.getOrDefault(false)
+            }
+            val canonicalSet = canonicalSamsungUrls.toSet()
+            // Keep the targeted search URL as a secondary option rather than dropping it
+            // behind six guessed paths; canonical model URLs remain the first priority.
+            canonicalSamsungUrls +
+                listOfNotNull(storeSearchUrl) +
+                guessedProductUrls.filterNot { it in canonicalSet }
         } else {
             listOfNotNull(storeSearchUrl) + guessedProductUrls
         }

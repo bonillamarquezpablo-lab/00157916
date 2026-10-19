@@ -85,6 +85,16 @@ fun MarketScreen(
     var showStoreMenu by remember { mutableStateOf(false) }
     val verifiedProductCount = remember(products) { products.count { it.isPriceVerified } }
 
+    // Collapse marketplace-generated aliases (for example AliExpress-239640258)
+    // into one canonical display/filter option without deleting any underlying seller records.
+    val displayStores = remember(stores) {
+        stores.map { store ->
+            val canonical = Store.findKnownByName(store.name, "https://${store.domain}")
+            val label = canonical?.name ?: store.name
+            Triple(store, label, label.lowercase(java.util.Locale.ROOT))
+        }.distinctBy { it.third }
+    }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -189,7 +199,7 @@ fun MarketScreen(
                         FilterChip(
                             selected = uiState.selectedStoreName == null,
                             onClick = { onStoreFilterSelect(null) },
-                            label = { Text("Todas (${stores.size})", fontSize = 11.sp) },
+                            label = { Text("Todas (${displayStores.size})", fontSize = 11.sp) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = MaterialTheme.colorScheme.primary,
                                 selectedLabelColor = MaterialTheme.colorScheme.onPrimary
@@ -197,13 +207,13 @@ fun MarketScreen(
                         )
                     }
 
-                    items(stores, key = { it.id }) { store ->
-                        val isSelected = uiState.selectedStoreName.equals(store.name, ignoreCase = true)
+                    items(displayStores, key = { it.first.id }) { (store, displayName, _) ->
+                        val isSelected = uiState.selectedStoreName.equals(displayName, ignoreCase = true)
                         FilterChip(
                             selected = isSelected,
                             onClick = {
                                 if (isSelected) onStoreFilterSelect(null)
-                                else onStoreFilterSelect(store.name)
+                                else onStoreFilterSelect(displayName)
                             },
                             label = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -215,7 +225,7 @@ fun MarketScreen(
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = store.name,
+                                        text = displayName,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Medium,
                                         maxLines = 1,
@@ -329,7 +339,7 @@ fun MarketScreen(
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = uiState.selectedStoreName ?: "Tienda: Todas (${stores.size})",
+                                    text = uiState.selectedStoreName ?: "Tienda: Todas (${displayStores.size})",
                                     fontSize = 12.sp
                                 )
                             }
@@ -350,13 +360,13 @@ fun MarketScreen(
                                 .verticalScroll(rememberScrollState())
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Todas las tiendas (${stores.size})") },
+                                text = { Text("Todas las tiendas (${displayStores.size})") },
                                 onClick = {
                                     onStoreFilterSelect(null)
                                     showStoreMenu = false
                                 }
                             )
-                            stores.forEach { store ->
+                            displayStores.forEach { (store, displayName, _) ->
                                 DropdownMenuItem(
                                     text = {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -367,11 +377,11 @@ fun MarketScreen(
                                                     .background(store.brandColor)
                                             )
                                             Spacer(modifier = Modifier.width(8.dp))
-                                            Text(store.name)
+                                            Text(displayName)
                                         }
                                     },
                                     onClick = {
-                                        onStoreFilterSelect(store.name)
+                                        onStoreFilterSelect(displayName)
                                         showStoreMenu = false
                                     }
                                 )

@@ -2136,7 +2136,7 @@ class WaybackPriceHistoryClient(
     private fun jsonLdTypeNames(value: JSONObject): Set<String> {
         val rawType = value.opt("@type") ?: return emptySet()
         val types = when (rawType) {
-            is JSONArray -> (0 until rawType.length()).mapNotNull { rawType.optString(it).takeIf(String::isNotBlank) }
+            is JSONArray -> (0 until rawType.length()).mapNotNull { rawType.optString(it).takeIf { typeName -> typeName.isNotBlank() } }
             else -> listOf(rawType.toString())
         }
         return types.map { it.substringAfterLast('/').substringAfterLast('#').lowercase(Locale.ROOT) }.toSet()

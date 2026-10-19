@@ -2153,6 +2153,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
                 val diagnosticLabels = diagnosticCodes.distinct().take(8).map { code ->
                     when {
+                        code.startsWith("CDX_ALTERNATE_PREFIX_HTTP_") -> "$code (respuesta HTTP al consultar una ruta alternativa del producto)"
                         code.startsWith("CDX_DOMAIN_EXACT_HTTP_") -> "$code (respuesta HTTP de la consulta exacta de una URL candidata)"
                         code.startsWith("CDX_URL_PREFIX_HTTP_") -> "$code (respuesta HTTP de la búsqueda por prefijo de URL)"
                         code.startsWith("CDX_DOMAIN_HTTP_") -> "$code (respuesta HTTP de la búsqueda por dominio)"
@@ -2172,6 +2173,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             "CDX_DOMAIN_INVALID_RESPONSE" -> "$code (la consulta por dominio no devolvió el formato esperado)"
                             "CDX_URL_PREFIX_TIMEOUT" -> "$code (agotó el tiempo la consulta por prefijo de URL)"
                             "CDX_DOMAIN_TIMEOUT" -> "$code (agotó el tiempo la búsqueda de URLs de producto en el índice)"
+                            "CDX_ALTERNATE_PREFIX_TIMEOUT" -> "$code (se agotó el tiempo de la búsqueda CDX en una URL alternativa del producto)"
+                            "CDX_ALTERNATE_PREFIX_DNS" -> "$code (no se resolvió el servidor al probar una URL alternativa)"
+                            "CDX_ALTERNATE_PREFIX_NETWORK" -> "$code (falló la conexión al probar una URL alternativa)"
+                            "CDX_ALTERNATE_PREFIX_UNEXPECTED_ERROR" -> "$code (error inesperado al consultar la ruta alternativa)"
+                            "CDX_ALTERNATE_PREFIX_BODY_EMPTY_OR_LIMIT" -> "$code (la respuesta de la búsqueda alternativa estaba vacía o era demasiado grande)"
+                            "CDX_ALTERNATE_PREFIX_INVALID_RESPONSE" -> "$code (la búsqueda alternativa no devolvió un índice válido)"
                             "CDX_DOMAIN_EXACT_TIMEOUT" -> "$code (agotó el tiempo al consultar una URL de producto encontrada)"
                             "CDX_DOMAIN_EXACT_DNS" -> "$code (no se pudo resolver el servidor al consultar una URL candidata)"
                             "CDX_DOMAIN_EXACT_NETWORK" -> "$code (fallo de conexión al consultar una URL candidata)"

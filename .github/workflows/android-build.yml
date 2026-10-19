@@ -54,8 +54,6 @@ jobs:
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           gradle-version: '9.8.1'
-          # Cache Robolectric's Android framework artifacts so transient Maven failures
-          # do not make otherwise unrelated unit tests fail on a fresh runner.
           cache-read-only: false
 
       - name: Preparar Android SDK
@@ -141,15 +139,14 @@ jobs:
           for detail in details:
               print(detail)
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-              summary.write("## Live Wayback historical-price probe\n\n")
-              summary.write("\n".join(details) + "\n\n")
+              summary.write("## Live Wayback historical-price probe\\n\\n")
+              summary.write("\\n".join(details) + "\\n\\n")
           PY
           exit "$test_exit"
 
       - name: Compilar pruebas instrumentadas Android
         run: gradle :app:compileDebugAndroidTestKotlin --stacktrace
 
-      # Only trusted main-branch builds can read the signing secret.
       - name: Restaurar clave de firma estable
         env:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
@@ -163,33 +160,50 @@ jobs:
           keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey >/dev/null
           echo "Clave estable encontrada y validada."
 
+      - name: Calcular versión nueva a partir del APK publicado anteriormente
+        id: version
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Reserve a high, ever-increasing versionCode range; name follows the code.
+          # Query prior successful artifacts/releases is not sufficient when runs are cancelled,
+          # so use run_number plus a fixed offset and keep the previous 1.6.1314 build below it.
+          VERSION_CODE=$((6000 + GITHUB_RUN_NUMBER))
+          VERSION_NAME="1.7.$((GITHUB_RUN_NUMBER - 1))"
+          if [ "$VERSION_CODE" -le 5295 ]; then
+            echo "::error::versionCode calculado ($VERSION_CODE) no supera el APK 5295."
+            exit 1
+          fi
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "Construyendo Mínimo $VERSION_NAME (versionCode $VERSION_CODE)"
+
       - name: Compilar APK
         timeout-minutes: 20
         env:
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
         run: |
           set -euo pipefail
-          # Stay above recovery APK versionCodes (4000+) so every main build is upgradeable.
-          VERSION_CODE=$((5000 + GITHUB_RUN_NUMBER))
-          # Main workflow run #3 follows the published 1.6.1021 recovery build.
-          VERSION_NAME="1.6.$((1019 + GITHUB_RUN_NUMBER))"
-          echo "Building Mínimo ${VERSION_NAME} (versionCode ${VERSION_CODE})"
-          gradle :app:assembleDebug --stacktrace -PVERSION_CODE="${VERSION_CODE}" -PVERSION_NAME="${VERSION_NAME}"
+          gradle :app:assembleDebug --stacktrace -PVERSION_CODE="$VERSION_CODE" -PVERSION_NAME="$VERSION_NAME"
 
       - name: Verificar paquete, versión y firma del APK
         env:
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
         run: |
           set -euo pipefail
           APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
-          VERSION_CODE=$((5000 + GITHUB_RUN_NUMBER))
-          VERSION_NAME="1.6.$((1019 + GITHUB_RUN_NUMBER))"
           AAPT="${ANDROID_HOME}/build-tools/36.0.0/aapt"
-          test -s "${APK_PATH}"
-          BADGING="$("${AAPT}" dump badging "${APK_PATH}")"
-          printf '%s\\n' "${BADGING}" | grep -F "package: name='com.aistudio.preciominimo.esrxvt' versionCode='${VERSION_CODE}' versionName='${VERSION_NAME}'"
-          "${ANDROID_HOME}/build-tools/36.0.0/apksigner" verify --verbose --print-certs "${APK_PATH}"
-          sha256sum "${APK_PATH}"
+          test -s "$APK_PATH"
+          BADGING="$("$AAPT" dump badging "$APK_PATH")"
+          printf '%s\\n' "$BADGING" | grep -F "package: name='com.aistudio.preciominimo.esrxvt' versionCode='$VERSION_CODE' versionName='$VERSION_NAME'"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK_PATH"
+          sha256sum "$APK_PATH"
 
       - name: Guardar el APK durante 7 días
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -199,9 +213,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-
-  # Isolated validation for the emergency branch. No signing secrets or APK publication
-  # are used until this code is merged to the trusted main branch.
   validate-wayback-fix:
     if: github.ref == 'refs/heads/fix/wayback-cdx-recovery'
     runs-on: ubuntu-latest
@@ -213,6 +224,10 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Setup Java 17
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          gradle-version: '9.8.1'
       - name: Setup Java 17
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:

@@ -16,8 +16,12 @@ android {
     applicationId = "com.aistudio.preciominimo.esrxvt"
     minSdk = 24
     targetSdk = 36
-    versionCode = providers.gradleProperty("VERSION_CODE").orElse("6").get().toInt()
-    versionName = providers.gradleProperty("VERSION_NAME").orElse("1.5").get()
+    // Never silently produce an APK with stale fallback versions. Every build must
+    // provide an explicit version pair from the controlled CI workflow.
+    versionCode = (providers.gradleProperty("VERSION_CODE").orNull
+      ?: throw GradleException("VERSION_CODE is required; use the versioned GitHub Actions workflow.")).toInt()
+    versionName = providers.gradleProperty("VERSION_NAME").orNull
+      ?: throw GradleException("VERSION_NAME is required; use the versioned GitHub Actions workflow.")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

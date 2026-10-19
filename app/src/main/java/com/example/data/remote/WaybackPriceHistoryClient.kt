@@ -2563,8 +2563,9 @@ class WaybackPriceHistoryClient(
         if (tokens.any { it in setOf("morado", "morada", "purple", "violet", "violeta") }) matches += "purple"
         if (tokens.any { it in setOf("dorado", "dorada", "gold", "oro") }) matches += "gold"
         if (tokens.any { it in setOf("naranja", "orange", "arancione") }) matches += "orange"
-        if (tokens.any { it in setOf("marron", "brown", "cafe", "beige", "arena", "sand") }) matches += "brown"
-        return matches.singleOrNull()
+        if (tokens.any { it in setOf("marron", "brown", "cafe") }) matches += "brown"
+        if (tokens.any { it in setOf("beige", "arena", "sand") }) matches += "beige"
+        return matches.sorted().joinToString("+").takeIf { it.isNotBlank() }
     }
 
     private fun productConditionKey(title: String): String = when {
@@ -2606,9 +2607,11 @@ class WaybackPriceHistoryClient(
             "pro", "ultra", "lite", "plus", "max", "mini", "edge", "fe", "se",
             "air", "sport", "gt", "prime", "active", "essential", "neo", "note",
             "fold", "flip", "play", "classic", "racing", "performance", "master",
-            "touring", "urban", "city", "offroad"
+            "touring", "urban", "city", "offroad", "slim", "super", "ti", "xt",
+            "xtx", "gre", "oled", "qled", "s", "x", "mark", "mk", "ii", "iii", "iv"
         )
-        return normalizedTitle.split(' ').filter { it in qualifiers }.toSet()
+        val canonical = normalizedTitle.replace(Regex("""\boff\s+road\b"""), "offroad")
+        return canonical.split(' ').filter { it in qualifiers }.toSet()
     }
 
     /**

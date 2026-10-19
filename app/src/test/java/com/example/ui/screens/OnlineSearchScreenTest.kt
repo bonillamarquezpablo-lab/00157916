@@ -7,7 +7,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
@@ -235,11 +234,11 @@ class OnlineSearchScreenTest {
         )
 
         // ON + Solo Amazon: Amazon Warehouse is appended as a separate labelled card.
-        searchList.performScrollToNode(hasTestTag("filter-second-hand"))
+        composeRule.onNodeWithTag("filter-second-hand-row").performScrollTo()
         composeRule.onNodeWithTag("filter-second-hand").performScrollTo().performClick()
+        composeRule.onNodeWithTag("filter-second-hand").assertIsSelected()
         assertVisibleText("Todas las ofertas")
         assertVisibleText("Solo Amazon")
-        composeRule.onNodeWithTag("filter-second-hand").assertIsSelected()
         assertVisibleText("1 tiendas · precio más bajo en Amazon Warehouse")
         assertTrue(
             composeRule.onAllNodesWithText("7 tiendas · precio más bajo en Wallapop")

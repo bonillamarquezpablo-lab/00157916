@@ -885,7 +885,10 @@ class WaybackPriceHistoryClient(
         val simpleColors = setOf(
             "black", "white", "blue", "pink", "yellow", "green", "purple", "red",
             "silver", "gold", "gray", "grey", "midnight", "starlight", "graphite",
-            "ultramarine", "teal", "indigo", "violet", "lavender", "coral", "titanium"
+            "ultramarine", "teal", "indigo", "violet", "lavender", "coral", "titanium",
+            "natural", "negro", "negra", "blanco", "blanca", "azul", "rosa", "amarillo",
+            "amarilla", "verde", "morado", "morada", "rojo", "roja", "plata", "dorado",
+            "dorada", "gris", "titanio"
         )
         val colorPairs = setOf(
             "space gray", "space black", "natural titanium", "desert titanium",

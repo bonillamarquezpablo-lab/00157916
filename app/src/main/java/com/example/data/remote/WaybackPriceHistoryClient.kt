@@ -2040,12 +2040,13 @@ class WaybackPriceHistoryClient(
         val metaPrice = listOf(
             "product:price:amount", "og:price:amount", "price", "product:price"
         ).firstNotNullOfOrNull { key ->
-            readMeta(html, setOf(key))?.let(::parsePositivePrice)
+            (readMeta(html, setOf(key)) ?: readItemPropValue(html, key))?.let(::parsePositivePrice)
         }
         val metaCurrency = listOf(
             "product:price:currency", "og:price:currency", "pricecurrency"
-        ).firstNotNullOfOrNull { key -> readMeta(html, setOf(key)) }
-            ?.uppercase(Locale.ROOT)
+        ).firstNotNullOfOrNull { key ->
+            readMeta(html, setOf(key)) ?: readItemPropValue(html, key)
+        }?.uppercase(Locale.ROOT)
 
         fun isValidCandidate(candidate: Triple<String, Double, String>): Boolean =
             candidate.third.equals("EUR", ignoreCase = true) &&

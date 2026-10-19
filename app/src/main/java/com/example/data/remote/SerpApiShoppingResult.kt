@@ -296,7 +296,13 @@ fun extractDirectRetailerUrl(sourceUrl: String): String? {
         val scheme = uri.scheme?.lowercase(Locale.ROOT)
         val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
         if (scheme !in setOf("http", "https") || host.isBlank()) return null
-        if (!isGoogleShoppingUrl(current)) return current
+        if (!isGoogleShoppingUrl(current)) {
+            // Mínimo only opens secure retailer destinations. An HTTP target is not safe to
+            // treat as a successful redirect; let the caller choose a verified HTTPS store page.
+            return current.takeIf {
+                scheme == "https" && uri.rawUserInfo == null
+            }
+        }
 
         val nestedCandidates = uri.rawQuery.orEmpty()
             .split('&')
@@ -314,7 +320,7 @@ fun extractDirectRetailerUrl(sourceUrl: String): String? {
                 val target = runCatching { URI(decoded) }.getOrNull() ?: return@mapNotNull null
                 val targetScheme = target.scheme?.lowercase(Locale.ROOT)
                 val targetHost = target.host?.lowercase(Locale.ROOT).orEmpty()
-                if (targetScheme !in setOf("http", "https") || targetHost.isBlank()) {
+                if (targetScheme != "https" || targetHost.isBlank() || target.rawUserInfo != null) {
                     return@mapNotNull null
                 }
                 decoded
@@ -347,27 +353,38 @@ fun linkTypeForUrl(sourceUrl: String): String {
  * Exact seller URLs win; generic Google Shopping links may fall back to a known retailer's
  * own search page. Keep Google catalog product pages because they can contain specific offers.
  */
+private fun isSecureRetailerDestination(value: String): Boolean = runCatching {
+    val uri = URI(value)
+    uri.scheme.equals("https", ignoreCase = true) &&
+        !uri.host.isNullOrBlank() &&
+        uri.rawUserInfo == null
+}.getOrDefault(false)
+
+/**
+ * Resolves a safe retailer destination. An insecure HTTP offer is rerouted to the known seller's
+ * HTTPS search page when available; otherwise the caller can keep a secure Google Shopping link
+ * instead of rendering a dead button that the app refuses to open.
+ */
 fun retailerDestinationForOffer(sourceUrl: String, storeName: String, productTitle: String): String? {
     extractDirectRetailerUrl(sourceUrl)?.let { direct ->
-        if (!isGoogleShoppingUrl(direct)) return direct
+        if (!isGoogleShoppingUrl(direct) && isSecureRetailerDestination(direct)) return direct
     }
     val uri = runCatching { URI(sourceUrl) }.getOrNull()
+    val isGoogle = isGoogleShoppingUrl(sourceUrl)
     val isGoogleCatalogProduct = uri?.let {
-        isGoogleShoppingUrl(sourceUrl) && it.path.orEmpty().contains("/shopping/product/")
+        isGoogle && it.path.orEmpty().contains("/shopping/product/")
     } == true
-    if (isGoogleCatalogProduct) return sourceUrl
+    if (isGoogleCatalogProduct && isSecureRetailerDestination(sourceUrl)) return sourceUrl
 
-    // Only reroute an indirect URL when it is a generic Google search page. A known retailer's
-    // direct product URL is already returned above; other URLs must not be silently replaced.
     val genericGoogleSearch = uri?.let {
-        isGoogleShoppingUrl(sourceUrl) &&
-            (it.path.orEmpty() == "/search" || it.path.orEmpty().startsWith("/search/"))
+        isGoogle && (it.path.orEmpty() == "/search" || it.path.orEmpty().startsWith("/search/"))
     } == true
+    val insecureSource = uri?.scheme.equals("http", ignoreCase = true)
     val store = Store.findKnownByName(storeName, sourceUrl)
-    if (genericGoogleSearch && store?.supportsProductSearch == true) {
-        return store.searchUrlFor(productTitle)
+    if ((genericGoogleSearch || insecureSource) && store?.supportsProductSearch == true) {
+        return store.searchUrlFor(productTitle).takeIf(::isSecureRetailerDestination)
     }
-    return sourceUrl.takeIf { it.isNotBlank() }
+    return sourceUrl.takeIf(::isSecureRetailerDestination)
 }
 
 fun isSecondHandCondition(condition: String): Boolean = Regex(

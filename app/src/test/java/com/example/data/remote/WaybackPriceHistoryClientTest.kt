@@ -155,7 +155,7 @@ class WaybackPriceHistoryClientTest {
             assertEquals("EUR", result.quotes.single().currency)
             assertEquals("Availability must not issue per-date HTTP requests", 0, requests.count { it.startsWith("archive.org/wayback/available") })
             assertEquals("Concurrent duplicate lookups must share one CDX request", 1, requests.count { it.startsWith("web.archive.org/cdx/search/cdx") })
-            assertEquals("The product URL should be queried exactly before a broad host scan", "exact", cdxMatchTypes.single())
+            assertEquals("The product URL prefix should be queried before any broad host scan", "prefix", cdxMatchTypes.single())
             assertEquals("The duplicate result should use the completed lookup cache", 1, results.count { it.skippedRecently })
             assertEquals("Only one archived snapshot is needed for this one-capture fixture", 1, requests.count { it.startsWith("web.archive.org/web/") })
         } finally {
@@ -404,6 +404,122 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun validEmptyProductPrefixCdxUsesAvailabilityWithoutBroadDomainScan() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .commit()
+
+        val title = "Anker Prime 27K Power Bank Empty CDX Fallback ${System.currentTimeMillis()}"
+        val preferredUrl = "https://shop.example/products/anker-prime-27k-empty-cdx.html"
+        val requests = CopyOnWriteArrayList<String>()
+        val availabilityUrls = CopyOnWriteArrayList<String>()
+        val cdxMatchTypes = CopyOnWriteArrayList<String>()
+        val traceEvents = CopyOnWriteArrayList<WaybackTraceEvent>()
+        val emptyCdxBody = """[["timestamp","original","statuscode","mimetype"]]"""
+        val archivedHtml = """
+            <html><head>
+              <script type="application/ld+json">
+                {"@type":"Product","name":"$title",
+                 "offers":{"@type":"Offer","price":"79.99","priceCurrency":"EUR"}}
+              </script>
+            </head><body></body></html>
+        """.trimIndent()
+
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            val hostAndPath = request.url.host + request.url.encodedPath
+            requests += hostAndPath
+            when {
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    cdxMatchTypes += request.url.queryParameter("matchType").orEmpty()
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(emptyCdxBody.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                request.url.host == "archive.org" &&
+                    request.url.encodedPath == "/wayback/available" -> {
+                    val originalUrl = request.url.queryParameter("url")
+                        ?: throw AssertionError("Availability request has no product URL")
+                    availabilityUrls += originalUrl
+                    val body = if (availabilityUrls.size == 1) {
+                        """{"archived_snapshots":{"closest":{"available":false}}}"""
+                    } else {
+                        val snapshotUrl = "https://web.archive.org/web/20250101120000id_/$originalUrl"
+                        """
+                            {"archived_snapshots":{"closest":{
+                              "available":true,"timestamp":"20250101120000","url":"$snapshotUrl"
+                            }}}
+                        """.trimIndent()
+                    }
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(body.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/web/") -> {
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "text/html; charset=utf-8")
+                        .body(archivedHtml.toResponseBody("text/html; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                else -> throw AssertionError("Unexpected Wayback request: $hostAndPath")
+            }
+        }.build()
+
+        try {
+            val result = withTimeout(10_000L) {
+                WaybackPriceHistoryClient(context, http).fetchHistoryByMerchantDomain(
+                    domain = "shop.example",
+                    expectedTitle = title,
+                    lookbackDays = 730,
+                    preferredUrl = preferredUrl,
+                    onTrace = { event -> traceEvents += event }
+                )
+            }
+            assertEquals("Only the product-prefix CDX request should be needed", 1,
+                requests.count { it == "web.archive.org/cdx/search/cdx" })
+            assertEquals(listOf("prefix"), cdxMatchTypes.toList())
+            assertEquals("Known URL is the first bounded Availability candidate", preferredUrl, availabilityUrls.first())
+            assertTrue("The second candidate must be tried after a valid empty response", availabilityUrls.size >= 2)
+            assertFalse("A valid empty product query must not trigger the slow broad host scan",
+                cdxMatchTypes.contains("host"))
+            assertEquals(79.99, result.quotes.single().price, 0.001)
+            assertTrue("Step 5 must classify an empty JSON CDX body as a valid response",
+                traceEvents.any {
+                    it.step == 5 && it.status == WaybackTraceStatus.PASSED &&
+                        it.detail.contains("0 captura(s)")
+                })
+            assertTrue("Step 6 must pass when the fallback recovered a verified price",
+                traceEvents.any { it.step == 6 && it.status == WaybackTraceStatus.PASSED })
+            assertTrue("Step 7 must report captures returned by Availability",
+                traceEvents.any { it.step == 7 && it.status == WaybackTraceStatus.PASSED })
+        } finally {
+            preferences.edit()
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .commit()
+        }
+    }
+
+    @Test
     fun domainCdxTimeoutFallsBackToAvailabilityAndSavesVerifiedPrice() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
@@ -599,7 +715,7 @@ class WaybackPriceHistoryClientTest {
             assertTrue("The original HTTP 500 must remain visible in diagnostics",
                 traceEvents.any {
                     it.step == 5 && it.status == WaybackTraceStatus.FAILED &&
-                        it.detail.contains("CDX_PRODUCT_EXACT_HTTP_500")
+                        it.detail.contains("CDX_PRODUCT_PREFIX_HTTP_500")
                 })
             assertTrue("The fallback must complete successfully",
                 traceEvents.any { it.step == 6 && it.status == WaybackTraceStatus.PASSED })
@@ -706,7 +822,7 @@ class WaybackPriceHistoryClientTest {
             assertTrue("Step 5 identifies the simulated product-specific CDX timeout",
                 traceEvents.any {
                     it.step == 5 && it.status == WaybackTraceStatus.FAILED &&
-                        it.detail.contains("CDX_PRODUCT_EXACT_TIMEOUT")
+                        it.detail.contains("CDX_PRODUCT_PREFIX_TIMEOUT")
                 })
             assertTrue("Step 6 records the fallback completing successfully",
                 traceEvents.any { it.step == 6 && it.status == WaybackTraceStatus.PASSED })

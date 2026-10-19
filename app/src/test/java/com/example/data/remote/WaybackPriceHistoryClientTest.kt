@@ -457,6 +457,112 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun domainCdxHttp500FallsBackToAvailabilityAndSavesVerifiedPrice() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .commit()
+
+        val title = "Anker Prime 27K Power Bank HTTP 500 Recovery ${System.currentTimeMillis()}"
+        val preferredUrl = "https://shop.example/products/anker-prime-27k-http-500-recovery.html"
+        val requests = CopyOnWriteArrayList<String>()
+        val availabilityUrls = CopyOnWriteArrayList<String>()
+        val archivedHtml = """
+            <html><head>
+              <script type="application/ld+json">
+                {"@type":"Product","name":"$title",
+                 "offers":{"@type":"Offer","price":"79.99","priceCurrency":"EUR"}}
+              </script>
+            </head><body></body></html>
+        """.trimIndent()
+
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            val hostAndPath = request.url.host + request.url.encodedPath
+            requests += hostAndPath
+            when {
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(500)
+                        .message("Temporary index failure")
+                        .body("temporary index failure".toResponseBody("text/plain".toMediaType()))
+                        .build()
+                }
+                request.url.host == "archive.org" &&
+                    request.url.encodedPath == "/wayback/available" -> {
+                    val originalUrl = request.url.queryParameter("url")
+                        ?: throw AssertionError("Availability request has no product URL")
+                    availabilityUrls += originalUrl
+                    val body = if (availabilityUrls.size == 1) {
+                        val snapshotUrl = "https://web.archive.org/web/20250101120000id_/$originalUrl"
+                        """
+                            {"archived_snapshots":{"closest":{
+                              "available":true,"timestamp":"20250101120000","url":"$snapshotUrl"
+                            }}}
+                        """.trimIndent()
+                    } else {
+                        """{"archived_snapshots":{"closest":{"available":false}}}"""
+                    }
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(body.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/web/") -> {
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "text/html; charset=utf-8")
+                        .body(archivedHtml.toResponseBody("text/html; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                else -> throw AssertionError("Unexpected Wayback request: $hostAndPath")
+            }
+        }.build()
+
+        try {
+            val traceEvents = CopyOnWriteArrayList<WaybackTraceEvent>()
+            val result = withTimeout(10_000L) {
+                WaybackPriceHistoryClient(context, http).fetchHistoryByMerchantDomain(
+                    domain = "shop.example",
+                    expectedTitle = title,
+                    lookbackDays = 730,
+                    preferredUrl = preferredUrl,
+                    onTrace = { event -> traceEvents += event }
+                )
+            }
+            assertTrue("A transient CDX HTTP 500 must activate the bounded Availability fallback",
+                requests.contains("archive.org/wayback/available"))
+            assertEquals("The known offer URL must be tried first", preferredUrl, availabilityUrls.first())
+            assertEquals("The archived EUR price must be verified", 79.99, result.quotes.single().price, 0.001)
+            assertTrue("The original HTTP 500 must remain visible in diagnostics",
+                traceEvents.any {
+                    it.step == 5 && it.status == WaybackTraceStatus.FAILED &&
+                        it.detail.contains("CDX_DOMAIN_HTTP_500")
+                })
+            assertTrue("The fallback must complete successfully",
+                traceEvents.any { it.step == 6 && it.status == WaybackTraceStatus.PASSED })
+        } finally {
+            preferences.edit()
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .commit()
+        }
+    }
+
+    @Test
     fun domainFallbackContinuesWhenFirstCaptureHasNoVerifiedPrice() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)

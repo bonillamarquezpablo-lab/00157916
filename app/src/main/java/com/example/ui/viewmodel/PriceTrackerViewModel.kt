@@ -1845,6 +1845,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 domain = candidate.merchantDomain,
                                 expectedTitle = candidate.title,
                                 preferredUrl = candidate.directUrl,
+                                // The direct URL's prefix-CDX lookup ran just above. Avoid
+                                // repeating the same request before the Availability fallback.
+                                preferredUrlAlreadyQueried = candidate.directUrl != null,
                                 onTrace = traceCallback
                             )
                         }

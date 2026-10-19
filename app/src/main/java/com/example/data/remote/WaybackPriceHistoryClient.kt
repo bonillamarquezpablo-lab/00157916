@@ -562,7 +562,11 @@ class WaybackPriceHistoryClient(
             probes += recentProbe
             if (recentProbe.diagnosticCode == "WAYBACK_RATE_LIMITED") break
             if (recentProbe.requestFailed) {
-                if (recentProbe.diagnosticCode == "${stage}_HTTP_404") continue
+                val code = recentProbe.diagnosticCode.orEmpty()
+                // A candidate-specific 404 or timeout should not hide a capture archived under
+                // the next bounded product URL. Keep the cap, and still stop immediately on 429
+                // or broad network/server errors to avoid needless traffic.
+                if (code == "${stage}_HTTP_404" || code.endsWith("_TIMEOUT")) continue
                 break
             }
             if (recentProbe.capture != null && probeOlderCapture) {
@@ -581,15 +585,28 @@ class WaybackPriceHistoryClient(
             .filter { it.timestamp <= now && it.timestamp >= (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L) }
             .distinctBy { it.rawTimestamp to it.originalUrl }
             .sortedBy { it.timestamp }
+        val successfulProbes = probes.count { !it.requestFailed }
+        val failedProbeCount = probes.count { it.requestFailed }
+        val probeDiagnostics = probes.mapNotNull { it.diagnosticCode }.toSet()
+        val availabilityTraceStatus = when {
+            probeDiagnostics.contains("WAYBACK_RATE_LIMITED") -> WaybackTraceStatus.SKIPPED
+            captures.isNotEmpty() || successfulProbes > 0 -> WaybackTraceStatus.PASSED
+            else -> WaybackTraceStatus.FAILED
+        }
+        val availabilityTraceDetail = when {
+            probeDiagnostics.contains("WAYBACK_RATE_LIMITED") ->
+                "Availability se detuvo al recibir HTTP 429; no se enviaron más consultas."
+            captures.isNotEmpty() ->
+                "Availability encontró ${captures.size} captura(s) en ${probes.size} URL(s) probadas; ${failedProbeCount} intento(s) fallido(s). Se conserva el detalle del error sin descartar las capturas válidas."
+            successfulProbes > 0 ->
+                "Availability respondió correctamente en ${successfulProbes} URL(s), pero no encontró capturas. ${failedProbeCount} intento(s) fallido(s): ${probeDiagnostics.joinToString(", ").take(180)}."
+            else ->
+                "Todas las ${probes.size} consultas Availability fallaron: ${probeDiagnostics.joinToString(", ").take(180)}."
+        }
         emitWaybackTrace(
-            onTrace, 7,
-            if (captures.isNotEmpty()) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
-            if (captures.isNotEmpty()) "Availability API devolvió ${captures.size} captura(s) válida(s)."
-            else "Availability respondió, pero no encontró capturas para las ${probes.size} URL candidata(s) probadas.",
+            onTrace, 7, availabilityTraceStatus, availabilityTraceDetail,
             diagnosticStep = 7
         )
-        val successfulProbes = probes.count { !it.requestFailed }
-        val probeDiagnostics = probes.mapNotNull { it.diagnosticCode }.toSet()
 
         // A 429 ends this backfill immediately. Do not follow successful earlier probes with
         // snapshot downloads while the archive has explicitly asked us to slow down.
@@ -687,8 +704,8 @@ class WaybackPriceHistoryClient(
             .addQueryParameter("timestamp", targetDate)
             .build()
         val availabilityHttp = http.newBuilder()
-            .readTimeout(2, TimeUnit.SECONDS)
-            .callTimeout(2, TimeUnit.SECONDS)
+            .readTimeout(4, TimeUnit.SECONDS)
+            .callTimeout(4, TimeUnit.SECONDS)
             .build()
         val request = Request.Builder().url(endpoint).header("User-Agent", USER_AGENT).get().build()
         return try {
@@ -1384,16 +1401,12 @@ class WaybackPriceHistoryClient(
             }
         }
         if (cdxOutcome.requestFailed) {
-            val extractionStatus = if (cdxOutcome.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) {
-                WaybackTraceStatus.SKIPPED
-            } else {
-                // The extraction parser did not run because its upstream index request failed.
-                // Report a blocked dependency rather than an ordinary "not executed" phase.
-                WaybackTraceStatus.FAILED
-            }
+            // The parser never ran: the upstream CDX request produced no usable response.
+            // Keep the actual failure on step 6 and mark extraction as blocked, not as a second
+            // independent code failure.
             emitWaybackTrace(
-                onTrace, 7, extractionStatus,
-                "Extracción bloqueada: CDX no entregó filas parseables. Causa anterior: ${cdxOutcome.diagnosticCodes.joinToString(", ")}.",
+                onTrace, 7, WaybackTraceStatus.SKIPPED,
+                "Extracción no ejecutada: CDX no entregó una respuesta utilizable. Causa del paso 6: ${cdxOutcome.diagnosticCodes.joinToString(", ")}.",
                 diagnosticStep = 8
             )
             val rateLimited = cdxOutcome.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
@@ -1406,9 +1419,9 @@ class WaybackPriceHistoryClient(
         val indexCaptures = cdxOutcome.captures
         emitWaybackTrace(
             onTrace, 7,
-            if (indexCaptures.isNotEmpty()) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
-            if (indexCaptures.isNotEmpty()) "Índice parseado: ${indexCaptures.size} fila(s) de captura válida(s) antes de aplicar límites del historial; máximo a revisar ${maxSnapshots}."
-            else "CDX respondió correctamente, pero no devolvió filas de captura utilizables.",
+            WaybackTraceStatus.PASSED,
+            if (indexCaptures.isNotEmpty()) "CDX parseado correctamente: ${indexCaptures.size} fila(s) de captura válida(s) antes de aplicar límites del historial; máximo a revisar ${maxSnapshots}."
+            else "CDX respondió y se parseó correctamente, pero devolvió 0 filas de captura; es ausencia de datos, no fallo del extractor.",
             diagnosticStep = 8
         )
 
@@ -2315,7 +2328,8 @@ class WaybackPriceHistoryClient(
         // short enough to leave time for the two bounded Availability probes.
         private const val DOMAIN_CDX_TIMEOUT_SECONDS = 3L
         // Product-specific CDX lookup is narrower than scanning every URL on a retailer host.
-        private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 3L
+        // Product URL prefix lookup only. The broader host scan remains at 3 seconds.
+        private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 4L
         private const val MAX_DOMAIN_PRODUCT_URL_CANDIDATES = 2
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 2
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 2

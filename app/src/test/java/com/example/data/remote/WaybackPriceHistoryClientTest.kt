@@ -216,6 +216,79 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun cachedDirectLookupEmitsExplicitSkippedTraceAndDoesNotSendNetworkRequest() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .commit()
+
+        val title = "Anker Prime cache diagnostic " + System.currentTimeMillis()
+        val originalUrl = "https://shop.example/products/anker-prime-cache-test"
+        val baseClient = WaybackPriceHistoryClient(context)
+        val canonicalUrl = baseClient.buildDirectUrlCandidates(originalUrl).last()
+        val rawKey = "url-cdx-batch-v5|" + canonicalUrl + "|" + title
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(rawKey.toByteArray(Charsets.UTF_8))
+        val cacheKey = "attempt_" + digest.take(16).joinToString("") {
+            "%02x".format(it.toInt() and 0xff)
+        }
+        val now = System.currentTimeMillis()
+        preferences.edit()
+            .putLong(cacheKey, now)
+            .putBoolean(cacheKey + "_has_quotes", false)
+            .putBoolean(cacheKey + "_failed", false)
+            .putBoolean(cacheKey + "_rate_limited", false)
+            .commit()
+
+        val traceEvents = CopyOnWriteArrayList<WaybackTraceEvent>()
+        val noNetworkClient = OkHttpClient.Builder().addInterceptor {
+            throw AssertionError("A recent negative cache entry must not start another HTTP request")
+        }.build()
+
+        try {
+            val result = WaybackPriceHistoryClient(context, noNetworkClient).fetchHistory(
+                originalUrl = originalUrl,
+                expectedTitle = title,
+                onTrace = { traceEvents += it }
+            )
+
+            assertTrue("The recent lookup should be skipped to protect the archive", result.skippedRecently)
+            assertTrue(
+                "Step 5 must explicitly say the request was skipped by cache",
+                traceEvents.any {
+                    it.step == 4 && it.status == WaybackTraceStatus.SKIPPED &&
+                        it.detail.contains("caché reciente")
+                }
+            )
+            assertTrue(
+                "Step 6 must not remain pending when no fresh response was requested",
+                traceEvents.any {
+                    it.step == 5 && it.status == WaybackTraceStatus.SKIPPED &&
+                        it.detail.contains("no hubo respuesta CDX nueva")
+                }
+            )
+            assertTrue(
+                "Capture extraction must explain that no new request was made",
+                traceEvents.any {
+                    it.diagnosticStep == 8 && it.status == WaybackTraceStatus.SKIPPED &&
+                        it.detail.contains("omitió por caché")
+                }
+            )
+        } finally {
+            preferences.edit()
+                .remove(cacheKey)
+                .remove(cacheKey + "_has_quotes")
+                .remove(cacheKey + "_failed")
+                .remove(cacheKey + "_rate_limited")
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .commit()
+        }
+    }
+
+    @Test
     fun cdxHttp429StopsFurtherRequestsAndPersistsRetryAfter() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)

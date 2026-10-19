@@ -424,6 +424,7 @@ class WaybackPriceHistoryClientTest {
         val preferredUrl = "https://shop.example/products/anker-prime-27k.html"
         val requests = CopyOnWriteArrayList<String>()
         val availabilityUrls = CopyOnWriteArrayList<String>()
+        val traceEvents = CopyOnWriteArrayList<WaybackTraceEvent>()
         val validHtml = """
             <html><head>
               <script type="application/ld+json">
@@ -489,7 +490,8 @@ class WaybackPriceHistoryClientTest {
                     domain = "shop.example",
                     expectedTitle = title,
                     lookbackDays = 730,
-                    preferredUrl = preferredUrl
+                    preferredUrl = preferredUrl,
+                    onTrace = { event -> traceEvents += event }
                 )
             }
             assertTrue("The direct offer URL must be the first candidate", availabilityUrls.first() == preferredUrl)
@@ -499,6 +501,34 @@ class WaybackPriceHistoryClientTest {
                 requests.count { it.startsWith("web.archive.org/web/") } >= 2
             )
             assertEquals(79.99, result.quotes.single().price, 0.001)
+            assertTrue("Step 4 records that the CDX request was sent",
+                traceEvents.any { it.step == 4 && it.status == WaybackTraceStatus.PASSED })
+            assertTrue("Step 5 identifies the simulated CDX timeout",
+                traceEvents.any {
+                    it.step == 5 && it.status == WaybackTraceStatus.FAILED &&
+                        it.detail.contains("CDX_DOMAIN_TIMEOUT")
+                })
+            assertTrue("Step 6 records the fallback completing successfully",
+                traceEvents.any { it.step == 6 && it.status == WaybackTraceStatus.PASSED })
+            assertTrue("Step 7 records captures returned by the fallback",
+                traceEvents.any { it.step == 7 && it.status == WaybackTraceStatus.PASSED })
+            assertTrue("Step 8 records the first HTML download",
+                traceEvents.any { it.step == 8 && it.status == WaybackTraceStatus.PASSED })
+            assertTrue("Step 9 pinpoints the cookie/challenge barrier",
+                traceEvents.any {
+                    it.step == 9 && it.status == WaybackTraceStatus.FAILED &&
+                        it.detail.contains("CLOUDFLARE_CHALLENGE")
+                })
+            assertTrue("Step 10 records the second HTML download",
+                traceEvents.any { it.step == 10 && it.status == WaybackTraceStatus.PASSED })
+            assertTrue("Step 11 accepts the second HTML without a barrier",
+                traceEvents.any { it.step == 11 && it.status == WaybackTraceStatus.PASSED })
+            assertTrue("Step 12 verifies the product title",
+                traceEvents.any { it.step == 12 && it.status == WaybackTraceStatus.PASSED })
+            assertTrue("Step 13 finds a structured price",
+                traceEvents.any { it.step == 13 && it.status == WaybackTraceStatus.PASSED })
+            assertTrue("Step 14 verifies a EUR price",
+                traceEvents.any { it.step == 14 && it.status == WaybackTraceStatus.PASSED })
         } finally {
             preferences.edit()
                 .remove("wayback_rate_limit_until")

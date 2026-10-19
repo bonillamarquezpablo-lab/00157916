@@ -1740,14 +1740,17 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             }
                         } else {
                             attempts += domainResult
-                            if (diagnosticProductId != null && domainResult.quotes.isEmpty()) {
+                            if (diagnosticProductId != null) {
                                 reportWaybackDiagnostic(
                                     diagnosticProductId, 6,
                                     if (domainResult.requestFailed) WaybackTraceStatus.FAILED else WaybackTraceStatus.PASSED,
-                                    if (domainResult.requestFailed) {
-                                        "Alternativa por dominio terminó con error: ${domainResult.diagnosticCodes.joinToString(", ").take(180)}."
-                                    } else {
-                                        "Alternativa por dominio ejecutada; no devolvió precio verificado. Revisa pasos 7–14."
+                                    when {
+                                        domainResult.quotes.isNotEmpty() ->
+                                            "Alternativa por dominio devolvió ${domainResult.quotes.size} precio(s) verificado(s)."
+                                        domainResult.requestFailed ->
+                                            "Alternativa por dominio terminó con error: ${domainResult.diagnosticCodes.joinToString(", ").take(180)}."
+                                        else ->
+                                            "Alternativa por dominio respondió sin precio verificado; revisa los pasos 7–14."
                                     }
                                 )
                             }

@@ -2389,8 +2389,9 @@ class WaybackPriceHistoryClient(
         // short enough to leave time for the two bounded Availability probes.
         private const val DOMAIN_CDX_TIMEOUT_SECONDS = 3L
         // Product-specific CDX lookup is narrower than scanning every URL on a retailer host.
-        // Product URL prefix lookup only. The broader host scan remains at 3 seconds.
-        private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 5L
+        // Give the public index up to 7 seconds on slower responses; no retry is added here,
+        // and the bounded Availability fallback remains in place if CDX does not answer.
+        private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 7L
         private const val MAX_DOMAIN_PRODUCT_URL_CANDIDATES = 2
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 2
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 2

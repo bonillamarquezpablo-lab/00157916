@@ -619,7 +619,13 @@ class ProductRepository(
                 ?: stableOnlineId("online_product_", group.identityKey)
             // Keep the persisted title and representative image from the same provider listing.
             val displayTitle = group.title
-            val currentMinimum = if (hasTrustedOffer) group.minPrice else existingProduct?.currentPrice ?: 0.0
+            val currentMinimum = if (hasTrustedOffer) {
+                // Never let a flagged outlier become the main price when the group also contains
+                // valid offers. Use the trusted set and normalize wheel sets before comparing.
+                trustedOffers.minOf { offer -> offer.price / (offer.wheelSetCount ?: 1) }
+            } else {
+                existingProduct?.currentPrice ?: 0.0
+            }
             val trustedHighestToday = trustedOffers.maxOfOrNull { offer ->
                 offer.price / (offer.wheelSetCount ?: 1)
             }

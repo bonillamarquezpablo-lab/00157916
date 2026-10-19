@@ -1524,7 +1524,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             withContext(Dispatchers.IO) {
                                 onlineSearchCache.write(
                                     searchCacheProviderKey(provider),
-                                    query,
+                                    cacheQuery,
                                     results
                                 )
                             }

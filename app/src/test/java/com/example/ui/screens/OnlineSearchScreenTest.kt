@@ -17,6 +17,7 @@ import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.ui.viewmodel.OnlineSearchProvider
+import com.example.ui.viewmodel.optimizedOnlineShoppingQuery
 import com.example.ui.viewmodel.TrackerUiState
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -32,6 +33,26 @@ import org.robolectric.annotation.Config
 class OnlineSearchScreenTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun onlyKnownAmbiguousBrandQueriesAreRefinedWithoutAddingSearches() {
+        assertEquals(
+            "Shimano bicycle components cycling",
+            optimizedOnlineShoppingQuery("Shimano", OnlineSearchProvider.GOOGLE_SHOPPING)
+        )
+        assertEquals(
+            "Anker Prime power bank",
+            optimizedOnlineShoppingQuery("Anker Prime", OnlineSearchProvider.GOOGLE_SHOPPING)
+        )
+        assertEquals(
+            "Samsung Galaxy A57 256GB",
+            optimizedOnlineShoppingQuery("Samsung Galaxy A57 256GB", OnlineSearchProvider.GOOGLE_SHOPPING)
+        )
+        assertEquals(
+            "Anker Prime",
+            optimizedOnlineShoppingQuery("Anker Prime", OnlineSearchProvider.AMAZON)
+        )
+    }
 
     @Test
     fun discardedOffersCanBeExpandedAndCollapsed() {
@@ -225,6 +246,12 @@ class OnlineSearchScreenTest {
         assertVisibleText("3 tiendas · precio más bajo en Amazon.es")
         assertVisibleText("7 tiendas · precio más bajo en Wallapop")
         assertEquals(4, results.count { it.isAccessoryOffer })
+        assertTrue(
+            "Accessories are hidden from the main product list by default",
+            composeRule.onAllNodesWithText("Póster Samsung Galaxy S26 Ultra 512 GB")
+                .fetchSemanticsNodes().isEmpty()
+        )
+        clickFilter("Mostrar accesorios (4)")
         assertVisibleText("Póster Samsung Galaxy S26 Ultra 512 GB")
         assertTrue(
             "The accessory badge is visible on the poster card",

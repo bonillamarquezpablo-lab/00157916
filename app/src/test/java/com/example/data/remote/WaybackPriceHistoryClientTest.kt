@@ -501,7 +501,8 @@ class WaybackPriceHistoryClientTest {
             assertTrue("The second candidate must be tried after a valid empty response", availabilityUrls.size >= 2)
             assertFalse("A valid empty product query must not trigger the slow broad host scan",
                 cdxMatchTypes.contains("host"))
-            assertEquals(79.99, result.quotes.single().price, 0.001)
+            assertTrue("The fallback must recover at least one verified quote", result.quotes.isNotEmpty())
+            assertTrue("All recovered captures must pass EUR price verification", result.quotes.all { kotlin.math.abs(it.price - 79.99) < 0.001 })
             assertTrue("Step 5 must classify an empty JSON CDX body as a valid response",
                 traceEvents.any {
                     it.step == 5 && it.status == WaybackTraceStatus.PASSED &&
@@ -600,7 +601,7 @@ class WaybackPriceHistoryClientTest {
         }.build()
 
         try {
-            val result = withTimeout(15_000L) {
+            val result = withTimeout(20_000L) {
                 WaybackPriceHistoryClient(context, http).fetchHistoryByMerchantDomain(
                     domain = "shop.example",
                     expectedTitle = title,

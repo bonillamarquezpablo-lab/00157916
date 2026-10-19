@@ -940,6 +940,20 @@ class WaybackPriceHistoryClient(
         }
         val hosts = domainDiscoveryHosts(normalizedDomain)
         val paths = linkedSetOf<String>()
+        val canonicalSlug = canonicalRetailerProductSlug(fullSlug)
+        // When the Shopping provider exposes only a merchant domain, prefer one canonical
+        // route without colour/storage suffixes before guessing variant-specific URLs. Many
+        // retailers route all purchasable variants through the same product page.
+        // Keep the complete variant slug below as a fallback; no candidate is trusted without
+        // checking a real archived page and validating its product title + EUR price.
+        if (
+            canonicalSlug.isNotBlank() &&
+            canonicalSlug != fullSlug &&
+            normalizedDomain != "apple.com" &&
+            normalizedDomain != "samsung.com"
+        ) {
+            paths += "/$canonicalSlug/"
+        }
         if (normalizedDomain == "apple.com") {
             // Apple canonical product pages omit storage and colour (e.g. /es/iphone-15/).
             // Put the normalised model-family URL ahead of SKU-shaped guesses.
@@ -2095,7 +2109,11 @@ class WaybackPriceHistoryClient(
         // This runs in the background history backfill, not in the main search UI.
         // Four seconds accommodates ordinary CDX latency while staying inside the ViewModel's
         // independent 10-second cap for the whole domain fallback.
-        private const val CDX_FALLBACK_TIMEOUT_SECONDS = 4L
+        // This timeout is used only by the explicit historical lookup after product-specific
+        // URLs have been tried. It does not run on the primary shopping-search path.
+        // The public CDX index regularly needs more than four seconds for host-scoped filters;
+        // keep one bounded request long enough to return instead of immediately falling back.
+        private const val CDX_FALLBACK_TIMEOUT_SECONDS = 6L
         private const val CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS = 2L
         private const val DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS = 2L
         private const val MAX_AVAILABILITY_BODY_BYTES = 64 * 1024
@@ -2103,8 +2121,8 @@ class WaybackPriceHistoryClient(
         private const val CDX_RETRY_JITTER_MS = 350L
         private val RETRYABLE_CDX_HTTP_CODES = setOf(500, 502, 503, 504)
         private const val DIRECT_CDX_TIMEOUT_SECONDS = 5L
-        // Keep the broad domain-index request aligned with the UI's strict four-second budget.
-        private const val DOMAIN_CDX_TIMEOUT_SECONDS = 4L
+        // Keep the broad domain-index request bounded to the same historical-only budget.
+        private const val DOMAIN_CDX_TIMEOUT_SECONDS = 6L
         // Product-specific CDX lookup is narrower than scanning every URL on a retailer host.
         private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 3L
         private const val MAX_DOMAIN_PRODUCT_URL_CANDIDATES = 2

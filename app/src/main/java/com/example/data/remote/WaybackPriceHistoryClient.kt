@@ -975,7 +975,8 @@ class WaybackPriceHistoryClient(
             .firstNotNullOfOrNull { key ->
                 readMeta(html, setOf(key)) ?: readItemPropValue(html, key)
             }?.uppercase(Locale.ROOT)
-        val hasPriceCandidate = jsonLd.isNotEmpty() || metaPrice != null
+        val visiblePrice = if (quote == null) extractVisibleProductPrice(html, metaCurrency) else null
+        val hasPriceCandidate = jsonLd.isNotEmpty() || metaPrice != null || visiblePrice != null || quote != null
         emitWaybackTrace(
             onTrace, 13,
             if (hasPriceCandidate) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
@@ -985,10 +986,12 @@ class WaybackPriceHistoryClient(
                 else -> "No se encontró precio numérico en JSON-LD ni metadatos compatibles."
             }
         )
-        val prices = jsonLd.map { it.second } + listOfNotNull(metaPrice)
+        val prices = jsonLd.map { it.second } + listOfNotNull(metaPrice, visiblePrice, quote?.price)
         val numericValid = prices.any { it.isFinite() && it in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE }
         val euroValid = jsonLd.any { it.third.equals("EUR", ignoreCase = true) } ||
-            (metaPrice != null && metaCurrency.equals("EUR", ignoreCase = true))
+            (metaPrice != null && metaCurrency.equals("EUR", ignoreCase = true)) ||
+            visiblePrice != null ||
+            quote?.currency.equals("EUR", ignoreCase = true)
         val valid = numericValid && euroValid
         emitWaybackTrace(
             onTrace, 14,
@@ -1025,10 +1028,15 @@ class WaybackPriceHistoryClient(
             readMeta(html, setOf(key)) ?: readItemPropValue(html, key)
         }?.uppercase(Locale.ROOT)
         if (pageTitles.isEmpty() && jsonLd.isEmpty()) return "ARCHIVE_TITLE_MISSING"
-        if (metaPrice == null && jsonLd.isEmpty()) return "ARCHIVE_PRICE_METADATA_MISSING"
-        val candidates = jsonLd + if (pageTitles.isNotEmpty() && metaPrice != null && !metaCurrency.isNullOrBlank()) {
-            pageTitles.map { title -> Triple(title, metaPrice, metaCurrency) }
-        } else emptyList()
+        val visiblePrice = if (jsonLd.isEmpty() && metaPrice == null) extractVisibleProductPrice(html, metaCurrency) else null
+        if (metaPrice == null && jsonLd.isEmpty() && visiblePrice == null) return "ARCHIVE_PRICE_METADATA_MISSING"
+        val candidates = jsonLd +
+            if (pageTitles.isNotEmpty() && metaPrice != null && !metaCurrency.isNullOrBlank()) {
+                pageTitles.map { title -> Triple(title, metaPrice, metaCurrency) }
+            } else emptyList() +
+            if (pageTitles.isNotEmpty() && visiblePrice != null) {
+                pageTitles.map { title -> Triple(title, visiblePrice, "EUR") }
+            } else emptyList()
         if (candidates.none { it.third.equals("EUR", ignoreCase = true) }) {
             return "ARCHIVE_EUR_PRICE_MISSING"
         }

@@ -1582,7 +1582,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         val domainResult = withTimeoutOrNull(MAX_ARCHIVE_DOMAIN_FALLBACK_MS) {
                             waybackPriceHistoryClient.fetchHistoryByMerchantDomain(
                                 domain = candidate.merchantDomain,
-                                expectedTitle = candidate.title
+                                expectedTitle = candidate.title,
+                                preferredUrl = candidate.directUrl
                             )
                         }
                         if (domainResult == null) {

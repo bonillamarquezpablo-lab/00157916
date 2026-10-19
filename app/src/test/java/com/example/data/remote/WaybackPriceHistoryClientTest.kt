@@ -320,6 +320,8 @@ class WaybackPriceHistoryClientTest {
 
         val title = "Anker Prime 27K Power Bank Fallback Test ${System.currentTimeMillis()}"
         val requests = CopyOnWriteArrayList<String>()
+        val availabilityUrls = CopyOnWriteArrayList<String>()
+        val preferredUrl = "https://shop.example/products/anker-prime-27k-power-bank.html"
         val archivedHtml = """
             <html><head>
               <script type="application/ld+json">
@@ -342,9 +344,10 @@ class WaybackPriceHistoryClientTest {
                     request.url.encodedPath == "/wayback/available" -> {
                     val originalUrl = request.url.queryParameter("url")
                         ?: throw AssertionError("Availability request has no product URL")
-                    val availabilityProbeNumber = requests.count { it == "archive.org/wayback/available" }
-                    // The first candidate has no capture; the second has a valid historical
-                    // snapshot. This protects against stopping after a retailer search URL fails.
+                    availabilityUrls += originalUrl
+                    val availabilityProbeNumber = availabilityUrls.size
+                    // The known direct retailer URL has no capture; the next bounded candidate
+                    // has one. Verify the fallback tries the actual offer URL first, then moves on.
                     val body = if (availabilityProbeNumber == 1) {
                         """{"archived_snapshots":{"closest":{"available":false}}}"""
                     } else {
@@ -384,16 +387,18 @@ class WaybackPriceHistoryClientTest {
                 WaybackPriceHistoryClient(context, http).fetchHistoryByMerchantDomain(
                     domain = "shop.example",
                     expectedTitle = title,
-                    lookbackDays = 730
+                    lookbackDays = 730,
+                    preferredUrl = preferredUrl
                 )
             }
             assertTrue(
                 "A CDX_DOMAIN_TIMEOUT must still try the product-specific Availability API",
                 requests.contains("archive.org/wayback/available")
             )
+            assertEquals("The exact saved retailer URL must be the first Availability candidate", preferredUrl, availabilityUrls.first())
             assertTrue(
                 "If the first candidate has no capture, the bounded second candidate must be tried",
-                requests.count { it == "archive.org/wayback/available" } >= 2
+                availabilityUrls.size >= 2
             )
             assertTrue("The verified archived EUR price should be recovered", result.quotes.isNotEmpty())
             assertEquals(79.99, result.quotes.single().price, 0.001)

@@ -138,7 +138,8 @@ class WaybackPriceHistoryClient(
         domain: String,
         expectedTitle: String,
         now: Long = System.currentTimeMillis(),
-        lookbackDays: Int = DEFAULT_LOOKBACK_DAYS
+        lookbackDays: Int = DEFAULT_LOOKBACK_DAYS,
+        preferredUrl: String? = null
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
         if (!preferences.getBoolean("enabled", true)) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("WAYBACK_DISABLED"))
@@ -213,7 +214,14 @@ class WaybackPriceHistoryClient(
                 if (result.requestFailed &&
                     result.diagnosticCodes.contains("CDX_DOMAIN_TIMEOUT")
                 ) {
-                    val candidateUrls = buildAvailabilityCandidateUrls(normalizedDomain, expectedTitle)
+                    // Reuse the direct retailer URL already present on the offer when it is
+                    // safe to query. Domain discovery often guesses slugs incorrectly; probing
+                    // the known URL first avoids spending the bounded fallback on an unrelated
+                    // search or category URL. One generated candidate remains as a fallback.
+                    val candidateUrls = (
+                        listOfNotNull(preferredUrl?.takeIf(::isEligibleDirectUrl)) +
+                            buildAvailabilityCandidateUrls(normalizedDomain, expectedTitle)
+                        ).distinct().take(MAX_AVAILABILITY_URL_CANDIDATES)
                     if (candidateUrls.isNotEmpty()) {
                         val fallback = queryAvailabilityAndFetchPrices(
                             candidateUrls = candidateUrls,

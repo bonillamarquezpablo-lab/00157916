@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
 import com.example.data.remote.OnlineSearchCache
 import com.example.data.remote.WaybackPriceHistoryClient
+import com.example.data.remote.WaybackTraceEvent
+import com.example.data.remote.WaybackTraceStatus
 import com.example.data.remote.isGoogleShoppingUrl
 import com.example.data.remote.extractDirectRetailerUrl
 import com.example.data.remote.onlineProductIdentityKey
@@ -51,6 +53,32 @@ enum class OnlineSearchProvider { GOOGLE_SHOPPING, AMAZON }
 
 enum class SerpApiActionType { UPDATE_TRACKED, COMPARE_STORES }
 
+data class WaybackDiagnosticEntry(
+    val step: Int,
+    val title: String,
+    val status: WaybackTraceStatus = WaybackTraceStatus.PENDING,
+    val detail: String = "",
+    val durationMs: Long? = null
+)
+
+private val WAYBACK_DIAGNOSTIC_TITLES = listOf(
+    "Solicitud iniciada (botón pulsado)",
+    "URL principal recuperada de la ficha local",
+    "URL normalizada y destinos candidatos preparados",
+    "Petición enviada al índice CDX",
+    "Respuesta CDX recibida y clasificada",
+    "Fallback 1: CDX alternativo / Availability API",
+    "Extracción de capturas candidatas",
+    "Descarga del HTML de la captura 1",
+    "Evaluación de barreras del HTML 1",
+    "Descarga del HTML de la captura 2",
+    "Evaluación de barreras del HTML 2",
+    "Verificación del título e identidad del producto",
+    "Extracción del precio",
+    "Validación del importe y moneda EUR",
+    "Guardado local y actualización de la ficha/gráfica"
+)
+
 data class SerpApiActionConfirmation(
     val type: SerpApiActionType,
     val title: String,
@@ -93,6 +121,8 @@ data class TrackerUiState(
     val isSearchingFreeHistory: Boolean = false,
     val freeHistoryStatus: String? = null,
     val freeHistoryProductId: String? = null,
+    val waybackDiagnosticProductId: String? = null,
+    val waybackDiagnosticSteps: List<WaybackDiagnosticEntry> = emptyList(),
     val onlineSearchStatus: String? = null,
     val onlineSearchAmazonOnly: Boolean = false,
     val onlineSearchShowSecondHand: Boolean = false,
@@ -154,6 +184,89 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     private val _uiState = MutableStateFlow(TrackerUiState())
 
     val uiState: StateFlow<TrackerUiState> = _uiState.asStateFlow()
+
+    private fun startWaybackDiagnostic(product: Product) {
+        val initial = WAYBACK_DIAGNOSTIC_TITLES.mapIndexed { index, title ->
+            WaybackDiagnosticEntry(step = index + 1, title = title)
+        }
+        _uiState.value = _uiState.value.copy(
+            waybackDiagnosticProductId = product.id,
+            waybackDiagnosticSteps = initial
+        )
+        reportWaybackDiagnostic(
+            product.id, 1, WaybackTraceStatus.PASSED,
+            "Pulsación recibida por el ViewModel; empieza la única consulta solicitada por el usuario."
+        )
+        val hasSavedUrl = product.storeUrl.isNotBlank() || product.currentStore.officialUrl.isNotBlank()
+        reportWaybackDiagnostic(
+            product.id, 2,
+            if (hasSavedUrl || product.offers.isNotEmpty()) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
+            "Ficha local leída: URL principal ${if (hasSavedUrl) "presente" else "ausente"}; ${product.offers.size} oferta(s) guardada(s). La URL completa no se registra."
+        )
+        reportWaybackDiagnostic(
+            product.id, 3, WaybackTraceStatus.RUNNING,
+            "Preparando destinos de tienda y eliminando intermediarios o redirecciones cuando se puede."
+        )
+    }
+
+    private fun reportWaybackDiagnostic(
+        productId: String,
+        step: Int,
+        status: WaybackTraceStatus,
+        detail: String,
+        durationMs: Long? = null
+    ) {
+        if (step !in 1..15) return
+        val state = _uiState.value
+        if (state.waybackDiagnosticProductId != productId) return
+        val rows = state.waybackDiagnosticSteps.toMutableList()
+        val index = rows.indexOfFirst { it.step == step }
+        if (index < 0) return
+        val old = rows[index]
+        val detailLine = detail.trim() + (durationMs?.let { " · ${it} ms" } ?: "")
+        val combinedDetail = when {
+            detailLine.isBlank() -> old.detail
+            old.detail.isBlank() -> detailLine
+            old.detail.lines().any { it == detailLine } -> old.detail
+            else -> (old.detail.lines() + detailLine).takeLast(5).joinToString("\n")
+        }
+        rows[index] = old.copy(
+            status = status,
+            detail = combinedDetail,
+            durationMs = durationMs ?: old.durationMs
+        )
+        _uiState.value = state.copy(waybackDiagnosticSteps = rows)
+    }
+
+    private fun recordWaybackTrace(productId: String, event: WaybackTraceEvent) {
+        reportWaybackDiagnostic(productId, event.step, event.status, event.detail, event.durationMs)
+    }
+
+    private fun finishWaybackDiagnostic(
+        productId: String,
+        finalStatus: WaybackTraceStatus,
+        finalDetail: String
+    ) {
+        val initial = _uiState.value
+        if (initial.waybackDiagnosticProductId != productId || initial.waybackDiagnosticSteps.isEmpty()) return
+        for (row in initial.waybackDiagnosticSteps) {
+            if (row.step == 15) continue
+            when (row.status) {
+                WaybackTraceStatus.PENDING ->
+                    reportWaybackDiagnostic(
+                        productId, row.step, WaybackTraceStatus.SKIPPED,
+                        "No ejecutado: la cadena terminó antes de esta fase."
+                    )
+                WaybackTraceStatus.RUNNING ->
+                    reportWaybackDiagnostic(
+                        productId, row.step, WaybackTraceStatus.FAILED,
+                        "La operación terminó sin completar la fase."
+                    )
+                else -> Unit
+            }
+        }
+        reportWaybackDiagnostic(productId, 15, finalStatus, finalDetail)
+    }
 
     init {
         // Register one daily, quota-capped monitor; it remains idle without price targets.
@@ -990,6 +1103,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     fun searchFreeHistoricalPrices(product: Product) {
         val current = _uiState.value
         if (current.isSearchingFreeHistory) return
+        startWaybackDiagnostic(product)
 
         // Archived snapshots are independent evidence; use the saved retailer offers first.
         // Some older Google Shopping rows contain a generic Google URL and an incomplete
@@ -1052,11 +1166,21 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             it.title.trim().lowercase(Locale.ROOT) + "|" + (it.merchantDomain ?: it.directUrl ?: "unknown")
         }.take(MAX_ARCHIVE_PAGES_PER_SEARCH)
 
+        val directCandidates = orderedCandidates.count { it.directUrl != null }
+        val domainCandidates = orderedCandidates.count { it.merchantDomain != null }
+        reportWaybackDiagnostic(
+            product.id, 3,
+            if (orderedCandidates.isNotEmpty()) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
+            "Destinos válidos: ${orderedCandidates.size} (directos: $directCandidates; por dominio: $domainCandidates). Límite: $MAX_ARCHIVE_PAGES_PER_SEARCH tienda(s); no se registran rutas ni parámetros."
+        )
+
         if (orderedCandidates.isEmpty()) {
-            _uiState.value = current.copy(
+            _uiState.value = _uiState.value.copy(
                 isSearchingFreeHistory = false,
-                freeHistoryStatus = "Mínimo no pudo identificar la tienda de esta oferta para buscar capturas gratuitas. No se ha gastado cuota de SerpApi."
+                freeHistoryStatus = "Mínimo no pudo identificar la tienda de esta oferta para buscar capturas gratuitas. No se ha gastado cuota de SerpApi.",
+                freeHistoryProductId = product.id
             )
+            finishWaybackDiagnostic(product.id, WaybackTraceStatus.FAILED, "No se generó ninguna URL de tienda válida.")
             return
         }
 

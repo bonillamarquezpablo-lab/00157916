@@ -617,11 +617,11 @@ class WaybackPriceHistoryClientTest {
             assertEquals(79.99, result.quotes.single().price, 0.001)
             assertTrue(requests.any { it.startsWith("web.archive.org/web/") })
             assertTrue(
-                "A CDX timeout must be reported as an extraction failure on step 8, not mixed into Availability",
+                "Step 8 must be marked blocked/skipped when CDX failed upstream; step 6 keeps the actual timeout",
                 traceEvents.any {
                     it.diagnosticStep == 8 &&
-                        it.status == WaybackTraceStatus.FAILED &&
-                        it.detail.contains("Extracción bloqueada: CDX no entregó filas parseables") &&
+                        it.status == WaybackTraceStatus.SKIPPED &&
+                        it.detail.contains("Extracción no ejecutada: CDX no entregó una respuesta utilizable") &&
                         it.detail.contains("CDX_PRODUCT_PREFIX_TIMEOUT")
                 }
             )

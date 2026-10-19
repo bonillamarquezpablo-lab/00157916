@@ -350,7 +350,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             val oldDetailLines = when {
                 status == WaybackTraceStatus.PASSED || status == WaybackTraceStatus.FAILED ->
                     old.detail.lines().filterNot(::isSupersededWaybackSkipDetail)
-                status == WaybackTraceStatus.SKIPPED && old.status == WaybackTraceStatus.RUNNING ->
+                status in setOf(WaybackTraceStatus.SKIPPED, WaybackTraceStatus.FAILED) &&
+                    old.status == WaybackTraceStatus.RUNNING ->
                     old.detail.lines().filterNot { line ->
                         line.contains("Se activa la alternativa por dominio", ignoreCase = true) ||
                             line.contains("se activa la alternativa limitada", ignoreCase = true)

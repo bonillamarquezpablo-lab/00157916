@@ -223,7 +223,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         val index = rows.indexOfFirst { it.step == step }
         if (index < 0) return
         val old = rows[index]
-        val detailLine = detail.trim() + (durationMs?.let { " · ${it} ms" } ?: "")
+        val time = SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(Date())
+        val detailLine = "[$time] " + detail.trim() + (durationMs?.let { " · ${it} ms" } ?: "")
         val combinedDetail = when {
             detailLine.isBlank() -> old.detail
             old.detail.isBlank() -> detailLine
@@ -1101,9 +1102,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
      * checks quota, or spends a provider search credit.
      */
     fun searchFreeHistoricalPrices(product: Product) {
-        val current = _uiState.value
-        if (current.isSearchingFreeHistory) return
+        val previousState = _uiState.value
+        if (previousState.isSearchingFreeHistory) return
         startWaybackDiagnostic(product)
+        // Re-read after starting the trace; otherwise copying the pre-trace state here would
+        // immediately erase the 15 diagnostic rows from the UI.
+        val current = _uiState.value
 
         // Archived snapshots are independent evidence; use the saved retailer offers first.
         // Some older Google Shopping rows contain a generic Google URL and an incomplete

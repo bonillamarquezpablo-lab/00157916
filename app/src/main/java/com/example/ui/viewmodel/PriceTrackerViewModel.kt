@@ -98,7 +98,7 @@ private val WAYBACK_DIAGNOSTIC_TITLES = listOf(
     "URL normalizada y destinos candidatos preparados",
     "Precontrol de pausa global y preparación de consulta",
     "Petición enviada al índice CDX",
-    "Respuesta CDX o recuperación alternativa",
+    "Respuesta CDX o respuesta alternativa recibida",
     "Fallback: CDX alternativo / Availability API",
     "Extracción de capturas CDX (requiere respuesta válida)",
     "Normalización y deduplicación de URL candidatas",

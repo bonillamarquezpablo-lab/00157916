@@ -100,7 +100,7 @@ private val WAYBACK_DIAGNOSTIC_TITLES = listOf(
     "Petición enviada al índice CDX",
     "Respuesta CDX recibida y clasificada",
     "Fallback: CDX alternativo / Availability API",
-    "Extracción de filas de capturas del índice",
+    "Extracción de capturas CDX (requiere respuesta válida)",
     "Normalización y deduplicación de URL candidatas",
     "Validación de fechas y período histórico",
     "Descarga del HTML de la captura 1",

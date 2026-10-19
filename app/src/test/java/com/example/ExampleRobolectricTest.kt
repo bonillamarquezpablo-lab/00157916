@@ -1721,6 +1721,58 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun accessoryOffersForAnkerPrimeRemainVisibleButAreNotSavedAsTheMainBattery() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val timestamp = System.currentTimeMillis()
+            val battery = SerpApiShoppingResult(
+                title = "Anker Prime 20000mAh Power Bank 200W",
+                price = 149.99,
+                storeName = "Amazon.es",
+                sourceUrl = "https://www.google.com/shopping/product/anker-prime-battery",
+                observedAt = timestamp,
+                condition = "new"
+            )
+            val accessory = SerpApiShoppingResult(
+                title = "Funda Protectora para Anker Prime 20000mAh Power Bank",
+                price = 9.29,
+                storeName = "Amazon.es - Seller",
+                sourceUrl = "https://www.google.com/shopping/product/anker-prime-case",
+                observedAt = timestamp,
+                condition = "new"
+            )
+            assertTrue("The cheap case must be recognized as an accessory", accessory.isAccessoryOffer)
+
+            val saved = repository.recordOnlineSearchResults(
+                results = listOf(battery, accessory),
+                sourceType = "GOOGLE_SHOPPING",
+                searchQuery = "Anker Prime"
+            )
+
+            assertEquals("Only the main battery may be added to Mercado", 1, saved)
+            val products = database.productDao().getAllProductsSnapshot()
+            assertEquals(1, products.size)
+            assertEquals("Anker Prime 20000mAh Power Bank 200W", products.single().title)
+            assertTrue(
+                "The accessory price must never be recorded as a verified battery observation",
+                database.priceObservationDao().observeVerifiedHistory(products.single().id).first()
+                    .none { it.price == 9.29 }
+            )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun fitmentUnconfirmedWheelCandidatesAreNotSavedToMercadoOrHistory() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(

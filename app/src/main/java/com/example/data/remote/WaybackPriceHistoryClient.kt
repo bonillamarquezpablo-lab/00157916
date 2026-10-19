@@ -902,9 +902,9 @@ class WaybackPriceHistoryClient(
             val next = words.getOrNull(index + 1)
             val pair = next?.let { "$word $it" }
             when {
-                pair in colorPairs -> index += 2
+                pair != null && pair in colorPairs -> index += 2
                 Regex("""^\d{1,4}(?:gb|tb)$""").matches(word) -> index += 1
-                Regex("""^\d{1,4}$""").matches(word) && next in setOf("gb", "tb") -> index += 2
+                Regex("""^\d{1,4}$""").matches(word) && next != null && next in setOf("gb", "tb") -> index += 2
                 word in simpleColors -> index += 1
                 else -> {
                     result += word

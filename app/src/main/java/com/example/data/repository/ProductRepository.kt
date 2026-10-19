@@ -1560,9 +1560,25 @@ class ProductRepository(
         val liveHistory = sortedHistory.filter(::isLiveObservation)
         // Current price/store must always come from a live provider observation, never a Wayback
         // snapshot, even when an archived snapshot was captured later in the same calendar day.
-        val latestLiveDayStart = liveHistory.lastOrNull()?.let { localDayBounds(it.observedAt).first }
-        val latestBatch = liveHistory.filter {
-            latestLiveDayStart != null && localDayBounds(it.observedAt).first == latestLiveDayStart
+        // Google Product API merchant offers are fetched as one catalog comparison and all carry
+        // the same observedAt timestamp. They must remain one current comparison batch even when
+        // their writes straddle midnight or legacy rows share an observation day.
+        val latestLiveTimestamp = liveHistory.maxOfOrNull { it.observedAt }
+        val latestComparisonRows = if (latestLiveTimestamp != null) {
+            liveHistory.filter { observation ->
+                observation.sourceName.equals("SerpApi · Google Product API", ignoreCase = true) &&
+                    observation.observedAt == latestLiveTimestamp
+            }
+        } else {
+            emptyList()
+        }
+        val latestComparisonDayStart = latestLiveTimestamp?.let { localDayBounds(it).first }
+        val latestBatch = if (latestComparisonRows.isNotEmpty()) {
+            latestComparisonRows
+        } else {
+            liveHistory.filter {
+                latestComparisonDayStart != null && localDayBounds(it.observedAt).first == latestComparisonDayStart
+            }
         }
         // Keep one point per local day AND evidence series. A live quote, Wayback capture and
         // Google historical insight on the same date remain distinct; external points cannot

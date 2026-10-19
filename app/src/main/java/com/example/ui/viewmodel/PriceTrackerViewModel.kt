@@ -1634,7 +1634,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             expectedTitle = candidate.title,
                             originalUrl = archiveUrl,
                             storeName = candidate.storeName,
-                            quotes = urlQuotes
+                            quotes = urlQuotes,
+                            targetProductId = targetProductId
                         )
                         savedCount += newlySaved
                     }

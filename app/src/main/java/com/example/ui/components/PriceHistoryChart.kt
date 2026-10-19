@@ -98,6 +98,7 @@ fun PriceHistoryChart(
 ) {
     var selectedRange by remember { mutableStateOf(ChartRange.ALL) }
     var selectedSeries by remember { mutableStateOf(HistoryEvidenceSeries.LIVE) }
+    var userSelectedSeries by remember { mutableStateOf(false) }
     var selectedPointIndex by remember { mutableIntStateOf(-1) }
 
     val availableSeries = buildList {
@@ -105,10 +106,35 @@ fun PriceHistoryChart(
         if (archiveHistory.isNotEmpty()) add(HistoryEvidenceSeries.WAYBACK)
         if (googleInsightHistory.isNotEmpty()) add(HistoryEvidenceSeries.GOOGLE_INSIGHTS)
     }
-    LaunchedEffect(availableSeries, selectedSeries) {
+    LaunchedEffect(
+        availableSeries,
+        selectedSeries,
+        userSelectedSeries,
+        priceHistory.isEmpty(),
+        archiveHistory.isNotEmpty(),
+        googleInsightHistory.isNotEmpty()
+    ) {
         if (selectedSeries !in availableSeries) {
-            selectedSeries = HistoryEvidenceSeries.LIVE
+            selectedSeries = when {
+                archiveHistory.isNotEmpty() -> HistoryEvidenceSeries.WAYBACK
+                googleInsightHistory.isNotEmpty() -> HistoryEvidenceSeries.GOOGLE_INSIGHTS
+                else -> HistoryEvidenceSeries.LIVE
+            }
+            userSelectedSeries = false
             selectedPointIndex = -1
+        } else if (!userSelectedSeries && priceHistory.isEmpty()) {
+            // The live series is deliberately separate from archive/Google evidence. When no
+            // live points exist, select actual external history so a recovered Wayback series
+            // does not leave the graph looking empty by default.
+            val preferredSeries = when {
+                archiveHistory.isNotEmpty() -> HistoryEvidenceSeries.WAYBACK
+                googleInsightHistory.isNotEmpty() -> HistoryEvidenceSeries.GOOGLE_INSIGHTS
+                else -> HistoryEvidenceSeries.LIVE
+            }
+            if (selectedSeries != preferredSeries) {
+                selectedSeries = preferredSeries
+                selectedPointIndex = -1
+            }
         }
     }
     val selectedHistory = when (selectedSeries) {
@@ -260,6 +286,7 @@ fun PriceHistoryChart(
                     FilterChip(
                         selected = selectedSeries == series,
                         onClick = {
+                            userSelectedSeries = true
                             selectedSeries = series
                             selectedPointIndex = -1
                         },

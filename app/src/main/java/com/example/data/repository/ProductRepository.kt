@@ -726,7 +726,8 @@ class ProductRepository(
         expectedTitle: String,
         originalUrl: String,
         storeName: String,
-        quotes: List<ArchivedPriceQuote>
+        quotes: List<ArchivedPriceQuote>,
+        targetProductId: String? = null
     ): Int {
         startupCleanupCompleted.await()
         if (expectedTitle.isBlank() || originalUrl.isBlank() || quotes.isEmpty()) return 0
@@ -759,7 +760,16 @@ class ProductRepository(
                             normalizedProductPageKey(observation.sourcePageUrl) == originalUrlKey)
                 }
         }
+        // Product-detail history searches are started from an explicit saved product and only
+        // use the retailer URLs selected from that product's offer list. Anchor persistence to
+        // that product ID so an external capture is not discarded merely because its primary
+        // saved URL is still a Google Shopping redirect.
+        val explicitlyTargetedProduct = targetProductId?.let { id ->
+            matchingProducts.singleOrNull { it.id == id }
+        }
+        if (targetProductId != null && explicitlyTargetedProduct == null) return 0
         val product = when {
+            explicitlyTargetedProduct != null -> explicitlyTargetedProduct
             verifiedUrlMatches.size == 1 -> verifiedUrlMatches.single()
             verifiedUrlMatches.size > 1 -> return 0
             else -> {
@@ -798,7 +808,11 @@ class ProductRepository(
         val uniqueGoogleOnlyProduct = isGoogleShoppingUrl(product.storeUrl) &&
             matchingProducts.size == 1 &&
             productStoreId == storeId
-        if (!hasVerifiedLiveQuote && !productOwnsArchiveUrl && !uniqueGoogleOnlyProduct) return 0
+        val archiveCandidateBelongsToSelectedProduct =
+            targetProductId != null && explicitlyTargetedProduct?.id == product.id
+        if (!hasVerifiedLiveQuote && !productOwnsArchiveUrl &&
+            !uniqueGoogleOnlyProduct && !archiveCandidateBelongsToSelectedProduct
+        ) return 0
 
         val now = System.currentTimeMillis()
         val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)

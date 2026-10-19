@@ -22,6 +22,28 @@ class PriceHistoryChartEvidenceTest {
     val composeRule = createComposeRule()
 
     @Test
+    fun archivedHistoryIsShownByDefaultWhenThereAreNoLiveObservations() {
+        composeRule.setContent {
+            MaterialTheme {
+                PriceHistoryChart(
+                    priceHistory = emptyList(),
+                    avg90dPrice = 0.0,
+                    archiveHistory = listOf(
+                        point(1_700_000_000_000L, 89.99, "Internet Archive", "archive")
+                    )
+                )
+            }
+        }
+
+        composeRule.waitUntil(3_000L) {
+            composeRule.onAllNodesWithText("Histórico externo · Wayback")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("Histórico externo · Wayback").assertIsDisplayed()
+        composeRule.onNodeWithText("1 observación").assertIsDisplayed()
+    }
+
+    @Test
     fun externalHistoricalSeriesIsSelectableAndDoesNotShowLiveAverage() {
         composeRule.setContent {
             MaterialTheme {

@@ -102,7 +102,11 @@ internal fun diagnosticIndexForWaybackTrace(event: WaybackTraceEvent): Int {
  * received and classified; a later secondary timeout must not overwrite that fact and make the
  * whole step appear broken. Capture discovery remains step 7's responsibility.
  */
-internal fun summarizeCdxStep5Events(events: List<WaybackTraceEvent>): WaybackTraceEvent? {
+internal fun summarizeCdxStep5Events(
+    events: List<WaybackTraceEvent>,
+    availabilityRecovered: Boolean = false,
+    availabilityCapturesFound: Int = 0
+): WaybackTraceEvent? {
     val terminal = events.filter { event ->
         event.step == 5 && event.status in setOf(
             WaybackTraceStatus.PASSED,
@@ -148,6 +152,20 @@ internal fun summarizeCdxStep5Events(events: List<WaybackTraceEvent>): WaybackTr
 
     val lastFailure = failures.lastOrNull()
     if (lastFailure != null) {
+        if (availabilityRecovered) {
+            val recoveryDetail = if (availabilityCapturesFound > 0) {
+                " Availability respondió y encontró $availabilityCapturesFound captura(s)."
+            } else {
+                " Availability respondió correctamente como alternativa."
+            }
+            return WaybackTraceEvent(
+                step = 5,
+                status = WaybackTraceStatus.PASSED,
+                detail = "CDX no respondió de forma válida en ${failures.size} intento(s). Último diagnóstico: ${lastFailure.detail.take(180)}.$recoveryDetail El flujo se recuperó por la vía alternativa; revisa los pasos 7–17 para la validación del precio.",
+                durationMs = lastFailure.durationMs,
+                diagnosticStep = 6
+            )
+        }
         return WaybackTraceEvent(
             step = 5,
             status = WaybackTraceStatus.FAILED,

@@ -84,9 +84,9 @@ fun ProductCard(
     val savedDateFormatter = remember { SimpleDateFormat("dd/MM/yyyy", SPANISH_LOCALE) }
 
     Card(
+        shape = ProductCardShape,
         modifier = modifier
             .fillMaxWidth()
-            .clip(ProductCardShape)
             .border(
                 width = if (isVerifiedMinimum) 1.5.dp else 1.dp,
                 color = if (isVerifiedMinimum) {
@@ -102,7 +102,7 @@ fun ProductCard(
             // Keep cards visually consistent; retailer colours belong in small metadata accents.
             containerColor = MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
             // Top Section: Product Photo + Product Details

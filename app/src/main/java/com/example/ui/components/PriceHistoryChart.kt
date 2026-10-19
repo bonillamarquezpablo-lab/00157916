@@ -180,6 +180,8 @@ fun PriceHistoryChart(
             filteredPoints[selectedPointIndex]
         } else null
     }
+    // Follow the app's current theme accent (amber in Mínimo) instead of a fixed emerald line.
+    val chartAccent = MaterialTheme.colorScheme.primary
 
     Column(
         modifier = modifier
@@ -410,8 +412,8 @@ fun PriceHistoryChart(
                     path = fillPath,
                     brush = Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xFF10B981).copy(alpha = 0.35f),
-                            Color(0xFF10B981).copy(alpha = 0.02f)
+                            chartAccent.copy(alpha = 0.32f),
+                            chartAccent.copy(alpha = 0.015f)
                         ),
                         startY = paddingTop,
                         endY = height - paddingBottom
@@ -429,7 +431,7 @@ fun PriceHistoryChart(
 
                 drawPath(
                     path = strokePath,
-                    color = Color(0xFF059669),
+                    color = chartAccent,
                     style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
                 )
 
@@ -442,7 +444,7 @@ fun PriceHistoryChart(
                     when {
                         isSelected -> {
                             drawCircle(
-                                color = Color(0xFF0284C7),
+                                color = chartAccent,
                                 radius = 7.dp.toPx(),
                                 center = coord
                             )

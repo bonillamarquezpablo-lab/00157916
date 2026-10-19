@@ -1234,9 +1234,9 @@ class WaybackPriceHistoryClient(
                 HttpUrl.Builder().scheme("https").host(host).addPathSegments(path.trim('/')).addPathSegment("").build().toString()
             }
         }
-        // For Samsung, try canonical model pages before a broad search page: the
-        // product page is more likely to expose its own historical price metadata.
-        // Other merchants retain their existing search-first behaviour.
+        // For every retailer, try likely product-specific routes before generic search pages;
+        // product pages are more likely to expose the exact model and a verifiable historical price.
+        // Samsung gets a stricter priority for its canonical model-page paths below.
         val orderedCandidates = if (normalizedDomain == "samsung.com") {
             val canonicalSamsungUrls = guessedProductUrls.filter { candidate ->
                 runCatching {

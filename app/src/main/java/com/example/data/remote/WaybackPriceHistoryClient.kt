@@ -661,10 +661,13 @@ class WaybackPriceHistoryClient(
         emitWaybackTrace(
             onTrace, 7,
             if (captures.isNotEmpty()) WaybackTraceStatus.PASSED else WaybackTraceStatus.SKIPPED,
-            if (captures.isNotEmpty()) {
-                "Candidatas Availability normalizadas y deduplicadas: ${captures.map { it.originalUrl }.distinct().size} URL(s) únicas."
-            } else {
-                "No hay URL candidatas que normalizar porque Availability no aportó capturas dentro del período."
+            when {
+                captures.isNotEmpty() ->
+                    "Candidatas Availability normalizadas y deduplicadas: ${captures.map { it.originalUrl }.distinct().size} URL(s) únicas."
+                probeDiagnostics.contains("WAYBACK_RATE_LIMITED") ->
+                    "Normalización omitida por HTTP 429: se respeta la pausa global; no se puede concluir que falten capturas."
+                else ->
+                    "No hay URL candidatas que normalizar porque Availability no aportó capturas dentro del período."
             },
             diagnosticStep = 9
         )

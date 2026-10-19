@@ -319,9 +319,12 @@ class WaybackPriceHistoryClientTest {
             "A product-shaped URL must be tried before a generic retailer search page",
             !pcCandidates.first().contains("/search/")
         )
+        val pcSearchIndex = pcCandidates.indexOfFirst {
+            it.startsWith("https://www.pccomponentes.com/search/")
+        }
         assertTrue(
-            "The known retailer search URL must remain available as the second fallback",
-            pcCandidates.getOrNull(1)?.startsWith("https://www.pccomponentes.com/search/") == true
+            "The known retailer search URL must remain available after the first three product-route guesses",
+            pcSearchIndex >= 3
         )
 
         val samsungCandidates = client.buildAvailabilityCandidateUrls(
@@ -337,10 +340,9 @@ class WaybackPriceHistoryClientTest {
             .firstOrNull { it.domain.contains("samsung.com", ignoreCase = true) && it.supportsProductSearch }
             ?.searchUrlFor("Samsung Galaxy S25 Edge")
         if (samsungSearchUrl != null) {
-            assertEquals(
-                "The actual Samsung search page must survive the two-candidate fallback budget",
-                samsungSearchUrl,
-                samsungCandidates[1]
+            assertTrue(
+                "The Samsung search page must remain available after canonical product URLs",
+                samsungCandidates.indexOf(samsungSearchUrl) >= 2
             )
         }
     }

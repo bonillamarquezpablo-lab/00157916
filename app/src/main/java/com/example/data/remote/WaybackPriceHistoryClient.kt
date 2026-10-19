@@ -2120,12 +2120,101 @@ class WaybackPriceHistoryClient(
         val scripts = Regex(
             """(?is)<script\b(?=[^>]*\btype\s*=\s*(?:["']application/ld\+json["']|application/ld\+json(?:\s|/?>)))[^>]*>(.*?)</script\s*>"""
         ).findAll(html).map { it.groupValues[1] }
-        val output = mutableListOf<Triple<String, Double, String>>()
-        for (script in scripts) {
-            val json = try { JSONTokener(script).nextValue() } catch (_: Exception) { null }
-            visitJsonLd(json, output)
+        val roots = scripts.mapNotNull { script ->
+            try { JSONTokener(script).nextValue() } catch (_: Exception) { null }
         }
-        return output
+        val output = mutableListOf<Triple<String, Double, String>>()
+        val productNamesById = linkedMapOf<String, Pair<String, String>>()
+        roots.forEach { indexJsonLdProducts(it, productNamesById) }
+        roots.forEach { visitJsonLd(it, output) }
+        // Some retailers separate Product and Offer into different entries in @graph and link them
+        // through Offer.itemOffered.@id. The single-node parser cannot connect these by itself.
+        roots.forEach { visitLinkedJsonLdOffers(it, productNamesById, output) }
+        return output.distinct()
+    }
+
+    private fun jsonLdTypeNames(value: JSONObject): Set<String> {
+        val rawType = value.opt("@type") ?: return emptySet()
+        val types = when (rawType) {
+            is JSONArray -> (0 until rawType.length()).mapNotNull { rawType.optString(it).takeIf(String::isNotBlank) }
+            else -> listOf(rawType.toString())
+        }
+        return types.map { it.substringAfterLast('/').substringAfterLast('#').lowercase(Locale.ROOT) }.toSet()
+    }
+
+    private fun jsonLdCurrencyHint(value: JSONObject): String {
+        return value.optString("priceCurrency")
+            .takeIf { it.isNotBlank() && it != "null" }
+            ?: value.optJSONObject("priceSpecification")?.optString("priceCurrency")
+                ?.takeIf { it.isNotBlank() && it != "null" }
+            ?: ""
+    }
+
+    private fun indexJsonLdProducts(value: Any?, productsById: MutableMap<String, Pair<String, String>>) {
+        when (value) {
+            is JSONObject -> {
+                val productTypes = setOf("product", "productgroup", "individualproduct", "productmodel")
+                val name = value.optString("name").takeIf { it.isNotBlank() && it != "null" }
+                val id = value.optString("@id").takeIf { it.isNotBlank() && it != "null" }
+                if (name != null && id != null && jsonLdTypeNames(value).any { it in productTypes }) {
+                    productsById[id] = name to jsonLdCurrencyHint(value).uppercase(Locale.ROOT)
+                }
+                val keys = value.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    if (key != "offers") indexJsonLdProducts(value.opt(key), productsById)
+                }
+            }
+            is JSONArray -> for (i in 0 until value.length()) indexJsonLdProducts(value.opt(i), productsById)
+        }
+    }
+
+    private fun linkedProductIdentities(
+        value: Any?,
+        productsById: Map<String, Pair<String, String>>
+    ): List<Pair<String, String>> {
+        val found = linkedSetOf<Pair<String, String>>()
+        fun visit(node: Any?) {
+            when (node) {
+                is JSONObject -> {
+                    val id = node.optString("@id").takeIf { it.isNotBlank() && it != "null" }
+                    if (id != null) productsById[id]?.let(found::add)
+                    val name = node.optString("name").takeIf { it.isNotBlank() && it != "null" }
+                    if (name != null) found += name to jsonLdCurrencyHint(node).uppercase(Locale.ROOT)
+                }
+                is JSONArray -> for (i in 0 until node.length()) visit(node.opt(i))
+            }
+        }
+        visit(value)
+        return found.toList()
+    }
+
+    private fun visitLinkedJsonLdOffers(
+        value: Any?,
+        productsById: Map<String, Pair<String, String>>,
+        out: MutableList<Triple<String, Double, String>>
+    ) {
+        when (value) {
+            is JSONObject -> {
+                val itemOffered = value.opt("itemOffered")
+                if (itemOffered != null &&
+                    (value.has("price") || value.has("lowPrice") || value.has("priceSpecification"))
+                ) {
+                    val identities = linkedProductIdentities(itemOffered, productsById)
+                    val localCurrency = jsonLdCurrencyHint(value)
+                    for ((name, productCurrency) in identities) {
+                        val offers = collectOfferPrices(value, localCurrency.ifBlank { productCurrency })
+                        offers.forEach { (price, currency) -> out += Triple(name, price, currency) }
+                    }
+                }
+                val keys = value.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    if (key != "offers") visitLinkedJsonLdOffers(value.opt(key), productsById, out)
+                }
+            }
+            is JSONArray -> for (i in 0 until value.length()) visitLinkedJsonLdOffers(value.opt(i), productsById, out)
+        }
     }
 
     private fun visitJsonLd(value: Any?, out: MutableList<Triple<String, Double, String>>) {

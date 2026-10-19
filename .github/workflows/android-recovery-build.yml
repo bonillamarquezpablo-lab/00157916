@@ -87,20 +87,26 @@ jobs:
       - name: Compilar APK instalable sobre la versión anterior
         env:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          VERSION_CODE=$((4000 + GITHUB_RUN_NUMBER))
-          VERSION_NAME="1.6.1021"
+          VERSION_CODE=$((10000 + GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))
+          VERSION_NAME="1.7.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          if [ "$VERSION_CODE" -le 6296 ]; then
+            echo "::error::versionCode calculado ($VERSION_CODE) no supera la versión instalada 6296."
+            exit 1
+          fi
           gradle :app:assembleDebug --stacktrace -PVERSION_CODE="$VERSION_CODE" -PVERSION_NAME="$VERSION_NAME"
 
       - name: Verificar paquete, versión y firma estable
         env:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
           APK="app/build/outputs/apk/debug/app-debug.apk"
-          VERSION_CODE=$((4000 + GITHUB_RUN_NUMBER))
-          VERSION_NAME="1.6.1021"
+          VERSION_CODE=$((10000 + GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))
+          VERSION_NAME="1.7.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           test -s "$APK"

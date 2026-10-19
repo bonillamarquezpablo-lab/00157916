@@ -108,10 +108,12 @@ class ProductRepository(
      */
     val storesWithSavedPricesStream: Flow<List<Store>> = combine(
         storeDao.getAllStores(),
-        priceObservationDao.observeAllVerified()
-    ) { storeEntities, observations ->
+        priceObservationDao.observeAllVerified(),
+        productDao.getAllProducts()
+    ) { storeEntities, observations, productEntities ->
         val configuredStores = (storeEntities.map { it.toDomainStore() } + Store.ALL_STORES)
             .distinctBy { it.id }
+        val canonicalTitlesByProductId = productEntities.associate { it.id to it.title }
 
         observations.asSequence()
             .filter { observation ->
@@ -120,7 +122,14 @@ class ProductRepository(
                     observation.currency.trim().equals("EUR", ignoreCase = true) &&
                     observation.price.isFinite() && observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
                     observation.observedAt in 1L..System.currentTimeMillis() &&
-                    observation.storeId.isNotBlank()
+                    observation.storeId.isNotBlank() &&
+                    // Legacy rows may have generic/mislabelled seller titles. Validate the price
+                    // against the canonical product too, so an absurd stale quote cannot add a
+                    // retailer to the trusted store directory.
+                    isPlausibleHistoryPrice(
+                        canonicalTitlesByProductId[observation.productId] ?: observation.productTitle,
+                        observation.price
+                    )
             }
             .mapNotNull { observation ->
                 val merchantHost = merchantHostForObservation(observation)
@@ -1537,7 +1546,12 @@ class ProductRepository(
             val eligibleDate = isArchiveBackedObservation(observation) ||
                 observation.evidenceType.equals("google_insights", ignoreCase = true) ||
                 observation.observedAt >= HISTORY_START_TIMESTAMP
-            eligibleDate && isEligibleObservationForHistory(observation)
+            eligibleDate &&
+                isEligibleObservationForHistory(observation) &&
+                // Re-check each observation against the canonical catalogue title as well as the
+                // retailer's title. This keeps old, incorrectly verified rows from resurfacing as
+                // current offers after a stricter price-quality policy ships.
+                isPlausibleHistoryPrice(entity.title, observation.price)
         }.sortedBy { it.observedAt }
         // Only current search observations establish the live price. Historical-provider points
         // remain visible on the chart but can never replace the current quote.

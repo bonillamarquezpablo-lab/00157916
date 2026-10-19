@@ -19,6 +19,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
+import com.example.ui.viewmodel.mergeWaybackDiagnosticStatus
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -27,6 +28,35 @@ import java.util.concurrent.CopyOnWriteArrayList
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class WaybackPriceHistoryClientTest {
+    @Test
+    fun repeatedWaybackAttemptsCannotDowngradeAnAlreadyExecutedDiagnosticStage() {
+        assertEquals(
+            "An Availability capture keeps extraction marked as passed after a later CDX timeout",
+            WaybackTraceStatus.PASSED,
+            mergeWaybackDiagnosticStatus(WaybackTraceStatus.PASSED, WaybackTraceStatus.SKIPPED)
+        )
+        assertEquals(
+            "An HTML download remains executed when a different route skips the same stage",
+            WaybackTraceStatus.PASSED,
+            mergeWaybackDiagnosticStatus(WaybackTraceStatus.PASSED, WaybackTraceStatus.FAILED)
+        )
+        assertEquals(
+            "A real validation failure must not be relabelled as skipped by another attempt",
+            WaybackTraceStatus.FAILED,
+            mergeWaybackDiagnosticStatus(WaybackTraceStatus.FAILED, WaybackTraceStatus.SKIPPED)
+        )
+        assertEquals(
+            "A retry may move a skipped stage back to running before it completes",
+            WaybackTraceStatus.RUNNING,
+            mergeWaybackDiagnosticStatus(WaybackTraceStatus.SKIPPED, WaybackTraceStatus.RUNNING)
+        )
+        assertEquals(
+            "A later successful attempt may recover a previously failed stage",
+            WaybackTraceStatus.PASSED,
+            mergeWaybackDiagnosticStatus(WaybackTraceStatus.FAILED, WaybackTraceStatus.PASSED)
+        )
+    }
+
     private fun newClient(): WaybackPriceHistoryClient =
         WaybackPriceHistoryClient(ApplicationProvider.getApplicationContext<Context>())
 

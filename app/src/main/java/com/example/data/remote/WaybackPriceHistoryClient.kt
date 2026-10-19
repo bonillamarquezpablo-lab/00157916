@@ -2240,6 +2240,7 @@ class WaybackPriceHistoryClient(
                 }
             val matchingKey = listOf("property", "name", "itemprop")
                 .mapNotNull { attributes[it]?.lowercase(Locale.ROOT) }
+                .flatMap { it.split(Regex("""\s+""")) }
                 .any { it in normalizedNames }
             if (matchingKey) attributes["content"]?.takeIf { it.isNotBlank() }?.let { return it }
         }
@@ -2459,6 +2460,9 @@ class WaybackPriceHistoryClient(
     private fun normalizeTitle(value: String): String =
         Normalizer.normalize(decodeHtml(value).lowercase(Locale.ROOT), Normalizer.Form.NFD)
             .replace(Regex("\\p{M}+"), "")
+            // Preserve the plus suffix on phone models such as Galaxy S26+; punctuation
+            // removal otherwise makes it indistinguishable from the base S26 variant.
+            .replace(Regex("""\\b(s\\d{1,2})\\s*\\+"""), "$1 plus")
             .replace(Regex("[^a-z0-9]+"), " ")
             .trim()
             .replace(Regex("\\s+"), " ")

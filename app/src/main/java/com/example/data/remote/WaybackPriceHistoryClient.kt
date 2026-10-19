@@ -52,6 +52,27 @@ data class WaybackBackfillResult(
     val diagnosticCodes: Set<String> = emptySet()
 )
 
+enum class WaybackTraceStatus { PENDING, RUNNING, PASSED, FAILED, SKIPPED }
+
+/** Local-only event; complete URLs, headers, API keys and HTML are deliberately omitted. */
+data class WaybackTraceEvent(
+    val step: Int,
+    val status: WaybackTraceStatus,
+    val detail: String,
+    val durationMs: Long? = null
+)
+
+private fun emitWaybackTrace(
+    listener: ((WaybackTraceEvent) -> Unit)?,
+    step: Int,
+    status: WaybackTraceStatus,
+    detail: String,
+    durationMs: Long? = null
+) {
+    if (listener == null) return
+    runCatching { listener(WaybackTraceEvent(step, status, detail, durationMs)) }
+}
+
 /**
  * Best-effort free historical backfill using Internet Archive snapshots.
  * A capture is accepted only when structured metadata exposes a EUR price and a product title
@@ -78,7 +99,8 @@ class WaybackPriceHistoryClient(
         originalUrl: String,
         expectedTitle: String,
         now: Long = System.currentTimeMillis(),
-        lookbackDays: Int = DEFAULT_LOOKBACK_DAYS
+        lookbackDays: Int = DEFAULT_LOOKBACK_DAYS,
+        onTrace: ((WaybackTraceEvent) -> Unit)? = null
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
         if (!preferences.getBoolean("enabled", true)) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("WAYBACK_DISABLED"))
@@ -124,7 +146,8 @@ class WaybackPriceHistoryClient(
                 maxSnapshots = MAX_DIRECT_SNAPSHOTS_PER_URL,
                 cdxTimeoutSeconds = DIRECT_CDX_TIMEOUT_SECONDS,
                 cdxStage = "CDX_EXACT",
-                snapshotTimeoutSeconds = DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS
+                snapshotTimeoutSeconds = DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS,
+                onTrace = onTrace
             )
         }
     }
@@ -139,7 +162,8 @@ class WaybackPriceHistoryClient(
         expectedTitle: String,
         now: Long = System.currentTimeMillis(),
         lookbackDays: Int = DEFAULT_LOOKBACK_DAYS,
-        preferredUrl: String? = null
+        preferredUrl: String? = null,
+        onTrace: ((WaybackTraceEvent) -> Unit)? = null
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
         if (!preferences.getBoolean("enabled", true)) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("WAYBACK_DISABLED"))
@@ -199,7 +223,8 @@ class WaybackPriceHistoryClient(
                     maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP,
                     cdxTimeoutSeconds = CDX_FALLBACK_TIMEOUT_SECONDS,
                     cdxStage = "CDX_DOMAIN",
-                    snapshotTimeoutSeconds = CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS
+                    snapshotTimeoutSeconds = CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS,
+                    onTrace = onTrace
                 )
                 lastResult = result
                 if (result.quotes.isNotEmpty()) {
@@ -280,7 +305,8 @@ class WaybackPriceHistoryClient(
         maxSnapshots: Int,
         maxCandidates: Int,
         stage: String,
-        probeOlderCapture: Boolean = true
+        probeOlderCapture: Boolean = true,
+        onTrace: ((WaybackTraceEvent) -> Unit)? = null
     ): WaybackBackfillResult {
         val urls = candidateUrls.asSequence()
             .filter(::isEligibleDirectUrl)
@@ -323,6 +349,12 @@ class WaybackPriceHistoryClient(
             .filter { it.timestamp <= now && it.timestamp >= (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L) }
             .distinctBy { it.rawTimestamp to it.originalUrl }
             .sortedBy { it.timestamp }
+        emitWaybackTrace(
+            onTrace, 7,
+            if (captures.isNotEmpty()) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
+            if (captures.isNotEmpty()) "Availability API devolvió ${captures.size} captura(s) válida(s)."
+            else "La alternativa respondió sin capturas utilizables; candidatos probados: ${probes.size}."
+        )
         val successfulProbes = probes.count { !it.requestFailed }
         val probeDiagnostics = probes.mapNotNull { it.diagnosticCode }.toSet()
 
@@ -367,11 +399,13 @@ class WaybackPriceHistoryClient(
 
         val sampled = sampleCaptures(captures, maxSnapshots)
         val fetched = mutableListOf<SnapshotFetch>()
-        for (capture in sampled) {
+        for ((snapshotIndex, capture) in sampled.withIndex()) {
             val snapshot = fetchAndVerifySnapshot(
                 capture = capture,
                 expectedTitle = expectedTitle,
-                snapshotTimeoutSeconds = SNAPSHOT_CALL_TIMEOUT_SECONDS
+                snapshotTimeoutSeconds = SNAPSHOT_CALL_TIMEOUT_SECONDS,
+                snapshotOrdinal = snapshotIndex + 1,
+                onTrace = onTrace
             )
             fetched += snapshot
             if (snapshot.diagnosticCode == "WAYBACK_RATE_LIMITED") break
@@ -855,17 +889,38 @@ class WaybackPriceHistoryClient(
         maxSnapshots: Int,
         cdxTimeoutSeconds: Long,
         cdxStage: String,
-        snapshotTimeoutSeconds: Long = SNAPSHOT_CALL_TIMEOUT_SECONDS
+        snapshotTimeoutSeconds: Long = SNAPSHOT_CALL_TIMEOUT_SECONDS,
+        onTrace: ((WaybackTraceEvent) -> Unit)? = null
     ): WaybackBackfillResult {
+        emitWaybackTrace(onTrace, 4, WaybackTraceStatus.RUNNING,
+            "$cdxStage: petición CDX preparada; URL completa omitida.")
+        val startedAt = System.nanoTime()
         val cdxOutcome = availabilitySemaphore.withPermit {
             val gate = awaitArchiveRequestTurn()
             if (gate != null) {
+                emitWaybackTrace(onTrace, 4, WaybackTraceStatus.SKIPPED,
+                    "Consulta no enviada: bloqueada por el control de ritmo.")
+                emitWaybackTrace(onTrace, 5, WaybackTraceStatus.SKIPPED,
+                    "No hubo respuesta HTTP porque la petición no salió.")
                 CdxIndexOutcome(requestFailed = true, diagnosticCodes = setOf(gate))
             } else {
-                queryCdxIndexOnly(cdxUrl, cdxTimeoutSeconds, cdxStage)
+                emitWaybackTrace(onTrace, 4, WaybackTraceStatus.PASSED, "$cdxStage: petición CDX enviada.")
+                emitWaybackTrace(onTrace, 5, WaybackTraceStatus.RUNNING, "$cdxStage: esperando respuesta.")
+                val outcome = queryCdxIndexOnly(cdxUrl, cdxTimeoutSeconds, cdxStage)
+                val elapsed = ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(0L)
+                emitWaybackTrace(
+                    onTrace, 5,
+                    if (outcome.requestFailed) WaybackTraceStatus.FAILED else WaybackTraceStatus.PASSED,
+                    if (outcome.requestFailed) "$cdxStage: ${outcome.diagnosticCodes.joinToString(", ").ifBlank { "respuesta inválida" }}."
+                    else "$cdxStage: respuesta válida; ${outcome.captures.size} captura(s) candidatas.",
+                    elapsed
+                )
+                outcome
             }
         }
         if (cdxOutcome.requestFailed) {
+            emitWaybackTrace(onTrace, 7, WaybackTraceStatus.SKIPPED,
+                "No se pudo extraer una lista de capturas del índice.")
             val rateLimited = cdxOutcome.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
             rememberAttempt(cacheKey, now, hasQuotes = false, failed = true, rateLimited = rateLimited)
             return WaybackBackfillResult(
@@ -874,14 +929,22 @@ class WaybackPriceHistoryClient(
             )
         }
         val captures = cdxOutcome.captures
+        emitWaybackTrace(
+            onTrace, 7,
+            if (captures.isNotEmpty()) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
+            if (captures.isNotEmpty()) "Índice parseado: ${captures.size} captura(s) válida(s); límite ${maxSnapshots}."
+            else "El índice respondió, pero no devolvió capturas válidas."
+        )
 
         val sampled = sampleCaptures(captures, maxSnapshots)
         val fetched = mutableListOf<SnapshotFetch>()
-        for (capture in sampled) {
+        for ((snapshotIndex, capture) in sampled.withIndex()) {
             val snapshot = fetchAndVerifySnapshot(
                 capture = capture,
                 expectedTitle = expectedTitle,
-                snapshotTimeoutSeconds = snapshotTimeoutSeconds
+                snapshotTimeoutSeconds = snapshotTimeoutSeconds,
+                snapshotOrdinal = snapshotIndex + 1,
+                onTrace = onTrace
             )
             fetched += snapshot
             if (snapshot.diagnosticCode == "WAYBACK_RATE_LIMITED") break

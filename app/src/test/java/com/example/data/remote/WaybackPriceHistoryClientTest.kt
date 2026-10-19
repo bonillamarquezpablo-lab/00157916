@@ -642,7 +642,7 @@ class WaybackPriceHistoryClientTest {
                 traceEvents.any {
                     it.diagnosticStep == 7 &&
                         it.status == WaybackTraceStatus.PASSED &&
-                        it.detail.contains("Availability encontró 1 captura(s)") &&
+                        it.detail.contains("Availability encontró 2 captura(s)") &&
                         it.detail.contains("DOMAIN_AVAILABILITY_FALLBACK_TIMEOUT")
                 }
             )

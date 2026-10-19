@@ -111,7 +111,14 @@ class WaybackPriceHistoryClient(
         if (expectedTitle.isBlank()) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("PRODUCT_TITLE_EMPTY"))
         }
-        val attempt = attemptKey("url-cdx-batch-v3|$originalUrl|$expectedTitle")
+        // Canonicalize once before deriving the cache key. Tracking parameters on the same
+        // retailer page must not create separate CDX requests and amplify archive rate limits.
+        val directUrl = buildDirectUrlCandidates(originalUrl).lastOrNull()
+            ?: return@withContext WaybackBackfillResult(
+                requestFailed = true,
+                diagnosticCodes = setOf("DIRECT_URL_INVALID")
+            )
+        val attempt = attemptKey("url-cdx-batch-v4|$directUrl|$expectedTitle")
         serializedArchiveLookup {
             if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
                 return@serializedArchiveLookup WaybackBackfillResult(
@@ -130,9 +137,7 @@ class WaybackPriceHistoryClient(
                 )
             }
 
-            // One exact CDX request returns many timestamps at once. Prefer the clean URL variant
-            // without tracking/session parameters; take two distant captures for a useful graph.
-            val directUrl = buildDirectUrlCandidates(originalUrl).lastOrNull() ?: originalUrl
+            // One exact CDX request returns many timestamps at once; two distant captures feed the chart.
             val cdxUrl = buildCdxUrl(directUrl, now, lookbackDays)
                 ?: return@serializedArchiveLookup WaybackBackfillResult(
                     requestFailed = true,
@@ -1861,7 +1866,9 @@ class WaybackPriceHistoryClient(
     internal fun isEligibleDirectUrl(value: String): Boolean {
         val uri = runCatching { URI(value) }.getOrNull() ?: return false
         val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
-        if (uri.scheme != "https" || host.isBlank() || uri.path.isNullOrBlank() || uri.path == "/") return false
+        if (uri.scheme != "https" || host.isBlank() || uri.rawUserInfo != null ||
+            uri.path.isNullOrBlank() || uri.path == "/"
+        ) return false
         if (host == "web.archive.org" || host == "archive.org" ||
             host.startsWith("google.") || host.endsWith(".google.com") || host.endsWith(".google.es") ||
             host == "bing.com" || host.endsWith(".bing.com")

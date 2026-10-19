@@ -2530,7 +2530,29 @@ class ExampleRobolectricTest {
 
 
     @Test
-    fun `online search stores valid offers once per store and day and marks low outliers`() = runBlocking<Unit> {
+    fun \`insecure retailer links fall back to a safe HTTPS destination\`() {
+        val insecureRedirect = com.example.data.remote.extractDirectRetailerUrl(
+            "https://www.google.com/url?q=http%3A%2F%2Fwww.pccomponentes.com%2Fproducto"
+        )
+        assertEquals(
+            "An embedded HTTP URL must not be accepted as a safe direct destination",
+            null,
+            insecureRedirect
+        )
+
+        val retailerFallback = com.example.data.remote.retailerDestinationForOffer(
+            "http://www.pccomponentes.com/producto",
+            "PcComponentes",
+            "Sony WH-1000XM5"
+        )
+        assertTrue(
+            "Known sellers should use their HTTPS store search page when the supplied link is HTTP",
+            retailerFallback.orEmpty().startsWith("https://www.pccomponentes.com/")
+        )
+    }
+
+    @Test
+    fun \`online search stores valid offers once per store and day and marks low outliers\`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,

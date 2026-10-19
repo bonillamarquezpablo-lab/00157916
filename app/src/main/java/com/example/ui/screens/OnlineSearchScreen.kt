@@ -52,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -500,6 +501,7 @@ fun OnlineSearchScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             FilterChip(
+                                modifier = Modifier.testTag("filter-second-hand"),
                                 selected = state.onlineSearchShowSecondHand,
                                 onClick = { onShowSecondHandChange(!state.onlineSearchShowSecondHand) },
                                 label = { Text("Mostrar segunda mano") }

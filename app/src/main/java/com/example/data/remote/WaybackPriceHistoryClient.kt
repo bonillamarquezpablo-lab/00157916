@@ -286,7 +286,13 @@ class WaybackPriceHistoryClient(
                         // availability response as a negative result. The domain-index timeout
                         // still failed, so preserve it as a short-lived failure, not a six-hour
                         // "no captures" cache entry.
-                        rememberAttempt(attempt, now, hasQuotes = false, failed = true)
+                        rememberAttempt(
+                            attempt,
+                            now,
+                            hasQuotes = false,
+                            failed = true,
+                            rateLimited = fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
+                        )
                         return@serializedArchiveLookup fallback.copy(
                             requestFailed = true,
                             diagnosticCodes = fallback.diagnosticCodes + "CDX_DOMAIN_TIMEOUT"
@@ -736,9 +742,10 @@ class WaybackPriceHistoryClient(
             candidates += base
         }
 
-        // Queryless retailer pages are often archived under the opposite slash convention.
-        // Try that only when no tracking-free query candidate was available.
-        if (candidates.size == 1 && uri.rawPath.isNullOrBlank().not()) {
+        // Only queryless product pages should receive a slash-variant probe. A query such as
+        // ?sku=27k or ?variant=blue can identify a different product; adding a slash while
+        // preserving that query is a different URL and often misses the archived page.
+        if (candidates.size == 1 && uri.rawQuery.isNullOrBlank() && uri.rawPath.isNullOrBlank().not()) {
             val path = uri.rawPath!!
             val alternatePath = if (path.endsWith("/")) path.trimEnd('/').ifBlank { "/" } else "$path/"
             candidates += buildString {
@@ -866,10 +873,11 @@ class WaybackPriceHistoryClient(
                 }.getOrDefault(false)
             }
             val canonicalSet = canonicalSamsungUrls.toSet()
-            // Keep the targeted search URL as a secondary option rather than dropping it
-            // behind six guessed paths; canonical model URLs remain the first priority.
-            canonicalSamsungUrls +
-                listOfNotNull(storeSearchUrl) +
+            // The caller only probes two URLs. Put one canonical model page first and the real
+            // retailer search URL second; otherwise www + apex guesses consume the entire budget
+            // and the useful search fallback is never tried.
+            listOfNotNull(canonicalSamsungUrls.firstOrNull(), storeSearchUrl) +
+                canonicalSamsungUrls.drop(1) +
                 guessedProductUrls.filterNot { it in canonicalSet }
         } else {
             listOfNotNull(storeSearchUrl) + guessedProductUrls
@@ -1884,7 +1892,11 @@ class WaybackPriceHistoryClient(
                 total += count
             }
         }
-        return output.toString(Charsets.UTF_8.name())
+        // Old retailer snapshots may use ISO-8859-1 or another declared HTML charset.
+        // Decode using the HTTP Content-Type instead of forcing UTF-8, which can corrupt product
+        // names/accents and make exact title verification reject a valid capture.
+        val charset = body.contentType()?.charset(Charsets.UTF_8) ?: Charsets.UTF_8
+        return output.toString(charset.name())
     }
 
     private fun sampleCaptures(captures: List<WaybackCapture>, max: Int): List<WaybackCapture> {

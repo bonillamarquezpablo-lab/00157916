@@ -2177,7 +2177,7 @@ class WaybackPriceHistoryClient(
             addAll(extractHtmlProductTitleCandidates(html))
         }
         return titles.asSequence()
-            .map { decodeHtml(it).replace(Regex("""\\s+"""), " ").trim() }
+            .map { decodeHtml(it).replace(Regex("""\s+"""), " ").trim() }
             .filter { it.length in 3..180 }
             .distinctBy(::normalizeTitle)
             .take(16)
@@ -2191,8 +2191,8 @@ class WaybackPriceHistoryClient(
      */
     private fun extractHtmlProductTitleCandidates(html: String): List<String> {
         val output = mutableListOf<String>()
-        val openingTags = Regex("""(?is)<([a-z][a-z0-9:-]*)\\b([^>]*)>""")
-        val attributeRegex = Regex("""(?is)([a-z_:.-]+)\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))""")
+        val openingTags = Regex("""(?is)<([a-z][a-z0-9:-]*)\b([^>]*)>""")
+        val attributeRegex = Regex("""(?is)([a-z_:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""")
         val voidTags = setOf("meta", "input", "img", "br", "hr", "link", "source", "area", "embed", "track", "wbr")
         val productSelector = Regex("""(?i)(product[-_ ]?(?:title|name)|producttitle|productname|pdp[-_ ]?title|itemprop.*(?:name|headline))""")
         val opening = openingTags.findAll(html)
@@ -2203,7 +2203,7 @@ class WaybackPriceHistoryClient(
                 val raw = attr.groups[2]?.value ?: attr.groups[3]?.value ?: attr.groups[4]?.value.orEmpty()
                 attr.groupValues[1].lowercase(Locale.ROOT) to decodeHtml(raw).trim()
             }
-            val itemProps = attrs["itemprop"].orEmpty().lowercase(Locale.ROOT).split(Regex("""\\s+"""))
+            val itemProps = attrs["itemprop"].orEmpty().lowercase(Locale.ROOT).split(Regex("""\s+"""))
             val selectorText = listOf("class", "id", "data-testid", "data-test", "data-qa")
                 .mapNotNull { attrs[it] }
                 .joinToString(" ")
@@ -2218,12 +2218,12 @@ class WaybackPriceHistoryClient(
                 continue
             }
             val contentStart = match.range.last + 1
-            val close = Regex("</" + Regex.escape(tagName) + """\\s*>""", RegexOption.IGNORE_CASE)
+            val close = Regex("</" + Regex.escape(tagName) + """\s*>""", RegexOption.IGNORE_CASE)
                 .find(html, contentStart) ?: continue
             var inner = html.substring(contentStart, close.range.first)
-            inner = Regex("""(?is)<(script|style|noscript)\\b[^>]*>.*?</\\1\\s*>""").replace(inner, " ")
+            inner = Regex("""(?is)<(script|style|noscript)\b[^>]*>.*?</\1\s*>""").replace(inner, " ")
             val text = decodeHtml(Regex("""(?is)<[^>]+>""").replace(inner, " "))
-                .replace(Regex("""\\s+"""), " ").trim()
+                .replace(Regex("""\s+"""), " ").trim()
             if (text.length in 3..180) output += text
         }
         return output.distinctBy(::normalizeTitle)

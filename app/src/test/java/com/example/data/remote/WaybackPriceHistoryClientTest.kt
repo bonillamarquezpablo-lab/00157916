@@ -383,6 +383,27 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun canonicalVariantSlugIsTriedBeforeStorageAndColourSpecificGuessForUnknownRetailer() {
+        val client = newClient()
+        val candidates = client.buildAvailabilityCandidateUrls(
+            domain = "shop.example",
+            expectedTitle = "Apple iPhone 15 128 GB Negro"
+        )
+
+        assertTrue("A bounded merchant candidate list should be created", candidates.isNotEmpty())
+        assertEquals(
+            "The canonical product slug should not contain storage or colour",
+            "https://www.shop.example/apple-iphone-15/",
+            candidates.first()
+        )
+        assertTrue(
+            "The full variant-specific path must remain as a later fallback",
+            candidates.any { it.contains("apple-iphone-15-128-gb-negro") }
+        )
+        assertTrue("Candidate fan-out must remain bounded", candidates.size <= 6)
+    }
+
+    @Test
     fun domainCdxTimeoutFallsBackToAvailabilityAndSavesVerifiedPrice() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)

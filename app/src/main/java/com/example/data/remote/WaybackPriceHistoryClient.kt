@@ -2079,13 +2079,30 @@ class WaybackPriceHistoryClient(
         val matching = explicitMeta ?: matchingJsonLd.minWithOrNull(
             compareBy<Triple<String, Double, String>> { it.second }
                 .thenBy { normalizeTitle(it.first) }
-        ) ?: return null
+        )
+        if (matching != null) {
+            return ArchivedPriceQuote(
+                observedAt = observedAt,
+                price = matching.second,
+                currency = "EUR",
+                productTitle = decodeHtml(matching.first).trim(),
+                originalUrl = originalUrl,
+                snapshotUrl = snapshotUrl
+            )
+        }
 
+        // Some historical pages expose only the rendered price block and no structured price
+        // data. Permit that fallback only when a product-title candidate matches and a scoped
+        // price element explicitly shows EUR/€ (or the matching price element is backed by EUR
+        // metadata). Never scan the whole page for arbitrary numbers.
+        val matchingPageTitle = pageTitles.firstOrNull { isMatchingProductTitle(expectedTitle, it) }
+            ?: return null
+        val visiblePrice = extractVisibleProductPrice(html, metaCurrency) ?: return null
         return ArchivedPriceQuote(
             observedAt = observedAt,
-            price = matching.second,
+            price = visiblePrice,
             currency = "EUR",
-            productTitle = decodeHtml(matching.first).trim(),
+            productTitle = decodeHtml(matchingPageTitle).trim(),
             originalUrl = originalUrl,
             snapshotUrl = snapshotUrl
         )
@@ -2227,6 +2244,60 @@ class WaybackPriceHistoryClient(
             if (text.length in 3..180) output += text
         }
         return output.distinctBy(::normalizeTitle)
+    }
+
+    /**
+     * Extract a visible price only from a price-specific HTML element. This covers older product
+     * pages where the displayed price is present but JSON-LD/Open Graph price metadata is absent.
+     * A currency marker is mandatory unless the matching price element is covered by EUR metadata.
+     */
+    private fun extractVisibleProductPrice(html: String, knownCurrency: String?): Double? {
+        val openingTags = Regex("""(?is)<([a-z][a-z0-9:-]*)\b([^>]*)>""")
+        val attributeRegex = Regex("""(?is)([a-z_:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""")
+        val priceSelector = Regex("""(?i)(product[-_ ]?price|current[-_ ]?price|sale[-_ ]?price|selling[-_ ]?price|final[-_ ]?price|special[-_ ]?price|price__current|price-value|pricevalue|a-price|^price$)""")
+        val rejectedSelector = Regex("""(?i)(old|previous|regular|original|was[-_ ]?price|list[-_ ]?price|strike|crossed|installment|monthly|shipping|unit[-_ ]?price|price[-_ ]?before)""")
+        val voidTags = setOf("meta", "input", "img", "br", "hr", "link", "source", "area", "embed", "track", "wbr")
+        val euroAmount = Regex("""(?i)(?:€\s*[0-9][0-9., \u00a0]*|[0-9][0-9., \u00a0]*\s*€|\bEUR\s*[0-9][0-9., \u00a0]*|[0-9][0-9., \u00a0]*\s*\bEUR\b)""")
+        val foreignCurrency = Regex("""(?i)(?:\$|£|\b(?:USD|GBP|CAD|AUD|PLN|SEK|NOK|DKK|CHF)\b)""")
+        val number = Regex("""(?<![A-Za-z0-9])(?:[0-9]{1,3}(?:[., \u00a0][0-9]{3})+|[0-9]+)(?:[.,][0-9]{1,2})?(?![A-Za-z0-9])""")
+        for (match in openingTags.findAll(html)) {
+            val tagName = match.groupValues[1].lowercase(Locale.ROOT)
+            val attrs = attributeRegex.findAll(match.groupValues[2]).associate { attr ->
+                val raw = attr.groups[2]?.value ?: attr.groups[3]?.value ?: attr.groups[4]?.value.orEmpty()
+                attr.groupValues[1].lowercase(Locale.ROOT) to decodeHtml(raw).trim()
+            }
+            val itemProps = attrs["itemprop"].orEmpty().lowercase(Locale.ROOT).split(Regex("""\s+"""))
+            val selector = listOf("class", "id", "data-testid", "data-test", "data-qa")
+                .mapNotNull { attrs[it] }
+                .joinToString(" ")
+            val isPriceElement = itemProps.any { it in setOf("price", "lowprice") } ||
+                priceSelector.containsMatchIn(selector)
+            if (!isPriceElement || rejectedSelector.containsMatchIn(selector) || tagName in voidTags) continue
+
+            val contentStart = match.range.last + 1
+            val close = Regex("</" + Regex.escape(tagName) + """\s*>""", RegexOption.IGNORE_CASE)
+                .find(html, contentStart) ?: continue
+            val inner = Regex("""(?is)<(script|style|noscript)\b[^>]*>.*?</\1\s*>""")
+                .replace(html.substring(contentStart, close.range.first), " ")
+            val text = decodeHtml(Regex("""(?is)<[^>]+>""").replace(inner, " "))
+                .replace(Regex("""\s+"""), " ").trim()
+            val directValue = sequenceOf("content", "data-price", "value", "data-value")
+                .mapNotNull { attrs[it] }
+                .firstOrNull { it.isNotBlank() }
+            val visibleEuroMatch = euroAmount.find(text)
+            val localCurrency = attrs["data-currency"] ?: attrs["currency"]
+            val hasForeignCurrency = foreignCurrency.containsMatchIn(text) ||
+                (!localCurrency.isNullOrBlank() && !localCurrency.equals("EUR", true))
+            if (hasForeignCurrency) continue
+            val currencyIsEuro = visibleEuroMatch != null ||
+                localCurrency.equals("EUR", true) ||
+                knownCurrency.equals("EUR", true)
+            if (!currencyIsEuro) continue
+            val rawNumber = visibleEuroMatch?.value ?: directValue ?: number.find(text)?.value ?: continue
+            val parsed = parsePositivePrice(rawNumber) ?: continue
+            if (parsed in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE) return parsed
+        }
+        return null
     }
 
     private fun readMeta(html: String, names: Set<String>): String? {

@@ -2405,3 +2405,4 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     fun clearVerifierResult() {
         _uiState.value = _uiState.value.copy(verifierResult = null, verifierInput = "")
     }
+}

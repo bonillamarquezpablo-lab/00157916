@@ -224,6 +224,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     val uiState: StateFlow<TrackerUiState> = _uiState.asStateFlow()
 
+    private fun waybackRateLimitNotice(now: Long = System.currentTimeMillis()): String {
+        val until = waybackPriceHistoryClient.activeRateLimitUntil(now)
+            ?: return "Internet Archive ha limitado temporalmente las consultas (HTTP 429). Espera unos minutos antes de volver a intentarlo. No se ha gastado cuota de SerpApi."
+        val remainingMinutes = ((until - now + 59_999L) / 60_000L).coerceAtLeast(1L)
+        val retryAt = SimpleDateFormat("HH:mm", Locale("es", "ES")).format(Date(until))
+        return "Internet Archive ha pedido una pausa temporal (HTTP 429). Mínimo no enviará más peticiones hasta aproximadamente las \${retryAt} (en unos \${remainingMinutes} min). Vuelve a pulsar «Buscar histórico gratis» entonces. No se consume cuota de SerpApi."
+    }
+
     private fun startWaybackDiagnostic(product: Product) {
         val initial = WAYBACK_DIAGNOSTIC_TITLES.mapIndexed { index, title ->
             WaybackDiagnosticEntry(step = index + 1, title = title)
@@ -1151,6 +1159,27 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         // immediately erase the 15 diagnostic rows from the UI.
         val current = _uiState.value
 
+        // A 429 cooldown applies to Internet Archive globally, not just this product. Explain
+        // the retry time locally instead of making a doomed request for every other product.
+        val rateLimitUntil = waybackPriceHistoryClient.activeRateLimitUntil()
+        if (rateLimitUntil != null) {
+            val status = waybackRateLimitNotice()
+            _uiState.value = _uiState.value.copy(
+                isSearchingFreeHistory = false,
+                freeHistoryStatus = status,
+                freeHistoryProductId = product.id
+            )
+            reportWaybackDiagnostic(
+                product.id, 3, WaybackTraceStatus.SKIPPED,
+                "Pausa global de Internet Archive activa; no se envió otra petición."
+            )
+            finishWaybackDiagnostic(
+                product.id, WaybackTraceStatus.SKIPPED,
+                "Reintento no enviado durante la pausa global. ${status}"
+            )
+            return
+        }
+
         // Archived snapshots are independent evidence; use the saved retailer offers first.
         // Some older Google Shopping rows contain a generic Google URL and an incomplete
         // merchant-domain field. Resolve the merchant from the saved store directory before
@@ -1975,7 +2004,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     foundCount > 0 ->
                         "Se encontraron capturas con precios previos, pero no se pudieron vincular a la ficha del producto o ya existían esos registros diarios."
                     requestFailedCount > 0 && diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ->
-                        "Internet Archive ha limitado temporalmente las consultas (HTTP 429). Mínimo ha pausado las peticiones para evitar seguir saturando el servicio; inténtalo más tarde. Esto no significa que no existan capturas."
+                        waybackRateLimitNotice() + " Esto no significa que no existan capturas."
                     capturesFoundCount > 0 && checkedCount == 0 && requestFailedCount > 0 ->
                         "Internet Archive encontró $capturesFoundCount capturas, pero las descargas fallaron. No se puede confirmar el precio histórico; puedes volver a intentarlo."
                     checkedCount > 0 && requestFailedCount > 0 ->

@@ -302,8 +302,12 @@ class WaybackPriceHistoryClientTest {
             "Apple iPhone 16 128 GB Negro"
         )
         assertTrue(
-            "Known retailer product-search URL should be tried for structured listing metadata",
-            pcCandidates.first().startsWith("https://www.pccomponentes.com/search/")
+            "A product-shaped URL must be tried before a generic retailer search page",
+            !pcCandidates.first().contains("/search/")
+        )
+        assertTrue(
+            "The known retailer search URL must remain available as the second fallback",
+            pcCandidates.getOrNull(1)?.startsWith("https://www.pccomponentes.com/search/") == true
         )
 
         val samsungCandidates = client.buildAvailabilityCandidateUrls(

@@ -1810,8 +1810,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         // Collect terminal CDX outcomes so a slow secondary request cannot overwrite a
         // response already received and classified successfully for this product.
         val cdxStep5Events = java.util.Collections.synchronizedList(mutableListOf<WaybackTraceEvent>())
+        // A bad/unknown domain on one fallback candidate must not mark the whole preflight as
+        // failed when another direct URL has already reached Internet Archive successfully.
+        val archiveRequestSent = java.util.concurrent.atomic.AtomicBoolean(false)
         val traceCallback: ((WaybackTraceEvent) -> Unit)? = diagnosticProductId?.let { id ->
             { event ->
+                if (event.step == 4 && event.status == WaybackTraceStatus.PASSED) {
+                    archiveRequestSent.set(true)
+                }
                 if (event.step == 5 && event.status != WaybackTraceStatus.RUNNING &&
                     event.status != WaybackTraceStatus.PENDING
                 ) {
@@ -2045,6 +2051,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         diagnosticProductId, 19, persistenceStatus, persistenceDetail
                     )
                     val gateStatus = when {
+                        // Network activity is stronger evidence than aggregate error codes: the
+                        // latter may include a rejected secondary merchant-domain candidate.
+                        archiveRequestSent.get() -> WaybackTraceStatus.PASSED
                         diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ||
                             diagnosticCodes.contains("CACHE_SKIPPED") ||
                             diagnosticCodes.contains("CACHE_SKIPPED_AFTER_FAILURE") ->
@@ -2057,10 +2066,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }
                     reportWaybackDiagnostic(
                         diagnosticProductId, 4, gateStatus,
-                        when (gateStatus) {
-                            WaybackTraceStatus.SKIPPED ->
+                        when {
+                            archiveRequestSent.get() ->
+                                "Validación previa superada: al menos una petición CDX salió. Los destinos secundarios no válidos se aíslan y se detallan en su fase; los fallos de red se muestran en los pasos 5–8."
+                            gateStatus == WaybackTraceStatus.SKIPPED ->
                                 "Consulta omitida por pausa HTTP 429 o caché; no se enviaron peticiones duplicadas."
-                            WaybackTraceStatus.FAILED ->
+                            gateStatus == WaybackTraceStatus.FAILED ->
                                 "No se superó la validación previa. Diagnóstico: ${diagnosticCodes.filter {
                                     it in setOf("WAYBACK_DISABLED", "DIRECT_URL_INVALID", "DOMAIN_UNRESOLVED")
                                 }.joinToString(", ")}."

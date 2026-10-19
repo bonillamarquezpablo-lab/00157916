@@ -130,6 +130,21 @@ private fun emitCachedLookupSkippedTrace(
         diagnosticStep = 14
     )
     emitWaybackTrace(
+        listener, 12, WaybackTraceStatus.SKIPPED,
+        "No ejecutado: no hay título archivado que verificar porque no se descargó ninguna captura.",
+        diagnosticStep = 15
+    )
+    emitWaybackTrace(
+        listener, 13, WaybackTraceStatus.SKIPPED,
+        "No ejecutado: no hay precio extraíble porque no se descargó ninguna captura.",
+        diagnosticStep = 16
+    )
+    emitWaybackTrace(
+        listener, 13, WaybackTraceStatus.SKIPPED,
+        "No ejecutado: no se puede validar el importe en EUR sin un precio extraído.",
+        diagnosticStep = 17
+    )
+    emitWaybackTrace(
         listener, 14, WaybackTraceStatus.SKIPPED,
         "No ejecutado: no hay capturas nuevas que consolidar porque la consulta fue omitida por caché.",
         diagnosticStep = 18
@@ -396,6 +411,26 @@ class WaybackPriceHistoryClient(
                     onTrace, 11, WaybackTraceStatus.SKIPPED,
                     "No ejecutado: no hay una segunda captura que evaluar.",
                     diagnosticStep = 14
+                )
+                emitWaybackTrace(
+                    onTrace, 12, WaybackTraceStatus.SKIPPED,
+                    "Verificación del producto omitida: no se consultó ningún archivo porque el dominio es inválido.",
+                    diagnosticStep = 15
+                )
+                emitWaybackTrace(
+                    onTrace, 13, WaybackTraceStatus.SKIPPED,
+                    "Extracción del precio omitida: no hay HTML histórico que analizar.",
+                    diagnosticStep = 16
+                )
+                emitWaybackTrace(
+                    onTrace, 13, WaybackTraceStatus.SKIPPED,
+                    "Validación del importe omitida: no se extrajo ningún precio.",
+                    diagnosticStep = 17
+                )
+                emitWaybackTrace(
+                    onTrace, 14, WaybackTraceStatus.SKIPPED,
+                    "Consolidación omitida: no hay capturas porque no se pudo resolver el dominio.",
+                    diagnosticStep = 18
                 )
                 return@withContext WaybackBackfillResult(diagnosticCodes = setOf("DOMAIN_UNRESOLVED"))
             }
@@ -935,6 +970,21 @@ class WaybackPriceHistoryClient(
                 onTrace, 11, WaybackTraceStatus.SKIPPED,
                 "Evaluación de la captura 2 omitida porque Availability no encontró una captura.",
                 diagnosticStep = 14
+            )
+            emitWaybackTrace(
+                onTrace, 12, WaybackTraceStatus.SKIPPED,
+                "Verificación del producto omitida: Availability no devolvió una captura para descargar.",
+                diagnosticStep = 15
+            )
+            emitWaybackTrace(
+                onTrace, 13, WaybackTraceStatus.SKIPPED,
+                "Extracción del precio omitida: no hay HTML de una captura histórica.",
+                diagnosticStep = 16
+            )
+            emitWaybackTrace(
+                onTrace, 13, WaybackTraceStatus.SKIPPED,
+                "Validación de importe omitida: no se extrajo ningún precio.",
+                diagnosticStep = 17
             )
             emitWaybackTrace(
                 onTrace, 14, WaybackTraceStatus.SKIPPED,
@@ -1783,6 +1833,21 @@ class WaybackPriceHistoryClient(
                 onTrace, 11, WaybackTraceStatus.SKIPPED,
                 "No hay una segunda captura que evaluar porque el índice CDX no respondió.",
                 diagnosticStep = 14
+            )
+            emitWaybackTrace(
+                onTrace, 12, WaybackTraceStatus.SKIPPED,
+                "No se pudo comprobar la identidad: CDX no proporcionó ninguna captura para descargar.",
+                diagnosticStep = 15
+            )
+            emitWaybackTrace(
+                onTrace, 13, WaybackTraceStatus.SKIPPED,
+                "Extracción de precio omitida: no se descargó HTML de una captura CDX.",
+                diagnosticStep = 16
+            )
+            emitWaybackTrace(
+                onTrace, 13, WaybackTraceStatus.SKIPPED,
+                "Validación de importe omitida: no se obtuvo ningún precio de una captura CDX.",
+                diagnosticStep = 17
             )
             emitWaybackTrace(
                 onTrace, 14, WaybackTraceStatus.SKIPPED,

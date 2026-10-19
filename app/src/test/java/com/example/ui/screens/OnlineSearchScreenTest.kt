@@ -95,6 +95,7 @@ class OnlineSearchScreenTest {
         composeRule.onNodeWithText("Ver descartados (1)").performClick()
         searchList.performScrollToNode(hasText(rejectedOffer.title))
         composeRule.onNodeWithText(rejectedOffer.title).assertIsDisplayed()
+        searchList.performScrollToNode(hasText(rejectedOffer.priceLabel))
         composeRule.onNodeWithText(rejectedOffer.priceLabel).assertIsDisplayed()
         composeRule.onNodeWithText(rejectedOffer.reason).assertIsDisplayed()
         composeRule.onNodeWithText(rejectedOffer.provider).assertIsDisplayed()
@@ -367,9 +368,9 @@ class OnlineSearchScreenTest {
         }
 
         val searchList = composeRule.onNodeWithTag("online-search-list")
-        searchList.performScrollToNode(hasText("Actualizar resultados ahora (puede consumir cuota)"))
-        composeRule.onNodeWithText("Actualizar resultados ahora (puede consumir cuota)").assertIsDisplayed()
-        composeRule.onNodeWithText("Actualizar resultados ahora (puede consumir cuota)").performClick()
+        searchList.performScrollToNode(hasText("Actualizar · puede consumir cuota"))
+        composeRule.onNodeWithText("Actualizar · puede consumir cuota").assertIsDisplayed()
+        composeRule.onNodeWithText("Actualizar · puede consumir cuota").performClick()
         assertEquals(1, refreshInvocations)
         searchList.performScrollToNode(hasText("Comprueba diámetro, anclaje, ancho y ET", substring = true))
         assertTrue(composeRule.onAllNodesWithText("Comprueba diámetro, anclaje, ancho y ET", substring = true).fetchSemanticsNodes().isNotEmpty())

@@ -1600,6 +1600,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
                     if (attempts.isNotEmpty() && attempts.all { it.skippedRecently }) {
                         skippedCount++
+                        // Preserve the reason for a cached skip: a previous timeout is not a
+                        // successful "no history" result and should be explained differently.
+                        attempts.flatMap { it.diagnosticCodes }.forEach(diagnosticCodes::add)
                         continue
                     }
                     // Prefer diagnostics from the last-stage outcome. A domain fallback may

@@ -229,7 +229,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             ?: return "Internet Archive ha limitado temporalmente las consultas (HTTP 429). Espera unos minutos antes de volver a intentarlo. No se ha gastado cuota de SerpApi."
         val remainingMinutes = ((until - now + 59_999L) / 60_000L).coerceAtLeast(1L)
         val retryAt = SimpleDateFormat("HH:mm", Locale("es", "ES")).format(Date(until))
-        return "Internet Archive ha pedido una pausa temporal (HTTP 429). Mínimo no enviará más peticiones hasta aproximadamente las \${retryAt} (en unos \${remainingMinutes} min). Vuelve a pulsar «Buscar histórico gratis» entonces. No se consume cuota de SerpApi."
+        return "Internet Archive ha pedido una pausa temporal (HTTP 429). Mínimo no enviará más peticiones hasta aproximadamente las ${retryAt} (en unos ${remainingMinutes} min). Vuelve a pulsar «Buscar histórico gratis» entonces. No se consume cuota de SerpApi."
     }
 
     private fun startWaybackDiagnostic(product: Product) {
@@ -242,7 +242,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         )
         reportWaybackDiagnostic(
             product.id, 1, WaybackTraceStatus.PASSED,
-            "Pulsación recibida por el ViewModel; empieza la única consulta solicitada por el usuario."
+            "Pulsación recibida por el ViewModel; se comprobarán los límites antes de consultar el archivo."
         )
         val hasSavedUrl = product.storeUrl.isNotBlank() || product.currentStore.officialUrl.isNotBlank()
         reportWaybackDiagnostic(

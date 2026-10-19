@@ -1,5 +1,6 @@
 package com.example.data.remote
 
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -211,6 +212,47 @@ class SerpApiVariantMismatchTest {
         assertEquals(99.99, report.results.single().price, 0.001)
     }
 
+
+    @Test
+    fun broadSamsungBrandSearchIncludesGalaxyFamilyNamesAndUsesAllProviderSections() {
+        val client = SerpApiClient()
+        fun offer(index: Int, title: String): JSONObject = JSONObject()
+            .put("title", title)
+            .put("price", "${100 + index}.00 €")
+            .put("extracted_price", 100.0 + index)
+            .put("link", "https://shop${index}.example.com/product/${index}")
+            .put("source", "Tienda ${index}")
+
+        val shopping = JSONArray()
+        val featured = JSONArray()
+        val inline = JSONArray()
+        repeat(40) { index -> shopping.put(offer(index, "Samsung Galaxy Modelo ${index}")) }
+        repeat(40) { index -> featured.put(offer(40 + index, "Galaxy Watch modelo ${index}")) }
+        repeat(40) { index -> inline.put(offer(80 + index, "Galaxy Buds modelo ${index}")) }
+
+        val report = client.parseShoppingResultsDetailed(
+            root = JSONObject()
+                .put("shopping_results", shopping)
+                .put("featured_shopping_results", featured)
+                .put("inline_shopping_results", inline)
+                .put("categorized_shopping_results", JSONArray().put(
+                    JSONObject().put("category", "Samsung").put(
+                        "shopping_results", JSONArray().put(
+                            offer(120, "Xiaomi Redmi Note 14")
+                        )
+                    )
+                )),
+            query = "Samsung",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals("All returned sections should be examined from the same provider response", 121, report.rawResultCount)
+        assertEquals("A broad brand search should retain up to the configured 100 result ceiling", 100, report.results.size)
+        assertEquals("Keep a wide set of distinct retailer offers", 100, report.results.map { it.storeName }.distinct().size)
+        assertTrue("Samsung product family titles like Galaxy Watch should match", report.results.any { it.title.startsWith("Galaxy Watch") })
+        assertTrue("Samsung product family titles like Galaxy Buds should match", report.results.any { it.title.startsWith("Galaxy Buds") })
+        assertFalse("A different brand must still be rejected", report.results.any { it.title.contains("Xiaomi", ignoreCase = true) })
+    }
 
     @Test
     fun broadXiaomiScooterSearchKeepsRelatedModelsForSelection() {

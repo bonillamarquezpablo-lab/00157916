@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
 import com.example.data.remote.OnlineSearchCache
+import com.example.data.remote.OnlineSearchQuotaGuard
 import com.example.data.remote.WaybackPriceHistoryClient
 import com.example.data.remote.WaybackTraceEvent
 import com.example.data.remote.WaybackTraceStatus
@@ -164,8 +165,18 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     private val serpApiTokenStore = SerpApiTokenStore(application)
     private val serpApiClient = SerpApiClient()
     private val onlineSearchCache = OnlineSearchCache(application)
+    private val onlineSearchQuotaGuard = OnlineSearchQuotaGuard(application)
     private val waybackPriceHistoryClient = WaybackPriceHistoryClient(application)
     private val onlineDiscardedCache = mutableMapOf<String, List<RejectedOnlineOffer>>()
+    private var lastDisplayedSearchIdentity: String? = null
+
+    private fun onlineSearchIdentity(provider: OnlineSearchProvider, query: String): String =
+        provider.name + "|" + query.trim().replace(Regex("\\s+"), " ").lowercase(Locale.ROOT)
+
+    private fun quotaCooldownMessage(remainingMs: Long): String {
+        val minutes = ((remainingMs + 59_999L) / 60_000L).coerceAtLeast(1L)
+        return "Para proteger la cuota, Mínimo no repetirá esta búsqueda de pago durante unos $minutes min. Se mantienen los resultados ya disponibles."
+    }
 
     private fun searchCacheProviderKey(provider: OnlineSearchProvider): String =
         if (provider == OnlineSearchProvider.GOOGLE_SHOPPING) {
@@ -1219,8 +1230,18 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             showSnackbar(message)
             return
         }
-        onlineSearchCache.invalidate(searchCacheProviderKey(current.onlineSearchProvider), query)
-        startOnlineSearch(current.onlineSearchProvider)
+        val cooldown = onlineSearchQuotaGuard.cooldownRemainingMs(
+            searchCacheProviderKey(current.onlineSearchProvider),
+            query
+        )
+        if (cooldown > 0L) {
+            val message = quotaCooldownMessage(cooldown)
+            _uiState.value = current.copy(onlineSearchStatus = message)
+            showSnackbar(message)
+            return
+        }
+        // Keep the previous cache until a replacement search succeeds.
+        startOnlineSearch(current.onlineSearchProvider, bypassCache = true)
     }
 
     /** Ignore late results when the user edits the query during an in-flight request. */
@@ -1230,7 +1251,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     }
 
     /** Search Google Shopping or Amazon.es, reusing fresh local results whenever possible. */
-    private fun startOnlineSearch(provider: OnlineSearchProvider) {
+    private fun startOnlineSearch(provider: OnlineSearchProvider, bypassCache: Boolean = false) {
         val current = _uiState.value
         val query = current.onlineSearchQuery.trim()
         if (current.isOnlineSearching || current.isRefreshingPrices) return
@@ -1245,11 +1266,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             OnlineSearchProvider.AMAZON -> "Consultando resultados públicos de Amazon.es…"
             OnlineSearchProvider.GOOGLE_SHOPPING -> "Buscando ofertas en Google Shopping España…"
         }
+        val keepPreviousSnapshot = lastDisplayedSearchIdentity == onlineSearchIdentity(provider, query)
         _uiState.value = current.copy(
             isOnlineSearching = true,
             onlineSearchStatus = searchingMessage,
-            onlineSearchResults = emptyList(),
-            onlineSearchDiscardedOffers = emptyList(),
+            onlineSearchResults = if (keepPreviousSnapshot) current.onlineSearchResults else emptyList(),
+            onlineSearchDiscardedOffers = if (keepPreviousSnapshot) current.onlineSearchDiscardedOffers else emptyList(),
             showOnlineSearchDiscarded = false,
             onlineSearchProvider = provider,
             onlineSearchAmazonOnly = provider == OnlineSearchProvider.AMAZON
@@ -1262,7 +1284,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     // The request itself remains bounded by OkHttp's 12-second call timeout.
                     // Cache lookup comes first: saved results remain usable even if the quota is empty
                     // or the API key was removed after the previous search.
-                    val cached = withContext(Dispatchers.IO) {
+                    val cached = if (bypassCache) null else withContext(Dispatchers.IO) {
                         onlineSearchCache.read(searchCacheProviderKey(provider), query)
                     }
                     if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
@@ -1319,6 +1341,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             .filter { it.isNotBlank() }
                             .joinToString("\n\n")
                         if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
+                        lastDisplayedSearchIdentity = onlineSearchIdentity(provider, query)
                         _uiState.value = _uiState.value.copy(
                             onlineSearchResults = safeCachedResults,
                             onlineSearchDiscardedOffers = cachedDiscarded,
@@ -1356,6 +1379,19 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }
                     if (accountCapacity(accountInfo) <= 0) {
                         val message = quotaBlockMessage(accountInfo)
+                        _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
+                        showSnackbar(message)
+                        return@withTimeout
+                    }
+
+                    // A failed/empty query might not create a cache entry. Keep a short local
+                    // cooldown for the same query so repeated taps cannot burn repeated credits.
+                    val cooldown = onlineSearchQuotaGuard.tryStartAttempt(
+                        searchCacheProviderKey(provider),
+                        query
+                    )
+                    if (cooldown > 0L) {
+                        val message = quotaCooldownMessage(cooldown)
                         _uiState.value = _uiState.value.copy(onlineSearchStatus = message)
                         showSnackbar(message)
                         return@withTimeout
@@ -1464,8 +1500,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         // Do not cache a gaming search as complete when its GAME supplement failed
                         // or could not run due to quota: otherwise a later retry would reuse the
                         // general-only cache for 24 hours and never retry the missing retailer.
-                        withContext(Dispatchers.IO) {
-                            onlineSearchCache.invalidate(searchCacheProviderKey(provider), query)
+                        if (!bypassCache) {
+                            withContext(Dispatchers.IO) {
+                                onlineSearchCache.invalidate(searchCacheProviderKey(provider), query)
+                            }
                         }
                     }
                     val base = if (results.isEmpty() && providerRawResultCount > 0) {
@@ -1478,15 +1516,30 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     } else {
                         "Saldo comprobado antes de buscar: ${accountInfo.quotaSummary()} La búsqueda general puede haber consumido una búsqueda."
                     }
+                    val uniqueStoreCount = results.map { it.storeName.trim().lowercase(Locale.ROOT) }
+                        .filter { it.isNotBlank() }
+                        .distinct()
+                        .size
+                    val coverageNote = if (provider == OnlineSearchProvider.GOOGLE_SHOPPING) {
+                        val queryDescription = if (gameSupplementAttempted) {
+                            "entre la búsqueda general y el intento de complemento de GAME"
+                        } else {
+                            "en una sola búsqueda general"
+                        }
+                        "Cobertura: ${providerRawResultCount} resultados del proveedor ${queryDescription}; ${results.size} ofertas válidas de ${uniqueStoreCount} tiendas tras comprobar producto, precio y enlace. La consulta general solicita hasta 100 resultados sin hacer una petición por tienda."
+                    } else {
+                        ""
+                    }
                     val filterNote = onlineFilterNotice(discarded)
                     val historyNote = if (results.isNotEmpty()) {
                         onlineHistoryNotice(savedObservations, results.size)
                     } else ""
-                    val message = listOf(base, quotaNote, gameSupplementNote, filterNote, historyNote)
+                    val message = listOf(base, coverageNote, quotaNote, gameSupplementNote, filterNote, historyNote)
                         .map { it.trim() }
                         .filter { it.isNotBlank() }
                         .joinToString("\\n\\n")
                     if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
+                    lastDisplayedSearchIdentity = onlineSearchIdentity(provider, query)
                     _uiState.value = _uiState.value.copy(
                         onlineSearchResults = results,
                         onlineSearchDiscardedOffers = discarded,

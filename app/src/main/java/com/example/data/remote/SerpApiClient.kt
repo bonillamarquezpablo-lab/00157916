@@ -434,7 +434,10 @@ class SerpApiClient(
         }
 
         val items = mutableListOf<JSONObject>()
+        // Use every shopping-offer section supplied in this response; no extra paid requests.
         root.optJSONArray("shopping_results")?.let { items += it.toObjects() }
+        root.optJSONArray("featured_shopping_results")?.let { items += it.toObjects() }
+        root.optJSONArray("inline_shopping_results")?.let { items += it.toObjects() }
         root.optJSONArray("categorized_shopping_results")?.let { categories ->
             for (index in 0 until categories.length()) {
                 categories.optJSONObject(index)?.optJSONArray("shopping_results")?.let {
@@ -975,6 +978,8 @@ class SerpApiClient(
 
         val results = mutableListOf<JSONObject>()
         root.optJSONArray("shopping_results")?.let { results += it.toObjects() }
+        root.optJSONArray("featured_shopping_results")?.let { results += it.toObjects() }
+        root.optJSONArray("inline_shopping_results")?.let { results += it.toObjects() }
         root.optJSONArray("categorized_shopping_results")?.let { categories ->
             for (i in 0 until categories.length()) {
                 val nested = categories.optJSONObject(i)?.optJSONArray("shopping_results")
@@ -1490,6 +1495,11 @@ class SerpApiClient(
             requestedFootwearBrandMatches(requested, returned)
         ) return true
 
+        // A one-word brand query is a catalogue-discovery request, not an exact model.
+        // Accept established family names (e.g. Galaxy for Samsung) when the brand is omitted.
+        // Explicit model searches still use the stricter variant checks below.
+        if (isBrandOverviewQuery(requested, returned)) return true
+
         // A brand + generic product family query is intentionally broad.
         // Return related models so the user can choose one; exact variant checking remains
         // in the strict persistence/history filters and in the selected-model search.
@@ -1600,6 +1610,18 @@ class SerpApiClient(
         val compactTitle = normalize(returned).replace(" ", "")
         return compactQuery.length >= 8 && compactTitle.length >= 8 &&
             (compactTitle.contains(compactQuery) || compactQuery.contains(compactTitle))
+    }
+
+    /**
+     * One-word brand lookups use known family aliases to keep legitimate related products visible.
+     * This branch only applies to a single brand token; product/model searches remain strict.
+     */
+    private fun isBrandOverviewQuery(requested: String, returned: String): Boolean {
+        val queryTokens = normalize(requested).split(' ')
+            .filter { it.length > 1 && it !in STOP_WORDS }
+        if (queryTokens.size != 1) return false
+        val aliases = BRAND_OVERVIEW_ALIASES[queryTokens.single()] ?: return false
+        return tokens(returned).any { it in aliases }
     }
 
     /**
@@ -1741,8 +1763,32 @@ class SerpApiClient(
         const val MIN_PRICE_INSIGHT_EUR = 0.50
         const val MAX_PRICE_INSIGHT_EUR = 10_000.0
         const val DAY_MS = 24L * 60L * 60L * 1000L
+        // Request the maximum configured page size from one Google Shopping query.
+        // Do not multiply paid calls simply to increase result count.
         const val MAX_ONLINE_RESULTS = 100
         const val INTER_REQUEST_DELAY_MS = 1_200L
+        val BRAND_OVERVIEW_ALIASES = mapOf(
+            "samsung" to setOf("samsung", "galaxy"),
+            "apple" to setOf("apple", "iphone", "ipad", "macbook", "airpods", "imac"),
+            "xiaomi" to setOf("xiaomi", "redmi", "poco", "mi"),
+            "google" to setOf("google", "pixel", "nest"),
+            "sony" to setOf("sony", "playstation", "ps5"),
+            "microsoft" to setOf("microsoft", "surface", "xbox"),
+            "lenovo" to setOf("lenovo", "thinkpad", "legion", "ideapad", "yoga"),
+            "asus" to setOf("asus", "rog", "zenbook"),
+            "acer" to setOf("acer", "predator", "aspire"),
+            "hp" to setOf("hp", "omen", "victus", "pavilion", "elitebook", "spectre"),
+            "nintendo" to setOf("nintendo", "switch"),
+            "motorola" to setOf("motorola", "moto"),
+            "anker" to setOf("anker", "soundcore"),
+            "jbl" to setOf("jbl"),
+            "lg" to setOf("lg"),
+            "dyson" to setOf("dyson"),
+            "razer" to setOf("razer"),
+            "logitech" to setOf("logitech"),
+            "philips" to setOf("philips"),
+            "tcl" to setOf("tcl")
+        )
         val STOP_WORDS = setOf(
             "the", "and", "for", "with", "in", "on", "de", "del", "la", "el", "los", "las",
             "para", "con", "por", "nuevo", "nueva", "original", "oficial", "gb", "tb", "mb"

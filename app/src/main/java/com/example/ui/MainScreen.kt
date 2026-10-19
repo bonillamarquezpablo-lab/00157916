@@ -368,6 +368,9 @@ fun MainScreen(
             },
             isSearchingFreeHistory = uiState.isSearchingFreeHistory &&
                 uiState.freeHistoryProductId == product.id,
+            waybackDiagnosticSteps = uiState.waybackDiagnosticSteps.takeIf {
+                uiState.waybackDiagnosticProductId == product.id
+            }.orEmpty(),
             serpApiActionStatus = uiState.serpApiActionStatus,
             isComparingStores = uiState.isPreparingSerpApiAction ||
                 (uiState.isExecutingSerpApiAction && uiState.activeSerpApiAction == com.example.ui.viewmodel.SerpApiActionType.COMPARE_STORES)

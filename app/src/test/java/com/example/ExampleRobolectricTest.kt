@@ -2178,7 +2178,8 @@ class ExampleRobolectricTest {
         assertEquals("Eligible offers survive whether the URL is direct, HTTP, or Google Shopping", 3, results.size)
         assertEquals("Unsafe HTTP", results[0].storeName)
         assertEquals(49.99, results[0].price, 0.001)
-        assertEquals("directo", results[0].linkType)
+        assertEquals("Google Shopping", results[0].linkType)
+        assertTrue("Unsafe HTTP must be rerouted to a secure destination", results[0].isGoogleShoppingProductLink)
         assertEquals("PcComponentes", results[1].storeName)
         assertEquals(79.99, results[1].price, 0.001)
         assertTrue(results[1].isGoogleShoppingProductLink)
@@ -2259,7 +2260,8 @@ class ExampleRobolectricTest {
 
         val httpResult = report.results.single { it.storeName == "Unsafe HTTP" }
         assertEquals(229.99, httpResult.price, 0.001)
-        assertEquals("directo", httpResult.linkType)
+        assertEquals("Google Shopping", httpResult.linkType)
+        assertTrue("Unsafe HTTP must not be exposed as a direct retailer link", httpResult.isGoogleShoppingProductLink)
 
         assertEquals(1, report.rejectedAsIrrelevant)
         assertEquals(1, report.rejectedForPriceOrCurrency)

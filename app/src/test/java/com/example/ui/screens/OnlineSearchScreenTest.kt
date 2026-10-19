@@ -233,11 +233,10 @@ class OnlineSearchScreenTest {
         )
 
         // ON + Solo Amazon: Amazon Warehouse is appended as a separate labelled card.
-        clickFilter("Mostrar segunda mano")
+        composeRule.onNodeWithTag("filter-second-hand").performClick()
         assertVisibleText("Todas las ofertas")
         assertVisibleText("Solo Amazon")
-        assertVisibleText("Mostrar segunda mano")
-        composeRule.onNodeWithText("Mostrar segunda mano").assertIsSelected()
+        composeRule.onNodeWithTag("filter-second-hand").assertIsDisplayed().assertIsSelected()
         assertVisibleText("1 tiendas · precio más bajo en Amazon Warehouse")
         assertTrue(
             composeRule.onAllNodesWithText("7 tiendas · precio más bajo en Wallapop")

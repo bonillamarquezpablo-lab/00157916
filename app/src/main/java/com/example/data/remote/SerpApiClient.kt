@@ -860,7 +860,8 @@ class SerpApiClient(
                     !priceText.contains("EUR", ignoreCase = true))
             ) return@mapNotNull null
             val rawUrl = store.optString("link").takeIf(::isNavigableHttpUrl) ?: return@mapNotNull null
-            val url = extractDirectRetailerUrl(rawUrl) ?: rawUrl
+            val url = retailerDestinationForOffer(rawUrl, name, catalogTitle)
+                ?: return@mapNotNull null
             SerpApiShoppingResult(
                 title = catalogTitle,
                 price = price,

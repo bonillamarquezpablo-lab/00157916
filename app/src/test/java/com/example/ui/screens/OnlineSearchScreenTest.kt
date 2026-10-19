@@ -208,7 +208,11 @@ class OnlineSearchScreenTest {
             composeRule.onNodeWithText(text).assertIsDisplayed()
         }
         fun clickFilter(text: String) {
-            searchList.performScrollToNode(hasText(text))
+            if (text.contains("accesorios", ignoreCase = true)) {
+                composeRule.onNodeWithTag("filter-second-hand-row").performScrollTo()
+            } else {
+                searchList.performScrollToNode(hasText(text))
+            }
             composeRule.onNodeWithText(text).performClick()
         }
 

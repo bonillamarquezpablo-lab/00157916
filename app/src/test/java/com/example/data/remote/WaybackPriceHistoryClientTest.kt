@@ -1194,10 +1194,32 @@ class WaybackPriceHistoryClientTest {
             client.computeRateLimitUntil("999999", now)
         )
         assertEquals(
-            "Missing or invalid headers use a one-hour default pause",
-            now + 60L * 60L * 1000L,
+            "Missing or invalid Retry-After headers use a short five-minute safety pause",
+            now + 5L * 60L * 1000L,
             client.computeRateLimitUntil("not-a-date", now)
         )
+    }
+
+    @Test
+    fun activeRateLimitUntilExposesOnlyFutureCooldown() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        val client = newClient()
+        val now = System.currentTimeMillis()
+        try {
+            preferences.edit().putLong("wayback_rate_limit_until", now + 120_000L).commit()
+            assertEquals(
+                "The UI can read the persisted retry time",
+                now + 120_000L,
+                client.activeRateLimitUntil(now)
+            )
+            assertNull(
+                "An expired cooldown must not block a later user retry",
+                client.activeRateLimitUntil(now + 120_000L)
+            )
+        } finally {
+            preferences.edit().remove("wayback_rate_limit_until").commit()
+        }
     }
 
     @Test

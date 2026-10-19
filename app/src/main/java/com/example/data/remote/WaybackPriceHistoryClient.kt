@@ -957,9 +957,13 @@ class WaybackPriceHistoryClient(
         )
 
         val metaPrice = listOf("product:price:amount", "og:price:amount", "price", "product:price")
-            .firstNotNullOfOrNull { key -> readMeta(html, setOf(key))?.let(::parsePositivePrice) }
+            .firstNotNullOfOrNull { key ->
+                (readMeta(html, setOf(key)) ?: readItemPropValue(html, key))?.let(::parsePositivePrice)
+            }
         val metaCurrency = listOf("product:price:currency", "og:price:currency", "pricecurrency")
-            .firstNotNullOfOrNull { key -> readMeta(html, setOf(key)) }?.uppercase(Locale.ROOT)
+            .firstNotNullOfOrNull { key ->
+                readMeta(html, setOf(key)) ?: readItemPropValue(html, key)
+            }?.uppercase(Locale.ROOT)
         val hasPriceCandidate = jsonLd.isNotEmpty() || metaPrice != null
         emitWaybackTrace(
             onTrace, 13,
@@ -1001,10 +1005,14 @@ class WaybackPriceHistoryClient(
         val pageTitles = extractArchivedPageTitles(html)
         val metaPrice = listOf(
             "product:price:amount", "og:price:amount", "price", "product:price"
-        ).firstNotNullOfOrNull { key -> readMeta(html, setOf(key))?.let(::parsePositivePrice) }
+        ).firstNotNullOfOrNull { key ->
+            (readMeta(html, setOf(key)) ?: readItemPropValue(html, key))?.let(::parsePositivePrice)
+        }
         val metaCurrency = listOf(
             "product:price:currency", "og:price:currency", "pricecurrency"
-        ).firstNotNullOfOrNull { key -> readMeta(html, setOf(key)) }?.uppercase(Locale.ROOT)
+        ).firstNotNullOfOrNull { key ->
+            readMeta(html, setOf(key)) ?: readItemPropValue(html, key)
+        }?.uppercase(Locale.ROOT)
         if (pageTitles.isEmpty() && jsonLd.isEmpty()) return "ARCHIVE_TITLE_MISSING"
         if (metaPrice == null && jsonLd.isEmpty()) return "ARCHIVE_PRICE_METADATA_MISSING"
         val candidates = jsonLd + if (pageTitles.isNotEmpty() && metaPrice != null && !metaCurrency.isNullOrBlank()) {
@@ -2164,6 +2172,35 @@ class WaybackPriceHistoryClient(
                 .mapNotNull { attributes[it]?.lowercase(Locale.ROOT) }
                 .any { it in normalizedNames }
             if (matchingKey) attributes["content"]?.takeIf { it.isNotBlank() }?.let { return it }
+        }
+        return null
+    }
+
+    /**
+     * Read Schema.org microdata from non-meta elements too (for example
+     * <span itemprop="price">183,71</span>). Some older product pages expose no JSON-LD.
+     * Values are only used with an independently verified product title and explicit EUR
+     * currency before a historical quote can be saved.
+     */
+    private fun readItemPropValue(html: String, name: String): String? {
+        val wanted = name.lowercase(Locale.ROOT)
+        val elements = Regex("""(?is)<([a-z][a-z0-9:-]*)\\b([^>]*)>(.*?)</\\1\\s*>""")
+        val attributeRegex = Regex("""(?is)([a-z_:.-]+)\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))""")
+        for (match in elements.findAll(html)) {
+            val attributes = attributeRegex.findAll(match.groupValues[2]).associate { attr ->
+                val raw = attr.groups[2]?.value ?: attr.groups[3]?.value ?: attr.groups[4]?.value.orEmpty()
+                attr.groupValues[1].lowercase(Locale.ROOT) to decodeHtml(raw).trim()
+            }
+            val itemProp = attributes["itemprop"]?.lowercase(Locale.ROOT)
+            if (itemProp != wanted) continue
+            val explicit = sequenceOf("content", "value", "data-price", "data-value")
+                .mapNotNull { attributes[it] }
+                .firstOrNull { it.isNotBlank() }
+            if (explicit != null) return explicit
+            val text = decodeHtml(Regex("""(?is)<[^>]+>""").replace(match.groupValues[3], " "))
+                .replace(Regex("""\\s+"""), " ")
+                .trim()
+            if (text.isNotBlank() && text.length <= 120) return text
         }
         return null
     }

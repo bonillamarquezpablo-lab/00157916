@@ -222,7 +222,11 @@ class WaybackPriceHistoryClient(
                             now = now,
                             lookbackDays = lookbackDays,
                             maxSnapshots = 1,
-                            maxCandidates = 1,
+                            // Try at most two product-specific URL candidates. The first
+                            // candidate is often the retailer's search page; one unavailable
+                            // archive there must not prevent a second plausible product path.
+                            // The shared request gate still serializes/paces these free probes.
+                            maxCandidates = MAX_AVAILABILITY_PROBE_CANDIDATES,
                             stage = "DOMAIN_AVAILABILITY_FALLBACK",
                             probeOlderCapture = false
                         )

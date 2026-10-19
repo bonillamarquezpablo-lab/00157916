@@ -1599,6 +1599,88 @@ class WaybackPriceHistoryClientTest {
 
 
     @Test
+    fun stepFiveRemainsPassedWhenValidEmptyCdxResponseIsFollowedBySecondaryTimeout() {
+        val result = summarizeCdxStep5Events(
+            listOf(
+                WaybackTraceEvent(
+                    step = 5,
+                    status = WaybackTraceStatus.RUNNING,
+                    detail = "CDX_EXACT: esperando respuesta."
+                ),
+                WaybackTraceEvent(
+                    step = 5,
+                    status = WaybackTraceStatus.PASSED,
+                    detail = "CDX_EXACT: respuesta válida; 0 captura(s) candidatas.",
+                    durationMs = 692L
+                ),
+                WaybackTraceEvent(
+                    step = 5,
+                    status = WaybackTraceStatus.RUNNING,
+                    detail = "CDX_DOMAIN: esperando respuesta."
+                ),
+                WaybackTraceEvent(
+                    step = 5,
+                    status = WaybackTraceStatus.FAILED,
+                    detail = "CDX_DOMAIN: CDX_DOMAIN_TIMEOUT.",
+                    durationMs = 7_008L
+                )
+            )
+        )
+
+        assertNotNull(result)
+        assertEquals(WaybackTraceStatus.PASSED, result!!.status)
+        assertTrue(result.detail.contains("1 respuesta(s) CDX válida(s)"))
+        assertTrue(result.detail.contains("0 captura(s) candidata(s)"))
+        assertTrue(result.detail.contains("CDX_DOMAIN_TIMEOUT"))
+        assertTrue(result.detail.contains("paso 7"))
+    }
+
+    @Test
+    fun stepFiveFailsWhenEveryCdxRequestFailsBeforeAValidResponse() {
+        val result = summarizeCdxStep5Events(
+            listOf(
+                WaybackTraceEvent(
+                    step = 5,
+                    status = WaybackTraceStatus.FAILED,
+                    detail = "CDX_EXACT: CDX_EXACT_TIMEOUT.",
+                    durationMs = 5_000L
+                ),
+                WaybackTraceEvent(
+                    step = 5,
+                    status = WaybackTraceStatus.FAILED,
+                    detail = "CDX_PRODUCT_PREFIX: CDX_PRODUCT_PREFIX_HTTP_500.",
+                    durationMs = 900L
+                )
+            )
+        )
+
+        assertNotNull(result)
+        assertEquals(WaybackTraceStatus.FAILED, result!!.status)
+        assertTrue(result.detail.contains("2 intento(s)"))
+        assertTrue(result.detail.contains("CDX_PRODUCT_PREFIX_HTTP_500"))
+    }
+
+    @Test
+    fun stepFiveUsesLatestValidResponseAndKeepsAdditionalFailureVisible() {
+        val result = summarizeCdxStep5Events(
+            listOf(
+                WaybackTraceEvent(5, WaybackTraceStatus.PASSED,
+                    "CDX_EXACT: respuesta válida; 3 captura(s) candidatas.", 800L),
+                WaybackTraceEvent(5, WaybackTraceStatus.PASSED,
+                    "CDX_PRODUCT_PREFIX: respuesta válida; 1 captura(s) candidatas.", 950L),
+                WaybackTraceEvent(5, WaybackTraceStatus.FAILED,
+                    "CDX_DOMAIN: CDX_DOMAIN_HTTP_500.", 1_100L)
+            )
+        )
+
+        assertNotNull(result)
+        assertEquals(WaybackTraceStatus.PASSED, result!!.status)
+        assertTrue(result.detail.contains("2 respuesta(s) CDX válida(s)"))
+        assertTrue(result.detail.contains("1 captura(s) candidata(s)"))
+        assertTrue(result.detail.contains("CDX_DOMAIN_HTTP_500"))
+    }
+
+    @Test
     fun distinguishesValidEmptyCdxIndexFromMalformedErrorBody() {
         val client = newClient()
         assertTrue(client.isValidCaptureIndexResponse("[]"))

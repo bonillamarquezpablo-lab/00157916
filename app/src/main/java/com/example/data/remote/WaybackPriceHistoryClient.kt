@@ -75,6 +75,67 @@ private fun emitWaybackTrace(
 }
 
 /**
+ * Step 5 aggregates several bounded CDX requests. A valid empty response is still successfully
+ * received and classified; a later secondary timeout must not overwrite that fact and make the
+ * whole step appear broken. Capture discovery remains step 7's responsibility.
+ */
+internal fun summarizeCdxStep5Events(events: List<WaybackTraceEvent>): WaybackTraceEvent? {
+    val terminal = events.filter { event ->
+        event.step == 5 && event.status in setOf(
+            WaybackTraceStatus.PASSED,
+            WaybackTraceStatus.FAILED,
+            WaybackTraceStatus.SKIPPED
+        )
+    }
+    if (terminal.isEmpty()) return null
+
+    val valid = terminal.filter { event ->
+        event.status == WaybackTraceStatus.PASSED &&
+            event.detail.contains("respuesta válida", ignoreCase = true)
+    }
+    val failures = terminal.filter { it.status == WaybackTraceStatus.FAILED }
+
+    if (valid.isNotEmpty()) {
+        val lastValid = valid.last()
+        val candidateCount = Regex(
+            """respuesta válida;\s*(\d+)\s+captura\(s\) candidatas""",
+            RegexOption.IGNORE_CASE
+        ).find(lastValid.detail)?.groupValues?.getOrNull(1)
+        val detail = buildString {
+            append("Se recibieron y clasificaron ${valid.size} respuesta(s) CDX válida(s).")
+            if (candidateCount != null) {
+                append(" La última respuesta válida devolvió ${candidateCount} captura(s) candidata(s).")
+            }
+            if (failures.isNotEmpty()) {
+                append(" Además, una consulta secundaria falló: ")
+                append(failures.last().detail.take(180))
+                append(". Este fallo no invalida la respuesta válida; el paso 7 determina si hay capturas utilizables.")
+            } else {
+                append(" El paso 7 determina si las capturas encontradas son utilizables.")
+            }
+        }
+        return WaybackTraceEvent(
+            step = 5,
+            status = WaybackTraceStatus.PASSED,
+            detail = detail,
+            durationMs = lastValid.durationMs
+        )
+    }
+
+    val lastFailure = failures.lastOrNull()
+    if (lastFailure != null) {
+        return WaybackTraceEvent(
+            step = 5,
+            status = WaybackTraceStatus.FAILED,
+            detail = "No se consiguió una respuesta CDX válida en ${failures.size} intento(s). Último diagnóstico: ${lastFailure.detail.take(180)}",
+            durationMs = lastFailure.durationMs
+        )
+    }
+
+    return terminal.lastOrNull()
+}
+
+/**
  * Best-effort free historical backfill using Internet Archive snapshots.
  * A capture is accepted only when structured metadata exposes a EUR price and a product title
  * matching the searched item. Archive gaps are expected; this client never invents prices.

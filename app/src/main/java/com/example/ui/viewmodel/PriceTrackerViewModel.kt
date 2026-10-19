@@ -8,6 +8,7 @@ import com.example.data.local.AppDatabase
 import com.example.data.remote.OnlineSearchCache
 import com.example.data.remote.OnlineSearchQuotaGuard
 import com.example.data.remote.WaybackPriceHistoryClient
+import com.example.data.remote.summarizeCdxStep5Events
 import com.example.data.remote.WaybackTraceEvent
 import com.example.data.remote.WaybackTraceStatus
 import com.example.data.remote.isGoogleShoppingUrl
@@ -1786,8 +1787,18 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         val diagnosticProductId = targetProductId?.takeIf {
             _uiState.value.waybackDiagnosticProductId == it
         }
+        // Collect terminal CDX outcomes so a slow secondary request cannot overwrite a
+        // response already received and classified successfully for this product.
+        val cdxStep5Events = java.util.Collections.synchronizedList(mutableListOf<WaybackTraceEvent>())
         val traceCallback: ((WaybackTraceEvent) -> Unit)? = diagnosticProductId?.let { id ->
-            { event -> recordWaybackTrace(id, event) }
+            { event ->
+                if (event.step == 5 && event.status != WaybackTraceStatus.RUNNING &&
+                    event.status != WaybackTraceStatus.PENDING
+                ) {
+                    synchronized(cdxStep5Events) { cdxStep5Events.add(event) }
+                }
+                recordWaybackTrace(id, event)
+            }
         }
         viewModelScope.launch {
             try {
@@ -1988,6 +1999,21 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     // Stop the batch now instead of iterating through the remaining candidates.
                     if (attempts.any { it.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") }) {
                         break
+                    }
+                }
+
+                if (diagnosticProductId != null) {
+                    val cdxSummary = synchronized(cdxStep5Events) {
+                        summarizeCdxStep5Events(cdxStep5Events.toList())
+                    }
+                    if (cdxSummary != null) {
+                        reportWaybackDiagnostic(
+                            diagnosticProductId,
+                            cdxSummary.step,
+                            cdxSummary.status,
+                            cdxSummary.detail,
+                            cdxSummary.durationMs
+                        )
                     }
                 }
 

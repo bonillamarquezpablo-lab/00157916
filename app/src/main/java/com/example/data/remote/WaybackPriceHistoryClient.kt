@@ -204,19 +204,14 @@ class WaybackPriceHistoryClient(
                 if (result.quotes.isNotEmpty()) {
                     return@serializedArchiveLookup result.copy(diagnosticCodes = emptySet())
                 }
-                if (result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ||
-                    result.requestFailed ||
-                    result.capturesFound > 0 ||
-                    !result.diagnosticCodes.contains("CDX_NO_CAPTURES")
-                ) {
+                if (result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) {
                     return@serializedArchiveLookup result
                 }
-                // A slow CDX domain index should not end the whole lookup. Fall back to one
-                // product-specific URL probe via Availability API; this is narrower than another
-                // host-wide scan and still validates the archived title and EUR price.
+                // IMPORTANT: handle the timeout before the generic requestFailed return.
+                // Otherwise this fallback is unreachable for the exact CDX_DOMAIN_TIMEOUT
+                // reported by the user's device, and the button stops without trying availability.
                 if (result.requestFailed &&
-                    result.diagnosticCodes.contains("CDX_DOMAIN_TIMEOUT") &&
-                    !result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
+                    result.diagnosticCodes.contains("CDX_DOMAIN_TIMEOUT")
                 ) {
                     val candidateUrls = buildAvailabilityCandidateUrls(normalizedDomain, expectedTitle)
                     if (candidateUrls.isNotEmpty()) {
@@ -244,6 +239,15 @@ class WaybackPriceHistoryClient(
                             diagnosticCodes = fallback.diagnosticCodes + "CDX_DOMAIN_TIMEOUT"
                         )
                     }
+                    rememberAttempt(attempt, now, hasQuotes = false, failed = true)
+                    return@serializedArchiveLookup result
+                }
+                if (
+                    result.requestFailed ||
+                    result.capturesFound > 0 ||
+                    !result.diagnosticCodes.contains("CDX_NO_CAPTURES")
+                ) {
+                    return@serializedArchiveLookup result
                 }
                 // Only the confirmed empty www host permits one fallback to the apex host.
             }

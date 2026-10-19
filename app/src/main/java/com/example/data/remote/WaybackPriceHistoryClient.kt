@@ -154,14 +154,19 @@ internal fun summarizeCdxStep5Events(
     if (lastFailure != null) {
         if (availabilityRecovered) {
             val recoveryDetail = if (availabilityCapturesFound > 0) {
-                " Availability respondió y encontró $availabilityCapturesFound captura(s)."
+                " Availability encontró $availabilityCapturesFound captura(s) para validar."
             } else {
-                " Availability respondió correctamente como alternativa."
+                " Availability respondió, pero no encontró capturas utilizables en las URL consultadas; todavía no hay histórico que validar."
+            }
+            val recoverySummary = if (availabilityCapturesFound > 0) {
+                " La alternativa sí recuperó capturas; los pasos 8–17 verifican su identidad y precio."
+            } else {
+                " La respuesta de red se recuperó, pero eso no significa que se haya recuperado histórico. Los pasos 8–17 se omiten si no hay capturas."
             }
             return WaybackTraceEvent(
                 step = 5,
                 status = WaybackTraceStatus.PASSED,
-                detail = "CDX no respondió de forma válida en ${failures.size} intento(s). Último diagnóstico: ${lastFailure.detail.take(180)}.$recoveryDetail El flujo se recuperó por la vía alternativa; revisa los pasos 7–17 para la validación del precio.",
+                detail = "CDX no respondió de forma válida en ${failures.size} intento(s). Último diagnóstico: ${lastFailure.detail.take(180)}.$recoveryDetail$recoverySummary",
                 durationMs = lastFailure.durationMs,
                 diagnosticStep = 6
             )

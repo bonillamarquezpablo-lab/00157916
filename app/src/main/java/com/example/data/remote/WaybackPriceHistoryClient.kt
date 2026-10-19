@@ -235,6 +235,7 @@ class WaybackPriceHistoryClient(
                             return@serializedArchiveLookup fallback.copy(diagnosticCodes = emptySet())
                         }
                         return@serializedArchiveLookup fallback.copy(
+                            requestFailed = true,
                             diagnosticCodes = fallback.diagnosticCodes + "CDX_DOMAIN_TIMEOUT"
                         )
                     }

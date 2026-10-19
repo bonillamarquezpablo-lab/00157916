@@ -108,7 +108,9 @@ fun StoreComparisonView(
                 ?.searchUrlFor(productTitle)
             val actionDestination = directDestination
                 ?: storeSearchDestination
-                ?: offer.url.takeIf { it.isNotBlank() }
+                // Persisted rows created by older builds may still contain HTTP URLs. Never let
+                // those dead/unsafe links hide the secure official-site fallback.
+                ?: offer.url.takeIf { safeExternalHttpsUrl(it) != null }
                 ?: knownStore?.officialUrl
 
             Surface(

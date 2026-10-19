@@ -2232,10 +2232,10 @@ class WaybackPriceHistoryClient(
             overlap.size.toDouble() / expectedTokens.size >= 0.72
     }
     private fun xiaomiMiModel(normalizedTitle: String): String? {
-        if (!Regex("""\\bxiaomi\\b""").containsMatchIn(normalizedTitle) &&
-            !Regex("""\\bmi\\s+\\d{1,2}\\s+(?:pro|lite|ultra|note)\\b""").containsMatchIn(normalizedTitle)
+        if (!Regex("""\bxiaomi\b""").containsMatchIn(normalizedTitle) &&
+            !Regex("""\bmi\s+\d{1,2}\s+(?:pro|lite|ultra|note)\b""").containsMatchIn(normalizedTitle)
         ) return null
-        return Regex("""\\bmi\\s+(\\d{1,2})\\s+(pro|lite|ultra|note)\\b""")
+        return Regex("""\bmi\s+(\d{1,2})\s+(pro|lite|ultra|note)\b""")
             .find(normalizedTitle)
             ?.let { "${it.groupValues[1]} ${it.groupValues[2]}" }
     }

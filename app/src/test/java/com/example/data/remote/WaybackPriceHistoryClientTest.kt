@@ -72,7 +72,7 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun cdxBatchLookupRecoversPriceAndDeduplicatesConcurrentLookups() = runBlocking {
+    fun cdxBatchLookupRecoversPriceAndDeduplicatesConcurrentLookupsWithCaptchaLibraryScript() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
         preferences.edit()
@@ -91,6 +91,8 @@ class WaybackPriceHistoryClientTest {
         """.trimIndent()
         val archivedHtml = """
             <html><head>
+              <!-- A normal page may load a CAPTCHA library without presenting a challenge. -->
+              <script src="/assets/recaptcha-widget.js"></script>
               <script type="application/ld+json">
                 {"@type":"Product","name":"$title",
                  "offers":{"@type":"Offer","price":"79.99","priceCurrency":"EUR"}}

@@ -606,8 +606,12 @@ class WaybackPriceHistoryClient(
         return when {
             "cf-chl-" in head || "cloudflare ray id" in head || "checking your browser" in head ->
                 "CLOUDFLARE_CHALLENGE"
-            "captcha" in head || "verify you are human" in head || "prove you are human" in head ||
-                "robot check" in head -> "CAPTCHA_OR_ROBOT_CHECK"
+            "verify you are human" in head || "prove you are human" in head ||
+                "robot check" in head || "complete the captcha" in head ||
+                "complete this captcha" in head || "solve the captcha" in head ||
+                "enter the captcha" in head || "please enter the characters" in head ||
+                Regex("""(?is)<title[^>]*>[^<]*(?:captcha|robot check|human verification|verification required)[^<]*</title>""")
+                    .containsMatchIn(head) -> "CAPTCHA_OR_ROBOT_CHECK"
             "access denied" in head || "request blocked" in head || "temporarily blocked" in head ->
                 "ACCESS_DENIED_OR_BLOCKED"
             Regex("""(?is)<title[^>]*>\s*(404|page not found|página no encontrada|not found)\b""")

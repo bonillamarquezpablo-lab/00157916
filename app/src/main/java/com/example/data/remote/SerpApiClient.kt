@@ -218,14 +218,17 @@ class SerpApiClient(
     /** Same search with counts of results rejected by the safety/relevance filters. */
     suspend fun searchOnlineWithDiagnostics(
         token: String,
-        query: String
+        query: String,
+        relevanceQuery: String = query
     ): SerpApiShoppingSearchReport = withContext(Dispatchers.IO) {
         val apiKey = token.trim()
         require(apiKey.isNotEmpty()) { "Guarda primero tu clave de SerpApi en Ajustes." }
         val normalizedQuery = query.trim().replace(Regex("\\s+"), " ").take(120)
+        val normalizedRelevanceQuery = relevanceQuery.trim().replace(Regex("\\s+"), " ").take(120)
         require(normalizedQuery.length >= 2) { "Escribe al menos 2 caracteres para buscar." }
         val response = executeSearch(apiKey, normalizedQuery)
-        parseShoppingResultsDetailed(response, normalizedQuery).copy(rawResponse = response.toString())
+        // Provider wording may be broadened for recall; use the user's original query for filtering.
+        parseShoppingResultsDetailed(response, normalizedRelevanceQuery).copy(rawResponse = response.toString())
     }
 
     /**

@@ -1778,6 +1778,27 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun stepSixClarifiesThatSuccessfulAvailabilityResponseCanContainNoCaptures() {
+        val result = summarizeCdxStep5Events(
+            events = listOf(
+                WaybackTraceEvent(
+                    step = 5,
+                    status = WaybackTraceStatus.FAILED,
+                    detail = "CDX_URL_PREFIX: CDX_URL_PREFIX_TIMEOUT.",
+                    durationMs = 7_001L
+                )
+            ),
+            availabilityRecovered = true,
+            availabilityCapturesFound = 0
+        )
+
+        assertNotNull(result)
+        assertEquals(WaybackTraceStatus.PASSED, result!!.status)
+        assertTrue(result.detail.contains("Availability respondió, pero no encontró capturas utilizables"))
+        assertTrue(result.detail.contains("no significa que se haya recuperado histórico"))
+    }
+
+    @Test
     fun stepFiveRemainsPassedWhenValidEmptyCdxResponseIsFollowedBySecondaryTimeout() {
         val result = summarizeCdxStep5Events(
             listOf(

@@ -512,6 +512,27 @@ class WaybackPriceHistoryClientTest {
                 traceEvents.any { it.step == 6 && it.status == WaybackTraceStatus.PASSED })
             assertTrue("Step 7 must report captures returned by Availability",
                 traceEvents.any { it.step == 7 && it.status == WaybackTraceStatus.PASSED })
+            assertTrue(
+                "Availability captures must mark diagnostic stage 8 as executed even when CDX returned an empty index",
+                traceEvents.any {
+                    it.diagnosticStep == 8 && it.status == WaybackTraceStatus.PASSED &&
+                        it.detail.contains("Availability API devolvió")
+                }
+            )
+            assertTrue(
+                "Availability candidate URLs must be reflected in diagnostic stage 9",
+                traceEvents.any {
+                    it.diagnosticStep == 9 && it.status == WaybackTraceStatus.PASSED &&
+                        it.detail.contains("Candidatas Availability normalizadas")
+                }
+            )
+            assertTrue(
+                "Availability capture dates must be reflected in diagnostic stage 10",
+                traceEvents.any {
+                    it.diagnosticStep == 10 && it.status == WaybackTraceStatus.PASSED &&
+                        it.detail.contains("Fechas Availability validadas")
+                }
+            )
         } finally {
             preferences.edit()
                 .remove("wayback_rate_limit_until")

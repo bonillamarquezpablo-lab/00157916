@@ -29,10 +29,10 @@ import androidx.compose.material.icons.filled.TrendingDown
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -58,7 +58,6 @@ import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.Store
 import com.example.ui.theme.ProductCardShape
-import com.example.ui.theme.ProductImageShape
 
 private val SPANISH_LOCALE = Locale("es", "ES")
 
@@ -115,7 +114,6 @@ fun ProductCard(
                     product = product,
                     modifier = Modifier
                         .size(80.dp)
-                        .clip(ProductImageShape)
                         .testTag("product_photo_${product.id}"),
                     showAthRibbon = product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isAtAth
                 )
@@ -311,10 +309,10 @@ fun ProductCard(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            OutlinedButton(
+            Button(
                 onClick = { showStoreComparison = true },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp)
+                modifier = Modifier.fillMaxWidth().testTag("choose_store_button"),
+                shape = MaterialTheme.shapes.medium
             ) {
                 Icon(
                     imageVector = Icons.Default.OpenInNew,

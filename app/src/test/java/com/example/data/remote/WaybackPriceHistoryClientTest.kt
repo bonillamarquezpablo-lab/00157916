@@ -312,6 +312,33 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun prioritizesCanonicalSamsungPathWhenSavedTitleOmitsGalaxy() {
+        val client = newClient()
+
+        val standardCandidates = client.buildAvailabilityCandidateUrls(
+            domain = "samsung.com",
+            expectedTitle = "Samsung S26"
+        )
+        assertEquals(
+            "A shortened title should lead with the canonical Galaxy S26 page",
+            "https://www.samsung.com/es/smartphones/galaxy-s/galaxy-s26/",
+            standardCandidates.first()
+        )
+
+        val ultraCandidates = client.buildAvailabilityCandidateUrls(
+            domain = "samsung.com",
+            expectedTitle = "Samsung S26 Ultra"
+        )
+        assertEquals(
+            "The model variant should be retained in the canonical product path",
+            "https://www.samsung.com/es/smartphones/galaxy-s/galaxy-s26-ultra/",
+            ultraCandidates.first()
+        )
+        assertTrue(standardCandidates.size <= 6)
+        assertTrue(ultraCandidates.size <= 6)
+    }
+
+    @Test
     fun domainCdxTimeoutFallsBackToAvailabilityAndSavesVerifiedPrice() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)

@@ -1660,12 +1660,19 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             return
         }
 
+        val diagnosticProductId = targetProductId?.takeIf {
+            _uiState.value.waybackDiagnosticProductId == it
+        }
+        val traceCallback: ((WaybackTraceEvent) -> Unit)? = diagnosticProductId?.let { id ->
+            { event -> recordWaybackTrace(id, event) }
+        }
         viewModelScope.launch {
             try {
                 var savedCount = 0
                 var checkedCount = 0
                 var foundCount = 0
                 var capturesFoundCount = 0
+                var selectedProductRefreshed = false
                 var successfulLookupsCount = 0
                 var requestFailedCount = 0
                 var skippedCount = 0
@@ -1684,7 +1691,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         val direct = withTimeoutOrNull(MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS) {
                             waybackPriceHistoryClient.fetchHistory(
                                 originalUrl = candidate.directUrl,
-                                expectedTitle = candidate.title
+                                expectedTitle = candidate.title,
+                                onTrace = traceCallback
                             )
                         }
                         if (direct == null) {
@@ -1703,18 +1711,42 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         !candidateTimedOut &&
                         !rateLimitedAtDirectStage
                     ) {
+                        if (diagnosticProductId != null) {
+                            reportWaybackDiagnostic(
+                                diagnosticProductId, 6, WaybackTraceStatus.RUNNING,
+                                "Se activa la alternativa por dominio; se mantienen la caché y los límites de consultas."
+                            )
+                        }
                         val domainResult = withTimeoutOrNull(MAX_ARCHIVE_DOMAIN_FALLBACK_MS) {
                             waybackPriceHistoryClient.fetchHistoryByMerchantDomain(
                                 domain = candidate.merchantDomain,
                                 expectedTitle = candidate.title,
-                                preferredUrl = candidate.directUrl
+                                preferredUrl = candidate.directUrl,
+                                onTrace = traceCallback
                             )
                         }
                         if (domainResult == null) {
                             candidateTimedOut = true
                             diagnosticCodes.add("CDX_DOMAIN_CANDIDATE_TIMEOUT")
+                            if (diagnosticProductId != null) {
+                                reportWaybackDiagnostic(
+                                    diagnosticProductId, 6, WaybackTraceStatus.FAILED,
+                                    "La alternativa por dominio superó el límite de tiempo local."
+                                )
+                            }
                         } else {
                             attempts += domainResult
+                            if (diagnosticProductId != null && domainResult.quotes.isEmpty()) {
+                                reportWaybackDiagnostic(
+                                    diagnosticProductId, 6,
+                                    if (domainResult.requestFailed) WaybackTraceStatus.FAILED else WaybackTraceStatus.PASSED,
+                                    if (domainResult.requestFailed) {
+                                        "Alternativa por dominio terminó con error: ${domainResult.diagnosticCodes.joinToString(", ").take(180)}."
+                                    } else {
+                                        "Alternativa por dominio ejecutada; no devolvió precio verificado. Revisa pasos 7–14."
+                                    }
+                                )
+                            }
                         }
                     }
                     if (candidateTimedOut && attempts.isEmpty()) {
@@ -1786,6 +1818,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             }
                         }.getOrNull()
                         if (refreshedProduct != null) {
+                            selectedProductRefreshed = true
                             val currentState = _uiState.value
                             if (currentState.selectedProduct?.id == refreshedProduct.id) {
                                 _uiState.value = currentState.copy(selectedProduct = refreshedProduct)
@@ -1885,9 +1918,42 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     "$notice\nDiagnóstico Wayback: ${diagnosticLabels.joinToString(" · ")}."
                 } else notice
                 appendArchiveNotice(query, provider, noticeWithDiagnostics, targetProductId)
+                if (diagnosticProductId != null) {
+                    when {
+                        savedCount > 0 -> finishWaybackDiagnostic(
+                            diagnosticProductId, WaybackTraceStatus.PASSED,
+                            "$savedCount precio(s) histórico(s) guardado(s) en la base de datos local."
+                        )
+                        foundCount > 0 && selectedProductRefreshed -> finishWaybackDiagnostic(
+                            diagnosticProductId, WaybackTraceStatus.PASSED,
+                            "Se recuperaron precios, pero ya estaban guardados; la ficha se refrescó con el historial existente."
+                        )
+                        foundCount > 0 -> finishWaybackDiagnostic(
+                            diagnosticProductId, WaybackTraceStatus.FAILED,
+                            "Se extrajeron precios, pero no se confirmó el guardado o la actualización de la ficha."
+                        )
+                        skippedCount == candidates.size -> finishWaybackDiagnostic(
+                            diagnosticProductId, WaybackTraceStatus.SKIPPED,
+                            "No se repitió la búsqueda porque había un resultado reciente en caché."
+                        )
+                        else -> finishWaybackDiagnostic(
+                            diagnosticProductId, WaybackTraceStatus.SKIPPED,
+                            "No se obtuvo ningún precio válido; el guardado no llegó a ejecutarse."
+                        )
+                    }
+                }
             } catch (cancelled: CancellationException) {
+                if (diagnosticProductId != null) {
+                    finishWaybackDiagnostic(diagnosticProductId, WaybackTraceStatus.FAILED, "La operación fue cancelada.")
+                }
                 throw cancelled
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                if (diagnosticProductId != null) {
+                    finishWaybackDiagnostic(
+                        diagnosticProductId, WaybackTraceStatus.FAILED,
+                        "Error interno controlado: ${error.javaClass.simpleName}."
+                    )
+                }
                 appendArchiveNotice(
                     query,
                     provider,

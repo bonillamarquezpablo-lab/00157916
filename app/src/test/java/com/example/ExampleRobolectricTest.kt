@@ -2530,7 +2530,7 @@ class ExampleRobolectricTest {
 
 
     @Test
-    fun \`insecure retailer links fall back to a safe HTTPS destination\`() {
+    fun `insecure retailer links fall back to a safe HTTPS destination`() {
         val insecureRedirect = com.example.data.remote.extractDirectRetailerUrl(
             "https://www.google.com/url?q=http%3A%2F%2Fwww.pccomponentes.com%2Fproducto"
         )
@@ -2552,7 +2552,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun \`online search stores valid offers once per store and day and marks low outliers\`() = runBlocking<Unit> {
+    fun `online search stores valid offers once per store and day and marks low outliers`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,
@@ -3698,7 +3698,7 @@ class ExampleRobolectricTest {
 
 
     @Test
-    fun \`legacy verified quote is rechecked against canonical product title\`() = runBlocking<Unit> {
+    fun `legacy verified quote is rechecked against canonical product title`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries().build()
@@ -3770,7 +3770,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun \`main store directory only includes merchants with valid saved prices\`() = runBlocking<Unit> {
+    fun `main store directory only includes merchants with valid saved prices`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,

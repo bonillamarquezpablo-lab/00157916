@@ -2184,8 +2184,8 @@ class WaybackPriceHistoryClient(
      */
     private fun readItemPropValue(html: String, name: String): String? {
         val wanted = name.lowercase(Locale.ROOT)
-        val elements = Regex("""(?is)<([a-z][a-z0-9:-]*)\\b([^>]*)>(.*?)</\\1\\s*>""")
-        val attributeRegex = Regex("""(?is)([a-z_:.-]+)\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))""")
+        val elements = Regex("""(?is)<([a-z][a-z0-9:-]*)\b([^>]*)>(.*?)</\1\s*>""")
+        val attributeRegex = Regex("""(?is)([a-z_:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""")
         for (match in elements.findAll(html)) {
             val attributes = attributeRegex.findAll(match.groupValues[2]).associate { attr ->
                 val raw = attr.groups[2]?.value ?: attr.groups[3]?.value ?: attr.groups[4]?.value.orEmpty()
@@ -2198,7 +2198,7 @@ class WaybackPriceHistoryClient(
                 .firstOrNull { it.isNotBlank() }
             if (explicit != null) return explicit
             val text = decodeHtml(Regex("""(?is)<[^>]+>""").replace(match.groupValues[3], " "))
-                .replace(Regex("""\\s+"""), " ")
+                .replace(Regex("""\s+"""), " ")
                 .trim()
             if (text.isNotBlank() && text.length <= 120) return text
         }

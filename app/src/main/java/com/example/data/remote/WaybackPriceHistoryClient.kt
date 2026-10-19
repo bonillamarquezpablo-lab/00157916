@@ -2109,7 +2109,14 @@ class WaybackPriceHistoryClient(
                     val currency = node.optString("priceCurrency")
                         .takeIf { it.isNotBlank() && it != "null" }
                         ?: specification?.optString("priceCurrency").orEmpty()
-                    val rawPrice = node.opt("price") ?: specification?.opt("price")
+                    // Product pages often expose a ProductGroup/AggregateOffer with lowPrice
+                    // instead of a single Offer.price. Use the explicit aggregate minimum only
+                    // when a normal price is absent; the product-title, EUR and range checks still
+                    // run before any historical observation can be saved.
+                    val rawPrice = node.opt("price")
+                        ?: specification?.opt("price")
+                        ?: node.opt("lowPrice")
+                        ?: specification?.opt("lowPrice")
                     val price = parsePositivePrice(rawPrice?.toString())
                     if (price != null && currency.isNotBlank()) found += price to currency.uppercase(Locale.ROOT)
                     val keys = node.keys()
@@ -2164,6 +2171,24 @@ class WaybackPriceHistoryClient(
         if (e.isBlank() || a.isBlank()) return false
         if (productConditionKey(e) != productConditionKey(a)) return false
 
+        // Xiaomi archive titles frequently omit a colour suffix or translate "Gris" to
+        // "Grey/Gray/Grigio". Treat the exact Mi model as the identity anchor, while refusing
+        // any conflicting numeric/storage variant or an explicitly different colour.
+        val expectedXiaomiModel = xiaomiMiModel(e)
+        val archivedXiaomiModel = xiaomiMiModel(a)
+        if (expectedXiaomiModel != null && archivedXiaomiModel != null) {
+            if (expectedXiaomiModel != archivedXiaomiModel) return false
+            val expectedVariants = requiredVariantTokens(canonicalizeArchiveTitle(e))
+            val archivedVariants = requiredVariantTokens(canonicalizeArchiveTitle(a))
+            if (!archivedVariants.containsAll(expectedVariants)) return false
+            val expectedColour = productColourFamily(e)
+            val archivedColour = productColourFamily(a)
+            if (expectedColour != null && archivedColour != null &&
+                expectedColour != archivedColour
+            ) return false
+            return true
+        }
+
         // Titles from Samsung's regional catalogues use TQ/QE prefixes for the same EU TV
         // model. Compare the exact compact model code and diagonal before fuzzy text matching.
         if (Regex("""\bsamsung\b""").containsMatchIn(e) &&
@@ -2206,6 +2231,27 @@ class WaybackPriceHistoryClient(
         return overlap.size >= minOf(2, expectedTokens.size) &&
             overlap.size.toDouble() / expectedTokens.size >= 0.72
     }
+    private fun xiaomiMiModel(normalizedTitle: String): String? {
+        if (!Regex("""\\bxiaomi\\b""").containsMatchIn(normalizedTitle) &&
+            !Regex("""\\bmi\\s+\\d{1,2}\\s+(?:pro|lite|ultra|note)\\b""").containsMatchIn(normalizedTitle)
+        ) return null
+        return Regex("""\\bmi\\s+(\\d{1,2})\\s+(pro|lite|ultra|note)\\b""")
+            .find(normalizedTitle)
+            ?.let { "${it.groupValues[1]} ${it.groupValues[2]}" }
+    }
+
+    private fun productColourFamily(normalizedTitle: String): String? {
+        val tokens = normalizedTitle.split(' ').toSet()
+        return when {
+            tokens.any { it in setOf("gris", "grey", "gray", "grigio") } -> "grey"
+            tokens.any { it in setOf("negro", "negra", "black", "nero") } -> "black"
+            tokens.any { it in setOf("blanco", "blanca", "white", "bianco") } -> "white"
+            tokens.any { it in setOf("azul", "blue", "bleu") } -> "blue"
+            tokens.any { it in setOf("verde", "green") } -> "green"
+            else -> null
+        }
+    }
+
     private fun productConditionKey(title: String): String = when {
         Regex("""\b(reacondicionado|reacondicionada|refurbished|renewed)\b""")
             .containsMatchIn(title) -> "refurbished"

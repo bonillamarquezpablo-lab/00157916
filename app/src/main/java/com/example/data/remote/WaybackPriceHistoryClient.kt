@@ -262,7 +262,14 @@ class WaybackPriceHistoryClient(
         if (!preferences.getBoolean("enabled", true)) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("WAYBACK_DISABLED"))
         }
+        // Merchant metadata can be incomplete even when the offer has a valid direct URL.
+        // Recover the host from that URL before rejecting the fallback; this adds no network call
+        // and the normalizer still rejects search-engine/archive hosts.
         val normalizedDomain = normalizeMerchantDomain(domain)
+            ?: preferredUrl
+                ?.takeIf(::isEligibleDirectUrl)
+                ?.let { url -> runCatching { URI(url).host }.getOrNull() }
+                ?.let(::normalizeMerchantDomain)
             ?: return@withContext WaybackBackfillResult(diagnosticCodes = setOf("DOMAIN_UNRESOLVED"))
         if (expectedTitle.isBlank()) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("PRODUCT_TITLE_EMPTY"))
@@ -1377,9 +1384,16 @@ class WaybackPriceHistoryClient(
             }
         }
         if (cdxOutcome.requestFailed) {
+            val extractionStatus = if (cdxOutcome.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) {
+                WaybackTraceStatus.SKIPPED
+            } else {
+                // The extraction parser did not run because its upstream index request failed.
+                // Report a blocked dependency rather than an ordinary "not executed" phase.
+                WaybackTraceStatus.FAILED
+            }
             emitWaybackTrace(
-                onTrace, 7, WaybackTraceStatus.SKIPPED,
-                "No se pudo extraer una lista de capturas porque CDX no devolvió una respuesta utilizable.",
+                onTrace, 7, extractionStatus,
+                "Extracción bloqueada: CDX no entregó filas parseables. Causa anterior: ${cdxOutcome.diagnosticCodes.joinToString(", ")}.",
                 diagnosticStep = 8
             )
             val rateLimited = cdxOutcome.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")

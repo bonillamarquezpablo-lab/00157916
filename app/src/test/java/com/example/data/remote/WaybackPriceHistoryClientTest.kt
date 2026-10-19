@@ -937,6 +937,56 @@ class WaybackPriceHistoryClientTest {
     }
 
 
+
+    @Test
+    fun usesMatchingSecondaryTitleAndReadsUnquotedMetaAttributes() {
+        val client = newClient()
+        val html = """
+            <html><head>
+              <meta property=og:title content="PC Componentes | Tecnología y ofertas" />
+              <meta name=twitter:title content="Anker Prime 27K Power Bank" />
+              <meta property=product:price:amount content=79.99 />
+              <meta property=product:price:currency content=EUR />
+            </head><body></body></html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "Anker Prime 27K Power Bank",
+            originalUrl = "https://www.pccomponentes.com/anker-prime-27k",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://www.pccomponentes.com/anker-prime-27k",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("A generic og:title must not hide a matching twitter:title", quote)
+        assertEquals(79.99, quote!!.price, 0.001)
+        assertEquals("Anker Prime 27K Power Bank", quote.productTitle)
+    }
+
+    @Test
+    fun parsesJsonLdWhenScriptTypeAttributeIsUnquoted() {
+        val client = newClient()
+        val html = """
+            <html><head>
+              <script type=application/ld+json>
+                {"@type":"Product","name":"Anker Prime 27K Power Bank",
+                 "offers":{"@type":"Offer","price":"89.99","priceCurrency":"EUR"}}
+              </script>
+            </head><body></body></html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "Anker Prime 27K Power Bank",
+            originalUrl = "https://shop.example/products/anker-prime-27k",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/products/anker-prime-27k",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("Valid product JSON-LD can use an unquoted MIME attribute", quote)
+        assertEquals(89.99, quote!!.price, 0.001)
+    }
+
     @Test
     fun explicitProductPriceMetadataTakesPrecedenceOverConflictingJsonLdOffers() {
         val client = newClient()

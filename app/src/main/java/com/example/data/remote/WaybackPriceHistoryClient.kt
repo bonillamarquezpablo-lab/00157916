@@ -623,10 +623,8 @@ class WaybackPriceHistoryClient(
         quote: ArchivedPriceQuote?
     ) {
         val jsonLd = extractJsonLdProductOffers(html)
-        val pageTitle = readMeta(html, setOf("og:title"))
-            ?: readMeta(html, setOf("twitter:title"))
-            ?: Regex("""(?is)<title[^>]*>(.*?)</title>""").find(html)?.groupValues?.getOrNull(1)?.let(::decodeHtml)
-        val titles = (jsonLd.map { it.first } + listOfNotNull(pageTitle)).filter { it.isNotBlank() }
+        val pageTitles = extractArchivedPageTitles(html)
+        val titles = (jsonLd.map { it.first } + pageTitles).filter { it.isNotBlank() }
         val titleMatches = titles.any { isMatchingProductTitle(expectedTitle, it) }
         emitWaybackTrace(
             onTrace, 12,
@@ -681,19 +679,17 @@ class WaybackPriceHistoryClient(
 
     private fun diagnoseArchivedPrice(html: String, expectedTitle: String): String {
         val jsonLd = extractJsonLdProductOffers(html)
-        val pageTitle = readMeta(html, setOf("og:title"))
-            ?: readMeta(html, setOf("twitter:title"))
-            ?: Regex("""(?is)<title[^>]*>(.*?)</title>""").find(html)?.groupValues?.getOrNull(1)?.let(::decodeHtml)
+        val pageTitles = extractArchivedPageTitles(html)
         val metaPrice = listOf(
             "product:price:amount", "og:price:amount", "price", "product:price"
         ).firstNotNullOfOrNull { key -> readMeta(html, setOf(key))?.let(::parsePositivePrice) }
         val metaCurrency = listOf(
             "product:price:currency", "og:price:currency", "pricecurrency"
         ).firstNotNullOfOrNull { key -> readMeta(html, setOf(key)) }?.uppercase(Locale.ROOT)
-        if (pageTitle.isNullOrBlank() && jsonLd.isEmpty()) return "ARCHIVE_TITLE_MISSING"
+        if (pageTitles.isEmpty() && jsonLd.isEmpty()) return "ARCHIVE_TITLE_MISSING"
         if (metaPrice == null && jsonLd.isEmpty()) return "ARCHIVE_PRICE_METADATA_MISSING"
-        val candidates = jsonLd + if (!pageTitle.isNullOrBlank() && metaPrice != null && !metaCurrency.isNullOrBlank()) {
-            listOf(Triple(pageTitle, metaPrice, metaCurrency))
+        val candidates = jsonLd + if (pageTitles.isNotEmpty() && metaPrice != null && !metaCurrency.isNullOrBlank()) {
+            pageTitles.map { title -> Triple(title, metaPrice, metaCurrency) }
         } else emptyList()
         if (candidates.none { it.third.equals("EUR", ignoreCase = true) }) {
             return "ARCHIVE_EUR_PRICE_MISSING"
@@ -1529,9 +1525,7 @@ class WaybackPriceHistoryClient(
         if (html.isBlank() || expectedTitle.isBlank() || observedAt <= 0L) return null
         val jsonLdCandidates = extractJsonLdProductOffers(html)
 
-        val pageTitle = readMeta(html, setOf("og:title"))
-            ?: readMeta(html, setOf("twitter:title"))
-            ?: Regex("""(?is)<title[^>]*>(.*?)</title>""").find(html)?.groupValues?.getOrNull(1)?.let(::decodeHtml)
+        val pageTitles = extractArchivedPageTitles(html)
 
         // Prefer the page's explicit product price metadata in a stable priority order.
         // readMeta(Set) follows document order, so each key is queried separately here.
@@ -1550,8 +1544,11 @@ class WaybackPriceHistoryClient(
                 candidate.second in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE &&
                 isMatchingProductTitle(expectedTitle, candidate.first)
 
-        val explicitMeta = if (!pageTitle.isNullOrBlank() && metaPrice != null && !metaCurrency.isNullOrBlank()) {
-            Triple(pageTitle, metaPrice, metaCurrency).takeIf(::isValidCandidate)
+        val explicitMeta = if (metaPrice != null && !metaCurrency.isNullOrBlank()) {
+            pageTitles.asSequence()
+                .filter { isMatchingProductTitle(expectedTitle, it) }
+                .map { title -> Triple(title, metaPrice, metaCurrency) }
+                .firstOrNull(::isValidCandidate)
         } else null
 
         // A retailer page can expose multiple valid EUR offers for the exact same product.
@@ -1576,7 +1573,7 @@ class WaybackPriceHistoryClient(
 
     private fun extractJsonLdProductOffers(html: String): List<Triple<String, Double, String>> {
         val scripts = Regex(
-            """(?is)<script\b[^>]*type\s*=\s*["']application/ld\+json["'][^>]*>(.*?)</script\s*>"""
+            """(?is)<script\b(?=[^>]*\btype\s*=\s*(?:["']application/ld\+json["']|application/ld\+json(?:\s|/?>)))[^>]*>(.*?)</script\s*>"""
         ).findAll(html).map { it.groupValues[1] }
         val output = mutableListOf<Triple<String, Double, String>>()
         for (script in scripts) {
@@ -1631,15 +1628,35 @@ class WaybackPriceHistoryClient(
         return found
     }
 
+    private fun extractArchivedPageTitles(html: String): List<String> {
+        val titles = listOfNotNull(
+            readMeta(html, setOf("og:title")),
+            readMeta(html, setOf("twitter:title")),
+            readMeta(html, setOf("title")),
+            readMeta(html, setOf("headline")),
+            Regex("""(?is)<title[^>]*>(.*?)</title>""")
+                .find(html)?.groupValues?.getOrNull(1)?.let(::decodeHtml)
+        )
+        return titles.asSequence()
+            .map { decodeHtml(it).trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy(::normalizeTitle)
+            .toList()
+    }
+
     private fun readMeta(html: String, names: Set<String>): String? {
         val normalizedNames = names.map { it.lowercase(Locale.ROOT) }.toSet()
         for (tag in Regex("""(?is)<meta\b[^>]*>""").findAll(html)) {
-            val attributes = Regex("""(?is)([a-z_:.-]+)\s*=\s*["'](.*?)["']""")
+            val attributes = Regex("""(?is)([a-z_:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""")
                 .findAll(tag.value)
-                .associate { it.groupValues[1].lowercase(Locale.ROOT) to decodeHtml(it.groupValues[2]).trim() }
-            val key = (attributes["property"] ?: attributes["name"] ?: attributes["itemprop"])
-                ?.lowercase(Locale.ROOT)
-            if (key in normalizedNames) attributes["content"]?.takeIf { it.isNotBlank() }?.let { return it }
+                .associate { match ->
+                    val rawValue = match.groups[2]?.value ?: match.groups[3]?.value ?: match.groups[4]?.value.orEmpty()
+                    match.groupValues[1].lowercase(Locale.ROOT) to decodeHtml(rawValue).trim()
+                }
+            val matchingKey = listOf("property", "name", "itemprop")
+                .mapNotNull { attributes[it]?.lowercase(Locale.ROOT) }
+                .any { it in normalizedNames }
+            if (matchingKey) attributes["content"]?.takeIf { it.isNotBlank() }?.let { return it }
         }
         return null
     }

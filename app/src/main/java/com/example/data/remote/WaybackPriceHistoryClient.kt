@@ -895,7 +895,11 @@ class WaybackPriceHistoryClient(
                 canonicalSamsungUrls.drop(1) +
                 guessedProductUrls.filterNot { it in canonicalSet }
         } else {
-            listOfNotNull(storeSearchUrl) + guessedProductUrls
+            // A retailer search URL is often not archived (or contains no product metadata).
+            // Prefer one product-shaped URL first, but retain the real search URL as the next
+            // fallback. Since the caller probes at most two URLs and may prepend the known offer
+            // URL, this ordering ensures the second probe is not wasted on a generic search page.
+            listOfNotNull(guessedProductUrls.firstOrNull(), storeSearchUrl) + guessedProductUrls.drop(1)
         }
         return orderedCandidates.distinct().take(MAX_AVAILABILITY_URL_CANDIDATES)
     }
@@ -1960,7 +1964,10 @@ class WaybackPriceHistoryClient(
         private const val MAX_AVAILABILITY_PROBE_CANDIDATES = 2
         private const val MAX_CDX_FALLBACK_SNAPSHOTS = 2
         private const val MAX_DOMAIN_CDX_HOST_QUERIES = 2
-        private const val CDX_FALLBACK_TIMEOUT_SECONDS = 3L
+        // This runs in the background history backfill, not in the main search UI.
+        // Four seconds accommodates ordinary CDX latency while staying inside the ViewModel's
+        // independent 10-second cap for the whole domain fallback.
+        private const val CDX_FALLBACK_TIMEOUT_SECONDS = 4L
         private const val CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS = 2L
         private const val DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS = 2L
         private const val MAX_AVAILABILITY_BODY_BYTES = 64 * 1024

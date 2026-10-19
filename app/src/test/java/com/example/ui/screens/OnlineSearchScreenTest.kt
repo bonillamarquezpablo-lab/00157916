@@ -97,7 +97,9 @@ class OnlineSearchScreenTest {
         composeRule.onNodeWithText(rejectedOffer.title).assertIsDisplayed()
         searchList.performScrollToNode(hasText(rejectedOffer.priceLabel))
         composeRule.onNodeWithText(rejectedOffer.priceLabel).assertIsDisplayed()
+        searchList.performScrollToNode(hasText(rejectedOffer.reason))
         composeRule.onNodeWithText(rejectedOffer.reason).assertIsDisplayed()
+        searchList.performScrollToNode(hasText(rejectedOffer.provider))
         composeRule.onNodeWithText(rejectedOffer.provider).assertIsDisplayed()
 
         searchList.performScrollToNode(hasText("Ocultar descartados"))
@@ -233,7 +235,7 @@ class OnlineSearchScreenTest {
         clickFilter("Mostrar segunda mano")
         assertVisibleText("Todas las ofertas")
         assertVisibleText("Solo Amazon")
-        assertVisibleText("Segunda mano")
+        composeRule.onNodeWithText("Segunda mano").assertIsDisplayed()
         assertVisibleText("1 tiendas · precio más bajo en Amazon Warehouse")
         assertTrue(
             composeRule.onAllNodesWithText("7 tiendas · precio más bajo en Wallapop")

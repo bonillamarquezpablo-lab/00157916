@@ -1877,4 +1877,17 @@ class WaybackPriceHistoryClientTest {
         assertNull(client.buildDomainCdxUrl("shop.example", "Anker"))
     }
 
+
+    @Test
+    fun domainCdxHostQueryNormalizesFullUrlWithMixedCaseSchemeAndPath() {
+        val client = newClient()
+        val urls = client.buildDomainCdxHostUrls(
+            domain = "HTTPS://WWW.shop.example/catalog/item/",
+            expectedTitle = "Anker Prime 27K Power Bank",
+            now = 1_800_000_000_000L,
+            lookbackDays = 730
+        )
+        assertNotNull(urls)
+        assertEquals(listOf("www.shop.example", "shop.example"), urls!!.map { it.queryParameter("url") })
+    }
 }

@@ -230,6 +230,19 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     val uiState: StateFlow<TrackerUiState> = _uiState.asStateFlow()
 
+    /**
+     * Publish short UI feedback messages for actions started by the user.
+     * StateFlow.update keeps concurrent state changes from overwriting each other.
+     */
+    private fun showSnackbar(message: String) {
+        _uiState.update { it.copy(snackbarMessage = message) }
+    }
+
+    /** Clear a snackbar after the UI has displayed it. */
+    fun clearSnackbarMessage() {
+        _uiState.update { it.copy(snackbarMessage = null) }
+    }
+
     private fun waybackRateLimitNotice(now: Long = System.currentTimeMillis()): String {
         val until = waybackPriceHistoryClient.activeRateLimitUntil(now)
             ?: return "Internet Archive ha limitado temporalmente las consultas (HTTP 429). Espera unos minutos antes de volver a intentarlo. No se ha gastado cuota de SerpApi."

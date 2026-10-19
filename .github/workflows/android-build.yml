@@ -164,18 +164,16 @@ jobs:
         id: version
         env:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
         shell: bash
         run: |
           set -euo pipefail
-          # Reserve a high, ever-increasing versionCode range; name follows the code.
-          # Query prior successful artifacts/releases is not sufficient when runs are cancelled,
-          # so use run_number plus a fixed offset and keep the previous 1.6.1314 build below it.
-          VERSION_CODE=$((6000 + GITHUB_RUN_NUMBER))
-          VERSION_NAME="1.7.$((GITHUB_RUN_NUMBER - 1))"
-          if [ "$VERSION_CODE" -le 5295 ]; then
-            echo "::error::versionCode calculado ($VERSION_CODE) no supera el APK 5295."
+          # Unique version per workflow run AND retry. Run number is monotonic per workflow;
+          # run_attempt prevents re-runs of the same run from reusing an APK version.
+          VERSION_CODE=$((10000 + GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))
+          VERSION_NAME="1.7.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          if [ "$VERSION_CODE" -le 6296 ]; then
+            echo "::error::versionCode calculado ($VERSION_CODE) no supera la versión instalada 6296."
             exit 1
           fi
           echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"

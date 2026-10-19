@@ -92,6 +92,27 @@ data class WaybackDiagnosticEntry(
     val durationMs: Long? = null
 )
 
+/**
+ * One diagnostic row aggregates repeated attempts for the same product. A later CDX timeout can
+ * skip parsing even though Availability already supplied captures and the HTML was downloaded.
+ * Keep the strongest terminal outcome instead of letting that later, unrelated route erase it.
+ */
+internal fun mergeWaybackDiagnosticStatus(
+    current: WaybackTraceStatus,
+    incoming: WaybackTraceStatus
+): WaybackTraceStatus = when {
+    current == WaybackTraceStatus.PASSED || incoming == WaybackTraceStatus.PASSED ->
+        WaybackTraceStatus.PASSED
+    current == WaybackTraceStatus.FAILED || incoming == WaybackTraceStatus.FAILED ->
+        WaybackTraceStatus.FAILED
+    incoming == WaybackTraceStatus.RUNNING -> WaybackTraceStatus.RUNNING
+    current == WaybackTraceStatus.RUNNING && incoming == WaybackTraceStatus.PENDING ->
+        WaybackTraceStatus.RUNNING
+    current == WaybackTraceStatus.SKIPPED || incoming == WaybackTraceStatus.SKIPPED ->
+        WaybackTraceStatus.SKIPPED
+    else -> incoming
+}
+
 private val WAYBACK_DIAGNOSTIC_TITLES = listOf(
     "Solicitud iniciada (botón pulsado)",
     "Ficha local y URL principal recuperadas",
@@ -100,7 +121,7 @@ private val WAYBACK_DIAGNOSTIC_TITLES = listOf(
     "Petición enviada al índice CDX",
     "Respuesta CDX o respuesta alternativa recibida",
     "Fallback: CDX alternativo / Availability API",
-    "Extracción de capturas CDX (requiere respuesta válida)",
+    "Extracción de capturas (índice CDX o Availability)",
     "Normalización y deduplicación de URL candidatas",
     "Validación de fechas y período histórico",
     "Descarga del HTML de la captura 1",
@@ -297,14 +318,20 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             val index = rows.indexOfFirst { it.step == step }
             if (index < 0) return@update state
             val old = rows[index]
+            // A stage can be attempted by direct CDX, Availability and an alternate CDX
+            // route. Once a real attempt passed or failed at this stage, a later SKIPPED event
+            // from another route is not evidence that the stage was never executed.
+            val mergedStatus = mergeWaybackDiagnosticStatus(old.status, status)
+            val redundantSkip = status == WaybackTraceStatus.SKIPPED &&
+                old.status in setOf(WaybackTraceStatus.PASSED, WaybackTraceStatus.FAILED)
             val combinedDetail = when {
-                detailLine.isBlank() -> old.detail
+                detailLine.isBlank() || redundantSkip -> old.detail
                 old.detail.isBlank() -> detailLine
                 old.detail.lines().any { it == detailLine } -> old.detail
                 else -> (old.detail.lines() + detailLine).takeLast(5).joinToString("\n")
             }
             rows[index] = old.copy(
-                status = status,
+                status = mergedStatus,
                 detail = combinedDetail,
                 durationMs = durationMs ?: old.durationMs
             )

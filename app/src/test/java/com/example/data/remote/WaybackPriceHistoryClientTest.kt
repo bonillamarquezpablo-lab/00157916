@@ -1879,8 +1879,8 @@ class WaybackPriceHistoryClientTest {
         assertEquals(WaybackTraceStatus.PASSED, result!!.status)
         assertEquals(6, diagnosticIndexForWaybackTrace(result))
         assertTrue(result.detail.contains("CDX_PRODUCT_PREFIX_TIMEOUT"))
-        assertTrue(result.detail.contains("Availability respondió y encontró 1 captura(s)"))
-        assertTrue(result.detail.contains("validación del precio"))
+        assertTrue(result.detail.contains("Availability encontró 1 captura(s) para validar"))
+        assertTrue(result.detail.contains("verifican su identidad y precio"))
     }
 
     @Test

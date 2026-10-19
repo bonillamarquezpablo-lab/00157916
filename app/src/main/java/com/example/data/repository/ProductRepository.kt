@@ -1551,7 +1551,7 @@ class ProductRepository(
                 // Re-check each observation against the canonical catalogue title as well as the
                 // retailer's title. This keeps old, incorrectly verified rows from resurfacing as
                 // current offers after a stricter price-quality policy ships.
-                isPlausibleHistoryPrice(entity.title, observation.price)
+                isPlausibleHistoryPrice(this.title, observation.price)
         }.sortedBy { it.observedAt }
         // Only current search observations establish the live price. Historical-provider points
         // remain visible on the chart but can never replace the current quote.

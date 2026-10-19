@@ -626,7 +626,7 @@ class WaybackPriceHistoryClientTest {
                 availabilityUrls[2]
             )
             assertTrue("The verified archived EUR price should be recovered after a 3.5-second HTML response", result.quotes.isNotEmpty())
-            assertEquals(79.99, result.quotes.single().price, 0.001)
+            assertTrue("Every accepted result must retain the verified EUR price", result.quotes.isNotEmpty() && result.quotes.all { kotlin.math.abs(it.price - 79.99) < 0.001 })
             assertTrue(requests.any { it.startsWith("web.archive.org/web/") })
             assertTrue(
                 "Step 8 must be marked blocked/skipped when CDX failed upstream; step 6 keeps the actual timeout",
@@ -1687,12 +1687,12 @@ class WaybackPriceHistoryClientTest {
                 WaybackTraceEvent(
                     step = 5,
                     status = WaybackTraceStatus.RUNNING,
-                    detail = "CDX_EXACT: esperando respuesta."
+                    detail = "CDX_URL_PREFIX: esperando respuesta."
                 ),
                 WaybackTraceEvent(
                     step = 5,
                     status = WaybackTraceStatus.PASSED,
-                    detail = "CDX_EXACT: respuesta válida; 0 captura(s) candidatas.",
+                    detail = "CDX_URL_PREFIX: respuesta válida; 0 captura(s) candidatas.",
                     durationMs = 692L
                 ),
                 WaybackTraceEvent(
@@ -1724,7 +1724,7 @@ class WaybackPriceHistoryClientTest {
                 WaybackTraceEvent(
                     step = 5,
                     status = WaybackTraceStatus.FAILED,
-                    detail = "CDX_EXACT: CDX_EXACT_TIMEOUT.",
+                    detail = "CDX_URL_PREFIX: CDX_URL_PREFIX_TIMEOUT.",
                     durationMs = 5_000L
                 ),
                 WaybackTraceEvent(
@@ -1747,7 +1747,7 @@ class WaybackPriceHistoryClientTest {
         val result = summarizeCdxStep5Events(
             listOf(
                 WaybackTraceEvent(5, WaybackTraceStatus.PASSED,
-                    "CDX_EXACT: respuesta válida; 3 captura(s) candidatas.", 800L),
+                    "CDX_URL_PREFIX: respuesta válida; 3 captura(s) candidatas.", 800L),
                 WaybackTraceEvent(5, WaybackTraceStatus.PASSED,
                     "CDX_PRODUCT_PREFIX: respuesta válida; 1 captura(s) candidatas.", 950L),
                 WaybackTraceEvent(5, WaybackTraceStatus.FAILED,
@@ -1796,10 +1796,10 @@ class WaybackPriceHistoryClientTest {
     @Test
     fun classifiesWaybackNetworkFailuresWithoutLeakingExceptionText() {
         val client = newClient()
-        assertEquals("CDX_EXACT_TIMEOUT", client.classifyNetworkFailure("CDX_EXACT", java.net.SocketTimeoutException("secret url")))
+        assertEquals("CDX_URL_PREFIX_TIMEOUT", client.classifyNetworkFailure("CDX_URL_PREFIX", java.net.SocketTimeoutException("secret url")))
         assertEquals("CDX_DOMAIN_TIMEOUT", client.classifyNetworkFailure("CDX_DOMAIN", java.io.InterruptedIOException("timeout")))
         assertEquals("SNAPSHOT_TIMEOUT", client.classifyNetworkFailure("SNAPSHOT", java.io.InterruptedIOException("timeout")))
-        assertEquals("CDX_EXACT_DNS", client.classifyNetworkFailure("CDX_EXACT", java.net.UnknownHostException("private host")))
+        assertEquals("CDX_URL_PREFIX_DNS", client.classifyNetworkFailure("CDX_URL_PREFIX", java.net.UnknownHostException("private host")))
         assertEquals("CDX_DOMAIN_NETWORK", client.classifyNetworkFailure("CDX_DOMAIN", java.io.IOException("private host")))
         assertEquals("CDX_DOMAIN_UNEXPECTED_ERROR", client.classifyNetworkFailure("CDX_DOMAIN", IllegalStateException("private data")))
     }

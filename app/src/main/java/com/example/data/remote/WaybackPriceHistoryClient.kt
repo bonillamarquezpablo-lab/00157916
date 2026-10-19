@@ -224,7 +224,7 @@ class WaybackPriceHistoryClient(
                 )
             }
 
-            // One exact CDX request returns many timestamps at once; two distant captures feed the chart.
+            // One URL-prefix CDX request returns multiple timestamps at once; two distant captures feed the chart.
             val cdxUrl = buildCdxUrl(directUrl, now, lookbackDays)
                 ?: return@serializedArchiveLookup WaybackBackfillResult(
                     requestFailed = true,
@@ -238,7 +238,7 @@ class WaybackPriceHistoryClient(
                 lookbackDays = lookbackDays,
                 maxSnapshots = MAX_DIRECT_SNAPSHOTS_PER_URL,
                 cdxTimeoutSeconds = DIRECT_CDX_TIMEOUT_SECONDS,
-                cdxStage = "CDX_EXACT",
+                cdxStage = "CDX_URL_PREFIX",
                 snapshotTimeoutSeconds = DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS,
                 onTrace = onTrace
             )

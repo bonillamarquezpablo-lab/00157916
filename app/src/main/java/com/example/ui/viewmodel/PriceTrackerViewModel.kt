@@ -1856,7 +1856,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         }
                         if (direct == null) {
                             candidateTimedOut = true
-                            diagnosticCodes.add("CDX_EXACT_CANDIDATE_TIMEOUT")
+                            diagnosticCodes.add("CDX_URL_PREFIX_CANDIDATE_TIMEOUT")
                         } else {
                             attempts += direct
                         }
@@ -1867,7 +1867,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         attempts.any { it.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") }
                     if (candidate.merchantDomain != null &&
                         attempts.none { it.quotes.isNotEmpty() } &&
-                        !candidateTimedOut &&
                         !rateLimitedAtDirectStage
                     ) {
                         if (diagnosticProductId != null) {
@@ -2129,7 +2128,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 val diagnosticLabels = diagnosticCodes.distinct().take(8).map { code ->
                     when {
                         code.startsWith("CDX_DOMAIN_EXACT_HTTP_") -> "$code (respuesta HTTP de la consulta exacta de una URL candidata)"
-                        code.startsWith("CDX_EXACT_HTTP_") -> "$code (respuesta HTTP de la búsqueda por URL exacta)"
+                        code.startsWith("CDX_URL_PREFIX_HTTP_") -> "$code (respuesta HTTP de la búsqueda por prefijo de URL)"
                         code.startsWith("CDX_DOMAIN_HTTP_") -> "$code (respuesta HTTP de la búsqueda por dominio)"
                         code.startsWith("SNAPSHOT_HTTP_") -> "$code (respuesta HTTP de una captura)"
                         else -> when (code) {
@@ -2141,11 +2140,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             "DOMAIN_UNRESOLVED" -> "$code (no se identificó el dominio de la tienda)"
                             "CDX_QUERY_NOT_BUILDABLE" -> "$code (faltan términos útiles para buscar en el dominio)"
                             "CACHE_SKIPPED" -> "$code (resultado reciente en caché)"
-                            "CDX_EXACT_BODY_EMPTY_OR_LIMIT" -> "$code (respuesta de la consulta exacta vacía o demasiado grande)"
+                            "CDX_URL_PREFIX_BODY_EMPTY_OR_LIMIT" -> "$code (respuesta de la consulta por prefijo vacía o demasiado grande)"
                             "CDX_DOMAIN_BODY_EMPTY_OR_LIMIT" -> "$code (respuesta de la consulta por dominio vacía o demasiado grande)"
-                            "CDX_EXACT_INVALID_RESPONSE" -> "$code (la consulta exacta no devolvió el formato esperado)"
+                            "CDX_URL_PREFIX_INVALID_RESPONSE" -> "$code (la consulta por prefijo no devolvió el formato esperado)"
                             "CDX_DOMAIN_INVALID_RESPONSE" -> "$code (la consulta por dominio no devolvió el formato esperado)"
-                            "CDX_EXACT_TIMEOUT" -> "$code (agotó el tiempo la consulta a la URL exacta)"
+                            "CDX_URL_PREFIX_TIMEOUT" -> "$code (agotó el tiempo la consulta por prefijo de URL)"
                             "CDX_DOMAIN_TIMEOUT" -> "$code (agotó el tiempo la búsqueda de URLs de producto en el índice)"
                             "CDX_DOMAIN_EXACT_TIMEOUT" -> "$code (agotó el tiempo al consultar una URL de producto encontrada)"
                             "CDX_DOMAIN_EXACT_DNS" -> "$code (no se pudo resolver el servidor al consultar una URL candidata)"
@@ -2154,11 +2153,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             "CDX_DOMAIN_EXACT_BODY_EMPTY_OR_LIMIT" -> "$code (respuesta de la URL candidata vacía o demasiado grande)"
                             "CDX_DOMAIN_EXACT_INVALID_RESPONSE" -> "$code (la URL candidata devolvió un formato de índice no válido)"
                             "CDX_NO_PRODUCT_URLS" -> "$code (el índice no devolvió URLs de producto que coincidieran con la búsqueda)"
-                            "CDX_EXACT_DNS" -> "$code (no se pudo resolver el servidor del índice en la consulta exacta)"
+                            "CDX_URL_PREFIX_DNS" -> "$code (no se pudo resolver el servidor del índice en la consulta por prefijo)"
                             "CDX_DOMAIN_DNS" -> "$code (no se pudo resolver el servidor del índice en la búsqueda por dominio)"
-                            "CDX_EXACT_NETWORK" -> "$code (fallo de conexión en la consulta exacta)"
+                            "CDX_URL_PREFIX_NETWORK" -> "$code (fallo de conexión en la consulta por prefijo)"
                             "CDX_DOMAIN_NETWORK" -> "$code (fallo de conexión en la búsqueda por dominio)"
-                            "CDX_EXACT_UNEXPECTED_ERROR" -> "$code (error inesperado en la consulta exacta)"
+                            "CDX_URL_PREFIX_UNEXPECTED_ERROR" -> "$code (error inesperado en la consulta por prefijo)"
                             "CDX_DOMAIN_UNEXPECTED_ERROR" -> "$code (error inesperado en la búsqueda por dominio)"
                             "CDX_NO_CAPTURES" -> "$code (el índice respondió, pero no encontró capturas)"
                             "NO_VERIFIED_EUR_PRICE" -> "$code (capturas sin título coincidente y precio EUR verificable)"
@@ -2169,7 +2168,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             "SNAPSHOT_NETWORK" -> "$code (fallo de red al descargar la captura)"
                             "ALL_SNAPSHOTS_FAILED" -> "$code (ninguna captura se pudo descargar)"
                             "CANDIDATE_TIMEOUT" -> "$code (se agotó el tiempo total de la búsqueda de esta tienda)"
-                            "CDX_EXACT_CANDIDATE_TIMEOUT" -> "$code (la consulta exacta superó su límite de tiempo)"
+                            "CDX_URL_PREFIX_CANDIDATE_TIMEOUT" -> "$code (la consulta por prefijo superó su límite de tiempo)"
                             "CDX_DOMAIN_CANDIDATE_TIMEOUT" -> "$code (la búsqueda amplia por dominio superó su límite de tiempo)"
                             else -> code
                         }

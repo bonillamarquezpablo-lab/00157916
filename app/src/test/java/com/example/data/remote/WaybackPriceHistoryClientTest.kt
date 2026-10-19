@@ -589,12 +589,18 @@ class WaybackPriceHistoryClientTest {
                         Thread.sleep(3_500L)
                         throw java.net.SocketTimeoutException("simulated first Availability URL timeout")
                     }
-                    val snapshotUrl = "https://web.archive.org/web/20250101120000id_/$originalUrl"
-                    val body = """
-                        {"archived_snapshots":{"closest":{
-                          "available":true,"timestamp":"20250101120000","url":"$snapshotUrl"
-                        }}}
-                    """.trimIndent()
+                    val body = if (originalUrl == realStoreSearchUrl) {
+                        val snapshotUrl = "https://web.archive.org/web/20250101120000id_/$originalUrl"
+                        """
+                            {"archived_snapshots":{"closest":{
+                              "available":true,"timestamp":"20250101120000","url":"$snapshotUrl"
+                            }}}
+                        """.trimIndent()
+                    } else {
+                        // Product-shaped guesses without a capture must be exhausted before
+                        // the generic search page is tried as the fifth bounded candidate.
+                        """{"archived_snapshots":{}}"""
+                    }
                     Response.Builder()
                         .request(request)
                         .protocol(Protocol.HTTP_1_1)
@@ -637,14 +643,14 @@ class WaybackPriceHistoryClientTest {
             )
             assertEquals("The exact saved retailer URL must be the first Availability candidate", preferredUrl, availabilityUrls.first())
             assertEquals(
-                "Fallback is bounded to three candidate URLs",
-                3,
+                "Fallback should try up to five bounded URLs before giving up",
+                5,
                 availabilityUrls.size
             )
             assertEquals(
-                "The third probe should reach the actual retailer search URL after the offer URL and guessed product route",
+                "The real retailer search URL should be tried only after the saved offer URL and three product-shaped guesses",
                 realStoreSearchUrl,
-                availabilityUrls[2]
+                availabilityUrls[4]
             )
             assertTrue("The verified archived EUR price should be recovered after a 3.5-second HTML response", result.quotes.isNotEmpty())
             assertTrue("Every accepted result must retain the verified EUR price", result.quotes.isNotEmpty() && result.quotes.all { kotlin.math.abs(it.price - 79.99) < 0.001 })
@@ -663,7 +669,7 @@ class WaybackPriceHistoryClientTest {
                 traceEvents.any {
                     it.diagnosticStep == 7 &&
                         it.status == WaybackTraceStatus.PASSED &&
-                        it.detail.contains("Availability encontró 2 captura(s)") &&
+                        it.detail.contains("Availability encontró 1 captura(s)") &&
                         it.detail.contains("DOMAIN_AVAILABILITY_FALLBACK_TIMEOUT")
                 }
             )

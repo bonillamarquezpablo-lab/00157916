@@ -37,7 +37,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,7 +55,9 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.Store
+import com.example.data.remote.WaybackTraceStatus
 import com.example.data.remote.extractDirectRetailerUrl
+import com.example.ui.viewmodel.WaybackDiagnosticEntry
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -72,10 +77,12 @@ fun ProductDetailSheet(
     onSearchFreeHistory: () -> Unit = {},
     freeHistoryStatus: String? = null,
     isSearchingFreeHistory: Boolean = false,
+    waybackDiagnosticSteps: List<WaybackDiagnosticEntry> = emptyList(),
     serpApiActionStatus: String? = null,
     isComparingStores: Boolean = false
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showWaybackDiagnostics by remember(product.id) { mutableStateOf(false) }
     val context = LocalContext.current
     val scrollState = rememberScrollState()
     val spanishLocale = remember { Locale("es", "ES") }
@@ -553,7 +560,10 @@ fun ProductDetailSheet(
                 product.offers.isNotEmpty()
             ) {
                 OutlinedButton(
-                    onClick = onSearchFreeHistory,
+                    onClick = {
+                        showWaybackDiagnostics = true
+                        onSearchFreeHistory()
+                    },
                     enabled = !isSearchingFreeHistory && !isComparingStores,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -572,6 +582,114 @@ fun ProductDetailSheet(
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+                OutlinedButton(
+                    onClick = { showWaybackDiagnostics = !showWaybackDiagnostics },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(38.dp)
+                        .testTag("wayback_diagnostic_toggle"),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(
+                        if (showWaybackDiagnostics) "Ocultar diagnóstico Wayback"
+                        else "Ver diagnóstico Wayback · 15 pasos"
+                    )
+                }
+                if (showWaybackDiagnostics || isSearchingFreeHistory) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("wayback_diagnostic_panel"),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                "Telemetría local de Wayback",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                "Observa la búsqueda solicitada: no lanza peticiones adicionales. Se ocultan URLs completas, parámetros y contenido HTML.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            waybackDiagnosticSteps.forEach { entry ->
+                                val statusLabel = when (entry.status) {
+                                    WaybackTraceStatus.PENDING -> "PENDIENTE"
+                                    WaybackTraceStatus.RUNNING -> "EN CURSO"
+                                    WaybackTraceStatus.PASSED -> "SUPERADO"
+                                    WaybackTraceStatus.FAILED -> "FALLÓ"
+                                    WaybackTraceStatus.SKIPPED -> "NO EJECUTADO"
+                                }
+                                val statusColor = when (entry.status) {
+                                    WaybackTraceStatus.PASSED -> Color(0xFF047857)
+                                    WaybackTraceStatus.FAILED -> Color(0xFFB91C1C)
+                                    WaybackTraceStatus.RUNNING -> Color(0xFF1D4ED8)
+                                    WaybackTraceStatus.PENDING,
+                                    WaybackTraceStatus.SKIPPED -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 2.dp),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.Top,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            "${entry.step}. ${entry.title}",
+                                            modifier = Modifier.weight(1f),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            statusLabel,
+                                            color = statusColor,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    if (entry.detail.isNotBlank()) {
+                                        Text(
+                                            entry.detail,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 10.sp
+                                        )
+                                    }
+                                    entry.durationMs?.let { duration ->
+                                        Text(
+                                            "Duración del último intento: ${duration} ms",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 9.sp
+                                        )
+                                    }
+                                }
+                                if (entry.step != 15) {
+                                    Spacer(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(1.dp)
+                                            .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
 

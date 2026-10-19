@@ -638,12 +638,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         val googleProductId = product.googleProductId?.takeIf { it.isNotBlank() }
             ?: extractGoogleShoppingProductId(product.storeUrl)
             ?: product.offers.firstNotNullOfOrNull { extractGoogleShoppingProductId(it.url) }
-        if (googleProductId.isNullOrBlank()) {
-            val message = "Esta ficha todavía no tiene un ID de catálogo de Google Shopping. Repite la búsqueda online del producto para obtenerlo; no se ha gastado cuota."
-            _uiState.value = current.copy(serpApiActionStatus = message)
-            showSnackbar(message)
-            return
-        }
         val lastAttempt = priceRefreshPreferences.getLong("compare_stores_attempt_${product.id}", 0L)
         if (lastAttempt > 0L && System.currentTimeMillis() - lastAttempt < TRACKED_REFRESH_COOLDOWN_MS) {
             val message = "Las tiendas de este producto se consultaron hace menos de 24 horas. No se ha repetido la búsqueda ni gastado cuota."
@@ -693,7 +687,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         searchesToSpend = 1,
                         remainingSearches = accountInfo.searchesRemaining,
                         remainingThisHour = accountInfo.remainingThisHour,
-                        message = "Consultar todas las ofertas disponibles para «${product.title}». La petición no se repetirá durante 24 horas, incluso si Google no devuelve coincidencias válidas."
+                        message = if (googleProductId != null) {
+                            "Consultar las ofertas y el historial disponibles para «${product.title}» con una búsqueda. La consulta no se repetirá durante 24 horas."
+                        } else {
+                            "La ficha no tiene ID de catálogo; Mínimo buscará «${product.title}» por nombre con una búsqueda. La consulta no se repetirá durante 24 horas."
+                        }
                     ),
                     serpApiActionStatus = null
                 )
@@ -826,12 +824,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         val productId = product.googleProductId?.takeIf { it.isNotBlank() }
             ?: extractGoogleShoppingProductId(product.storeUrl)
             ?: product.offers.firstNotNullOfOrNull { extractGoogleShoppingProductId(it.url) }
-        if (productId.isNullOrBlank()) {
-            _uiState.value = _uiState.value.copy(
-                serpApiActionStatus = "No se ha podido identificar el producto de Google Shopping. No se ha gastado cuota ni modificado el historial."
-            )
-            return
-        }
         val token = serpApiTokenStore.read()
         if (token.isNullOrBlank()) {
             _uiState.value = _uiState.value.copy(
@@ -864,20 +856,41 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         priceRefreshPreferences.edit()
             .putLong("compare_stores_attempt_${product.id}", now)
             .commit()
-        _uiState.value = _uiState.value.copy(serpApiActionStatus = "Consultando las tiendas de ${product.title}…")
-        val details = serpApiClient.searchGoogleProductDetails(
-            token = token,
-            productId = productId,
-            expectedTitle = product.title,
-            observedAt = now
+        _uiState.value = _uiState.value.copy(
+            serpApiActionStatus = if (productId != null) {
+                "Consultando las tiendas de ${product.title}…"
+            } else {
+                "Buscando tiendas para ${product.title} por nombre…"
+            }
         )
+        // Use the catalog endpoint when this saved row has Google's product ID. Older or
+        // intermediary Google Shopping links often have no ID; in that case use the same
+        // single-search budget to search by the product title instead of sending the user back
+        // to the search screen or launching a second paid request.
+        val details = if (productId != null) {
+            serpApiClient.searchGoogleProductDetails(
+                token = token,
+                productId = productId,
+                expectedTitle = product.title,
+                observedAt = now
+            )
+        } else {
+            val report = serpApiClient.searchOnlineWithDiagnostics(token, product.title)
+            com.example.data.remote.SerpApiGoogleProductDetails(
+                offers = report.results,
+                priceInsights = emptyList(),
+                priceHistoryAvailable = false
+            )
+        }
         val safeOffers = repository.filterProductComparisonOffers(details.offers, product.title)
-        val savedHistory = repository.recordGooglePriceInsightsHistory(
-            productId = product.id,
-            expectedTitle = product.title,
-            googleCatalogId = productId,
-            insights = details.priceInsights
-        )
+        val savedHistory = if (productId != null && details.priceInsights.isNotEmpty()) {
+            repository.recordGooglePriceInsightsHistory(
+                productId = product.id,
+                expectedTitle = product.title,
+                googleCatalogId = productId,
+                insights = details.priceInsights
+            )
+        } else 0
         val savedOffers = if (safeOffers.isNotEmpty()) {
             repository.recordProductComparisonOffers(product.id, product.title, safeOffers)
         } else 0
@@ -917,7 +930,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             details.priceHistoryAvailable -> "Google indica que hay una serie histórica, pero no se pudieron interpretar puntos fechados en euros."
             else -> "Google no publica una serie histórica para este producto."
         }
-        val message = "Comparación completada: $offerNote $historyNote No se repetirá antes de 24 horas."
+        val modeNote = if (productId == null) "Búsqueda por nombre completada. " else ""
+        val message = "${modeNote}Comparación completada: $offerNote $historyNote No se repetirá antes de 24 horas."
         _uiState.value = _uiState.value.copy(serpApiActionStatus = message)
         showSnackbar(message)
         val after = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
@@ -1658,6 +1672,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
 
                 val notice = when {
+                    skippedCount == candidates.size && diagnosticCodes.contains("CACHE_SKIPPED_AFTER_FAILURE") ->
+                        "Internet Archive no respondió en el intento anterior. Mínimo evita repetir enseguida una consulta que agotó el tiempo; vuelve a probar dentro de unos minutos. Esto no significa que no existan capturas."
                     skippedCount == candidates.size ->
                         "Estas consultas gratuitas ya se comprobaron recientemente. La caché evita repetir búsquedas completadas sin resultados útiles."
                     savedCount > 0 -> {

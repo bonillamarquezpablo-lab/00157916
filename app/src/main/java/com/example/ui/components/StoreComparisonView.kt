@@ -42,6 +42,24 @@ import com.example.data.remote.extractDirectRetailerUrl
 import java.text.NumberFormat
 import java.util.Locale
 
+internal fun storeComparisonSummaryLabel(offerCount: Int, storeCount: Int): String {
+    val safeOfferCount = offerCount.coerceAtLeast(0)
+    val safeStoreCount = storeCount.coerceAtLeast(0)
+    val offerLabel = if (safeOfferCount == 1) "oferta" else "ofertas"
+    val storeLabel = if (safeStoreCount == 1) "tienda" else "tiendas"
+    return "$safeOfferCount $offerLabel · $safeStoreCount $storeLabel"
+}
+
+/** A cheapest-offer badge is meaningful only when more than one seller is represented. */
+internal fun shouldHighlightLowestCurrentOffer(
+    distinctStoreCount: Int,
+    offerPrice: Double,
+    minimumOfferPrice: Double
+): Boolean = distinctStoreCount > 1 &&
+    offerPrice.isFinite() &&
+    minimumOfferPrice.isFinite() &&
+    offerPrice == minimumOfferPrice
+
 @Composable
 fun StoreComparisonView(
     offers: List<StoreOffer>,
@@ -53,6 +71,9 @@ fun StoreComparisonView(
     val context = LocalContext.current
     val priceFormatter = remember { NumberFormat.getCurrencyInstance(Locale("es", "ES")) }
     val minOfferPrice = offers.minOfOrNull { it.price } ?: athPrice
+    val distinctStoreCount = offers.map { offer ->
+        offer.store.id.ifBlank { offer.store.name.trim().lowercase(Locale.ROOT) }
+    }.distinct().size
 
     Column(
         modifier = modifier
@@ -89,7 +110,7 @@ fun StoreComparisonView(
                     .padding(horizontal = 6.dp, vertical = 3.dp)
             ) {
                 Text(
-                    text = "${offers.size} ofertas",
+                    text = storeComparisonSummaryLabel(offers.size, distinctStoreCount),
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF059669)
@@ -100,7 +121,12 @@ fun StoreComparisonView(
         Spacer(modifier = Modifier.height(10.dp))
 
         offers.sortedBy { it.price }.forEachIndexed { index, offer ->
-            val isBestCurrent = offer.price == minOfferPrice
+            val isBestCurrent = shouldHighlightLowestCurrentOffer(
+                distinctStoreCount = distinctStoreCount,
+                offerPrice = offer.price,
+                minimumOfferPrice = minOfferPrice
+            )
+            val isOnlyOffer = offers.size == 1
             val isAtHistoricalMin = hasSufficientHistory && offer.price <= athPrice + 0.05
             val directDestination = offer.url.takeIf { it.isNotBlank() }?.let(::extractDirectRetailerUrl)
             val knownStore = Store.findKnownByName(offer.store.name, offer.url)
@@ -159,14 +185,16 @@ fun StoreComparisonView(
                                 maxLines = 2,
                                 softWrap = true
                             )
-                            if (isBestCurrent) {
+                            if (isBestCurrent || isOnlyOffer) {
                                 Surface(
                                     shape = RoundedCornerShape(4.dp),
-                                    color = Color(0xFF059669),
-                                    contentColor = Color.White
+                                    color = if (isBestCurrent) Color(0xFF059669)
+                                        else MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = if (isBestCurrent) Color.White
+                                        else MaterialTheme.colorScheme.onSurfaceVariant
                                 ) {
                                     Text(
-                                        text = "MENOR PRECIO",
+                                        text = if (isOnlyOffer) "ÚNICA OFERTA" else "MENOR PRECIO",
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.ExtraBold,

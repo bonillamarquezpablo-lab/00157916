@@ -412,6 +412,102 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun domainFallbackContinuesWhenFirstCaptureHasNoVerifiedPrice() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .commit()
+
+        val title = "Anker Prime 27K Cookie Wall Test ${System.currentTimeMillis()}"
+        val preferredUrl = "https://shop.example/products/anker-prime-27k.html"
+        val requests = CopyOnWriteArrayList<String>()
+        val availabilityUrls = CopyOnWriteArrayList<String>()
+        val validHtml = """
+            <html><head>
+              <script type="application/ld+json">
+                {"@type":"Product","name":"$title",
+                 "offers":{"@type":"Offer","price":"79.99","priceCurrency":"EUR"}}
+              </script>
+            </head><body></body></html>
+        """.trimIndent()
+        val cookieWallHtml = """
+            <html><head><title>Checking your browser</title></head>
+            <body>Enable JavaScript and cookies to continue.</body></html>
+        """.trimIndent()
+
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            val hostAndPath = request.url.host + request.url.encodedPath
+            requests += hostAndPath
+            when {
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    throw java.net.SocketTimeoutException("simulated CDX domain timeout")
+                }
+                request.url.host == "archive.org" &&
+                    request.url.encodedPath == "/wayback/available" -> {
+                    val originalUrl = request.url.queryParameter("url")
+                        ?: throw AssertionError("Availability request has no product URL")
+                    availabilityUrls += originalUrl
+                    val snapshotUrl = "https://web.archive.org/web/20250101120000id_/$originalUrl"
+                    val body = """
+                        {"archived_snapshots":{"closest":{
+                          "available":true,"timestamp":"20250101120000","url":"$snapshotUrl"
+                        }}}
+                    """.trimIndent()
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(body.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/web/") -> {
+                    val snapshotNumber = requests.count { it.startsWith("web.archive.org/web/") }
+                    val html = if (snapshotNumber == 1) cookieWallHtml else validHtml
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "text/html; charset=utf-8")
+                        .body(html.toResponseBody("text/html; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                else -> throw AssertionError("Unexpected Wayback request: $hostAndPath")
+            }
+        }.build()
+
+        try {
+            val result = withTimeout(10_000L) {
+                WaybackPriceHistoryClient(context, http).fetchHistoryByMerchantDomain(
+                    domain = "shop.example",
+                    expectedTitle = title,
+                    lookbackDays = 730,
+                    preferredUrl = preferredUrl
+                )
+            }
+            assertTrue("The direct offer URL must be the first candidate", availabilityUrls.first() == preferredUrl)
+            assertTrue("The bounded second URL candidate must be queried", availabilityUrls.size >= 2)
+            assertTrue(
+                "A cookie wall at the first snapshot must not hide a valid price in the second",
+                requests.count { it.startsWith("web.archive.org/web/") } >= 2
+            )
+            assertEquals(79.99, result.quotes.single().price, 0.001)
+        } finally {
+            preferences.edit()
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .commit()
+        }
+    }
+
+    @Test
     fun parsesOnlySuccessfulHtmlCapturesInTimestampOrder() {
         val client = newClient()
         val body = """

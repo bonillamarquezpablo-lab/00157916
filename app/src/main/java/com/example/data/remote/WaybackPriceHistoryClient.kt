@@ -229,7 +229,7 @@ class WaybackPriceHistoryClient(
                             cacheKey = attempt,
                             now = now,
                             lookbackDays = lookbackDays,
-                            maxSnapshots = 1,
+                            maxSnapshots = MAX_CDX_FALLBACK_SNAPSHOTS,
                             // Try at most two product-specific URL candidates. The first
                             // candidate is often the retailer's search page; one unavailable
                             // archive there must not prevent a second plausible product path.
@@ -307,15 +307,17 @@ class WaybackPriceHistoryClient(
                 if (recentProbe.diagnosticCode == "${stage}_HTTP_404") continue
                 break
             }
-            if (recentProbe.capture != null) {
-                if (probeOlderCapture) {
-                    val olderProbe = availabilitySemaphore.withPermit {
-                        queryAvailability(originalUrl, dates.last(), stage)
-                    }
-                    probes += olderProbe
+            if (recentProbe.capture != null && probeOlderCapture) {
+                val olderProbe = availabilitySemaphore.withPermit {
+                    queryAvailability(originalUrl, dates.last(), stage)
                 }
+                probes += olderProbe
                 break
             }
+            // For the timeout fallback, candidates are product-specific and strictly bounded.
+            // Do not stop at the first archived capture: its HTML may be a cookie wall or contain
+            // no verifiable EUR price. Continue to the next candidate so its snapshot can be
+            // validated too; maxCandidates/maxSnapshots bound both traffic and total work.
         }
         val captures = probes.mapNotNull { it.capture }
             .filter { it.timestamp <= now && it.timestamp >= (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L) }

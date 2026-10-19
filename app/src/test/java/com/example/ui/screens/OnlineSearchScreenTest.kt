@@ -5,6 +5,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -235,7 +236,8 @@ class OnlineSearchScreenTest {
         clickFilter("Mostrar segunda mano")
         assertVisibleText("Todas las ofertas")
         assertVisibleText("Solo Amazon")
-        assertTrue("The second-hand filter should switch to its selected label", composeRule.onAllNodesWithText("Segunda mano").fetchSemanticsNodes().isNotEmpty())
+        assertVisibleText("Mostrar segunda mano")
+        composeRule.onNodeWithText("Mostrar segunda mano").assertIsSelected()
         assertVisibleText("1 tiendas · precio más bajo en Amazon Warehouse")
         assertTrue(
             composeRule.onAllNodesWithText("7 tiendas · precio más bajo en Wallapop")

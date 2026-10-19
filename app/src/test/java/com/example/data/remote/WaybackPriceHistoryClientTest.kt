@@ -531,6 +531,7 @@ class WaybackPriceHistoryClientTest {
         val title = "Anker Prime 27K Power Bank Fallback Test ${System.currentTimeMillis()}"
         val requests = CopyOnWriteArrayList<String>()
         val availabilityUrls = CopyOnWriteArrayList<String>()
+        val traceEvents = CopyOnWriteArrayList<WaybackTraceEvent>()
         val preferredUrl = "https://shop.example/products/anker-prime-27k-power-bank.html"
         val archivedHtml = """
             <html><head>
@@ -579,6 +580,8 @@ class WaybackPriceHistoryClientTest {
                 }
                 request.url.host == "web.archive.org" &&
                     request.url.encodedPath.startsWith("/web/") -> {
+                    // Reproduce an archived page that takes longer than the old 3-second timeout.
+                    Thread.sleep(3_500L)
                     Response.Builder()
                         .request(request)
                         .protocol(Protocol.HTTP_1_1)
@@ -598,7 +601,8 @@ class WaybackPriceHistoryClientTest {
                     domain = "shop.example",
                     expectedTitle = title,
                     lookbackDays = 730,
-                    preferredUrl = preferredUrl
+                    preferredUrl = preferredUrl,
+                    onTrace = { event -> traceEvents += event }
                 )
             }
             assertTrue(
@@ -610,9 +614,33 @@ class WaybackPriceHistoryClientTest {
                 "If the first candidate has no capture, the bounded second candidate must be tried",
                 availabilityUrls.size >= 2
             )
-            assertTrue("The verified archived EUR price should be recovered", result.quotes.isNotEmpty())
+            assertTrue("The verified archived EUR price should be recovered after a 3.5-second HTML response", result.quotes.isNotEmpty())
             assertEquals(79.99, result.quotes.single().price, 0.001)
             assertTrue(requests.any { it.startsWith("web.archive.org/web/") })
+            assertTrue(
+                "A CDX failure belongs to the CDX extraction row, not the Availability row",
+                traceEvents.any {
+                    it.diagnosticStep == 8 &&
+                        it.status == WaybackTraceStatus.SKIPPED &&
+                        it.detail.contains("No se pudo extraer una lista de capturas")
+                }
+            )
+            assertTrue(
+                "The Availability capture belongs to the fallback phase",
+                traceEvents.any {
+                    it.diagnosticStep == 7 &&
+                        it.status == WaybackTraceStatus.PASSED &&
+                        it.detail.contains("Availability API devolvió 1 captura(s) válida(s)")
+                }
+            )
+            assertTrue(
+                "A slow snapshot that succeeds must be recorded as downloaded HTML",
+                traceEvents.any {
+                    diagnosticIndexForWaybackTrace(it) == 11 &&
+                        it.status == WaybackTraceStatus.PASSED &&
+                        it.detail.contains("HTML recibido")
+                }
+            )
         } finally {
             preferences.edit()
                 .remove("wayback_rate_limit_until")

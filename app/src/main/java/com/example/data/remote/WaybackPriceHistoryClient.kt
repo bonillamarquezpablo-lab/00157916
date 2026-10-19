@@ -80,6 +80,62 @@ private fun emitWaybackTrace(
     runCatching { listener(WaybackTraceEvent(step, status, detail, durationMs, diagnosticStep)) }
 }
 
+/**
+ * Report all relevant phases when a fresh lookup is intentionally suppressed by the negative
+ * cache. Without these events the UI shows a generic "chain ended" message even though the
+ * client deliberately avoided a duplicate request.
+ */
+private fun emitCachedLookupSkippedTrace(
+    listener: ((WaybackTraceEvent) -> Unit)?,
+    stage: String,
+    fallbackWasAlsoSkipped: Boolean
+) {
+    emitWaybackTrace(
+        listener, 4, WaybackTraceStatus.SKIPPED,
+        "No ejecutado: consulta CDX de $stage omitida por caché reciente; no se envió petición."
+    )
+    emitWaybackTrace(
+        listener, 5, WaybackTraceStatus.SKIPPED,
+        "No ejecutado: no hubo respuesta CDX nueva porque se reutilizó el resultado reciente en caché."
+    )
+    if (fallbackWasAlsoSkipped) {
+        emitWaybackTrace(
+            listener, 6, WaybackTraceStatus.SKIPPED,
+            "No ejecutado: la alternativa de este dominio también se omitió por caché reciente."
+        )
+    }
+    emitWaybackTrace(
+        listener, 7, WaybackTraceStatus.SKIPPED,
+        "No ejecutado: no se extrajeron capturas nuevas porque la consulta CDX se omitió por caché.",
+        diagnosticStep = 8
+    )
+    emitWaybackTrace(
+        listener, 8, WaybackTraceStatus.SKIPPED,
+        "No ejecutado: no hay una captura nueva que descargar; la consulta fue omitida por caché.",
+        diagnosticStep = 11
+    )
+    emitWaybackTrace(
+        listener, 9, WaybackTraceStatus.SKIPPED,
+        "No ejecutado: no hay HTML nuevo que evaluar porque no se descargó una captura.",
+        diagnosticStep = 12
+    )
+    emitWaybackTrace(
+        listener, 10, WaybackTraceStatus.SKIPPED,
+        "No ejecutado: no se encontró una segunda captura nueva porque la consulta fue omitida por caché.",
+        diagnosticStep = 13
+    )
+    emitWaybackTrace(
+        listener, 11, WaybackTraceStatus.SKIPPED,
+        "No ejecutado: no hay una segunda página HTML nueva que evaluar.",
+        diagnosticStep = 14
+    )
+    emitWaybackTrace(
+        listener, 14, WaybackTraceStatus.SKIPPED,
+        "No ejecutado: no hay capturas nuevas que consolidar porque la consulta fue omitida por caché.",
+        diagnosticStep = 18
+    )
+}
+
 /** Translate stable client phase IDs into the clearer 20-stage on-device diagnostic. */
 internal fun diagnosticIndexForWaybackTrace(event: WaybackTraceEvent): Int {
     event.diagnosticStep?.takeIf { it in 1..20 }?.let { return it }
@@ -230,7 +286,7 @@ class WaybackPriceHistoryClient(
                 requestFailed = true,
                 diagnosticCodes = setOf("DIRECT_URL_INVALID")
             )
-        val attempt = attemptKey("url-cdx-batch-v4|$directUrl|$expectedTitle")
+        val attempt = attemptKey("url-cdx-batch-v5|$directUrl|$expectedTitle")
         serializedArchiveLookup {
             if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
                 return@serializedArchiveLookup WaybackBackfillResult(
@@ -240,6 +296,11 @@ class WaybackPriceHistoryClient(
             }
             if (wasAttemptedRecently(attempt, System.currentTimeMillis())) {
                 val previousAttemptFailed = preferences.getBoolean("${attempt}_failed", false)
+                emitCachedLookupSkippedTrace(
+                    onTrace,
+                    stage = "directa",
+                    fallbackWasAlsoSkipped = false
+                )
                 return@serializedArchiveLookup WaybackBackfillResult(
                     skippedRecently = true,
                     requestFailed = previousAttemptFailed,
@@ -295,11 +356,53 @@ class WaybackPriceHistoryClient(
                 ?.takeIf(::isEligibleDirectUrl)
                 ?.let { url -> runCatching { URI(url).host }.getOrNull() }
                 ?.let(::normalizeMerchantDomain)
-            ?: return@withContext WaybackBackfillResult(diagnosticCodes = setOf("DOMAIN_UNRESOLVED"))
+            ?: run {
+                emitWaybackTrace(
+                    onTrace, 4, WaybackTraceStatus.SKIPPED,
+                    "No ejecutado: no se envió CDX porque no se pudo identificar un dominio de tienda válido.",
+                    diagnosticStep = 5
+                )
+                emitWaybackTrace(
+                    onTrace, 5, WaybackTraceStatus.SKIPPED,
+                    "No ejecutado: no hay respuesta CDX porque no se envió una petición; causa DOMAIN_UNRESOLVED.",
+                    diagnosticStep = 6
+                )
+                emitWaybackTrace(
+                    onTrace, 6, WaybackTraceStatus.FAILED,
+                    "Alternativa no iniciada: DOMAIN_UNRESOLVED; no se pudo convertir el dato de tienda en un dominio válido.",
+                    diagnosticStep = 7
+                )
+                emitWaybackTrace(
+                    onTrace, 7, WaybackTraceStatus.SKIPPED,
+                    "No ejecutado: no se consultó un índice porque el dominio de tienda no se pudo resolver.",
+                    diagnosticStep = 8
+                )
+                emitWaybackTrace(
+                    onTrace, 8, WaybackTraceStatus.SKIPPED,
+                    "No ejecutado: no existe captura descargable sin una consulta válida al índice.",
+                    diagnosticStep = 11
+                )
+                emitWaybackTrace(
+                    onTrace, 9, WaybackTraceStatus.SKIPPED,
+                    "No ejecutado: no hay HTML de captura que evaluar.",
+                    diagnosticStep = 12
+                )
+                emitWaybackTrace(
+                    onTrace, 10, WaybackTraceStatus.SKIPPED,
+                    "No ejecutado: no hay una segunda captura que descargar.",
+                    diagnosticStep = 13
+                )
+                emitWaybackTrace(
+                    onTrace, 11, WaybackTraceStatus.SKIPPED,
+                    "No ejecutado: no hay una segunda captura que evaluar.",
+                    diagnosticStep = 14
+                )
+                return@withContext WaybackBackfillResult(diagnosticCodes = setOf("DOMAIN_UNRESOLVED"))
+            }
         if (expectedTitle.isBlank()) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("PRODUCT_TITLE_EMPTY"))
         }
-        val attempt = attemptKey("domain-cdx-batch-v4|$normalizedDomain|$expectedTitle")
+        val attempt = attemptKey("domain-cdx-batch-v5|$normalizedDomain|$expectedTitle")
         serializedArchiveLookup {
             if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
                 return@serializedArchiveLookup WaybackBackfillResult(
@@ -309,6 +412,11 @@ class WaybackPriceHistoryClient(
             }
             if (wasAttemptedRecently(attempt, System.currentTimeMillis())) {
                 val previousAttemptFailed = preferences.getBoolean("${attempt}_failed", false)
+                emitCachedLookupSkippedTrace(
+                    onTrace,
+                    stage = "por dominio",
+                    fallbackWasAlsoSkipped = true
+                )
                 return@serializedArchiveLookup WaybackBackfillResult(
                     skippedRecently = true,
                     requestFailed = previousAttemptFailed,
@@ -359,7 +467,7 @@ class WaybackPriceHistoryClient(
                 val productCdxUrl = buildCdxUrl(productUrlCandidate, now, lookbackDays)
                 if (productCdxUrl != null) {
                     val productAttemptKey = attemptKey(
-                        "domain-product-prefix-v2|$normalizedDomain|$expectedTitle|$productUrlCandidate"
+                        "domain-product-prefix-v3|$normalizedDomain|$expectedTitle|$productUrlCandidate"
                     )
                     val productResult = queryCdxAndFetchPrices(
                         cdxUrl = productCdxUrl,
@@ -557,7 +665,7 @@ class WaybackPriceHistoryClient(
                     "Availability no encontró un precio verificable; se comprueba una URL alternativa mediante CDX antes de cerrar la búsqueda."
                 )
                 val alternateCacheKey = attemptKey(
-                    "domain-alternate-product-prefix-v1|$normalizedDomain|$expectedTitle|$alternateUrl"
+                    "domain-alternate-product-prefix-v2|$normalizedDomain|$expectedTitle|$alternateUrl"
                 )
                 val candidateResult = queryCdxAndFetchPrices(
                     cdxUrl = alternateCdxUrl,

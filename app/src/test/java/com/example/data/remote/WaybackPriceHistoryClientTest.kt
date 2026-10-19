@@ -813,12 +813,12 @@ class WaybackPriceHistoryClientTest {
                 .remove("wayback_rate_limit_until")
                 .commit()
             assertTrue(
-                "A failed network request is briefly cached to avoid amplifying server throttling",
-                client.wasAttemptedRecently(key, lastAttempt + 10L * 60L * 1000L)
+                "A failed network request stays briefly cached to avoid amplifying server throttling",
+                client.wasAttemptedRecently(key, lastAttempt + 2L * 60L * 1000L)
             )
             assertFalse(
-                "A failed network request can be retried after thirty minutes",
-                client.wasAttemptedRecently(key, lastAttempt + 31L * 60L * 1000L)
+                "A failed network request can be retried after five minutes",
+                client.wasAttemptedRecently(key, lastAttempt + 6L * 60L * 1000L)
             )
 
             preferences.edit().putBoolean("${key}_failed", false).commit()

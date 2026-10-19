@@ -1031,12 +1031,12 @@ class WaybackPriceHistoryClient(
         val visiblePrice = if (jsonLd.isEmpty() && metaPrice == null) extractVisibleProductPrice(html, metaCurrency) else null
         if (metaPrice == null && jsonLd.isEmpty() && visiblePrice == null) return "ARCHIVE_PRICE_METADATA_MISSING"
         val candidates = jsonLd +
-            if (pageTitles.isNotEmpty() && metaPrice != null && !metaCurrency.isNullOrBlank()) {
+            (if (pageTitles.isNotEmpty() && metaPrice != null && !metaCurrency.isNullOrBlank()) {
                 pageTitles.map { title -> Triple(title, metaPrice, metaCurrency) }
-            } else emptyList() +
-            if (pageTitles.isNotEmpty() && visiblePrice != null) {
+            } else emptyList()) +
+            (if (pageTitles.isNotEmpty() && visiblePrice != null) {
                 pageTitles.map { title -> Triple(title, visiblePrice, "EUR") }
-            } else emptyList()
+            } else emptyList())
         if (candidates.none { it.third.equals("EUR", ignoreCase = true) }) {
             return "ARCHIVE_EUR_PRICE_MISSING"
         }

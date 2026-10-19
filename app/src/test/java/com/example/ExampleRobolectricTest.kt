@@ -409,6 +409,22 @@ class ExampleRobolectricTest {
                 groupOnlineShoppingResults(filtered).single().cheapestOffer.price,
                 0.001
             )
+
+            // A lone absurd phone price has no peer median, so the absolute category bound must catch it.
+            val loneGalaxyOutlier = repository.filterOnlineSearchResults(
+                listOf(
+                    SerpApiShoppingResult(
+                        title = "Samsung Galaxy A57 Azul Marino 256GB",
+                        price = 9_300.0,
+                        storeName = "Tienda Samsung",
+                        sourceUrl = "https://www.google.com/shopping/product/galaxy-a57",
+                        observedAt = timestamp
+                    )
+                ),
+                "Samsung Galaxy A57 Azul Marino 256GB"
+            )
+            assertEquals("Keep the suspicious offer visible for inspection", 1, loneGalaxyOutlier.size)
+            assertTrue("A 9,300 € mid-range phone must never be treated as a verified price", loneGalaxyOutlier.single().isSuspiciousPrice)
             val diagnosis = repository.diagnoseOnlineSearchRejections(
                 offers,
                 "Samsung Galaxy S26 Ultra 512 GB"

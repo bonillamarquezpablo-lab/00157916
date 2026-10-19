@@ -1573,6 +1573,15 @@ class WaybackPriceHistoryClientTest {
         assertEquals("lamanzanita.es", client.resolveMerchantDomain("La Manzanita", googleUrl))
         assertEquals("nike.com", client.resolveMerchantDomain("Nike Oficial", googleUrl))
         assertEquals("sprinter.es", client.resolveMerchantDomain("Sprinter Deportes", googleUrl))
+        assertEquals(
+            "A bad saved domain label must not override a recognised merchant name",
+            "apple.com",
+            client.resolveMerchantDomain("Apple", googleUrl, "Google Shopping")
+        )
+        assertNull(
+            "A provider label is not a valid store domain even when saved in Store.domain",
+            client.resolveMerchantDomain("Google Shopping", googleUrl, "Google Shopping")
+        )
 
         assertEquals(
             "A stored retailer domain should outrank Google's intermediate URL",

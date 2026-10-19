@@ -98,7 +98,7 @@ private val WAYBACK_DIAGNOSTIC_TITLES = listOf(
     "URL normalizada y destinos candidatos preparados",
     "Precontrol de pausa global y preparación de consulta",
     "Petición enviada al índice CDX",
-    "Respuesta CDX recibida y clasificada",
+    "Respuesta CDX o recuperación alternativa",
     "Fallback: CDX alternativo / Availability API",
     "Extracción de capturas CDX (requiere respuesta válida)",
     "Normalización y deduplicación de URL candidatas",
@@ -2100,8 +2100,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 "La consulta pasó las comprobaciones de configuración, destino y control de repetición; los errores de red se detallan en los pasos CDX."
                         }
                     )
+                    val availabilityRecovered = capturesFoundCount > 0 || successfulLookupsCount > 0
                     val cdxSummary = synchronized(cdxStep5Events) {
-                        summarizeCdxStep5Events(cdxStep5Events.toList())
+                        summarizeCdxStep5Events(
+                            events = cdxStep5Events.toList(),
+                            availabilityRecovered = availabilityRecovered,
+                            availabilityCapturesFound = capturesFoundCount
+                        )
                     }
                     if (cdxSummary != null) {
                         reportWaybackDiagnostic(

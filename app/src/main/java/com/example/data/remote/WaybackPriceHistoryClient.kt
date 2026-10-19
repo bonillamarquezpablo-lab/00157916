@@ -98,9 +98,13 @@ class WaybackPriceHistoryClient(
                 )
             }
             if (wasAttemptedRecently(attempt, System.currentTimeMillis())) {
+                val previousAttemptFailed = preferences.getBoolean("${attempt}_failed", false)
                 return@serializedArchiveLookup WaybackBackfillResult(
                     skippedRecently = true,
-                    diagnosticCodes = setOf("CACHE_SKIPPED")
+                    requestFailed = previousAttemptFailed,
+                    diagnosticCodes = setOf(
+                        if (previousAttemptFailed) "CACHE_SKIPPED_AFTER_FAILURE" else "CACHE_SKIPPED"
+                    )
                 )
             }
 
@@ -153,9 +157,13 @@ class WaybackPriceHistoryClient(
                 )
             }
             if (wasAttemptedRecently(attempt, System.currentTimeMillis())) {
+                val previousAttemptFailed = preferences.getBoolean("${attempt}_failed", false)
                 return@serializedArchiveLookup WaybackBackfillResult(
                     skippedRecently = true,
-                    diagnosticCodes = setOf("CACHE_SKIPPED")
+                    requestFailed = previousAttemptFailed,
+                    diagnosticCodes = setOf(
+                        if (previousAttemptFailed) "CACHE_SKIPPED_AFTER_FAILURE" else "CACHE_SKIPPED"
+                    )
                 )
             }
 
@@ -203,6 +211,34 @@ class WaybackPriceHistoryClient(
                 ) {
                     return@serializedArchiveLookup result
                 }
+                // A slow CDX domain index should not end the whole lookup. Fall back to one
+                // product-specific URL probe via Availability API; this is narrower than another
+                // host-wide scan and still validates the archived title and EUR price.
+                if (result.requestFailed &&
+                    result.diagnosticCodes.contains("CDX_DOMAIN_TIMEOUT") &&
+                    !result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
+                ) {
+                    val candidateUrls = buildAvailabilityCandidateUrls(normalizedDomain, expectedTitle)
+                    if (candidateUrls.isNotEmpty()) {
+                        val fallback = queryAvailabilityAndFetchPrices(
+                            candidateUrls = candidateUrls,
+                            expectedTitle = expectedTitle,
+                            cacheKey = attempt,
+                            now = now,
+                            lookbackDays = lookbackDays,
+                            maxSnapshots = 1,
+                            maxCandidates = 1,
+                            stage = "DOMAIN_AVAILABILITY_FALLBACK",
+                            probeOlderCapture = false
+                        )
+                        if (fallback.quotes.isNotEmpty()) {
+                            return@serializedArchiveLookup fallback.copy(diagnosticCodes = emptySet())
+                        }
+                        return@serializedArchiveLookup fallback.copy(
+                            diagnosticCodes = fallback.diagnosticCodes + "CDX_DOMAIN_TIMEOUT"
+                        )
+                    }
+                }
                 // Only the confirmed empty www host permits one fallback to the apex host.
             }
             lastResult ?: WaybackBackfillResult(diagnosticCodes = setOf("CDX_NO_CAPTURES"))
@@ -221,7 +257,8 @@ class WaybackPriceHistoryClient(
         lookbackDays: Int,
         maxSnapshots: Int,
         maxCandidates: Int,
-        stage: String
+        stage: String,
+        probeOlderCapture: Boolean = true
     ): WaybackBackfillResult {
         val urls = candidateUrls.asSequence()
             .filter(::isEligibleDirectUrl)
@@ -249,10 +286,12 @@ class WaybackPriceHistoryClient(
                 break
             }
             if (recentProbe.capture != null) {
-                val olderProbe = availabilitySemaphore.withPermit {
-                    queryAvailability(originalUrl, dates.last(), stage)
+                if (probeOlderCapture) {
+                    val olderProbe = availabilitySemaphore.withPermit {
+                        queryAvailability(originalUrl, dates.last(), stage)
+                    }
+                    probes += olderProbe
                 }
-                probes += olderProbe
                 break
             }
         }
@@ -1617,7 +1656,7 @@ class WaybackPriceHistoryClient(
         private const val MAX_AVAILABILITY_PROBE_CANDIDATES = 2
         private const val MAX_CDX_FALLBACK_SNAPSHOTS = 2
         private const val MAX_DOMAIN_CDX_HOST_QUERIES = 2
-        private const val CDX_FALLBACK_TIMEOUT_SECONDS = 4L
+        private const val CDX_FALLBACK_TIMEOUT_SECONDS = 3L
         private const val CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS = 2L
         private const val DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS = 2L
         private const val MAX_AVAILABILITY_BODY_BYTES = 64 * 1024
@@ -1637,7 +1676,7 @@ class WaybackPriceHistoryClient(
         private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L
         const val NEGATIVE_RETRY_INTERVAL_MS = 6L * 60L * 60L * 1000L
-        const val FAILURE_RETRY_INTERVAL_MS = 30L * 60L * 1000L
+        const val FAILURE_RETRY_INTERVAL_MS = 5L * 60L * 1000L
         private const val MIN_AVAILABILITY_REQUEST_INTERVAL_MS = 1_500L
         private const val KEY_LAST_AVAILABILITY_REQUEST_AT = "wayback_last_availability_request_at"
         private const val MIN_RATE_LIMIT_COOLDOWN_MS = 60L * 1000L

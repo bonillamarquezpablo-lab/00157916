@@ -588,7 +588,9 @@ class ProductRepository(
         // but are not added to Mercado or its price history.
         val eligible = filterOnlineSearchResults(results, searchQuery)
             .filterNot { it.isSecondHand || it.isFitmentUnverified || it.isCategoryUnverified }
-            // Accessories remain visible in online search, but are not saved as the main device.
+            // Marketplace accessory matches remain visible for inspection, but must never be
+            // persisted as the searched product. Explicit accessory searches are still supported.
+            .filterNot { it.isAccessoryOffer && !isAccessorySearchQuery(searchQuery) }
             .filterNot {
                 isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
                     isAccessoryListing(it.title)

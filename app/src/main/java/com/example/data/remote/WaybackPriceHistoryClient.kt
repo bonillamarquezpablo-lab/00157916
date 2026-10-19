@@ -610,7 +610,7 @@ class WaybackPriceHistoryClient(
                 "robot check" in head -> "CAPTCHA_OR_ROBOT_CHECK"
             "access denied" in head || "request blocked" in head || "temporarily blocked" in head ->
                 "ACCESS_DENIED_OR_BLOCKED"
-            Regex("""(?is)<title[^>]*>\\s*(404|page not found|página no encontrada|not found)\\b""")
+            Regex("""(?is)<title[^>]*>\s*(404|page not found|página no encontrada|not found)\b""")
                 .containsMatchIn(head) -> "ARCHIVED_PAGE_404"
             else -> null
         }

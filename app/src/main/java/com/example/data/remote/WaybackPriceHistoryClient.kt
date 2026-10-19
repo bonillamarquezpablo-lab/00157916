@@ -2351,12 +2351,14 @@ class WaybackPriceHistoryClient(
     private fun extractVisibleProductPrice(html: String, knownCurrency: String?): Double? {
         val openingTags = Regex("""(?is)<([a-z][a-z0-9:-]*)\b([^>]*)>""")
         val attributeRegex = Regex("""(?is)([a-z_:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""")
-        val priceSelector = Regex("""(?i)(product[-_ ]?price|current[-_ ]?price|sale[-_ ]?price|selling[-_ ]?price|final[-_ ]?price|special[-_ ]?price|price__current|price-value|pricevalue|a-price|^price$)""")
+        val priceSelector = Regex("""(?i)(product[-_ ]?price|current[-_ ]?price|sale[-_ ]?price|selling[-_ ]?price|final[-_ ]?price|special[-_ ]?price|price__current|price--current|price__sale|price--sale|price__amount|price-amount|pricevalue|price-value|a-price|pdp-price|priceblock_(?:our|deal|sale)price|^price$)""")
         val rejectedSelector = Regex("""(?i)(old|previous|regular|original|was[-_ ]?price|list[-_ ]?price|strike|crossed|installment|monthly|shipping|unit[-_ ]?price|price[-_ ]?before)""")
         val voidTags = setOf("meta", "input", "img", "br", "hr", "link", "source", "area", "embed", "track", "wbr")
         val euroAmount = Regex("""(?i)(?:€\s*[0-9][0-9., \u00a0]*|[0-9][0-9., \u00a0]*\s*€|\bEUR\s*[0-9][0-9., \u00a0]*|[0-9][0-9., \u00a0]*\s*\bEUR\b)""")
         val foreignCurrency = Regex("""(?i)(?:\$|£|\b(?:USD|GBP|CAD|AUD|PLN|SEK|NOK|DKK|CHF)\b)""")
         val number = Regex("""(?<![A-Za-z0-9])(?:[0-9]{1,3}(?:[., \u00a0][0-9]{3})+|[0-9]+)(?:[.,][0-9]{1,2})?(?![A-Za-z0-9])""")
+        val candidates = mutableListOf<Pair<Int, Double>>()
+        val preferredCurrentPrice = Regex("""(?i)(current[-_ ]?price|sale[-_ ]?price|selling[-_ ]?price|price__current|price--current|price__sale|price--sale|priceblock_(?:deal|sale)price)""")
         for (match in openingTags.findAll(html)) {
             val tagName = match.groupValues[1].lowercase(Locale.ROOT)
             val attrs = attributeRegex.findAll(match.groupValues[2]).associate { attr ->
@@ -2368,6 +2370,7 @@ class WaybackPriceHistoryClient(
                 .mapNotNull { attrs[it] }
                 .joinToString(" ")
             val isPriceElement = itemProps.any { it in setOf("price", "lowprice") } ||
+                attrs.keys.any { it in setOf("data-price", "data-price-amount", "data-product-price") } ||
                 priceSelector.containsMatchIn(selector)
             if (!isPriceElement || rejectedSelector.containsMatchIn(selector) || tagName in voidTags) continue
 
@@ -2378,7 +2381,7 @@ class WaybackPriceHistoryClient(
                 .replace(html.substring(contentStart, close.range.first), " ")
             val text = decodeHtml(Regex("""(?is)<[^>]+>""").replace(inner, " "))
                 .replace(Regex("""\s+"""), " ").trim()
-            val directValue = sequenceOf("content", "data-price", "value", "data-value")
+            val directValue = sequenceOf("content", "data-price", "data-price-amount", "data-product-price", "value", "data-value")
                 .mapNotNull { attrs[it] }
                 .firstOrNull { it.isNotBlank() }
             val visibleEuroMatch = euroAmount.find(text)
@@ -2387,14 +2390,23 @@ class WaybackPriceHistoryClient(
                 (!localCurrency.isNullOrBlank() && !localCurrency.equals("EUR", true))
             if (hasForeignCurrency) continue
             val currencyIsEuro = visibleEuroMatch != null ||
-                localCurrency.equals("EUR", true) ||
+                localCurrency.equals("EUR", true) || localCurrency == "€" ||
                 knownCurrency.equals("EUR", true)
             if (!currencyIsEuro) continue
             val rawNumber = visibleEuroMatch?.value ?: directValue ?: number.find(text)?.value ?: continue
             val parsed = parsePositivePrice(rawNumber) ?: continue
-            if (parsed in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE) return parsed
+            if (parsed in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE) {
+                val priority = when {
+                    itemProps.contains("price") -> 0
+                    preferredCurrentPrice.containsMatchIn(selector) -> 1
+                    else -> 2
+                }
+                candidates += priority to parsed
+            }
         }
-        return null
+        // Prefer exact itemprop prices, then explicit current/sale-price elements over wrappers
+        // that may contain both an old struck-through price and the current selling price.
+        return candidates.minByOrNull { it.first }?.second
     }
 
     private fun readMeta(html: String, names: Set<String>): String? {

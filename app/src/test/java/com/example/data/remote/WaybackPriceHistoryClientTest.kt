@@ -662,10 +662,10 @@ class WaybackPriceHistoryClientTest {
             assertEquals(79.99, result.quotes.single().price, 0.001)
             assertTrue("Step 4 records that the CDX request was sent",
                 traceEvents.any { it.step == 4 && it.status == WaybackTraceStatus.PASSED })
-            assertTrue("Step 5 identifies the simulated CDX timeout",
+            assertTrue("Step 5 identifies the simulated product-specific CDX timeout",
                 traceEvents.any {
                     it.step == 5 && it.status == WaybackTraceStatus.FAILED &&
-                        it.detail.contains("CDX_DOMAIN_TIMEOUT")
+                        it.detail.contains("CDX_PRODUCT_EXACT_TIMEOUT")
                 })
             assertTrue("Step 6 records the fallback completing successfully",
                 traceEvents.any { it.step == 6 && it.status == WaybackTraceStatus.PASSED })

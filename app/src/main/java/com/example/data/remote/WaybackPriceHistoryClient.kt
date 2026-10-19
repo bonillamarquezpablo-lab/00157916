@@ -485,7 +485,9 @@ class WaybackPriceHistoryClient(
             now = now,
             lookbackDays = lookbackDays,
             maxSnapshots = MAX_CDX_FALLBACK_SNAPSHOTS,
-            maxCandidates = MAX_AVAILABILITY_PROBE_CANDIDATES,
+            // Keep the known offer URL + guessed product URL, but also allow the real retailer
+            // search URL to be checked when those first two archived variants are absent.
+            maxCandidates = MAX_DOMAIN_AVAILABILITY_PROBE_CANDIDATES,
             stage = "DOMAIN_AVAILABILITY_FALLBACK",
             probeOlderCapture = false,
             onTrace = onTrace
@@ -561,6 +563,10 @@ class WaybackPriceHistoryClient(
             }
             probes += recentProbe
             if (recentProbe.diagnosticCode == "WAYBACK_RATE_LIMITED") break
+            // Avoid spending more requests once enough valid snapshots have been discovered.
+            if (!probeOlderCapture && probes.count { it.capture != null } >= maxSnapshots.coerceAtLeast(1)) {
+                break
+            }
             if (recentProbe.requestFailed) {
                 val code = recentProbe.diagnosticCode.orEmpty()
                 // A candidate-specific 404 or timeout should not hide a capture archived under
@@ -2304,6 +2310,7 @@ class WaybackPriceHistoryClient(
         private const val MAX_CONCURRENT_AVAILABILITY_REQUESTS = 1
         private const val MAX_AVAILABILITY_URL_CANDIDATES = 6
         private const val MAX_AVAILABILITY_PROBE_CANDIDATES = 2
+        private const val MAX_DOMAIN_AVAILABILITY_PROBE_CANDIDATES = 3
         private const val MAX_CDX_FALLBACK_SNAPSHOTS = 2
         private const val MAX_DOMAIN_CDX_HOST_QUERIES = 2
         // This runs in the background history backfill, not in the main search UI.

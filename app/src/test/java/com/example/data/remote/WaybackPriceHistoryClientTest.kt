@@ -532,7 +532,10 @@ class WaybackPriceHistoryClientTest {
         val requests = CopyOnWriteArrayList<String>()
         val availabilityUrls = CopyOnWriteArrayList<String>()
         val traceEvents = CopyOnWriteArrayList<WaybackTraceEvent>()
-        val preferredUrl = "https://shop.example/products/anker-prime-27k-power-bank.html"
+        val preferredUrl = "https://www.pccomponentes.com/anker-prime-27k-power-bank.html"
+        val realStoreSearchUrl = com.example.data.model.Store.ALL_STORES
+            .first { it.domain.contains("pccomponentes.com", ignoreCase = true) && it.supportsProductSearch }
+            .searchUrlFor(title)!!
         val archivedHtml = """
             <html><head>
               <script type="application/ld+json">
@@ -560,6 +563,8 @@ class WaybackPriceHistoryClientTest {
                     // First candidate simulates a transient per-URL timeout. The bounded
                     // fallback must continue to the second candidate instead of aborting early.
                     if (availabilityProbeNumber == 1) {
+                        // Reproduce a real elapsed timeout, rather than an instant exception.
+                        Thread.sleep(3_500L)
                         throw java.net.SocketTimeoutException("simulated first Availability URL timeout")
                     }
                     val snapshotUrl = "https://web.archive.org/web/20250101120000id_/$originalUrl"
@@ -595,7 +600,7 @@ class WaybackPriceHistoryClientTest {
         }.build()
 
         try {
-            val result = withTimeout(10_000L) {
+            val result = withTimeout(15_000L) {
                 WaybackPriceHistoryClient(context, http).fetchHistoryByMerchantDomain(
                     domain = "shop.example",
                     expectedTitle = title,
@@ -609,9 +614,15 @@ class WaybackPriceHistoryClientTest {
                 requests.contains("archive.org/wayback/available")
             )
             assertEquals("The exact saved retailer URL must be the first Availability candidate", preferredUrl, availabilityUrls.first())
-            assertTrue(
-                "If the first candidate has no capture, the bounded second candidate must be tried",
-                availabilityUrls.size >= 2
+            assertEquals(
+                "Fallback is bounded to three candidate URLs",
+                3,
+                availabilityUrls.size
+            )
+            assertEquals(
+                "The third probe should reach the actual retailer search URL after the offer URL and guessed product route",
+                realStoreSearchUrl,
+                availabilityUrls[2]
             )
             assertTrue("The verified archived EUR price should be recovered after a 3.5-second HTML response", result.quotes.isNotEmpty())
             assertEquals(79.99, result.quotes.single().price, 0.001)

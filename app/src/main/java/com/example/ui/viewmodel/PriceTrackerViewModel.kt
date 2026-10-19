@@ -181,10 +181,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         // The CDX domain endpoint is frequently unavailable or rate-limited. Keep the exact
         // page lookup first, but reserve only a short, separate budget for the broad fallback.
         const val MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS = 12_000L
-        // Product-prefix CDX, two bounded Availability probes and a captured HTML page can
-        // run in sequence. Keep this manual/history-only flow bounded without borrowing time
-        // from primary shopping search or UI rendering.
-        const val MAX_ARCHIVE_DOMAIN_FALLBACK_MS = 17_000L
+        // At most three 4-second Availability probes and up to two 5-second snapshot downloads,
+        // with a hard outer cap and scheduling margin. This is only the manual history path.
+        const val MAX_ARCHIVE_DOMAIN_FALLBACK_MS = 20_000L
     }
 
     private val database = AppDatabase.getInstance(application)

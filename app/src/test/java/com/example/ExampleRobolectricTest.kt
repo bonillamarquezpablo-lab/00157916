@@ -1486,7 +1486,15 @@ class ExampleRobolectricTest {
         ).allowMainThreadQueries().build()
         try {
             val now = System.currentTimeMillis()
-            val savedAt = now - 7L * 24L * 60L * 60L * 1000L
+            // Use a fixed date safely before the 13 Oct 2026 Europe/Madrid policy cutoff.
+            // "now - 7 days" crosses local midnight depending on the CI timezone/time of day
+            // and can accidentally create a post-cutoff quote, making this test wait forever.
+            val savedAt = java.util.Calendar.getInstance(
+                java.util.TimeZone.getTimeZone("Europe/Madrid")
+            ).apply {
+                clear()
+                set(2026, java.util.Calendar.OCTOBER, 10, 12, 0, 0)
+            }.timeInMillis
             val title = "Anker Prime 27K Power Bank"
             val productId = "old-saved-live-price"
             val sourceUrl = "https://www.amazon.es/dp/B0OLDPRICE"

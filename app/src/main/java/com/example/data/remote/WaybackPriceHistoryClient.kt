@@ -969,7 +969,11 @@ class WaybackPriceHistoryClient(
         return until
     }
 
-    private fun activeRateLimitUntil(now: Long): Long? =
+    /**
+     * Returns the end of Internet Archive's shared 429 cooldown, if one is still active.
+     * The UI uses this to explain when a retry can be sent without probing the archive again.
+     */
+    internal fun activeRateLimitUntil(now: Long = System.currentTimeMillis()): Long? =
         preferences.getLong(KEY_RATE_LIMIT_UNTIL, 0L).takeIf { it > now }
 
     internal fun clearRateLimitForTests() {
@@ -1959,7 +1963,7 @@ class WaybackPriceHistoryClient(
         private const val MIN_AVAILABILITY_REQUEST_INTERVAL_MS = 1_500L
         private const val KEY_LAST_AVAILABILITY_REQUEST_AT = "wayback_last_availability_request_at"
         private const val MIN_RATE_LIMIT_COOLDOWN_MS = 60L * 1000L
-        private const val DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60L * 60L * 1000L
+        private const val DEFAULT_RATE_LIMIT_COOLDOWN_MS = 5L * 60L * 1000L
         private const val MAX_RATE_LIMIT_COOLDOWN_MS = 6L * 60L * 60L * 1000L
         private const val KEY_RATE_LIMIT_UNTIL = "wayback_rate_limit_until"
         private val GLOBAL_AVAILABILITY_SEMAPHORE = Semaphore(1)

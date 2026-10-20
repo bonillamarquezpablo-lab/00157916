@@ -2847,7 +2847,7 @@ class WaybackPriceHistoryClient(
         )
     }
 
-    private fun parseArchivedPrice(
+    internal fun parseArchivedPrice(
         document: Document,
         expectedTitle: String,
         originalUrl: String,

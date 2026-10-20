@@ -6,6 +6,7 @@ import java.net.URI
 import java.net.URLDecoder
 import java.text.Normalizer
 import java.util.Locale
+import java.util.Base64
 
 private val BUNDLE_TERMS = Regex(
     """\b(pack|paquete|combo|bundle|kit|set|conjunto|combinacion|combinado)\b"""
@@ -328,6 +329,23 @@ private fun decodeRedirectParameter(raw: String): String {
             candidate.startsWith("http://", ignoreCase = true)
         ) return candidate
 
+        // Bing click IDs can store the destination as "u=a1<base64url>". Decode this
+        // envelope, then let the same bounded loop unwrap any nested URL encoding or redirect.
+        if (value.startsWith("a1") && value.length > 12) {
+            val payload = value.substring(2)
+            val base64Decoded = runCatching {
+                String(Base64.getUrlDecoder().decode(payload), Charsets.UTF_8)
+            }.recoverCatching {
+                String(Base64.getDecoder().decode(payload), Charsets.UTF_8)
+            }.getOrNull()?.let(::cleanRedirectUrlText)
+            if (base64Decoded?.startsWith("https://", ignoreCase = true) == true ||
+                base64Decoded?.startsWith("http://", ignoreCase = true) == true ||
+                base64Decoded?.startsWith("//") == true
+            ) {
+                value = base64Decoded
+                return@repeat
+            }
+        }
         val decoded = runCatching {
             URLDecoder.decode(value, Charsets.UTF_8.name())
         }.getOrDefault(value)
@@ -374,7 +392,7 @@ internal fun extractDirectRetailerUrlWithDepth(sourceUrl: String): Pair<String, 
         // A direct destination is done. Never archive or return a search, Wayback, or URL-shortener
         // host as if it were the merchant's product page.
         val redirectEndpoint = Regex(
-            """(?i)(?:^|/)(?:url|aclk|redirect|redir|out|outbound|away|click|link|track|go)(?:/|$)"""
+            """(?i)(?:^|/)(?:url|aclk|redirect|redir|slredirect|picassoredirect(?:\.html)?|out|outbound|away|click|link|track|go)(?:/|$)"""
         ).containsMatchIn(uri.rawPath.orEmpty())
         val intermediate = isIntermediaryRedirectHost(host) || redirectEndpoint
         if (!intermediate) {
@@ -420,11 +438,16 @@ internal fun extractDirectRetailerUrlWithDepth(sourceUrl: String): Pair<String, 
         val candidates = (orderedValues + fragmentParameters).distinct()
         val next = candidates.firstOrNull { candidate ->
             val target = runCatching { URI(candidate) }.getOrNull() ?: return@firstOrNull false
+            val targetScheme = target.scheme?.lowercase(Locale.ROOT)
             val targetHost = target.host?.lowercase(Locale.ROOT).orEmpty()
-            target.scheme?.lowercase(Locale.ROOT) in setOf("http", "https") &&
-                targetHost.isNotBlank() &&
-                target.rawUserInfo == null &&
-                candidate != current
+            if (targetScheme !in setOf("http", "https") ||
+                targetHost.isBlank() || target.rawUserInfo != null || candidate == current
+            ) return@firstOrNull false
+            // Convert an HTTP destination embedded in a secure redirect to its HTTPS equivalent;
+            // never pass an insecure target through to the historical-index client.
+            if (targetScheme == "http") {
+                candidate.replaceFirst(Regex("""(?i)^http://"""), "https://")
+            } else candidate
         } ?: return null
 
         current = next

@@ -130,7 +130,13 @@ internal fun isSupersededWaybackSkipDetail(detailLine: String): Boolean {
         message.startsWith("normalización omitida") ||
         message.startsWith("validación de fechas omitida") ||
         message.startsWith("no se encontró una segunda captura independiente") ||
-        message.startsWith("no había capturas disponibles")
+        message.startsWith("no había capturas disponibles") ||
+        message.startsWith("no se pudo comprobar la identidad: cdx no proporcionó ninguna captura") ||
+        message.startsWith("extracción de precio omitida: no se descargó html de una captura cdx") ||
+        message.startsWith("validación de importe omitida: no se obtuvo ningún precio de una captura cdx") ||
+        message.startsWith("verificación del producto omitida: availability no devolvió una captura") ||
+        message.startsWith("extracción del precio omitida: no hay html de una captura histórica") ||
+        message.startsWith("validación de importe omitida: no se extrajo ningún precio")
 }
 
 private val WAYBACK_DIAGNOSTIC_TITLES = listOf(

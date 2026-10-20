@@ -1212,6 +1212,105 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun usesPreferredAvailabilityUrlWhenBroadDomainCdxFilterCannotBeBuilt() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .commit()
+
+        val title = "Cafetera"
+        val preferredUrl = "https://shop.example/products/cafetera"
+        val now = System.currentTimeMillis()
+        val capturedAt = now - 2L * 60L * 60L * 1000L
+        val timestamp = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT)
+            .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+            .format(java.util.Date(capturedAt))
+        val archivedSnapshotUrl = "https://web.archive.org/web/" + timestamp + "id_/" + preferredUrl
+        val cdxRequests = java.util.concurrent.atomic.AtomicInteger()
+        val availabilityRequests = java.util.concurrent.atomic.AtomicInteger()
+        val archivedHtml = """
+            <html><head>
+              <script type="application/ld+json">
+                {"@type":"Product","name":"Cafetera",
+                 "offers":{"@type":"Offer","price":"99.99","priceCurrency":"EUR"}}
+              </script>
+            </head><body><h1>Cafetera</h1></body></html>
+        """.trimIndent()
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            when {
+                request.url.host == "archive.org" &&
+                    request.url.encodedPath == "/wayback/available" -> {
+                    availabilityRequests.incrementAndGet()
+                    val requestedUrl = request.url.queryParameter("url").orEmpty()
+                    val body = if (requestedUrl == preferredUrl) {
+                        """{"archived_snapshots":{"closest":{"available":true,"timestamp":"$timestamp","url":"$archivedSnapshotUrl"}}}"""
+                    } else {
+                        """{"archived_snapshots":{"closest":{"available":false}}}"""
+                    }
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(body.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    cdxRequests.incrementAndGet()
+                    throw AssertionError("No broad CDX pattern exists for a one-word product title")
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/web/") -> {
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "text/html; charset=utf-8")
+                        .body(archivedHtml.toResponseBody("text/html; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                else -> throw AssertionError("Unexpected archive request: " + request.url.host + request.url.encodedPath)
+            }
+        }.build()
+
+        try {
+            val client = WaybackPriceHistoryClient(context, http)
+            assertEquals(
+                "A one-word title has no safe broad-domain URL filter",
+                null,
+                client.buildDomainCdxHostUrls("shop.example", title, now = now, lookbackDays = 730)
+            )
+            val result = withTimeout(20_000L) {
+                client.fetchHistoryByMerchantDomain(
+                    domain = "shop.example",
+                    expectedTitle = title,
+                    now = now,
+                    lookbackDays = 730,
+                    preferredUrl = preferredUrl,
+                    preferredUrlAlreadyQueried = true
+                )
+            }
+
+            assertEquals(0, cdxRequests.get())
+            assertTrue("The direct retailer URL must still be checked with Availability", availabilityRequests.get() >= 1)
+            assertEquals(1, result.quotes.size)
+            assertEquals(99.99, result.quotes.single().price, 0.001)
+            assertEquals(preferredUrl, result.quotes.single().originalUrl)
+        } finally {
+            preferences.edit()
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .commit()
+        }
+    }
+
+    @Test
     fun domainCdxHttp500FallsBackToAvailabilityAndSavesVerifiedPrice() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)

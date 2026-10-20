@@ -67,6 +67,15 @@ android {
       // AI Studio.
       signingConfig = signingConfigs.getByName("debugConfig")
     }
+    // Private sideload build: same pinned certificate as installed app, but release-like
+    // manifest defaults (non-debuggable). This is not the Play Store production-signing setup.
+    create("sideload") {
+      initWith(getByName("release"))
+      isDebuggable = false
+      isMinifyEnabled = false
+      signingConfig = signingConfigs.getByName("debugConfig")
+      matchingFallbacks += listOf("release")
+    }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -132,7 +141,8 @@ dependencies {
   // implementation(libs.androidx.credentials.play.services)
   // implementation(libs.googleid)
   implementation(libs.firebase.appcheck.recaptcha)
-  implementation(libs.firebase.appcheck.debug)
+  // This debug-only provider is excluded from the non-debuggable sideload variant.
+  debugImplementation(libs.firebase.appcheck.debug)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.logging.interceptor)

@@ -190,7 +190,7 @@ jobs:
           VERSION_NAME: ${{ steps.version.outputs.version_name }}
         run: |
           set -euo pipefail
-          gradle :app:assembleDebug --stacktrace -PVERSION_CODE="$VERSION_CODE" -PVERSION_NAME="$VERSION_NAME"
+          gradle :app:assembleSideload --stacktrace -PVERSION_CODE="$VERSION_CODE" -PVERSION_NAME="$VERSION_NAME"
 
       - name: Verificar paquete, versión y firma del APK
         env:
@@ -198,11 +198,17 @@ jobs:
           VERSION_NAME: ${{ steps.version.outputs.version_name }}
         run: |
           set -euo pipefail
-          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          APK_PATH="app/build/outputs/apk/sideload/app-sideload.apk"
           AAPT="${ANDROID_HOME}/build-tools/36.0.0/aapt"
           test -s "$APK_PATH"
           BADGING="$("$AAPT" dump badging "$APK_PATH")"
           printf '%s\\n' "$BADGING" | grep -F "package: name='com.aistudio.preciominimo.esrxvt' versionCode='$VERSION_CODE' versionName='$VERSION_NAME'"
+          MANIFEST_TREE="$("$AAPT" dump xmltree "$APK_PATH" AndroidManifest.xml)"
+          if printf '%s\\n' "$MANIFEST_TREE" | grep -Eq 'android:debuggable.*(0xffffffff|true)'; then
+            echo "::error::El APK de distribución directa contiene android:debuggable=true."
+            exit 1
+          fi
+          echo "Manifest verificado: la aplicación no es depurable."
           SIGNATURE="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK_PATH")"
           printf '%s\\n' "$SIGNATURE"
           ACTUAL_CERT="$(printf '%s\\n' "$SIGNATURE" | sed -n 's/.*certificate SHA-256 digest: //p' | head -n 1 | tr -d ': ' | tr '[:lower:]' '[:upper:]')"
@@ -218,7 +224,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: minimo-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/sideload/app-sideload.apk
           if-no-files-found: error
           retention-days: 7
 

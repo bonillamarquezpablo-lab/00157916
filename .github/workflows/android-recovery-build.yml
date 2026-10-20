@@ -100,7 +100,7 @@ jobs:
             echo "::error::versionCode calculado ($VERSION_CODE) no supera la versión instalada 6296."
             exit 1
           fi
-          gradle :app:assembleDebug --stacktrace -PVERSION_CODE="$VERSION_CODE" -PVERSION_NAME="$VERSION_NAME"
+          gradle :app:assembleSideload --stacktrace -PVERSION_CODE="$VERSION_CODE" -PVERSION_NAME="$VERSION_NAME"
 
       - name: Verificar paquete, versión y firma estable
         env:
@@ -108,7 +108,7 @@ jobs:
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APK="app/build/outputs/apk/sideload/app-sideload.apk"
           VERSION_CODE=$((10000 + GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))
           VERSION_NAME="1.7.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
@@ -116,16 +116,21 @@ jobs:
           test -s "$APK"
           BADGING="$("$AAPT" dump badging "$APK")"
           printf '%s\\n' "$BADGING" | grep -F "package: name='com.aistudio.preciominimo.esrxvt' versionCode='${VERSION_CODE}' versionName='${VERSION_NAME}'"
+          MANIFEST_TREE="$("$AAPT" dump xmltree "$APK" AndroidManifest.xml)"
+          if printf '%s\\n' "$MANIFEST_TREE" | grep -Eq 'android:debuggable.*(0xffffffff|true)'; then
+            echo "::error::El APK de distribución directa contiene android:debuggable=true."
+            exit 1
+          fi
           SIGNATURE="$("$APKSIGNER" verify --verbose --print-certs "$APK")"
           ACTUAL_CERT="$(printf '%s\\n' "$SIGNATURE" | sed -n 's/.*certificate SHA-256 digest: //p' | head -n 1 | tr -d ': ' | tr '[:lower:]' '[:upper:]')"
           EXPECTED_CERT="F631A8C0A194008E77A312A78775E95837DBC66DF635EAE9B966E5C294ADD450"
           test "$ACTUAL_CERT" = "$EXPECTED_CERT"
-          echo "APK verificado: paquete, versión y certificado correctos."
+          echo "APK verificado: paquete, versión, estado no depurable y certificado correctos."
 
       - name: Guardar el APK
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: minimo-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/sideload/app-sideload.apk
           if-no-files-found: error
           retention-days: 7

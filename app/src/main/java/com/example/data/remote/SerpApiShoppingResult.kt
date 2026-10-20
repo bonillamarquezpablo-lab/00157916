@@ -133,14 +133,16 @@ data class SerpApiShoppingResult(
     /** A wheel result whose title omits one or more requested fitment dimensions. */
     val isFitmentUnverified: Boolean = false,
     /** The title may match the requested model, but does not clearly identify a wheel. */
-    val isCategoryUnverified: Boolean = false
+    val isCategoryUnverified: Boolean = false,
+    /** Original offer provenance when sourceUrl has been unwrapped to the actual retailer page. */
+    val sourceProvider: String? = null
 ) {
     /**
-     * True when the accepted URL stays on a Google domain rather than opening the seller directly.
-     * SerpApi can return /search?prds=... links as well as /shopping/product/... links.
+     * True when the offer originated from Google Shopping, even if its embedded seller URL has
+     * been safely unwrapped for direct price-history lookup.
      */
     val isGoogleShoppingProductLink: Boolean
-        get() = isGoogleShoppingUrl(sourceUrl)
+        get() = sourceProvider.equals("Google Shopping", ignoreCase = true) || isGoogleShoppingUrl(sourceUrl)
 
     val isSecondHand: Boolean
         get() {
@@ -161,9 +163,9 @@ data class SerpApiShoppingResult(
             """(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b|/\s*mes\b)"""
         ).containsMatchIn(condition)
 
-    /** Stored label describing where tapping this offer opens. */
+    /** Stored source label, separate from the unwrapped destination used by the history motor. */
     val linkType: String
-        get() = linkTypeForUrl(sourceUrl)
+        get() = sourceProvider?.takeIf { it.isNotBlank() } ?: linkTypeForUrl(sourceUrl)
 
     val isAmazonOffer: Boolean
         get() {
@@ -396,10 +398,10 @@ internal fun extractDirectRetailerUrlWithDepth(sourceUrl: String): Pair<String, 
         ).containsMatchIn(uri.rawPath.orEmpty())
         val intermediate = isIntermediaryRedirectHost(host) || redirectEndpoint
         if (!intermediate) {
-            val secure = if (scheme == "http") {
-                current.replaceFirst(Regex("""(?i)^http://"""), "https://")
-            } else current
-            return secure.takeIf(::isSafeResolvedRetailerUrl)?.let { it to hop }
+            // Do not upgrade an HTTP link by assumption. Only an actual HTTPS destination is
+            // safe to use for historical lookup; otherwise preserve the provider fallback.
+            return current.takeIf { scheme == "https" && isSafeResolvedRetailerUrl(it) }
+                ?.let { it to hop }
         }
 
         if (!visited.add(current)) return null
@@ -438,16 +440,10 @@ internal fun extractDirectRetailerUrlWithDepth(sourceUrl: String): Pair<String, 
         val candidates = (orderedValues + fragmentParameters).distinct()
         val next = candidates.firstOrNull { candidate ->
             val target = runCatching { URI(candidate) }.getOrNull() ?: return@firstOrNull false
-            val targetScheme = target.scheme?.lowercase(Locale.ROOT)
-            val targetHost = target.host?.lowercase(Locale.ROOT).orEmpty()
-            if (targetScheme !in setOf("http", "https") ||
-                targetHost.isBlank() || target.rawUserInfo != null || candidate == current
-            ) return@firstOrNull false
-            // Convert an HTTP destination embedded in a secure redirect to its HTTPS equivalent;
-            // never pass an insecure target through to the historical-index client.
-            if (targetScheme == "http") {
-                candidate.replaceFirst(Regex("""(?i)^http://"""), "https://")
-            } else candidate
+            target.scheme?.equals("https", ignoreCase = true) == true &&
+                !target.host.isNullOrBlank() &&
+                target.rawUserInfo == null &&
+                candidate != current
         } ?: return null
 
         current = next

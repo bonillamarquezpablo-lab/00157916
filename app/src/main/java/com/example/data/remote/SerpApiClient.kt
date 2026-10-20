@@ -673,7 +673,7 @@ class SerpApiClient(
         }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
             .sortedWith(
                 compareByDescending<SerpApiShoppingResult> {
-                    onlineProductRelevanceScore(query, it.title)
+                    onlineProductRelevanceScore(query.orEmpty(), it.title)
                 }.thenBy { it.price }
             )
             .take(MAX_ONLINE_RESULTS)

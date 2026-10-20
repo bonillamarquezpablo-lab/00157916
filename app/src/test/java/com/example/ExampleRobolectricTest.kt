@@ -2889,9 +2889,10 @@ class ExampleRobolectricTest {
                 .put(item("Samsung Galaxy S26 Ultra 512 GB negro", price = "1.259,99 €", extractedPrice = 1259.99,
                     link = "https://www.tienda.example/samsung-s26")))
         val validReport = client.parseShoppingResultsDetailed(mostlyGoogle, "Samsung Galaxy S26 Ultra 512 GB", 123L)
-        assertEquals("Google product/search links are valid destinations alongside direct links", 3, validReport.results.size)
-        assertEquals(2, validReport.results.count { it.linkType == "Google Shopping" })
+        assertEquals("Only a specific Google Shopping product page and a direct seller URL should survive", 2, validReport.results.size)
+        assertEquals(1, validReport.results.count { it.linkType == "Google Shopping" })
         assertEquals(1, validReport.results.count { it.linkType == "directo" })
+        assertEquals("A generic Google search URL is discarded instead of being used as a product destination", 1, validReport.rejectedForLink)
 
         val used = parse("Samsung Galaxy S26 Ultra 512 GB",
             item("Samsung Galaxy S26 Ultra 512 GB", condition = "used"))

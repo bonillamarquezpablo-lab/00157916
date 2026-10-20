@@ -2735,12 +2735,14 @@ class WaybackPriceHistoryClient(
 
         // Do not borrow a generic page/meta title if its structured offer identifies another SKU,
         // or if the matching structured offer carries a non-EUR/out-of-range price.
-        if (matchingJsonLd.isEmpty() &&
-            (matchingIdentityJsonLd.isNotEmpty() || structuredVariantConflict != null)
-        ) return null
+        if (matchingIdentityJsonLd.isNotEmpty() && matchingJsonLd.isEmpty()) return null
+        if (structuredVariantConflict != null && matchingJsonLd.isEmpty()) return null
 
-        val explicitMeta = if (matchingJsonLd.isEmpty() &&
-            structuredVariantConflict == null && metaPrice != null && !metaCurrency.isNullOrBlank()
+        // Keep the established retailer behavior where explicit EUR price metadata takes priority
+        // over another offer price for the same verified product. Disable this fallback when a
+        // conflicting structured product variant was detected.
+        val explicitMeta = if (structuredVariantConflict == null &&
+            metaPrice != null && !metaCurrency.isNullOrBlank()
         ) {
             pageTitles.asSequence()
                 .filter { isMatchingProductTitle(expectedTitle, it) }
@@ -2748,10 +2750,10 @@ class WaybackPriceHistoryClient(
                 .firstOrNull(::isValidCandidate)
         } else null
 
-        val matching = matchingJsonLd.minWithOrNull(
+        val matching = explicitMeta ?: matchingJsonLd.minWithOrNull(
             compareBy<Triple<String, Double, String>> { it.second }
                 .thenBy { normalizeTitle(it.first) }
-        ) ?: explicitMeta
+        )
         if (matching != null) {
             return ArchivedPriceQuote(
                 observedAt = observedAt,
@@ -3148,11 +3150,18 @@ class WaybackPriceHistoryClient(
         val sameIdentity =
             onlineProductIdentityKey(canonicalExpected) == onlineProductIdentityKey(canonicalArchived)
 
-        // Broad card identity ignores SKU distinctions such as storage. Require all variant
-        // tokens from the searched title before allowing an archived price to be accepted.
+        // Card identity intentionally ignores storage for deduplication. Require exact capacity
+        // tokens even when the broad model identity matches; retain existing equivalence rules for
+        // model-code spelling (e.g. WH-1000XM5 versus WH1000XM5).
         val expectedVariants = requiredVariantTokens(canonicalExpected)
         val archivedVariants = requiredVariantTokens(canonicalArchived)
-        if (!archivedVariants.containsAll(expectedVariants)) return false
+        val storageToken = Regex("""\b\d+\s*(?:gb|tb)\b""")
+        val expectedStorage = storageToken.findAll(canonicalExpected)
+            .map { it.value.replace(Regex("""\s+"""), "") }.toSet()
+        val archivedStorage = storageToken.findAll(canonicalArchived)
+            .map { it.value.replace(Regex("""\s+"""), "") }.toSet()
+        if (!archivedStorage.containsAll(expectedStorage)) return false
+        if (!sameIdentity && !archivedVariants.containsAll(expectedVariants)) return false
         if (sameIdentity) return true
 
         val expectedTokens = meaningfulTokens(canonicalExpected)
@@ -3186,9 +3195,7 @@ class WaybackPriceHistoryClient(
         val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
         val expectedStorage = storagePattern.findAll(e).map { it.value.replace(Regex("""\s+"""), "") }.toSet()
         val archivedStorage = storagePattern.findAll(a).map { it.value.replace(Regex("""\s+"""), "") }.toSet()
-        if (expectedStorage.isNotEmpty() && archivedStorage.isNotEmpty() &&
-            expectedStorage != archivedStorage
-        ) return true
+        if (expectedStorage.isNotEmpty() && !archivedStorage.containsAll(expectedStorage)) return true
 
         return expectedIdentifiers.isNotEmpty() &&
             expectedIdentifiers.any { it.matches(Regex("""\d+(?:gb|tb|mah|wh|w|hz|mm|cm)?""")) } &&

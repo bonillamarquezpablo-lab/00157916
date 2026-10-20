@@ -1862,6 +1862,79 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun prefersOriginalEurOfferOverUsdMetadataWhenBothAreAvailable() {
+        val client = newClient()
+        val capturedAt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).apply {
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }.parse("2025-01-03")!!.time
+        val html = """
+            <html><head>
+              <meta property="og:title" content="Anker Prime 27K Power Bank">
+              <meta property="product:price:amount" content="100.00">
+              <meta property="product:price:currency" content="USD">
+              <script type="application/ld+json">
+                {"@type":"Product","name":"Anker Prime 27K Power Bank",
+                 "offers":{"@type":"Offer","price":"94.99","priceCurrency":"EUR"}}
+              </script>
+            </head></html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            document = Jsoup.parse(html),
+            expectedTitle = "Anker Prime 27K Power Bank",
+            originalUrl = "https://shop.example/product/anker-prime-27k",
+            snapshotUrl = "https://web.archive.org/web/20250103000000id_/https://shop.example/product/anker-prime-27k",
+            observedAt = capturedAt,
+            acceptedCurrencies = setOf("EUR", "USD")
+        )
+        assertNotNull(quote)
+        assertEquals("EUR", quote!!.currency)
+        assertEquals(94.99, quote.price, 0.001)
+    }
+
+    @Test
+    fun leavesUsdPriceUnconvertedWhenTheHistoricalRateIsMissing() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        val cacheKey = "fx_usd_eur_capture_2025-01-06"
+        preferences.edit().remove(cacheKey + "_rate").remove(cacheKey + "_date").commit()
+        val events = CopyOnWriteArrayList<WaybackTraceEvent>()
+        val fxHttp = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            Response.Builder()
+                .request(request)
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .header("Content-Type", "application/json; charset=utf-8")
+                .body("[]".toResponseBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+        }.build()
+        val capturedAt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).apply {
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }.parse("2025-01-06")!!.time
+        val sourceQuote = ArchivedPriceQuote(
+            observedAt = capturedAt,
+            price = 100.0,
+            currency = "USD",
+            productTitle = "Anker Prime 27K Power Bank",
+            originalUrl = "https://shop.example/product/anker-prime-27k",
+            snapshotUrl = "https://web.archive.org/web/20250106000000id_/https://shop.example/product/anker-prime-27k"
+        )
+        try {
+            val converted = WaybackPriceHistoryClient(context, fxHttp = fxHttp)
+                .convertUsdQuoteToEurAtCaptureDate(sourceQuote) { events += it }
+            assertNull("No historical rate means no guessed conversion", converted)
+            assertTrue(events.any {
+                it.diagnosticStep == 17 && it.status == WaybackTraceStatus.FAILED &&
+                    it.detail.contains("Precio descartado")
+            })
+        } finally {
+            preferences.edit().remove(cacheKey + "_rate").remove(cacheKey + "_date").commit()
+        }
+    }
+
+    @Test
     fun convertsUsdUsingTheLatestHistoricalEcbRateNotLaterThanCaptureDate() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)

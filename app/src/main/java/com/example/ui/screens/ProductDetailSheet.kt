@@ -125,12 +125,16 @@ fun ProductDetailSheet(
             }
             if (archivedHistoryPoints.isNotEmpty()) {
                 if (isNotEmpty()) append(" ")
+                val convertedUsdPoints = archivedHistoryPoints.count {
+                    it.eventLabel?.contains("USD→EUR convertido", ignoreCase = true) == true
+                }
                 append("Internet Archive: ${archivedHistoryPoints.size} capturas")
+                if (convertedUsdPoints > 0) append(" (incluye ${convertedUsdPoints} convertidas de USD a EUR)")
                 oldestArchivedDate?.let { append(" desde $it") }
                 append(".")
             }
             if (isEmpty()) {
-                append("Aún no hay historial verificable. «Buscar histórico gratis» consulta capturas públicas sin gastar cuota de SerpApi, pero solo podrá reconstruir el precio si hay una captura con título y precio en euros verificables.")
+                append("Aún no hay historial verificable. «Buscar histórico gratis» consulta capturas públicas sin gastar cuota de SerpApi, pero solo podrá reconstruir el precio si hay una captura con título y precio en euros verificables o un precio USD con cambio histórico verificable.")
             } else {
                 append(" Puede haber huecos; stock, envío y precio final deben confirmarse en la tienda.")
             }

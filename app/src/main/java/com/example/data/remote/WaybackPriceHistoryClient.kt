@@ -3438,7 +3438,12 @@ class WaybackPriceHistoryClient(
         // must never be treated as the same SKU. Normalize common Spanish/English/Italian names.
         val expectedColourFamily = productColourFamily(e)
         val archivedColourFamily = productColourFamily(a)
-        if (expectedColourFamily != null && expectedColourFamily != archivedColourFamily) return false
+        // Missing colour in an archived title is unknown, not a contradiction. Only an
+        // explicitly different archived colour rejects the candidate; storage and model checks
+        // below remain strict so a generic page cannot lend a price to another SKU.
+        if (expectedColourFamily != null && archivedColourFamily != null &&
+            expectedColourFamily != archivedColourFamily
+        ) return false
 
         // Trim/model suffixes (Pro, Ultra, Max, etc.) are meaningful for phones and scooters.
         // Require the same explicit trim markers on both titles to avoid cross-variant prices.

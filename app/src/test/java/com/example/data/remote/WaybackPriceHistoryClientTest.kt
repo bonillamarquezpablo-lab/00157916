@@ -7,6 +7,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
+import org.jsoup.Jsoup
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -1826,6 +1827,95 @@ class WaybackPriceHistoryClientTest {
             "https://web.archive.org/web/20230101120000id_/https://shop.example/product/anker-prime-27k",
             1_672_574_400_000L
         ))
+    }
+
+    @Test
+    fun parsesExplicitUsdMetadataAsSourceCurrencyForConversionPipeline() {
+        val client = newClient()
+        val capturedAt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).apply {
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }.parse("2025-01-03")!!.time
+        val html = """
+            <html><head>
+              <meta property="og:title" content="Anker Prime 27K Power Bank">
+              <meta property="product:price:amount" content="100.00">
+              <meta property="product:price:currency" content="USD">
+              <script type="application/ld+json">
+                {"@type":"Product","name":"Anker Prime 27K Power Bank",
+                 "offers":{"@type":"Offer","price":"100.00","priceCurrency":"USD"}}
+              </script>
+            </head></html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            document = Jsoup.parse(html),
+            expectedTitle = "Anker Prime 27K Power Bank",
+            originalUrl = "https://shop.example/product/anker-prime-27k",
+            snapshotUrl = "https://web.archive.org/web/20250103000000id_/https://shop.example/product/anker-prime-27k",
+            observedAt = capturedAt,
+            acceptedCurrencies = setOf("EUR", "USD")
+        )
+
+        assertNotNull("Explicit USD metadata is recognized only for the conversion stage", quote)
+        assertEquals("USD", quote!!.currency)
+        assertEquals(100.0, quote.price, 0.001)
+    }
+
+    @Test
+    fun convertsUsdUsingTheLatestHistoricalEcbRateNotLaterThanCaptureDate() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        val cacheKey = "fx_usd_eur_capture_2025-01-03"
+        preferences.edit().remove(cacheKey + "_rate").remove(cacheKey + "_date").commit()
+        val requests = CopyOnWriteArrayList<String>()
+        val fxHttp = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            requests += request.url.encodedPath + "?" + request.url.encodedQuery
+            val body = """
+                [
+                  {"date":"2025-01-02","base":"USD","quote":"EUR","rate":0.96},
+                  {"date":"2025-01-04","base":"USD","quote":"EUR","rate":0.99}
+                ]
+            """.trimIndent()
+            Response.Builder()
+                .request(request)
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .header("Content-Type", "application/json; charset=utf-8")
+                .body(body.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+        }.build()
+        val capturedAt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).apply {
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }.parse("2025-01-03")!!.time
+        val sourceQuote = ArchivedPriceQuote(
+            observedAt = capturedAt,
+            price = 100.0,
+            currency = "USD",
+            productTitle = "Anker Prime 27K Power Bank",
+            originalUrl = "https://shop.example/product/anker-prime-27k",
+            snapshotUrl = "https://web.archive.org/web/20250103000000id_/https://shop.example/product/anker-prime-27k"
+        )
+
+        try {
+            val converted = WaybackPriceHistoryClient(context, fxHttp = fxHttp)
+                .convertUsdQuoteToEurAtCaptureDate(sourceQuote)
+            assertNotNull(converted)
+            assertEquals(96.0, converted!!.price, 0.001)
+            assertEquals("EUR", converted.currency)
+            assertEquals("USD", converted.sourceCurrency)
+            assertEquals(100.0, converted.sourcePrice, 0.001)
+            assertEquals(0.96, converted.exchangeRate!!, 0.0001)
+            assertEquals("2025-01-02", converted.exchangeRateDate)
+            assertEquals("Frankfurter/ECB", converted.conversionSource)
+            assertTrue("Historical request must be limited to the capture date",
+                requests.single().contains("to=2025-01-03"))
+            assertTrue("Historical request must use USD as its base currency",
+                requests.single().contains("base=USD"))
+        } finally {
+            preferences.edit().remove(cacheKey + "_rate").remove(cacheKey + "_date").commit()
+        }
     }
 
     @Test

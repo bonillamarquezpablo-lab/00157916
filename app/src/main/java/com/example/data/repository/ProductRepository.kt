@@ -891,10 +891,30 @@ class ProductRepository(
                 sourceUrl = quote.snapshotUrl,
                 sourceName = "Internet Archive (Wayback Machine)",
                 isVerified = true,
-                verificationNote = "Precio EUR extraído de metadatos de producto en una captura pública archivada. Es un precio histórico anunciado; no confirma impuestos, envío, disponibilidad ni precio final.",
+                verificationNote = if (
+                    quote.sourceCurrency.equals("USD", ignoreCase = true) && quote.exchangeRate != null &&
+                    !quote.exchangeRateDate.isNullOrBlank()
+                ) {
+                    "Precio archivado originalmente en " +
+                        String.format(java.util.Locale.ROOT, "%.2f", quote.sourcePrice) + " USD. " +
+                        "Convertido a " + String.format(java.util.Locale.ROOT, "%.2f", quote.price) +
+                        " EUR usando 1 USD = " +
+                        String.format(java.util.Locale.ROOT, "%.4f", quote.exchangeRate) +
+                        " EUR con fecha efectiva " + quote.exchangeRateDate +
+                        " (fuente " + (quote.conversionSource ?: "no indicada") + "). " +
+                        "Es una estimación comparativa por cambio monetario, no un precio observado en la UE; " +
+                        "no confirma impuestos, envío, disponibilidad ni precio final."
+                } else {
+                    "Precio EUR extraído de metadatos de producto en una captura pública archivada. " +
+                        "Es un precio histórico anunciado; no confirma impuestos, envío, disponibilidad ni precio final."
+                },
                 productTitle = quote.productTitle,
                 storeName = merchantName,
-                sourceType = "Internet Archive",
+                sourceType = if (quote.sourceCurrency.equals("USD", ignoreCase = true) && quote.exchangeRate != null) {
+                    "Internet Archive · USD→EUR convertido"
+                } else {
+                    "Internet Archive"
+                },
                 linkType = "Archivo histórico",
                 collectedAt = now,
                 evidenceType = "archive",

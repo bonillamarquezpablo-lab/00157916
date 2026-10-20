@@ -540,6 +540,24 @@ class WaybackPriceHistoryClient(
                 listOfNotNull(resolvedPreferredUrl?.takeIf(::isEligibleDirectUrl)) + generatedProductUrls
             ).distinct()
             val productUrlCandidate = productUrlCandidates.firstOrNull()
+
+            // When Shopping does not give a real seller URL, productUrlCandidate is only a
+            // URL guess assembled from the title. Do not spend the 7-second CDX timeout on that
+            // guessed path before asking Availability, which is much cheaper and can return the
+            // exact archived URL. If Availability yields no verified quote, the bounded alternate
+            // CDX probe still runs at the end of runDomainAvailabilityFallback.
+            if (resolvedPreferredUrl == null && productUrlCandidate != null) {
+                return@serializedArchiveLookup runDomainAvailabilityFallback(
+                    normalizedDomain = normalizedDomain,
+                    expectedTitle = expectedTitle,
+                    preferredUrl = productUrlCandidate,
+                    now = now,
+                    lookbackDays = lookbackDays,
+                    cacheKey = attempt,
+                    failureCodes = setOf("CDX_INFERRED_URL_AVAILABILITY_FIRST"),
+                    onTrace = onTrace
+                )
+            }
             if (preferredUrlAlreadyQueried && resolvedPreferredUrl != null) {
                 return@serializedArchiveLookup runDomainAvailabilityFallback(
                     normalizedDomain = normalizedDomain,
@@ -2263,6 +2281,8 @@ class WaybackPriceHistoryClient(
         val normalized = normalizeTitle(storeName)
         val aliases = listOf(
             "pccomponentes" to "pccomponentes.com",
+            "phone house" to "phonehouse.es",
+            "phonehouse" to "phonehouse.es",
             "la manzanita" to "lamanzanita.es",
             "nike" to "nike.com",
             "adidas" to "adidas.com",

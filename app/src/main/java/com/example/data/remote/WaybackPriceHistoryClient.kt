@@ -3303,7 +3303,7 @@ class WaybackPriceHistoryClient(
         private const val MAX_AVAILABILITY_URL_CANDIDATES = 6
         private const val MAX_AVAILABILITY_PROBE_CANDIDATES = 2
         private const val MAX_DOMAIN_AVAILABILITY_PROBE_CANDIDATES = 5
-        private const val MAX_CDX_FALLBACK_SNAPSHOTS = 6
+        private const val MAX_CDX_FALLBACK_SNAPSHOTS = 8
         private const val MAX_DOMAIN_CDX_HOST_QUERIES = 2
         // This runs in the background history backfill, not in the main search UI.
         // Four seconds accommodates ordinary CDX latency while staying inside the ViewModel's
@@ -3311,8 +3311,8 @@ class WaybackPriceHistoryClient(
         // Broad host scans are a last resort; retain a short bound so they cannot starve
         // Availability fallback or delay the primary shopping-search experience.
         private const val CDX_FALLBACK_TIMEOUT_SECONDS = 3L
-        // Snapshot downloads are the slowest stage on archived retailer pages. Keep each request
-        // bounded, but allow a 7-second response before classifying it as a transient timeout.
+        // Snapshot downloads are bounded individually; the outer manual-history time budget
+        // reserves enough room for a representative set of captures without blocking live search.
         private const val CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS = 4L
         private const val DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS = 4L
         private const val MAX_AVAILABILITY_BODY_BYTES = 64 * 1024
@@ -3331,8 +3331,8 @@ class WaybackPriceHistoryClient(
         private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 7L
         private const val ALTERNATE_PRODUCT_CDX_TIMEOUT_SECONDS = 3L
         private const val MAX_DOMAIN_PRODUCT_URL_CANDIDATES = 2
-        private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 8
-        private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 6
+        private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 12
+        private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 8
         // Used only by historical backfill, never by the primary shopping search.
         private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 7L
         private const val MAX_DOMAIN_INDEX_ROWS = 20

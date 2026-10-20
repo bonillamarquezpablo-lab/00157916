@@ -332,7 +332,7 @@ class WaybackPriceHistoryClient(
             )
         val directCandidates = buildDirectUrlCandidates(originalUrl)
         val directUrl = directCandidates.lastOrNull() ?: decomposedUrl.canonicalUrl
-        val attempt = attemptKey("url-cdx-batch-v7|${decomposedUrl.merchantDomain}|${decomposedUrl.productIdentifiers.sorted().joinToString(",")}|$directUrl|$expectedTitle")
+        val attempt = attemptKey("url-cdx-batch-v8|${decomposedUrl.merchantDomain}|${decomposedUrl.productIdentifiers.sorted().joinToString(",")}|$directUrl|$expectedTitle")
         serializedArchiveLookup {
             if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
                 return@serializedArchiveLookup WaybackBackfillResult(
@@ -554,7 +554,7 @@ class WaybackPriceHistoryClient(
                 val productCdxUrl = buildCdxUrl(productUrlCandidate, now, lookbackDays)
                 if (productCdxUrl != null) {
                     val productAttemptKey = attemptKey(
-                        "domain-product-prefix-v4|$normalizedDomain|$expectedTitle|$productUrlCandidate"
+                        "domain-product-prefix-v5|$normalizedDomain|$expectedTitle|$productUrlCandidate"
                     )
                     val productResult = queryCdxAndFetchPrices(
                         cdxUrl = productCdxUrl,
@@ -752,7 +752,7 @@ class WaybackPriceHistoryClient(
                     "Availability no encontró un precio verificable; se comprueba una URL alternativa mediante CDX antes de cerrar la búsqueda."
                 )
                 val alternateCacheKey = attemptKey(
-                    "domain-alternate-product-prefix-v3|$normalizedDomain|$expectedTitle|$alternateUrl"
+                    "domain-alternate-product-prefix-v4|$normalizedDomain|$expectedTitle|$alternateUrl"
                 )
                 val candidateResult = queryCdxAndFetchPrices(
                     cdxUrl = alternateCdxUrl,
@@ -1415,7 +1415,8 @@ class WaybackPriceHistoryClient(
      * variant identifiers. Google Shopping/Ads wrappers are resolved before archive eligibility.
      */
     internal fun decomposeProductUrl(input: String): DecomposedProductUrl? {
-        val resolved = extractDirectRetailerUrl(input) ?: return null
+        val resolution = extractDirectRetailerUrlWithDepth(input) ?: return null
+        val resolved = resolution.first
         val uri = runCatching { URI(resolved) }.getOrNull() ?: return null
         if (!isEligibleDirectUrl(resolved) || uri.rawUserInfo != null) return null
         val host = uri.host?.lowercase(Locale.ROOT)?.trimEnd('.') ?: return null
@@ -1479,7 +1480,7 @@ class WaybackPriceHistoryClient(
             productIdentifiers = identifiers,
             trackingParameters = removedTracking,
             fragment = uri.rawFragment?.let(::decodePathUrlComponent),
-            redirectDepth = if (resolved == input.trim()) 0 else 1
+            redirectDepth = resolution.second
         )
     }
 

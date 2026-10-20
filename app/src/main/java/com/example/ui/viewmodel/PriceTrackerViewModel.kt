@@ -2230,7 +2230,17 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     else ->
                         "No se recuperó histórico gratuito. Comprueba el diagnóstico de Wayback para conocer la fase que falló."
                 }
-                val diagnosticLabels = diagnosticCodes.distinct().take(8).map { code ->
+                // One seller in Shopping can be unresolved or cached while another seller
+                // already sent a request. Do not let those secondary skips make the whole
+                // search look like no request ever ran.
+                val noticeDiagnosticCodes = diagnosticCodes.distinct().filterNot { code ->
+                    archiveRequestSent.get() && code in setOf(
+                        "CACHE_SKIPPED",
+                        "CACHE_SKIPPED_AFTER_FAILURE",
+                        "DOMAIN_UNRESOLVED"
+                    )
+                }
+                val diagnosticLabels = noticeDiagnosticCodes.take(8).map { code ->
                     when {
                         code.startsWith("CDX_ALTERNATE_PREFIX_HTTP_") -> "$code (respuesta HTTP al consultar una ruta alternativa del producto)"
                         code.startsWith("CDX_DOMAIN_EXACT_HTTP_") -> "$code (respuesta HTTP de la consulta exacta de una URL candidata)"

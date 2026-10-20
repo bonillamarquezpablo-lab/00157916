@@ -669,6 +669,48 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun explicitlyWrongVariantUrlIsDeferredButFamilyUrlRemainsEligible() {
+        val client = newClient()
+        val expected = "Apple iPhone 15 256 GB Amarillo"
+        val baseModelUrl = "https://www.apple.com/es/shop/buy-iphone/iphone-15/"
+        val plusModelUrl = "https://www.apple.com/es/shop/buy-iphone/iphone-15-plus/"
+
+        assertFalse(
+            "A family page that omits colour/storage is unknown, not an explicit mismatch",
+            client.hasExplicitVariantConflictInProductUrl(expected, baseModelUrl)
+        )
+        assertTrue(
+            "The iPhone 15 Plus URL must not be treated as the base iPhone 15",
+            client.hasExplicitVariantConflictInProductUrl(expected, plusModelUrl)
+        )
+        assertTrue(
+            "An URL with a different explicit capacity and colour must be flagged",
+            client.hasExplicitVariantConflictInProductUrl(
+                expected,
+                "https://shop.example/iphone-15?capacity=128gb&color=black"
+            )
+        )
+        assertFalse(
+            "A URL whose explicit capacity and colour match remains eligible",
+            client.hasExplicitVariantConflictInProductUrl(
+                expected,
+                "https://shop.example/iphone-15?capacity=256gb&color=yellow"
+            )
+        )
+
+        val ordered = client.orderAvailabilityCandidateUrls(
+            preferredUrl = plusModelUrl,
+            generatedUrls = listOf(baseModelUrl),
+            expectedTitle = expected
+        )
+        assertEquals(
+            "A conflicting preferred URL must not consume the first archive probe",
+            listOf(baseModelUrl, plusModelUrl),
+            ordered
+        )
+    }
+
+    @Test
     fun buildsBoundedProductSpecificAvailabilityCandidates() {
         val client = newClient()
         val appleCandidates = client.buildAvailabilityCandidateUrls("apple.com", "iPhone 16")
@@ -1260,6 +1302,11 @@ class WaybackPriceHistoryClientTest {
             assertTrue(
                 "The parent domain attempt must be marked as failed, not as a clean negative result",
                 preferences.getBoolean(attemptKey + "_failed", false)
+            )
+            assertEquals(
+                "After the alternate product-prefix timeout, do not fan out into broad www/apex CDX scans",
+                1,
+                requestHosts.count { it == "web.archive.org/cdx/search/cdx" }
             )
             val beforeRetry = requestHosts.size
             val immediateRetry = WaybackPriceHistoryClient(

@@ -99,8 +99,19 @@ data class WaybackDiagnosticEntry(
  */
 internal fun mergeWaybackDiagnosticStatus(
     current: WaybackTraceStatus,
-    incoming: WaybackTraceStatus
+    incoming: WaybackTraceStatus,
+    diagnosticStep: Int? = null,
+    detail: String = ""
 ): WaybackTraceStatus = when {
+    // Stage 6 means "did this lookup recover archive captures?", not merely "did the
+    // server answer?". A final explicit no-capture summary must override an earlier green
+    // status from a valid-but-empty response. Other stages keep their strongest-outcome rule.
+    diagnosticStep == 6 && incoming == WaybackTraceStatus.FAILED &&
+        (
+            detail.contains("no encontraron capturas utilizables", ignoreCase = true) ||
+            detail.contains("no hay histórico que validar", ignoreCase = true) ||
+            detail.contains("no encontró capturas utilizables", ignoreCase = true)
+        ) -> WaybackTraceStatus.FAILED
     current == WaybackTraceStatus.PASSED || incoming == WaybackTraceStatus.PASSED ->
         WaybackTraceStatus.PASSED
     current == WaybackTraceStatus.FAILED || incoming == WaybackTraceStatus.FAILED ->
@@ -348,7 +359,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             // A stage can be attempted by direct CDX, Availability and an alternate CDX
             // route. Once a real attempt passed or failed at this stage, a later SKIPPED event
             // from another route is not evidence that the stage was never executed.
-            val mergedStatus = mergeWaybackDiagnosticStatus(old.status, status)
+            val mergedStatus = mergeWaybackDiagnosticStatus(old.status, status, step, detail)
             val redundantSkip = status == WaybackTraceStatus.SKIPPED &&
                 old.status in setOf(WaybackTraceStatus.PASSED, WaybackTraceStatus.FAILED)
             // If this same stage later really runs or fails on another route, remove obsolete

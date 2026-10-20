@@ -53,6 +53,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Product
+import com.example.data.model.summarizePriceHistory
 import com.example.data.model.ProductCategory
 import com.example.data.model.Store
 import com.example.data.remote.WaybackTraceStatus
@@ -97,6 +98,12 @@ fun ProductDetailSheet(
     val googleInsightPoints = remember(product.priceHistory) {
         product.priceHistory.filter { it.isGoogleInsightEvidence }
     }
+    // Display the minimum from all verified, dated observations (live and historical sources).
+    // This card is informational only; current-price and deal calculations still use live history.
+    val observedHistorySummary = remember(product.priceHistory) {
+        summarizePriceHistory(product.priceHistory)
+    }
+    val observedMinimumPoint = observedHistorySummary.minimumObservedPoint
     val oldestArchivedDate = remember(archivedHistoryPoints, savedDateFormatter) {
         archivedHistoryPoints.minByOrNull { it.timestamp }?.let {
             savedDateFormatter.format(Date(it.timestamp))
@@ -385,9 +392,11 @@ fun ProductDetailSheet(
                             }
                         }
 
-                        // Do not infer a historical low from a single query.
+                        // A historical minimum requires at least two distinct dated observations.
+                        // Archive/Google-insight lows are shown as observed evidence, never as an
+                        // all-time guarantee or as an input to the live-price deal verdict.
                         Column(horizontalAlignment = Alignment.End) {
-                            if (hasCurrentVerifiedHistory) {
+                            if (observedMinimumPoint != null) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Box(
                                         modifier = Modifier
@@ -397,20 +406,24 @@ fun ProductDetailSheet(
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = "MÍNIMO OBSERVADO",
+                                        text = if (observedMinimumPoint.isExternalHistoryEvidence) {
+                                            "MÍNIMO HISTÓRICO OBSERVADO"
+                                        } else {
+                                            "MÍNIMO OBSERVADO"
+                                        },
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color(0xFF059669)
                                     )
                                 }
                                 Text(
-                                    text = "${String.format(spanishLocale, "%.2f", product.athMinPrice)} €",
+                                    text = "${String.format(spanishLocale, "%.2f", observedMinimumPoint.price)} €",
                                     fontWeight = FontWeight.Black,
                                     fontSize = 20.sp,
                                     color = Color(0xFF059669)
                                 )
                                 Text(
-                                    text = "${product.athMinDate} en ${product.athMinStore}",
+                                    text = "${observedMinimumPoint.dateLabel} en ${observedMinimumPoint.storeName}",
                                     fontSize = 10.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )

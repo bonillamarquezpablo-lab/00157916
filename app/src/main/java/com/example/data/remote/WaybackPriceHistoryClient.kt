@@ -871,45 +871,54 @@ class WaybackPriceHistoryClient(
             return WaybackBackfillResult(requestFailed = true, diagnosticCodes = setOf("${stage}_NO_CANDIDATES"))
         }
 
-        // Cascade across URL variants efficiently: probe the newest capture for each URL;
-        // once one candidate works, query an older target date for that same URL to build history.
-        // A 429 or network failure stops immediately, and no more than three availability calls run.
+        // First probe the most recent target for each bounded URL so an archived capture on
+        // a later candidate is not hidden by an older-date request for the first URL. The number
+        // of total Availability requests, including optional older-date probes, never exceeds
+        // maxCandidates. This keeps request pacing predictable and avoids amplifying archive load.
         val dates = availabilityTargetDates(now, lookbackDays, 2)
         val probes = mutableListOf<AvailabilityProbe>()
         for (originalUrl in urls) {
+            if (probes.size >= maxCandidates.coerceAtLeast(1)) break
             val recentProbe = availabilitySemaphore.withPermit {
                 queryAvailability(originalUrl, dates.first(), stage)
             }
             probes += recentProbe
             if (recentProbe.diagnosticCode == "WAYBACK_RATE_LIMITED") break
-            // Avoid spending more requests once enough valid snapshots have been discovered.
-            if (probes.count { it.capture != null } >= maxSnapshots.coerceAtLeast(1)) {
-                break
-            }
+            val uniqueRecentCaptures = probes.mapNotNull { it.capture }
+                .distinctBy { it.rawTimestamp to it.originalUrl }
+            if (uniqueRecentCaptures.size >= maxSnapshots.coerceAtLeast(1)) break
             if (recentProbe.requestFailed) {
                 val code = recentProbe.diagnosticCode.orEmpty()
                 // A candidate-specific 404 or timeout should not hide a capture archived under
-                // the next bounded product URL. Keep the cap, and still stop immediately on 429
-                // or broad network/server errors to avoid needless traffic.
+                // the next bounded product URL. Other broad failures stop to protect the archive.
                 if (code == "${stage}_HTTP_404" || code.endsWith("_TIMEOUT")) continue
                 break
             }
-            if (recentProbe.capture != null && probeOlderCapture) {
+        }
+        // If the URL list has fewer items than the request budget, spend only the remaining slots
+        // on older target dates for captures already found. Never issue an extra sixth probe just
+        // because a URL had both a recent and an older snapshot.
+        if (probeOlderCapture &&
+            probes.size < maxCandidates.coerceAtLeast(1) &&
+            probes.none { it.diagnosticCode == "WAYBACK_RATE_LIMITED" }
+        ) {
+            val recentCaptures = probes.mapNotNull { it.capture }
+                .distinctBy { it.rawTimestamp to it.originalUrl }
+            for (capture in recentCaptures) {
+                if (probes.size >= maxCandidates.coerceAtLeast(1)) break
+                val currentUniqueCaptureCount = probes.mapNotNull { it.capture }
+                    .distinctBy { it.rawTimestamp to it.originalUrl }.size
+                if (currentUniqueCaptureCount >= maxSnapshots.coerceAtLeast(1)) break
                 val olderProbe = availabilitySemaphore.withPermit {
-                    queryAvailability(originalUrl, dates.last(), stage)
+                    queryAvailability(capture.originalUrl, dates.last(), stage)
                 }
                 probes += olderProbe
                 if (olderProbe.diagnosticCode == "WAYBACK_RATE_LIMITED") break
-                // A single URL may have a recent capture but no capture near the old target date.
-                // Continue to the next bounded URL so one stale/missing archive route does not
-                // consume the entire search or hide other monthly history points.
-                if (probes.count { it.capture != null } >= maxSnapshots.coerceAtLeast(1)) break
-                continue
+                val code = olderProbe.diagnosticCode.orEmpty()
+                if (olderProbe.requestFailed &&
+                    code != "${stage}_HTTP_404" && !code.endsWith("_TIMEOUT")
+                ) break
             }
-            // For the timeout fallback, candidates are product-specific and strictly bounded.
-            // Do not stop at the first archived capture: its HTML may be a cookie wall or contain
-            // no verifiable EUR price. Continue to the next candidate so its snapshot can be
-            // validated too; maxCandidates/maxSnapshots bound both traffic and total work.
         }
         val allAvailabilityCaptures = probes.mapNotNull { it.capture }
             .distinctBy { it.rawTimestamp to it.originalUrl }

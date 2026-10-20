@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -64,6 +65,8 @@ import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.extractDirectRetailerUrl
+import com.example.data.remote.formatOnlineSnapshotAge
+import com.example.data.remote.onlineProductRelevanceScore
 import com.example.data.remote.isAccessorySearchQuery
 import com.example.data.remote.isWheelFitmentQuery
 import com.example.ui.viewmodel.OnlineSearchProvider
@@ -135,12 +138,18 @@ internal fun buildOnlineSearchDisplayGroups(
 
     // Accessories remain visible but never take priority over the searched-for main product.
     appendGroups(accessoryDisplayGroups, "accessory", accessories)
+    val isWheelFitmentSearch = isWheelFitmentQuery(query)
     val priceOrder = compareBy<OnlineSearchDisplayGroup> { it.group.minPrice }
         .thenBy { it.group.title.lowercase(Locale.ROOT) }
         .thenBy { it.stableKey }
-    val sortedMain = mainDisplayGroups.sortedWith(priceOrder)
-    val sortedAccessories = accessoryDisplayGroups.sortedWith(priceOrder)
-    val isWheelFitmentSearch = isWheelFitmentQuery(query)
+    val relevanceOrder = compareByDescending<OnlineSearchDisplayGroup> {
+        onlineProductRelevanceScore(query, it.group.title)
+    }.thenBy { it.group.minPrice }
+        .thenBy { it.group.title.lowercase(Locale.ROOT) }
+        .thenBy { it.stableKey }
+    // Wheel fitment searches preserve price order; other searches put the closest model/variant first.
+    val sortedMain = mainDisplayGroups.sortedWith(if (isWheelFitmentSearch) priceOrder else relevanceOrder)
+    val sortedAccessories = accessoryDisplayGroups.sortedWith(if (isWheelFitmentSearch) priceOrder else relevanceOrder)
     // For wheel-fitment searches, used wheels and new wheels are comparable offers: show them
     // together in one price order when the opt-in filter is enabled. Keep accessory prioritization
     // for other product searches so unrelated low-cost accessories do not outrank the main product.
@@ -428,6 +437,11 @@ fun OnlineSearchScreen(
                 }
             }
         }
+        if (state.isOnlineSearching && state.onlineSearchResults.isEmpty()) {
+            items(count = 3, key = { index -> "search-skeleton-$index" }) {
+                SearchResultSkeletonCard()
+            }
+        }
         if (state.onlineSearchDiscardedOffers.isNotEmpty()) {
             item {
                 OutlinedButton(
@@ -645,6 +659,34 @@ fun OnlineSearchScreen(
 }
 
 @Composable
+private fun SearchResultSkeletonCard() {
+    val placeholder = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Box(
+                modifier = Modifier.size(88.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(placeholder)
+            )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.fillMaxWidth(0.92f).height(14.dp).clip(RoundedCornerShape(6.dp)).background(placeholder))
+                Box(Modifier.fillMaxWidth(0.68f).height(12.dp).clip(RoundedCornerShape(6.dp)).background(placeholder))
+                Box(Modifier.fillMaxWidth(0.46f).height(20.dp).clip(RoundedCornerShape(6.dp)).background(placeholder))
+                Box(Modifier.fillMaxWidth(0.72f).height(10.dp).clip(RoundedCornerShape(6.dp)).background(placeholder))
+            }
+        }
+    }
+}
+
+@Composable
 private fun ShoppingResultCard(
     group: OnlineProductGroup,
     onOpenProduct: (() -> Unit)?,
@@ -767,6 +809,11 @@ private fun ShoppingResultCard(
                     }
                     Text(
                         "${group.offers.size} ofertas · toca para ver tiendas e historial",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "Consulta capturada ${formatOnlineSnapshotAge(best.observedAt)} · el precio puede cambiar al abrir la tienda",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

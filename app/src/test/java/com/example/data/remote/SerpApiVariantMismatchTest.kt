@@ -130,6 +130,109 @@ class SerpApiVariantMismatchTest {
     }
 
     @Test
+    fun singleCapacityQueryRejectsWrongStorageButKeepsTheMatchingStorage() {
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "shopping_results": [
+                    {
+                      "title": "Samsung Galaxy S26 Ultra 12GB RAM 256GB Storage",
+                      "price": "899,99 €",
+                      "extracted_price": 899.99,
+                      "link": "https://shop.example.com/samsung-s26-ultra-256",
+                      "source": "Tienda A"
+                    },
+                    {
+                      "title": "Samsung Galaxy S26 Ultra 12GB RAM 512GB Storage",
+                      "price": "1.099,99 €",
+                      "extracted_price": 1099.99,
+                      "link": "https://shop.example.com/samsung-s26-ultra-512",
+                      "source": "Tienda B"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "Samsung Galaxy S26 Ultra 512GB",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals(1, report.results.size)
+        assertEquals("Samsung Galaxy S26 Ultra 12GB RAM 512GB Storage", report.results.single().title)
+        assertEquals(1, report.rejectedAsIrrelevant)
+    }
+
+    @Test
+    fun ranksExactModelPhraseBeforeLowerPricedLooseMatch() {
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "shopping_results": [
+                    {
+                      "title": "Power Bank 27K for Anker Prime",
+                      "price": "69,99 €",
+                      "extracted_price": 69.99,
+                      "link": "https://shop.example.com/anker-prime-27k",
+                      "source": "Tienda barata"
+                    },
+                    {
+                      "title": "Anker Prime 27K Power Bank",
+                      "price": "79,99 €",
+                      "extracted_price": 79.99,
+                      "link": "https://www.anker.com/products/prime-power-bank-27k",
+                      "source": "Anker"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "Anker Prime 27K Power Bank",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals(2, report.results.size)
+        assertEquals("Anker Prime 27K Power Bank", report.results.first().title)
+        assertTrue(report.results.first().price > report.results.last().price)
+    }
+
+    @Test
+    fun refusesToReturnGenericGoogleSearchAsTheOnlyOfferDestination() {
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "shopping_results": [{
+                    "title": "Sony WH-1000XM5 headphones",
+                    "price": "199,99 €",
+                    "extracted_price": 199.99,
+                    "source": "Tienda desconocida"
+                  }]
+                }
+                """.trimIndent()
+            ),
+            query = "Sony WH-1000XM5",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertTrue(report.results.isEmpty())
+        assertEquals(1, report.rejectedForLink)
+    }
+
+    @Test
+    fun formatsResultAgeForFreshnessDisclosure() {
+        assertEquals(
+            "hace 2 h 15 min",
+            formatOnlineSnapshotAge(capturedAt = 1_000L, now = 1_000L + 135L * 60_000L)
+        )
+        assertEquals(
+            "hace menos de 1 min",
+            formatOnlineSnapshotAge(capturedAt = 5_000L, now = 5_001L)
+        )
+    }
+
+    @Test
     fun unknownSellerMustNotBeSilentlyLabeledAsAmazon() {
         val unknown = Store.findByName("Tienda local")
 

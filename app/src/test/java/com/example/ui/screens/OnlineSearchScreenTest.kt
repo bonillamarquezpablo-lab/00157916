@@ -113,6 +113,38 @@ class OnlineSearchScreenTest {
 
 
     @Test
+    fun generalSearchRanksTheExactModelBeforeACheaperSiblingModel() {
+        val query = "Samsung Galaxy S26 Ultra 512 GB"
+        val rows = listOf(
+            SerpApiShoppingResult(
+                title = "Samsung Galaxy S26 Plus 512 GB",
+                price = 799.0,
+                storeName = "Tienda barata",
+                sourceUrl = "https://shop.example.test/s26-plus",
+                observedAt = 123L
+            ),
+            SerpApiShoppingResult(
+                title = "Samsung Galaxy S26 Ultra 512 GB",
+                price = 999.0,
+                storeName = "Tienda exacta",
+                sourceUrl = "https://shop.example.test/s26-ultra",
+                observedAt = 123L
+            )
+        )
+
+        val groups = buildOnlineSearchDisplayGroups(
+            results = rows,
+            query = query,
+            showSecondHand = false,
+            amazonOnly = false
+        )
+        assertEquals(
+            listOf("Samsung Galaxy S26 Ultra 512 GB", "Samsung Galaxy S26 Plus 512 GB"),
+            groups.map { it.group.title }
+        )
+    }
+
+    @Test
     fun secondHandOffersJoinTheSamePriceOrderWhenEnabled() {
         // Model-first searches still contain an explicit diameter + PCD and must share one price order.
         val query = "RIAL Milano 14\" 5x100"

@@ -112,6 +112,67 @@ data class RejectedOnlineOffer(
  * One result from a manual Google Shopping query.
  * Prices are point-in-time observations and must be rechecked at the seller.
  */
+/**
+ * Ranks result titles by the query's model and variant tokens before using price as a tie-breaker.
+ * This operates locally over the provider response and does not consume additional quota.
+ */
+internal fun onlineProductRelevanceScore(query: String, title: String): Int {
+    fun canonical(value: String): String = Normalizer.normalize(
+        value.lowercase(Locale.ROOT),
+        Normalizer.Form.NFD
+    ).replace(Regex("\\p{Mn}+"), "")
+        .replace(Regex("""\bplaystation\s*5\b"""), "ps5")
+        .replace(Regex("""[^a-z0-9]+"""), " ")
+        .trim()
+        .replace(Regex("""(\d+(?:\.\d+)?)\s*(gb|tb|mb|mah|wh|w|hz|mm|cm|ml|kg|g|l)\b"""), "$1$2")
+        .replace(Regex("""\s+"""), " ")
+
+    val wantedText = canonical(query)
+    val foundText = canonical(title)
+    if (wantedText.isBlank() || foundText.isBlank()) return 0
+    val wantedTokens = wantedText.split(' ').filter { it.length > 1 }.distinct()
+    val foundTokens = foundText.split(' ').toSet()
+    var score = wantedTokens.sumOf { token ->
+        when {
+            token !in foundTokens -> 0
+            token.any(Char::isDigit) -> 12
+            else -> 5
+        }
+    }
+    if (foundText.contains(wantedText)) score += 100
+    score += wantedTokens.count { token ->
+        token.length >= 4 && token.any(Char::isDigit) &&
+            token.any(Char::isLetter) && token in foundTokens
+    } * 20
+    return score
+}
+
+/**
+ * Timestamp when the provider snapshot was captured by the app, not a guarantee that the shop's
+ * live price was independently rechecked at that moment.
+ */
+internal fun formatOnlineSnapshotAge(
+    capturedAt: Long,
+    now: Long = System.currentTimeMillis()
+): String {
+    if (capturedAt <= 0L || now < capturedAt) return "fecha no disponible"
+    val totalMinutes = (now - capturedAt) / 60_000L
+    return when {
+        totalMinutes < 1L -> "hace menos de 1 min"
+        totalMinutes < 60L -> "hace $totalMinutes min"
+        totalMinutes < 24L * 60L -> {
+            val hours = totalMinutes / 60L
+            val minutes = totalMinutes % 60L
+            if (minutes == 0L) "hace $hours h" else "hace $hours h $minutes min"
+        }
+        else -> {
+            val days = totalMinutes / (24L * 60L)
+            val hours = (totalMinutes % (24L * 60L)) / 60L
+            if (hours == 0L) "hace $days d" else "hace $days d $hours h"
+        }
+    }
+}
+
 data class SerpApiShoppingResult(
     val title: String,
     val price: Double,
@@ -504,8 +565,9 @@ fun retailerDestinationForOffer(sourceUrl: String, storeName: String, productTit
     if ((genericGoogleSearch || insecureSource) && store?.supportsProductSearch == true) {
         return store.searchUrlFor(productTitle).takeIf(::isSecureRetailerDestination)
     }
-    return sourceUrl.takeIf(::isSecureRetailerDestination)
-}
+    // Unknown-seller offers must never fall back to a generic Google search page. If we
+    // cannot resolve a seller destination, let the caller disable the link rather than misdirect.
+    return sourceUrl.takeIf { !isGoogleShoppingUrl(it) && isSecureRetailerDestination(it) }
 
 fun isSecondHandCondition(condition: String): Boolean = Regex(
     """(?i)\b(used|second[\s_-]*hand|pre[\s_-]*owned|usad[oa]s?|seminuev[oa]s?|refurbished|reacondicionad[oa]s?|renewed|open[\s_-]*box)\b"""

@@ -403,7 +403,10 @@ class SerpApiClient(
                 primeEligible = item.optBoolean("prime", false)
             )
         }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
-            .sortedBy { it.price }
+            .sortedWith(
+                compareByDescending<SerpApiShoppingResult> { onlineProductRelevanceScore(query.orEmpty(), it.title) }
+                    .thenBy { it.price }
+            )
             .take(MAX_ONLINE_RESULTS)
 
         return SerpApiShoppingSearchReport(
@@ -612,9 +615,11 @@ class SerpApiClient(
                 .takeIf { it.isNotBlank() && it != "null" }
             val fallbackProviderUrl = candidateUrls.firstOrNull()
             val extractedCandidate = candidateUrls.firstNotNullOfOrNull { raw ->
-                extractDirectRetailerUrl(raw)?.let { resolved -> raw to resolved }
+                extractDirectRetailerUrl(raw)
             }
-            val url = extractedCandidate?.second
+            // Prefer the seller's real HTTPS product page. Known merchants may use their own
+            // storefront search only as a last resort; never expose a generic Google search URL.
+            val url = extractedCandidate
                 ?: fallbackProviderUrl?.let {
                     retailerDestinationForOffer(it, providerSource.orEmpty(), title)
                 }
@@ -623,7 +628,11 @@ class SerpApiClient(
                     providerSource.orEmpty(),
                     title
                 )
-                ?: googleShoppingSearchUrl(title)
+            if (url.isNullOrBlank()) {
+                rejectedForLink++
+                recordDiscard(item, title, "El proveedor no facilitó un enlace HTTPS útil a la tienda")
+                return@mapNotNull null
+            }
             // This parser is fed by the Google Shopping provider. Provider provenance must
             // survive even when the URL was decoded to a direct HTTPS seller destination, or when
             // we generate the retailer's search page because the response omitted a link entirely.
@@ -1438,10 +1447,17 @@ class SerpApiClient(
             if (queryValues.isEmpty() || titleValues.isEmpty()) continue
 
             // Products may specify several values in the same unit (for example RAM and storage
-            // in GB). Compare all of them, not only the first occurrence. Sorting makes this
-            // independent of whether the retailer lists RAM or storage first.
+            // in GB). Compare all values when both sides are equally specific. If the query gives
+            // only one capacity, require that value to appear in the listing; otherwise a 256 GB
+            // offer could pass a 512 GB query merely because the title also mentions RAM in GB.
             if (queryValues.size == titleValues.size &&
                 queryValues.sorted() != titleValues.sorted()
+            ) return true
+            if (queryValues.size == 1 &&
+                titleValues.none { kotlin.math.abs(it - queryValues.single()) < 0.01 }
+            ) return true
+            if (queryValues.size > 1 &&
+                titleValues.none { listed -> queryValues.any { wanted -> kotlin.math.abs(listed - wanted) < 0.01 } }
             ) return true
         }
         // Broad family searches such as "Xiaomi scooter" should return the family's

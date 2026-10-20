@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
 import com.example.data.remote.OnlineSearchCache
+import com.example.data.remote.formatOnlineSnapshotAge
 import com.example.data.remote.OnlineSearchQuotaGuard
 import com.example.data.remote.WaybackPriceHistoryClient
 import com.example.data.remote.diagnosticIndexForWaybackTrace
@@ -1507,13 +1508,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             eligible to discarded
                         }
                         onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = cachedDiscarded
-                        val ageMinutes = ((System.currentTimeMillis() - cached.savedAt) / 60_000L).coerceAtLeast(1L)
                         val base = if (safeCachedResults.isEmpty()) {
                             cachedReport.emptyResultMessage(query)
                         } else {
                             onlineSearchResultMessage(safeCachedResults, provider, query)
                         }
-                        val cacheNotice = "Resultados guardados hace $ageMinutes min; no se ha consumido otra búsqueda."
+                        val cacheNotice = "Resultados recuperados de caché: consulta capturada ${formatOnlineSnapshotAge(cached.savedAt)}. No se ha consumido otra búsqueda; los precios pueden haber cambiado."
                         val savedObservations = if (safeCachedResults.isNotEmpty()) {
                             withContext(Dispatchers.IO) {
                                 repository.recordOnlineSearchResults(safeCachedResults, provider.name, query)
@@ -1721,7 +1721,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     val historyNote = if (results.isNotEmpty()) {
                         onlineHistoryNotice(savedObservations, results.size)
                     } else ""
-                    val message = listOf(base, queryOptimizationNotice, coverageNote, quotaNote, gameSupplementNote, filterNote, historyNote)
+                    val freshnessNote = "Búsqueda recién realizada; la antigüedad indica cuándo se capturaron estos resultados, no una comprobación en tiempo real del precio de la tienda."
+                    val message = listOf(base, queryOptimizationNotice, freshnessNote, coverageNote, quotaNote, gameSupplementNote, filterNote, historyNote)
                         .map { it.trim() }
                         .filter { it.isNotBlank() }
                         .joinToString("\n\n")

@@ -391,9 +391,11 @@ class ExampleRobolectricTest {
             query = "Samsung Galaxy S26 Ultra 512 GB",
             observedAt = 123L
         )
-        assertEquals("All six valid new/used offers survive Google destination links", 6, report.results.size)
-        assertEquals(5, report.results.count { it.linkType == "Google Shopping" && !it.isSecondHand })
+        assertEquals("Only offers with a seller destination or a specific Google product page survive", 5, report.results.size)
+        assertEquals(4, report.results.count { it.linkType == "Google Shopping" && !it.isSecondHand })
         assertEquals(1, report.results.count { it.isSecondHand })
+        assertEquals(1, report.rejectedForLink)
+        assertTrue(report.results.none { it.sourceUrl.contains("google.es/search", ignoreCase = true) })
         assertTrue(report.results.none { it.title.contains("alquiler", ignoreCase = true) })
     }
 
@@ -2184,23 +2186,19 @@ class ExampleRobolectricTest {
 
         val results = client.parseShoppingResults(payload, observedAt = 123L)
 
-        assertEquals("Eligible offers survive whether the URL is direct, HTTP, or Google Shopping", 3, results.size)
-        assertEquals("Unsafe HTTP", results[0].storeName)
-        assertEquals(49.99, results[0].price, 0.001)
-        assertEquals("Google Shopping", results[0].linkType)
-        assertTrue("Unsafe HTTP must be rerouted to a secure destination", results[0].isGoogleShoppingProductLink)
-        assertEquals("PcComponentes", results[1].storeName)
-        assertEquals(79.99, results[1].price, 0.001)
+        assertEquals("Offers without a safe seller destination must not be sent to generic Google search", 2, results.size)
+        assertEquals("PcComponentes", results[0].storeName)
+        assertEquals(79.99, results[0].price, 0.001)
         assertFalse("A decoded HTTPS seller destination is not an indirect Google URL",
-            results[1].isGoogleShoppingProductLink)
-        assertEquals("Google Shopping", results[1].sourceProvider)
-        assertEquals("directo", results[1].linkType)
-        assertEquals("Amazon.es", results[2].storeName)
-        assertEquals(89.99, results[2].price, 0.001)
-        assertFalse(results[2].isGoogleShoppingProductLink)
-        assertTrue(results[2].isAmazonOffer)
-        assertEquals(123L, results[2].observedAt)
-        assertEquals("https://images.example.test/sony.jpg", results[2].thumbnailUrl)
+            results[0].isGoogleShoppingProductLink)
+        assertEquals("Google Shopping", results[0].sourceProvider)
+        assertEquals("directo", results[0].linkType)
+        assertEquals("Amazon.es", results[1].storeName)
+        assertEquals(89.99, results[1].price, 0.001)
+        assertFalse(results[1].isGoogleShoppingProductLink)
+        assertTrue(results[1].isAmazonOffer)
+        assertEquals(123L, results[1].observedAt)
+        assertEquals("https://images.example.test/sony.jpg", results[1].thumbnailUrl)
     }
 
     @Test
@@ -2258,7 +2256,7 @@ class ExampleRobolectricTest {
         )
 
         assertEquals(5, report.rawResultCount)
-        assertEquals("Matching Google Shopping and HTTP offers remain available", 3, report.results.size)
+        assertEquals("Only matching offers with a usable destination remain", 2, report.results.size)
         val amazonResult = report.results.single { it.storeName == "Amazon.es" }
         assertEquals("Sony WH1000XM5 Wireless Noise Canceling Headphones", amazonResult.title)
         assertEquals(249.99, amazonResult.price, 0.001)
@@ -2268,15 +2266,11 @@ class ExampleRobolectricTest {
         assertEquals(239.99, googleResult.price, 0.001)
         assertTrue(googleResult.isGoogleShoppingProductLink)
         assertEquals("Google Shopping", googleResult.linkType)
-
-        val httpResult = report.results.single { it.storeName == "Unsafe HTTP" }
-        assertEquals(229.99, httpResult.price, 0.001)
-        assertEquals("Google Shopping", httpResult.linkType)
-        assertTrue("Unsafe HTTP must not be exposed as a direct retailer link", httpResult.isGoogleShoppingProductLink)
+        assertFalse(report.results.any { it.storeName == "Unsafe HTTP" })
 
         assertEquals(1, report.rejectedAsIrrelevant)
         assertEquals(1, report.rejectedForPriceOrCurrency)
-        assertEquals(0, report.rejectedForLink)
+        assertEquals(1, report.rejectedForLink)
         assertTrue(report.emptyResultMessage("Sony WH-1000XM5").isNotBlank())
     }
 

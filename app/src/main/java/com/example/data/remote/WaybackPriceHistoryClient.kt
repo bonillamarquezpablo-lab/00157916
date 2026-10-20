@@ -1135,7 +1135,10 @@ class WaybackPriceHistoryClient(
 
         val quotes = fetched.mapNotNull { it.quote }
             .sortedBy { it.observedAt }
-            .distinctBy { Triple(it.originalUrl, it.observedAt, it.price) }
+            // Multiple candidate URLs can point to the same archived price at the same timestamp.
+            // Keep a single history point; otherwise one Availability snapshot returned for two
+            // URL variants is incorrectly persisted twice.
+            .distinctBy { Triple(it.observedAt, it.price, it.currency.uppercase(Locale.ROOT)) }
         val diagnostics = linkedSetOf<String>().apply {
             addAll(probeDiagnostics)
             fetched.mapNotNullTo(this) { it.diagnosticCode }
@@ -2169,7 +2172,10 @@ class WaybackPriceHistoryClient(
         val verifiedQuotesBeforeDedup = fetched.mapNotNull { it.quote }
             .sortedBy { it.observedAt }
         val quotes = verifiedQuotesBeforeDedup
-            .distinctBy { Triple(it.originalUrl, it.observedAt, it.price) }
+            // Multiple candidate URLs can point to the same archived price at the same timestamp.
+            // Keep a single history point; otherwise one Availability snapshot returned for two
+            // URL variants is incorrectly persisted twice.
+            .distinctBy { Triple(it.observedAt, it.price, it.currency.uppercase(Locale.ROOT)) }
         val duplicatesRemoved = verifiedQuotesBeforeDedup.size - quotes.size
         emitWaybackTrace(
             onTrace, 14,

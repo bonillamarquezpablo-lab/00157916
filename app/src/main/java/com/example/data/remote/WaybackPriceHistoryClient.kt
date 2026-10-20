@@ -478,7 +478,18 @@ class WaybackPriceHistoryClient(
         if (expectedTitle.isBlank()) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("PRODUCT_TITLE_EMPTY"))
         }
-        val attempt = attemptKey("domain-cdx-batch-v6|$normalizedDomain|$expectedTitle")
+        val preferredUrlIdentity = resolvedPreferredUrl?.let {
+            decomposeProductUrl(it)?.canonicalUrl ?: it
+        }.orEmpty()
+        val preferredUrlIdentifiers = resolvedPreferredUrl
+            ?.let(::decomposeProductUrl)
+            ?.productIdentifiers
+            .orEmpty()
+            .sorted()
+            .joinToString(",")
+        val attempt = attemptKey(
+            "domain-cdx-batch-v7|$normalizedDomain|$expectedTitle|$preferredUrlIdentity|$preferredUrlIdentifiers"
+        )
         serializedArchiveLookup {
             if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
                 return@serializedArchiveLookup WaybackBackfillResult(
@@ -626,7 +637,7 @@ class WaybackPriceHistoryClient(
                     return@serializedArchiveLookup runDomainAvailabilityFallback(
                         normalizedDomain = normalizedDomain,
                         expectedTitle = expectedTitle,
-                        preferredUrl = preferredUrl,
+                        preferredUrl = resolvedPreferredUrl,
                         now = now,
                         lookbackDays = lookbackDays,
                         cacheKey = attempt,
@@ -698,7 +709,7 @@ class WaybackPriceHistoryClient(
             // search URL to be checked when those first two archived variants are absent.
             maxCandidates = MAX_DOMAIN_AVAILABILITY_PROBE_CANDIDATES,
             stage = "DOMAIN_AVAILABILITY_FALLBACK",
-            probeOlderCapture = false,
+            probeOlderCapture = true,
             onTrace = onTrace
         )
         emitWaybackTrace(
@@ -854,7 +865,7 @@ class WaybackPriceHistoryClient(
             probes += recentProbe
             if (recentProbe.diagnosticCode == "WAYBACK_RATE_LIMITED") break
             // Avoid spending more requests once enough valid snapshots have been discovered.
-            if (!probeOlderCapture && probes.count { it.capture != null } >= maxSnapshots.coerceAtLeast(1)) {
+            if (probes.count { it.capture != null } >= maxSnapshots.coerceAtLeast(1)) {
                 break
             }
             if (recentProbe.requestFailed) {
@@ -870,7 +881,12 @@ class WaybackPriceHistoryClient(
                     queryAvailability(originalUrl, dates.last(), stage)
                 }
                 probes += olderProbe
-                break
+                if (olderProbe.diagnosticCode == "WAYBACK_RATE_LIMITED") break
+                // A single URL may have a recent capture but no capture near the old target date.
+                // Continue to the next bounded URL so one stale/missing archive route does not
+                // consume the entire search or hide other monthly history points.
+                if (probes.count { it.capture != null } >= maxSnapshots.coerceAtLeast(1)) break
+                continue
             }
             // For the timeout fallback, candidates are product-specific and strictly bounded.
             // Do not stop at the first archived capture: its HTML may be a cookie wall or contain
@@ -3268,7 +3284,7 @@ class WaybackPriceHistoryClient(
         private const val MAX_AVAILABILITY_URL_CANDIDATES = 6
         private const val MAX_AVAILABILITY_PROBE_CANDIDATES = 2
         private const val MAX_DOMAIN_AVAILABILITY_PROBE_CANDIDATES = 5
-        private const val MAX_CDX_FALLBACK_SNAPSHOTS = 2
+        private const val MAX_CDX_FALLBACK_SNAPSHOTS = 6
         private const val MAX_DOMAIN_CDX_HOST_QUERIES = 2
         // This runs in the background history backfill, not in the main search UI.
         // Four seconds accommodates ordinary CDX latency while staying inside the ViewModel's
@@ -3278,8 +3294,8 @@ class WaybackPriceHistoryClient(
         private const val CDX_FALLBACK_TIMEOUT_SECONDS = 3L
         // Snapshot downloads are the slowest stage on archived retailer pages. Keep each request
         // bounded, but allow a 7-second response before classifying it as a transient timeout.
-        private const val CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS = 7L
-        private const val DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS = 7L
+        private const val CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS = 4L
+        private const val DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS = 4L
         private const val MAX_AVAILABILITY_BODY_BYTES = 64 * 1024
         private const val CDX_RETRY_DELAY_MS = 500L
         private const val CDX_RETRY_JITTER_MS = 350L
@@ -3296,8 +3312,8 @@ class WaybackPriceHistoryClient(
         private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 7L
         private const val ALTERNATE_PRODUCT_CDX_TIMEOUT_SECONDS = 3L
         private const val MAX_DOMAIN_PRODUCT_URL_CANDIDATES = 2
-        private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 2
-        private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 2
+        private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 8
+        private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 6
         // Used only by historical backfill, never by the primary shopping search.
         private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 7L
         private const val MAX_DOMAIN_INDEX_ROWS = 20

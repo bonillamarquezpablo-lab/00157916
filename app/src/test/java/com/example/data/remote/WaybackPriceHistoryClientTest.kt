@@ -203,14 +203,16 @@ class WaybackPriceHistoryClientTest {
                             client.fetchHistoryByMerchantDomain(
                                 domain = "shop.example",
                                 expectedTitle = title,
-                                lookbackDays = 730
+                                lookbackDays = 730,
+                                preferredUrl = archivedUrl
                             )
                         },
                         async {
                             client.fetchHistoryByMerchantDomain(
                                 domain = "shop.example",
                                 expectedTitle = title,
-                                lookbackDays = 730
+                                lookbackDays = 730,
+                                preferredUrl = archivedUrl
                             )
                         }
                     ).awaitAll()

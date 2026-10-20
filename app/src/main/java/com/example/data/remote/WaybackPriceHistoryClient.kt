@@ -878,10 +878,10 @@ class WaybackPriceHistoryClient(
                 if (activeRateLimitUntil(System.currentTimeMillis()) != null) break
                 emitWaybackTrace(
                     onTrace, 6, WaybackTraceStatus.RUNNING,
-                    "Las URL de producto previstas no dieron precio; se buscan páginas alternativas del dominio (\${index + 1}/\${domainQueries.size})."
+                    "Las URL de producto previstas no dieron precio; se buscan páginas alternativas del dominio (${index + 1}/${domainQueries.size})."
                 )
                 val domainCacheKey = attemptKey(
-                    "domain-bounded-host-cdx-v1|\${normalizedDomain}|\${expectedTitle}|\${domainCdxUrl}"
+                    "domain-bounded-host-cdx-v1|${normalizedDomain}|${expectedTitle}|${domainCdxUrl}"
                 )
                 val discovered = queryCdxAndFetchPrices(
                     cdxUrl = domainCdxUrl,
@@ -901,7 +901,7 @@ class WaybackPriceHistoryClient(
                         rememberAttempt(cacheKey, now, hasQuotes = true, failed = false)
                         emitWaybackTrace(
                             onTrace, 6, WaybackTraceStatus.PASSED,
-                            "El índice del dominio encontró \${discovered.quotes.size} precio(s) histórico(s) verificado(s)."
+                            "El índice del dominio encontró ${discovered.quotes.size} precio(s) histórico(s) verificado(s)."
                         )
                         return discovered.copy(diagnosticCodes = emptySet())
                     }
@@ -919,7 +919,7 @@ class WaybackPriceHistoryClient(
                     } -> {
                         emitWaybackTrace(
                             onTrace, 6, WaybackTraceStatus.FAILED,
-                            "La búsqueda acotada del índice del dominio falló (\${discovered.diagnosticCodes.joinToString(", ")}); se evita insistir contra el archivo."
+                            "La búsqueda acotada del índice del dominio falló (${discovered.diagnosticCodes.joinToString(", ")}); se evita insistir contra el archivo."
                         )
                         break
                     }

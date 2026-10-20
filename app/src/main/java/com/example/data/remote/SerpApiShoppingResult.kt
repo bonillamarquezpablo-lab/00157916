@@ -163,9 +163,9 @@ data class SerpApiShoppingResult(
             """(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b|/\s*mes\b)"""
         ).containsMatchIn(condition)
 
-    /** Stored source label, separate from the unwrapped destination used by the history motor. */
+    /** Describes the link the user will actually open; sourceProvider keeps origin provenance separate. */
     val linkType: String
-        get() = sourceProvider?.takeIf { it.isNotBlank() } ?: linkTypeForUrl(sourceUrl)
+        get() = linkTypeForUrl(sourceUrl)
 
     val isAmazonOffer: Boolean
         get() {

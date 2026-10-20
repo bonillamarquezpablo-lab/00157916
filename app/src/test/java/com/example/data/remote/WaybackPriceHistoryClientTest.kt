@@ -57,6 +57,26 @@ class WaybackPriceHistoryClientTest {
             WaybackTraceStatus.PASSED,
             mergeWaybackDiagnosticStatus(WaybackTraceStatus.FAILED, WaybackTraceStatus.PASSED)
         )
+        assertEquals(
+            "A final no-capture outcome must override an earlier green status only for the recovery stage",
+            WaybackTraceStatus.FAILED,
+            mergeWaybackDiagnosticStatus(
+                WaybackTraceStatus.PASSED,
+                WaybackTraceStatus.FAILED,
+                6,
+                "Las respuestas llegaron, pero no encontraron capturas utilizables; no hay histórico que validar."
+            )
+        )
+        assertEquals(
+            "The no-capture override must not rewrite unrelated diagnostic stages",
+            WaybackTraceStatus.PASSED,
+            mergeWaybackDiagnosticStatus(
+                WaybackTraceStatus.PASSED,
+                WaybackTraceStatus.FAILED,
+                15,
+                "No coincide la identidad del producto."
+            )
+        )
         assertTrue(
             "A CDX-only skip message must disappear once Availability downloads that capture",
             isSupersededWaybackSkipDetail(
@@ -2997,7 +3017,7 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun stepFiveRemainsPassedWhenValidEmptyCdxResponseIsFollowedBySecondaryTimeout() {
+    fun stepFiveFailsRecoveryWhenValidCdxResponseContainsNoCapturesAndFallbackTimesOut() {
         val result = summarizeCdxStep5Events(
             listOf(
                 WaybackTraceEvent(
@@ -3026,11 +3046,11 @@ class WaybackPriceHistoryClientTest {
         )
 
         assertNotNull(result)
-        assertEquals(WaybackTraceStatus.PASSED, result!!.status)
+        assertEquals(WaybackTraceStatus.FAILED, result!!.status)
         assertTrue(result.detail.contains("1 respuesta(s) CDX válida(s)"))
         assertTrue(result.detail.contains("0 captura(s) candidata(s)"))
         assertTrue(result.detail.contains("CDX_DOMAIN_TIMEOUT"))
-        assertTrue(result.detail.contains("paso 7"))
+        assertTrue(result.detail.contains("no hay histórico que validar"))
     }
 
     @Test

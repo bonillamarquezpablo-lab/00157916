@@ -620,9 +620,13 @@ class WaybackPriceHistoryClientTest {
             expectedTitle = "Apple iPhone 15 128 GB Negro"
         )
         assertEquals(
-            "Apple's canonical model URL must ignore storage and colour variants",
-            "https://www.apple.com/es/iphone-15/",
+            "Apple's purchase flow must be the first probe because it can expose offer-specific metadata",
+            "https://www.apple.com/es/shop/buy-iphone/iphone-15/",
             appleStorageColorCandidates.first()
+        )
+        assertTrue(
+            "The canonical marketing page remains as a fallback after the purchase route",
+            appleStorageColorCandidates.contains("https://www.apple.com/es/iphone-15/")
         )
 
         val pcCandidates = client.buildAvailabilityCandidateUrls(
@@ -2714,6 +2718,43 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun matchingIphone15OfferIsAcceptedWhenSiblingIphone15PlusOfferAlsoExists() {
+        val client = newClient()
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head>
+                  <title>iPhone 15 y iPhone 15 Plus</title>
+                  <script type="application/ld+json">
+                    {
+                      "@graph": [
+                        {
+                          "@type": "Product",
+                          "name": "Apple iPhone 15 256 GB Amarillo",
+                          "offers": {"@type":"Offer","price":"499.00","priceCurrency":"EUR"}
+                        },
+                        {
+                          "@type": "Product",
+                          "name": "Apple iPhone 15 Plus 128 GB Negro",
+                          "offers": {"@type":"Offer","price":"599.00","priceCurrency":"EUR"}
+                        }
+                      ]
+                    }
+                  </script>
+                </head><body></body></html>
+            """.trimIndent(),
+            expectedTitle = "Apple iPhone 15 256 GB Amarillo",
+            originalUrl = "https://shop.example/product/iphone-15?sku=yellow-256",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/product/iphone-15?sku=yellow-256",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("A sibling Plus offer must not invalidate an exact matching base-model offer", quote)
+        assertEquals(499.00, quote!!.price, 0.001)
+        assertEquals("Apple iPhone 15 256 GB Amarillo", quote.productTitle)
+        assertEquals("EUR", quote.currency)
+    }
+
+    @Test
     fun archivedUsdOfferIsRejectedEvenWhenThePageTitleMatches() {
         val client = newClient()
         val quote = client.parseArchivedPrice(
@@ -3174,6 +3215,39 @@ class WaybackPriceHistoryClientTest {
         assertTrue(
             "Historical lookup should include older products such as the Xiaomi Mi 10 Pro",
             WaybackPriceHistoryClient.DEFAULT_LOOKBACK_DAYS >= 2_500
+        )
+    }
+
+    @Test
+    fun triesApexHostOnceAfterWwwCdxTimeoutWithoutRepeatingSameHost() {
+        val client = newClient()
+        val hosts = client.buildDomainCdxHostUrls(
+            domain = "phonehouse.es",
+            expectedTitle = "Xiaomi Mi 10 Pro Gris",
+            now = 1_800_000_000_000L
+        )!!
+        assertEquals(2, hosts.size)
+        assertEquals("www.phonehouse.es", hosts[0].queryParameter("url"))
+        assertEquals("phonehouse.es", hosts[1].queryParameter("url"))
+
+        assertTrue(
+            client.shouldTryNextDomainHostAfterTimeout(0, hosts, setOf("CDX_DOMAIN_TIMEOUT"))
+        )
+        assertFalse(
+            "Do not retry a host after its one bounded attempt",
+            client.shouldTryNextDomainHostAfterTimeout(1, hosts, setOf("CDX_DOMAIN_TIMEOUT"))
+        )
+        assertFalse(
+            "Respect Internet Archive's 429 cooldown",
+            client.shouldTryNextDomainHostAfterTimeout(0, hosts, setOf("WAYBACK_RATE_LIMITED"))
+        )
+        assertFalse(
+            "Do not spend the second host query on an HTTP server error",
+            client.shouldTryNextDomainHostAfterTimeout(0, hosts, setOf("CDX_DOMAIN_HTTP_503"))
+        )
+        assertFalse(
+            "Do not retry the same host under a duplicate URL",
+            client.shouldTryNextDomainHostAfterTimeout(0, listOf(hosts[0], hosts[0]), setOf("CDX_DOMAIN_TIMEOUT"))
         )
     }
 

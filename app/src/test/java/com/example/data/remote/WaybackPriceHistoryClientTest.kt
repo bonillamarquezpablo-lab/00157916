@@ -708,6 +708,33 @@ class WaybackPriceHistoryClientTest {
             listOf(baseModelUrl, plusModelUrl),
             ordered
         )
+
+        val variantSpecificUrl = "https://www.apple.com/es/iphone-15-256-gb-amarillo/"
+        val specificFirst = client.orderAvailabilityCandidateUrls(
+            preferredUrl = baseModelUrl,
+            generatedUrls = listOf(
+                "https://www.apple.com/es/iphone-15/",
+                variantSpecificUrl
+            ),
+            expectedTitle = expected
+        )
+        assertEquals(
+            "A URL that explicitly identifies the selected model, capacity and colour should outrank a generic family page",
+            variantSpecificUrl,
+            specificFirst.first()
+        )
+
+        val opaqueSkuUrl = "https://www.apple.com/es/shop/buy-iphone/iphone-15/?sku=SKU123456"
+        val skuFirst = client.orderAvailabilityCandidateUrls(
+            preferredUrl = opaqueSkuUrl,
+            generatedUrls = listOf(variantSpecificUrl),
+            expectedTitle = expected
+        )
+        assertEquals(
+            "An opaque SKU query on the preferred URL remains a strong identity signal",
+            opaqueSkuUrl,
+            skuFirst.first()
+        )
     }
 
     @Test

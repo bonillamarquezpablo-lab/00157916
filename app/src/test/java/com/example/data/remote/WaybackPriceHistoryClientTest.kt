@@ -485,6 +485,28 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun followsMultipleRedirectWrappersAndReportsTheirDepth() {
+        val client = newClient()
+        val retailer = "https://shop.example/products/redmi-17?sku=redmi-17-blue&color=blue"
+        val facebook = "https://l.facebook.com/l.php?u=" +
+            java.net.URLEncoder.encode(retailer, Charsets.UTF_8.name())
+        val google = "https://www.google.com/url?url=" +
+            java.net.URLEncoder.encode(facebook, Charsets.UTF_8.name())
+
+        val resolved = extractDirectRetailerUrlWithDepth(google)
+        assertNotNull(resolved)
+        assertEquals(retailer, resolved!!.first)
+        assertEquals(2, resolved.second)
+
+        val decomposed = client.decomposeProductUrl(google)
+        assertNotNull(decomposed)
+        assertEquals(2, decomposed!!.redirectDepth)
+        assertEquals("shop.example", decomposed.merchantDomain)
+        assertEquals(listOf("redmi-17-blue"), decomposed.variantParameters["sku"])
+        assertEquals(listOf("blue"), decomposed.variantParameters["color"])
+    }
+
+    @Test
     fun rejectsArchiveAndSearchIntermediariesAsRetailerDestinations() {
         assertNull(extractDirectRetailerUrl("https://web.archive.org/web/20250101/https://shop.example/product"))
         assertNull(extractDirectRetailerUrl("https://bit.ly/unresolved-short-link"))

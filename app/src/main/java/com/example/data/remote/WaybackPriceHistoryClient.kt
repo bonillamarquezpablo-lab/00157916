@@ -488,7 +488,7 @@ class WaybackPriceHistoryClient(
             .sorted()
             .joinToString(",")
         val attempt = attemptKey(
-            "domain-cdx-batch-v7|$normalizedDomain|$expectedTitle|$preferredUrlIdentity|$preferredUrlIdentifiers"
+            "domain-cdx-batch-v8|$normalizedDomain|$expectedTitle|$preferredUrlIdentity|$preferredUrlIdentifiers"
         )
         serializedArchiveLookup {
             if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
@@ -523,8 +523,10 @@ class WaybackPriceHistoryClient(
                 lookbackDays = lookbackDays
             )?.take(MAX_DOMAIN_CDX_HOST_QUERIES).orEmpty()
             if (cdxUrls.isEmpty()) {
-                return@serializedArchiveLookup WaybackBackfillResult(
-                    diagnosticCodes = setOf("DOMAIN_CDX_CANDIDATES_EMPTY")
+                emitWaybackTrace(
+                    onTrace, 5, WaybackTraceStatus.SKIPPED,
+                    "No se pudo construir una consulta amplia de dominio; se priorizarán la URL directa y las rutas de producto conocidas.",
+                    diagnosticStep = 5
                 )
             }
 
@@ -593,6 +595,22 @@ class WaybackPriceHistoryClient(
                         onTrace = onTrace
                     )
                 }
+            }
+
+            // If no CDX host query can be constructed, still try the validated direct URL and
+            // bounded Availability candidates. A weak/missing title token must not suppress a
+            // usable retailer URL and leave every later phase unexecuted.
+            if (cdxUrls.isEmpty()) {
+                return@serializedArchiveLookup runDomainAvailabilityFallback(
+                    normalizedDomain = normalizedDomain,
+                    expectedTitle = expectedTitle,
+                    preferredUrl = resolvedPreferredUrl,
+                    now = now,
+                    lookbackDays = lookbackDays,
+                    cacheKey = attempt,
+                    failureCodes = setOf("DOMAIN_CDX_CANDIDATES_EMPTY"),
+                    onTrace = onTrace
+                )
             }
 
             // Only when no product-shaped URL can be generated do we try a broad host scan.

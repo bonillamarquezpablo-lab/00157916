@@ -1020,15 +1020,83 @@ class WaybackPriceHistoryClient(
         generatedUrls: List<String>,
         expectedTitle: String
     ): List<String> {
-        val preferred = preferredUrl?.takeIf(::isEligibleDirectUrl)
-        val generated = generatedUrls.filter(::isEligibleDirectUrl).distinct()
-        if (preferred == null) return generated
-        val preferredHasConflict = hasExplicitVariantConflictInProductUrl(expectedTitle, preferred)
-        return if (preferredHasConflict) {
-            (generated + preferred).distinct()
-        } else {
-            (listOf(preferred) + generated).distinct()
+        val candidates = (listOfNotNull(preferredUrl?.takeIf(::isEligibleDirectUrl)) +
+            generatedUrls.filter(::isEligibleDirectUrl)).distinct()
+        // A preferred URL can be a generic family page, so it must not automatically outrank a
+        // generated URL that explicitly names the selected capacity and colour. Keep stable order
+        // for equally informative links, and push URLs that explicitly contradict the SKU last.
+        return candidates.withIndex()
+            .sortedWith(
+                compareByDescending<IndexedValue<String>> {
+                    availabilityCandidateSpecificityScore(expectedTitle, it.value)
+                }.thenBy { it.index }
+            )
+            .map { it.value }
+    }
+
+    private fun availabilityCandidateSpecificityScore(
+        expectedTitle: String,
+        candidateUrl: String
+    ): Int {
+        if (hasExplicitVariantConflictInProductUrl(expectedTitle, candidateUrl)) return -10_000
+        val uri = runCatching { URI(candidateUrl) }.getOrNull() ?: return Int.MIN_VALUE
+        val pathText = uri.path.orEmpty().split('/')
+            .filter { it.isNotBlank() }
+            .joinToString(" ") { decodePathUrlComponent(it) }
+        val identityQueryKeys = setOf(
+            "sku", "skuid", "sku_id", "variant", "variantid", "variant_id", "variation",
+            "variationid", "variation_id", "productid", "product_id", "id_product",
+            "offerid", "offer_id", "pid", "itemid", "item_id", "asin", "mpn", "gtin",
+            "ean", "model", "modelid", "color", "colour", "colorid", "colourid",
+            "storage", "capacity", "size", "configuration", "config", "option", "optionid"
+        )
+        val queryParts = uri.rawQuery.orEmpty().split('&').mapNotNull { parameter ->
+            val key = decodeQueryUrlComponent(parameter.substringBefore('=')).lowercase(Locale.ROOT)
+            val value = decodeQueryUrlComponent(parameter.substringAfter('=', ""))
+            if (key !in identityQueryKeys || value.isBlank()) null else key to value
         }
+        val normalized = normalizeTitle(
+            pathText + " " + queryParts.joinToString(" ") { it.second }
+        )
+        val expected = normalizeTitle(expectedTitle)
+        if (normalized.isBlank() || expected.isBlank()) return 0
+
+        var score = 0
+        val modelPattern = Regex(
+            """\b(iphone|ipad|pixel|redmi|poco|galaxy\s+s|galaxy\s+a|galaxy\s+z)\s*(\d{1,3})\b"""
+        )
+        val expectedModel = modelPattern.find(expected)
+        val urlModel = modelPattern.find(normalized)
+        if (expectedModel != null && urlModel != null &&
+            expectedModel.groupValues[1].replace(Regex("\\s+"), "") ==
+                urlModel.groupValues[1].replace(Regex("\\s+"), "") &&
+            expectedModel.groupValues[2] == urlModel.groupValues[2]
+        ) score += 8
+
+        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+        val expectedStorage = storagePattern.findAll(expected)
+            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
+        val urlStorage = storagePattern.findAll(normalized)
+            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
+        if (expectedStorage.isNotEmpty() && urlStorage.any { it in expectedStorage }) score += 6
+
+        val expectedColour = productColourFamily(expected)
+        val urlColour = productColourFamily(normalized)
+        if (expectedColour != null && urlColour == expectedColour) score += 6
+
+        val expectedVariants = productModelVariantTokens(expected)
+        val urlVariants = productModelVariantTokens(normalized)
+        if (expectedVariants.isNotEmpty() && urlVariants.containsAll(expectedVariants)) score += 5
+
+        // Opaque SKU/variant IDs still carry useful product-specific intent even when the URL
+        // does not repeat colour or capacity in readable text.
+        if (queryParts.any { (key, _) ->
+                key in setOf("sku", "skuid", "sku_id", "variant", "variantid", "variant_id",
+                    "variation", "variationid", "variation_id", "productid", "product_id",
+                    "id_product", "offerid", "offer_id", "asin", "ean", "gtin")
+            }) score += 15
+
+        return score
     }
 
     /**
@@ -1398,6 +1466,26 @@ class WaybackPriceHistoryClient(
         }
         val verifiedBeforeDedup = fetched.mapNotNull { it.quote }.sortedBy { it.observedAt }
         val duplicatesRemoved = verifiedBeforeDedup.size - quotes.size
+        val identityMismatches = fetched.count { it.diagnosticCode == "ARCHIVE_PRODUCT_TITLE_MISMATCH" }
+        val missingEurPrices = fetched.count { it.diagnosticCode == "ARCHIVE_EUR_PRICE_MISSING" }
+        val consolidationDetail = buildString {
+            append(
+                "Consolidación histórica por Availability: ${fetched.count { it.fetched }} HTML descargado(s), " +
+                    "${verifiedBeforeDedup.size} precio(s) verificado(s), ${duplicatesRemoved} duplicado(s) eliminado(s)."
+            )
+            if (quotes.isEmpty()) {
+                when {
+                    identityMismatches > 0 ->
+                        append(" No se guardó ningún importe porque ${identityMismatches} captura(s) no acreditaron el modelo/variante exactos.")
+                    missingEurPrices > 0 ->
+                        append(" No se guardó ningún importe porque ${missingEurPrices} captura(s) no aportaron un precio EUR verificable.")
+                    fetched.any { it.diagnosticCode == "ARCHIVE_USD_FX_UNAVAILABLE" } ->
+                        append(" No se guardó ningún importe porque faltó un cambio histórico USD/EUR verificable.")
+                    fetched.any { it.fetched } ->
+                        append(" Las capturas se descargaron, pero ninguna produjo un precio histórico verificable.")
+                }
+            }
+        }
         emitWaybackTrace(
             onTrace, 14,
             when {
@@ -1405,7 +1493,7 @@ class WaybackPriceHistoryClient(
                 captures.isEmpty() -> WaybackTraceStatus.SKIPPED
                 else -> WaybackTraceStatus.FAILED
             },
-            "Consolidación histórica por Availability: ${fetched.count { it.fetched }} HTML descargado(s), ${verifiedBeforeDedup.size} precio(s) verificado(s), ${duplicatesRemoved} duplicado(s) eliminado(s).",
+            consolidationDetail,
             diagnosticStep = 18
         )
         val anySnapshotFailed = fetched.any { !it.fetched }

@@ -110,8 +110,15 @@ data class RejectedOnlineOffer(
 
 /**
  * Ranks result titles by the query's model and variant tokens before using price as a tie-breaker.
- * This operates locally over the provider response and does not consume additional quota.
+ * Alias-aware ranking also understands that "teclado HAL" listings commonly say HE, TMR,
+ * magnetic or Rapid Trigger. This only ranks already-fetched offers and uses no extra quota.
  */
+private val HALL_EFFECT_KEYBOARD_QUERY = Regex("""\\b(teclado|keyboard|keyboards)\\b.*\\b(hal|hall)\\b|\\b(hal|hall)\\b.*\\b(teclado|keyboard|keyboards)\\b""")
+private val HALL_EFFECT_TECH_TITLE = Regex("""\\b(he|tmr)\\b""")
+private val MAGNETIC_KEYBOARD_TITLE = Regex("""\\b(magnetic|magnetico|magneticos)\\b""")
+private val RAPID_TRIGGER_TITLE = Regex("""\\brapid trigger\\b""")
+private val KEYBOARD_ENGLISH_TITLE = Regex("""\\b(keyboard|keyboards)\\b""")
+
 internal fun onlineProductRelevanceScore(query: String, title: String): Int {
     fun canonical(value: String): String = Normalizer.normalize(
         value.lowercase(Locale.ROOT),
@@ -140,6 +147,15 @@ internal fun onlineProductRelevanceScore(query: String, title: String): Int {
         token.length >= 4 && token.any(Char::isDigit) &&
             token.any(Char::isLetter) && token in foundTokens
     } * 20
+
+    if (HALL_EFFECT_KEYBOARD_QUERY.containsMatchIn(wantedText)) {
+        if (HALL_EFFECT_TECH_TITLE.containsMatchIn(foundText)) score += 30
+        if (MAGNETIC_KEYBOARD_TITLE.containsMatchIn(foundText)) score += 20
+        if (RAPID_TRIGGER_TITLE.containsMatchIn(foundText)) score += 10
+        if (KEYBOARD_ENGLISH_TITLE.containsMatchIn(foundText) &&
+            "teclado" !in wantedTokens
+        ) score += 5
+    }
     return score
 }
 

@@ -68,6 +68,27 @@ data class WaybackTraceEvent(
     val diagnosticStep: Int? = null
 )
 
+/**
+ * Fully decoded and classified retailer URL. Query data is retained for diagnostics and variant
+ * identity, while tracking-only parameters are removed from canonicalUrl for archive lookups.
+ * Full URLs and query values must never be written to the on-device diagnostic log.
+ */
+internal data class DecomposedProductUrl(
+    val resolvedUrl: String,
+    val canonicalUrl: String,
+    val scheme: String,
+    val host: String,
+    val merchantDomain: String,
+    val path: String,
+    val pathSegments: List<String>,
+    val queryParameters: Map<String, List<String>>,
+    val variantParameters: Map<String, List<String>>,
+    val productIdentifiers: Set<String>,
+    val trackingParameters: Set<String>,
+    val fragment: String?,
+    val redirectDepth: Int
+)
+
 private fun emitWaybackTrace(
     listener: ((WaybackTraceEvent) -> Unit)?,
     step: Int,
@@ -298,20 +319,20 @@ class WaybackPriceHistoryClient(
         if (!preferences.getBoolean("enabled", true)) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("WAYBACK_DISABLED"))
         }
-        if (!isEligibleDirectUrl(originalUrl)) {
-            return@withContext WaybackBackfillResult(diagnosticCodes = setOf("DIRECT_URL_INVALID"))
-        }
         if (expectedTitle.isBlank()) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("PRODUCT_TITLE_EMPTY"))
         }
-        // Canonicalize once before deriving the cache key. Tracking parameters on the same
-        // retailer page must not create separate CDX requests and amplify archive rate limits.
-        val directUrl = buildDirectUrlCandidates(originalUrl).lastOrNull()
+        // Resolve embedded Google/Ads destinations before eligibility checks. The decomposer
+        // keeps product identifiers (SKU, colour, capacity, variant IDs) while canonicalizing
+        // only tracking parameters for archive requests.
+        val decomposedUrl = decomposeProductUrl(originalUrl)
             ?: return@withContext WaybackBackfillResult(
                 requestFailed = true,
                 diagnosticCodes = setOf("DIRECT_URL_INVALID")
             )
-        val attempt = attemptKey("url-cdx-batch-v6|$directUrl|$expectedTitle")
+        val directCandidates = buildDirectUrlCandidates(originalUrl)
+        val directUrl = directCandidates.lastOrNull() ?: decomposedUrl.canonicalUrl
+        val attempt = attemptKey("url-cdx-batch-v7|${decomposedUrl.merchantDomain}|${decomposedUrl.productIdentifiers.sorted().joinToString(",")}|$directUrl|$expectedTitle")
         serializedArchiveLookup {
             if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
                 return@serializedArchiveLookup WaybackBackfillResult(
@@ -376,11 +397,11 @@ class WaybackPriceHistoryClient(
         // Merchant metadata can be incomplete even when the offer has a valid direct URL.
         // Recover the host from that URL before rejecting the fallback; this adds no network call
         // and the normalizer still rejects search-engine/archive hosts.
+        val resolvedPreferredUrl = preferredUrl?.let { raw ->
+            decomposeProductUrl(raw)?.resolvedUrl ?: raw.takeIf(::isEligibleDirectUrl)
+        }
         val normalizedDomain = normalizeMerchantDomain(domain)
-            ?: preferredUrl
-                ?.takeIf(::isEligibleDirectUrl)
-                ?.let { url -> runCatching { URI(url).host }.getOrNull() }
-                ?.let(::normalizeMerchantDomain)
+            ?: resolvedPreferredUrl?.let { decomposeProductUrl(it)?.merchantDomain }
             ?: run {
                 emitWaybackTrace(
                     onTrace, 4, WaybackTraceStatus.SKIPPED,
@@ -503,14 +524,14 @@ class WaybackPriceHistoryClient(
             // archived a slash/variant URL different from the product link.
             val generatedProductUrls = buildAvailabilityCandidateUrls(normalizedDomain, expectedTitle)
             val productUrlCandidates = (
-                listOfNotNull(preferredUrl?.takeIf(::isEligibleDirectUrl)) + generatedProductUrls
+                listOfNotNull(resolvedPreferredUrl?.takeIf(::isEligibleDirectUrl)) + generatedProductUrls
             ).distinct()
             val productUrlCandidate = productUrlCandidates.firstOrNull()
-            if (preferredUrlAlreadyQueried && preferredUrl != null) {
+            if (preferredUrlAlreadyQueried && resolvedPreferredUrl != null) {
                 return@serializedArchiveLookup runDomainAvailabilityFallback(
                     normalizedDomain = normalizedDomain,
                     expectedTitle = expectedTitle,
-                    preferredUrl = preferredUrl,
+                    preferredUrl = resolvedPreferredUrl,
                     now = now,
                     lookbackDays = lookbackDays,
                     cacheKey = attempt,
@@ -551,7 +572,7 @@ class WaybackPriceHistoryClient(
                     return@serializedArchiveLookup runDomainAvailabilityFallback(
                         normalizedDomain = normalizedDomain,
                         expectedTitle = expectedTitle,
-                        preferredUrl = preferredUrl ?: productUrlCandidate,
+                        preferredUrl = resolvedPreferredUrl ?: productUrlCandidate,
                         now = now,
                         lookbackDays = lookbackDays,
                         cacheKey = attempt,
@@ -1373,12 +1394,93 @@ class WaybackPriceHistoryClient(
         return "ARCHIVE_PRICE_AMBIGUOUS_OR_INVALID"
     }
 
-    internal fun buildDirectUrlCandidates(originalUrl: String): List<String> {
-        if (!isEligibleDirectUrl(originalUrl)) return emptyList()
-        val uri = runCatching { URI(originalUrl) }.getOrNull() ?: return listOf(originalUrl)
-        if (uri.rawUserInfo != null || uri.host.isNullOrBlank()) return listOf(originalUrl)
+    /**
+     * Decomposes retailer links into the actual destination, host/path, all query parameters and
+     * variant identifiers. Google Shopping/Ads wrappers are resolved before archive eligibility.
+     */
+    internal fun decomposeProductUrl(input: String): DecomposedProductUrl? {
+        val resolved = extractDirectRetailerUrl(input) ?: return null
+        val uri = runCatching { URI(resolved) }.getOrNull() ?: return null
+        if (!isEligibleDirectUrl(resolved) || uri.rawUserInfo != null) return null
+        val host = uri.host?.lowercase(Locale.ROOT)?.trimEnd('.') ?: return null
+        val merchantDomain = normalizeMerchantDomain(host) ?: return null
+        val scheme = uri.scheme?.lowercase(Locale.ROOT) ?: return null
+        val path = uri.rawPath?.ifBlank { "/" } ?: "/"
+        val pathSegments = path.split('/')
+            .filter { it.isNotBlank() }
+            .map(::decodePathUrlComponent)
+        val rawQueryParts = uri.rawQuery?.split('&').orEmpty().filter { it.isNotBlank() }
+        val decodedPairs = rawQueryParts.mapNotNull { part ->
+            val pair = part.split('=', limit = 2)
+            val key = decodeQueryUrlComponent(pair[0]).lowercase(Locale.ROOT)
+            if (key.isBlank()) return@mapNotNull null
+            key to decodeQueryUrlComponent(pair.getOrElse(1) { "" })
+        }
+        val queryParameters = decodedPairs.groupBy({ it.first }, { it.second })
+        val trackingNames = setOf(
+            "gclid", "dclid", "fbclid", "msclkid", "mc_eid", "mc_cid", "igshid",
+            "gad_source", "gbraid", "wbraid", "ref", "ref_", "tag", "linkcode",
+            "campid", "scid", "affid", "affiliate", "sourceid", "srsltid",
+            "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+            "utm_id", "utm_name", "campaignid", "adgroupid", "creative", "network",
+            "gclsrc", "dclid", "gbraid", "wbraid"
+        )
+        val removedTracking = decodedPairs.map { it.first }
+            .filter { it.startsWith("utm_") || it in trackingNames }
+            .toSet()
+        val variantKeys = setOf(
+            "sku", "skuid", "variant", "variantid", "variant_id", "productid", "product_id",
+            "pid", "itemid", "item_id", "asin", "mpn", "gtin", "ean", "model", "modelid",
+            "color", "colour", "colorid", "colourid", "storage", "capacity", "size",
+            "configuration", "config", "option", "optionid", "device", "style", "styleid"
+        )
+        val variantParameters = queryParameters.filterKeys { it in variantKeys }
+        val identifiers = linkedSetOf<String>()
+        pathSegments.filter { segment ->
+            segment.length >= 2 && (segment.any(Char::isDigit) ||
+                Regex("""(?i)[a-z]{1,8}\d[a-z0-9]{1,12}""").matches(segment))
+        }.forEach(identifiers::add)
+        variantParameters.values.flatten().filter { it.isNotBlank() }
+            .forEach { identifiers += it.take(100) }
+        val canonicalQuery = rawQueryParts.filterNot { part ->
+            val key = decodeQueryUrlComponent(part.substringBefore('=')).lowercase(Locale.ROOT)
+            key.startsWith("utm_") || key in trackingNames
+        }
+        val base = scheme + "://" + uri.rawAuthority + path
+        val canonicalUrl = base + if (canonicalQuery.isNotEmpty()) {
+            "?" + canonicalQuery.joinToString("&")
+        } else ""
+        return DecomposedProductUrl(
+            resolvedUrl = resolved.substringBefore('#'),
+            canonicalUrl = canonicalUrl,
+            scheme = scheme,
+            host = host,
+            merchantDomain = merchantDomain,
+            path = path,
+            pathSegments = pathSegments,
+            queryParameters = queryParameters,
+            variantParameters = variantParameters,
+            productIdentifiers = identifiers,
+            trackingParameters = removedTracking,
+            fragment = uri.rawFragment?.let(::decodePathUrlComponent),
+            redirectDepth = if (resolved == input.trim()) 0 else 1
+        )
+    }
 
-        val candidates = linkedSetOf(originalUrl)
+    private fun decodeQueryUrlComponent(value: String): String =
+        runCatching {
+            java.net.URLDecoder.decode(value, Charsets.UTF_8.name())
+        }.getOrDefault(value)
+
+    private fun decodePathUrlComponent(value: String): String =
+        runCatching {
+            java.net.URLDecoder.decode(value.replace("+", "%2B"), Charsets.UTF_8.name())
+        }.getOrDefault(value)
+
+    internal fun buildDirectUrlCandidates(originalUrl: String): List<String> {
+        val parts = decomposeProductUrl(originalUrl) ?: return emptyList()
+        val uri = runCatching { URI(parts.resolvedUrl) }.getOrNull() ?: return emptyList()
+        val candidates = linkedSetOf(parts.resolvedUrl)
         val trackingNames = setOf(
             "gclid", "dclid", "fbclid", "msclkid", "mc_eid", "mc_cid", "igshid",
             "gad_source", "gbraid", "wbraid", "ref", "ref_", "tag", "linkcode",
@@ -1386,13 +1488,9 @@ class WaybackPriceHistoryClient(
         )
         val queryParts = uri.rawQuery?.split('&').orEmpty()
         val cleanedParts = queryParts.filterNot { part ->
-            val rawName = part.substringBefore('=')
-            val name = runCatching {
-                java.net.URLDecoder.decode(rawName.replace("+", "%2B"), "UTF-8")
-            }.getOrDefault(rawName).lowercase(Locale.ROOT)
+            val name = decodeQueryUrlComponent(part.substringBefore('=')).lowercase(Locale.ROOT)
             name.startsWith("utm_") || name in trackingNames
         }
-        val trackingRemoved = cleanedParts.size != queryParts.size
         val base = buildString {
             append(uri.scheme.lowercase(Locale.ROOT))
             append("://")
@@ -1400,15 +1498,14 @@ class WaybackPriceHistoryClient(
             append(uri.rawPath?.takeIf { it.isNotBlank() } ?: "/")
         }
         if (cleanedParts.isNotEmpty()) {
-            candidates += "$base?${cleanedParts.joinToString("&")}"
-        } else if (trackingRemoved) {
+            candidates += base + "?" + cleanedParts.joinToString("&")
+        } else if (parts.trackingParameters.isNotEmpty()) {
             candidates += base
         }
 
-        // Only queryless product pages should receive a slash-variant probe. A query such as
-        // ?sku=27k or ?variant=blue can identify a different product; adding a slash while
-        // preserving that query is a different URL and often misses the archived page.
-        if (candidates.size == 1 && uri.rawQuery.isNullOrBlank() && uri.rawPath.isNullOrBlank().not()) {
+        // Keep functional SKU/colour/capacity queries untouched. Add a slash probe only when the
+        // URL is queryless; such a probe is common for canonical retailer product pages.
+        if (candidates.size == 1 && uri.rawQuery.isNullOrBlank() && uri.rawPath.isNotBlank()) {
             val path = uri.rawPath!!
             val alternatePath = if (path.endsWith("/")) path.trimEnd('/').ifBlank { "/" } else "$path/"
             candidates += buildString {
@@ -1416,10 +1513,9 @@ class WaybackPriceHistoryClient(
                 append("://")
                 append(uri.rawAuthority)
                 append(alternatePath)
-                uri.rawQuery?.takeIf { it.isNotBlank() }?.let { append("?").append(it) }
             }
         }
-        return candidates.filter(::isEligibleDirectUrl).take(2)
+        return candidates.filter(::isEligibleDirectUrl).distinct().take(2)
     }
 
     internal fun parseAvailabilityCapture(body: String, fallbackOriginalUrl: String): WaybackCapture? {
@@ -2091,6 +2187,7 @@ class WaybackPriceHistoryClient(
             normalizeMerchantDomain(it.domain)?.let { domain -> return domain }
         }
         if (sourceUrl.isNotBlank()) {
+            decomposeProductUrl(sourceUrl)?.merchantDomain?.let { return it }
             runCatching { URI(sourceUrl).host }.getOrNull()
                 ?.let(::normalizeMerchantDomain)?.let { return it }
         }
@@ -3079,8 +3176,9 @@ class WaybackPriceHistoryClient(
     internal fun isEligibleDirectUrl(value: String): Boolean {
         val uri = runCatching { URI(value) }.getOrNull() ?: return false
         val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
-        if (uri.scheme != "https" || host.isBlank() || uri.rawUserInfo != null ||
-            uri.path.isNullOrBlank() || uri.path == "/"
+        if (!uri.scheme.equals("https", ignoreCase = true) || host.isBlank() || uri.rawUserInfo != null ||
+            uri.path.isNullOrBlank() || uri.path == "/" ||
+            isIntermediaryRedirectHost(host) || isNonRetailerArchiveOrSearchHost(host)
         ) return false
         if (host == "web.archive.org" || host == "archive.org" ||
             host.startsWith("google.") || host.endsWith(".google.com") || host.endsWith(".google.es") ||

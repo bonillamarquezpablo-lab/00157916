@@ -228,7 +228,11 @@ class WaybackPriceHistoryClientTest {
         val originalUrl = "https://shop.example/products/anker-prime-cache-test"
         val baseClient = WaybackPriceHistoryClient(context)
         val canonicalUrl = baseClient.buildDirectUrlCandidates(originalUrl).last()
-        val rawKey = "url-cdx-batch-v6|" + canonicalUrl + "|" + title
+        val urlParts = baseClient.decomposeProductUrl(originalUrl)!!
+        val rawKey = "url-cdx-batch-v8|" +
+            urlParts.merchantDomain + "|" +
+            urlParts.productIdentifiers.sorted().joinToString(",") + "|" +
+            canonicalUrl + "|" + title
         val digest = java.security.MessageDigest.getInstance("SHA-256")
             .digest(rawKey.toByteArray(Charsets.UTF_8))
         val cacheKey = "attempt_" + digest.take(16).joinToString("") {

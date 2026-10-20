@@ -441,6 +441,52 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun fullyDecodesNestedGoogleRedirectAndPreservesProductVariantParameters() {
+        val client = newClient()
+        val encodedDestination =
+            "https%253A%252F%252Fshop.example%252Fproduct%252Fiphone-15" +
+                "%253Fsku%253Diphone15-yellow-256%2526color%253Dyellow" +
+                "%2526storage%253D256GB%2526utm_source%253Dgoogle"
+        val wrapped = "https://www.google.com/url?sa=t&url=" + encodedDestination + "&source=web"
+
+        assertEquals(
+            "https://shop.example/product/iphone-15?sku=iphone15-yellow-256&color=yellow&storage=256GB&utm_source=google",
+            extractDirectRetailerUrl(wrapped)
+        )
+        val decomposed = client.decomposeProductUrl(wrapped)
+        assertNotNull("The URL wrapper must resolve before archive eligibility is checked", decomposed)
+        assertEquals("shop.example", decomposed!!.merchantDomain)
+        assertEquals(listOf("product", "iphone-15"), decomposed.pathSegments)
+        assertEquals(listOf("yellow"), decomposed.queryParameters["color"])
+        assertEquals(listOf("256GB"), decomposed.queryParameters["storage"])
+        assertEquals(listOf("iphone15-yellow-256"), decomposed.variantParameters["sku"])
+        assertTrue(decomposed.productIdentifiers.contains("iphone-15"))
+        assertTrue(decomposed.productIdentifiers.contains("iphone15-yellow-256"))
+        assertTrue(decomposed.trackingParameters.contains("utm_source"))
+        assertEquals(
+            "https://shop.example/product/iphone-15?sku=iphone15-yellow-256&color=yellow&storage=256GB",
+            decomposed.canonicalUrl
+        )
+        assertEquals(
+            "shop.example",
+            client.resolveMerchantDomain("Google Shopping", wrapped)
+        )
+        val candidates = client.buildDirectUrlCandidates(wrapped)
+        assertEquals("The product URL must be used instead of the Google redirect", 
+            "https://shop.example/product/iphone-15?sku=iphone15-yellow-256&color=yellow&storage=256GB",
+            candidates.last()
+        )
+        assertTrue(candidates.all(client::isEligibleDirectUrl))
+    }
+
+    @Test
+    fun rejectsArchiveAndSearchIntermediariesAsRetailerDestinations() {
+        assertNull(extractDirectRetailerUrl("https://web.archive.org/web/20250101/https://shop.example/product"))
+        assertNull(extractDirectRetailerUrl("https://bit.ly/unresolved-short-link"))
+        assertFalse(newClient().isEligibleDirectUrl("https://www.googleadservices.com/pagead/aclk?adurl=https%3A%2F%2Fshop.example%2Fproduct"))
+    }
+
+    @Test
     fun directUrlCandidatesTrySlashVariantOnlyForQuerylessPages() {
         val client = newClient()
         val queryless = client.buildDirectUrlCandidates("https://shop.example/product/anker-prime")

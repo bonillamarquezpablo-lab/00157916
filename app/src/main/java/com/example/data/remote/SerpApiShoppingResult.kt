@@ -113,11 +113,11 @@ data class RejectedOnlineOffer(
  * Alias-aware ranking also understands that "teclado HAL" listings commonly say HE, TMR,
  * magnetic or Rapid Trigger. This only ranks already-fetched offers and uses no extra quota.
  */
-private val HALL_EFFECT_KEYBOARD_QUERY = Regex("""\\b(teclado|keyboard|keyboards)\\b.*\\b(hal|hall)\\b|\\b(hal|hall)\\b.*\\b(teclado|keyboard|keyboards)\\b""")
-private val HALL_EFFECT_TECH_TITLE = Regex("""\\b(he|tmr)\\b""")
-private val MAGNETIC_KEYBOARD_TITLE = Regex("""\\b(magnetic|magnetico|magneticos)\\b""")
-private val RAPID_TRIGGER_TITLE = Regex("""\\brapid trigger\\b""")
-private val KEYBOARD_ENGLISH_TITLE = Regex("""\\b(keyboard|keyboards)\\b""")
+private val HALL_EFFECT_KEYBOARD_QUERY = Regex("""\b(teclado|keyboard|keyboards)\b.*\b(hal|hall)\b|\b(hal|hall)\b.*\b(teclado|keyboard|keyboards)\b""")
+private val HALL_EFFECT_TECH_TITLE = Regex("""\b(he|tmr)\b""")
+private val MAGNETIC_KEYBOARD_TITLE = Regex("""\b(magnetic|magnetico|magneticos)\b""")
+private val RAPID_TRIGGER_TITLE = Regex("""\brapid trigger\b""")
+private val KEYBOARD_ENGLISH_TITLE = Regex("""\b(keyboard|keyboards)\b""")
 
 internal fun onlineProductRelevanceScore(query: String, title: String): Int {
     fun canonical(value: String): String = Normalizer.normalize(

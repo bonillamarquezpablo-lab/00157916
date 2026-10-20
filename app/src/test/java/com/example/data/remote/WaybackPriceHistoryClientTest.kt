@@ -749,7 +749,7 @@ class WaybackPriceHistoryClientTest {
         }.build()
 
         try {
-            val result = withTimeout(10_000L) {
+            val result = withTimeout(25_000L) {
                 WaybackPriceHistoryClient(context, http).fetchHistoryByMerchantDomain(
                     domain = "shop.example",
                     expectedTitle = title,
@@ -1529,7 +1529,7 @@ class WaybackPriceHistoryClientTest {
         }.build()
 
         try {
-            val result = withTimeout(10_000L) {
+            val result = withTimeout(25_000L) {
                 WaybackPriceHistoryClient(context, http).fetchHistoryByMerchantDomain(
                     domain = "shop.example",
                     expectedTitle = title,

@@ -6,7 +6,7 @@ import java.net.URI
 import java.net.URLDecoder
 import java.text.Normalizer
 import java.util.Locale
-import java.util.Base64
+import android.util.Base64
 
 private val BUNDLE_TERMS = Regex(
     """\b(pack|paquete|combo|bundle|kit|set|conjunto|combinacion|combinado)\b"""
@@ -335,10 +335,12 @@ private fun decodeRedirectParameter(raw: String): String {
         // envelope, then let the same bounded loop unwrap any nested URL encoding or redirect.
         if (value.startsWith("a1") && value.length > 12) {
             val payload = value.substring(2)
+            val paddedPayload = payload + "=".repeat((4 - payload.length % 4) % 4)
             val base64Decoded = runCatching {
-                String(Base64.getUrlDecoder().decode(payload), Charsets.UTF_8)
-            }.recoverCatching {
-                String(Base64.getDecoder().decode(payload), Charsets.UTF_8)
+                String(
+                    Base64.decode(paddedPayload, Base64.URL_SAFE or Base64.NO_WRAP),
+                    Charsets.UTF_8
+                )
             }.getOrNull()?.let(::cleanRedirectUrlText)
             if (base64Decoded?.startsWith("https://", ignoreCase = true) == true ||
                 base64Decoded?.startsWith("http://", ignoreCase = true) == true ||

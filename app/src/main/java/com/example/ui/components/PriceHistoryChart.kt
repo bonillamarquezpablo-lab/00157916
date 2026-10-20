@@ -467,7 +467,7 @@ fun PriceHistoryChart(
                             chartAccent.copy(alpha = 0.38f),
                             chartAccent.copy(alpha = 0.0f)
                         ),
-                        startY = coords.minOf { it.y },
+                        startY = minOf(coords.minOf { it.y }, baselineY - 1f),
                         endY = baselineY
                     )
                 )
@@ -491,6 +491,24 @@ fun PriceHistoryChart(
                     val isSelected = index == selectedPointIndex
 
                     when {
+                        isSelected && isAth -> {
+                            // Keep the green observed-minimum marker visible while selected.
+                            drawCircle(
+                                color = chartAccent,
+                                radius = 7.dp.toPx(),
+                                center = coord
+                            )
+                            drawCircle(
+                                color = Color(0xFF10B981),
+                                radius = 5.dp.toPx(),
+                                center = coord
+                            )
+                            drawCircle(
+                                color = Color(0xFF064E3B),
+                                radius = 2.dp.toPx(),
+                                center = coord
+                            )
+                        }
                         isSelected -> {
                             drawCircle(
                                 color = chartAccent,

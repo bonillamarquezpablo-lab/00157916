@@ -2113,14 +2113,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                         (targetProductId?.let { product.id == it }
                                             ?: (onlineProductIdentityKey(product.title) == targetIdentity)) &&
                                             product.priceHistory.any {
-                                                it.eventLabel.equals("Internet Archive", ignoreCase = true)
+                                                it.eventLabel.startsWith("Internet Archive", ignoreCase = true)
                                             }
                                     }
                                 }.first { product ->
                                     (targetProductId?.let { product.id == it }
                                         ?: (onlineProductIdentityKey(product.title) == targetIdentity)) &&
                                         product.priceHistory.any {
-                                            it.eventLabel.equals("Internet Archive", ignoreCase = true)
+                                            it.eventLabel.startsWith("Internet Archive", ignoreCase = true)
                                         }
                                 }
                             }

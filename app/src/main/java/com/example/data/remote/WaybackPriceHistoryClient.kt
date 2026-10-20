@@ -1543,12 +1543,17 @@ class WaybackPriceHistoryClient(
         if (candidates.size == 1 && uri.rawQuery.isNullOrBlank() && uri.rawPath.isNotBlank()) {
             val path = uri.rawPath!!
             val alternatePath = if (path.endsWith("/")) path.trimEnd('/').ifBlank { "/" } else "$path/"
-            candidates += buildString {
+            val slashVariant = buildString {
                 append(uri.scheme.lowercase(Locale.ROOT))
                 append("://")
                 append(uri.rawAuthority)
                 append(alternatePath)
             }
+            // Keep the exact retailer URL last so fetchHistory's selected target does not drop a
+            // real no-trailing-slash capture merely because a slash probe was also generated.
+            candidates.clear()
+            candidates += slashVariant
+            candidates += parts.resolvedUrl
         }
         return candidates.filter(::isEligibleDirectUrl).distinct().take(2)
     }

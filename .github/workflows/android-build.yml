@@ -44,6 +44,9 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Escanear credenciales en archivos y en el historial
+        run: python3 tools/secret_scan.py
+
       - name: Preparar Java
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
@@ -200,7 +203,15 @@ jobs:
           test -s "$APK_PATH"
           BADGING="$("$AAPT" dump badging "$APK_PATH")"
           printf '%s\\n' "$BADGING" | grep -F "package: name='com.aistudio.preciominimo.esrxvt' versionCode='$VERSION_CODE' versionName='$VERSION_NAME'"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK_PATH"
+          SIGNATURE="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK_PATH")"
+          printf '%s\\n' "$SIGNATURE"
+          ACTUAL_CERT="$(printf '%s\\n' "$SIGNATURE" | sed -n 's/.*certificate SHA-256 digest: //p' | head -n 1 | tr -d ': ' | tr '[:lower:]' '[:upper:]')"
+          EXPECTED_CERT="F631A8C0A194008E77A312A78775E95837DBC66DF635EAE9B966E5C294ADD450"
+          if [ -z "$ACTUAL_CERT" ] || [ "$ACTUAL_CERT" != "$EXPECTED_CERT" ]; then
+            echo "::error::La huella SHA-256 del certificado de firma no coincide con la clave estable autorizada."
+            exit 1
+          fi
+          echo "Certificado de firma coincide con la huella estable autorizada."
           sha256sum "$APK_PATH"
 
       - name: Guardar el APK durante 7 días

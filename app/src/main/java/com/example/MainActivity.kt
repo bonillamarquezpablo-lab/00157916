@@ -57,18 +57,12 @@ class MainActivity : ComponentActivity() {
         pendingCrashReport = readLatestReport()
     }
 
-    override fun onResume() {
-        super.onResume()
-        if (::crashStore.isInitialized && ::processExitDiagnostics.isInitialized && pendingCrashReport == null) {
-            readLatestReport()?.let { pendingCrashReport = it }
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         crashStore = CrashReportStore(applicationContext)
         processExitDiagnostics = ProcessExitDiagnostics(applicationContext)
-        pendingCrashReport = readLatestReport()
+        // Crash diagnostics are opened only from Settings > Application > Error reports.
+        // Never interrupt normal startup with a stale/system-exit report.
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {

@@ -15,9 +15,10 @@ import java.util.TimeZone
 /**
  * Captures Android's previous-process exit reason when available.
  *
- * ApplicationExitInfo is useful for ANRs and user-requested force-stops, which do not reliably
- * invoke Thread.UncaughtExceptionHandler. The system description and trace are intentionally not
- * copied because they may contain sensitive information.
+ * Only genuine app crashes (Java/native) and ANRs are reportable. User-initiated exits, task
+ * removal, low-memory kills, resource limits, dependency exits and package updates are ignored.
+ * System descriptions and traces are intentionally not copied because they may contain sensitive
+ * information. Reports are shown only when the user opens Settings > Error reports.
  */
 class ProcessExitDiagnostics(context: Context) {
     private val appContext = context.applicationContext
@@ -33,23 +34,37 @@ class ProcessExitDiagnostics(context: Context) {
 
         val manager = appContext.getSystemService(ActivityManager::class.java) ?: return
         val lastProcessed = preferences.getLong(LAST_PROCESSED_TIMESTAMP, 0L)
-        val latest = manager.getHistoricalProcessExitReasons(appContext.packageName, 0, MAX_HISTORY)
-            .firstOrNull { it.timestamp > lastProcessed }
-            ?: return
+        val newExits = manager.getHistoricalProcessExitReasons(appContext.packageName, 0, MAX_HISTORY)
+            .filter { it.timestamp > lastProcessed }
+        if (newExits.isEmpty()) return
 
-        val reasonLabel = describeProcessExitReason(latest.reason)
-        if (reasonLabel != null) {
-            writeReport(latest.timestamp, reasonLabel)
+        // Look across every new exit, not just the newest one: a routine OS kill after a real
+        // crash must not hide that crash, and a routine exit by itself must never create a report.
+        val reportableExit = newExits.mapNotNull { exit ->
+            describeProcessExitReason(exit.reason)?.let { label -> exit to label }
+        }.maxByOrNull { (exit, _) -> exit.timestamp }
+
+        reportableExit?.let { (exit, label) ->
+            writeReport(exit.timestamp, label)
         }
-        // Mark ordinary exits as processed too, so they are not reconsidered on every launch.
-        preferences.edit().putLong(LAST_PROCESSED_TIMESTAMP, latest.timestamp).apply()
+
+        // Mark every newly observed exit as processed, including non-reportable system exits.
+        preferences.edit()
+            .putLong(LAST_PROCESSED_TIMESTAMP, newExits.maxOf { it.timestamp })
+            .apply()
     }
 
     fun readLast(): String? = runCatching {
         if (!reportFile.isFile) return null
         val size = reportFile.length()
         if (size !in 1L..MAX_REPORT_BYTES.toLong()) return null
-        reportFile.readText(Charsets.UTF_8)
+        val report = reportFile.readText(Charsets.UTF_8)
+        if (!isReportableProcessExitReport(report)) {
+            // Purge legacy reports created by older versions for user/system exits.
+            reportFile.delete()
+            return null
+        }
+        report
     }.onFailure {
         Log.e(TAG, "Could not read private process-exit report (${it.javaClass.simpleName}).")
     }.getOrNull()
@@ -99,7 +114,7 @@ class ProcessExitDiagnostics(context: Context) {
     }
 }
 
-/** Maps Android exit codes to safe, human-readable text; normal lifecycle exits are ignored. */
+/** Maps only genuine app crashes and ANRs to reportable, human-readable labels. */
 internal fun describeProcessExitReason(reason: Int): String? = when (reason) {
     ApplicationExitInfo.REASON_ANR ->
         "ANR: Android detectó que la aplicación no respondía."
@@ -107,15 +122,17 @@ internal fun describeProcessExitReason(reason: Int): String? = when (reason) {
         "Excepción fatal: Android registró que el proceso terminó por un fallo de la aplicación."
     ApplicationExitInfo.REASON_CRASH_NATIVE ->
         "Fallo nativo: Android registró una terminación por código nativo."
-    ApplicationExitInfo.REASON_INITIALIZATION_FAILURE ->
-        "Falló la inicialización de la aplicación."
-    ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE ->
-        "Android terminó el proceso por uso excesivo de recursos."
-    ApplicationExitInfo.REASON_LOW_MEMORY ->
-        "Android terminó el proceso por falta de memoria disponible."
-    ApplicationExitInfo.REASON_DEPENDENCY_DIED ->
-        "Se detuvo un proceso o servicio del que dependía la aplicación."
-    ApplicationExitInfo.REASON_USER_REQUESTED ->
-        "Cierre solicitado por el usuario o el sistema. Puede incluir «Forzar detención» desde Ajustes; no implica por sí solo un fallo del código."
     else -> null
+}
+
+/** Rejects legacy diagnostic files that were written for routine OS/user exits in older builds. */
+internal fun isReportableProcessExitReport(report: String): Boolean {
+    if (!report.startsWith("Mínimo — diagnóstico del cierre anterior (registro de Android)")) return false
+    val reason = report.lineSequence()
+        .firstOrNull { it.startsWith("Motivo registrado: ") }
+        ?.removePrefix("Motivo registrado: ")
+        ?: return false
+    return reason.startsWith("ANR: ") ||
+        reason.startsWith("Excepción fatal: ") ||
+        reason.startsWith("Fallo nativo: ")
 }

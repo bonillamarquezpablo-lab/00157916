@@ -507,6 +507,23 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun decodesBingBase64ClickTargetBeforeWaybackLookup() {
+        val client = newClient()
+        val retailer = "https://shop.example/products/anker-prime?sku=anker-prime-27k&color=black"
+        val payload = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(retailer.toByteArray(Charsets.UTF_8))
+        val wrapped = "https://www.bing.com/ck/a?u=a1" + payload + "&ntb=1"
+
+        assertEquals(retailer, extractDirectRetailerUrl(wrapped))
+        val decomposed = client.decomposeProductUrl(wrapped)
+        assertNotNull(decomposed)
+        assertEquals("shop.example", decomposed!!.merchantDomain)
+        assertEquals(listOf("anker-prime-27k"), decomposed.variantParameters["sku"])
+        assertEquals(listOf("black"), decomposed.variantParameters["color"])
+        assertEquals(1, decomposed.redirectDepth)
+    }
+
+    @Test
     fun rejectsArchiveAndSearchIntermediariesAsRetailerDestinations() {
         assertNull(extractDirectRetailerUrl("https://web.archive.org/web/20250101/https://shop.example/product"))
         assertNull(extractDirectRetailerUrl("https://bit.ly/unresolved-short-link"))

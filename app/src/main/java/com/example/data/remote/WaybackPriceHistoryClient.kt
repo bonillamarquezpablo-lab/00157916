@@ -1348,12 +1348,18 @@ class WaybackPriceHistoryClient(
     private fun detectArchivedHtmlBarrier(html: String): String? {
         val head = html.take(160_000).lowercase(Locale.ROOT)
         return when {
-            "cf-chl-" in head || "cloudflare ray id" in head || "checking your browser" in head ->
+            // Cloudflare challenge pages archived by Wayback often omit cf-chl-* markers.
+            "cf-chl-" in head || "cloudflare ray id" in head ||
+                "checking your browser" in head || "just a moment" in head ||
+                "ddos protection" in head || "attention required! | cloudflare" in head ||
+                "performing security verification" in head ||
+                "checking if the site connection is secure" in head ->
                 "CLOUDFLARE_CHALLENGE"
             "verify you are human" in head || "prove you are human" in head ||
                 "robot check" in head || "complete the captcha" in head ||
                 "complete this captcha" in head || "solve the captcha" in head ||
                 "enter the captcha" in head || "please enter the characters" in head ||
+                "enable javascript and cookies to continue" in head ||
                 Regex("""(?is)<title[^>]*>[^<]*(?:captcha|robot check|human verification|verification required)[^<]*</title>""")
                     .containsMatchIn(head) -> "CAPTCHA_OR_ROBOT_CHECK"
             "access denied" in head || "request blocked" in head || "temporarily blocked" in head ->
@@ -1373,17 +1379,26 @@ class WaybackPriceHistoryClient(
         val jsonLd = extractJsonLdProductOffers(document)
         val pageTitles = extractArchivedPageTitles(document)
         val titles = (jsonLd.map { it.first } + pageTitles).filter { it.isNotBlank() }
-        val titleMatches = titles.any { isMatchingProductTitle(expectedTitle, it) }
         val expectedTitleForTrace = expectedTitle.replace(Regex("""\s+"""), " ").trim().take(100)
         val detectedTitlesForTrace = titles.take(3)
             .joinToString(" | ") { it.replace(Regex("""\s+"""), " ").trim().take(100) }
+        val structuredMatch = jsonLd.any { isMatchingProductTitle(expectedTitle, it.first) }
+        val structuredConflict = jsonLd.firstOrNull {
+            hasExplicitProductVariantConflict(expectedTitle, it.first)
+        }
+        val pageTitleMatch = pageTitles.any { isMatchingProductTitle(expectedTitle, it) }
+        val titleMatches = structuredMatch || (structuredConflict == null && pageTitleMatch)
         emitWaybackTrace(
             onTrace, 12,
-            if (titles.isEmpty()) WaybackTraceStatus.FAILED
-            else if (titleMatches) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
+            if (titles.isEmpty() || !titleMatches) WaybackTraceStatus.FAILED else WaybackTraceStatus.PASSED,
             when {
                 titles.isEmpty() -> "No se encontró título en JSON-LD, og:title, twitter:title ni <title>."
-                titleMatches -> "Título/modelo de la página coincide con el producto seleccionado."
+                structuredConflict != null && !structuredMatch ->
+                    "La oferta estructurada identifica otra variante («" +
+                        structuredConflict.first.replace(Regex("""\s+"""), " ").trim().take(100) +
+                        "»); el título general de la página no basta para confirmar «" +
+                        expectedTitleForTrace + "». No se aceptará su precio."
+                titleMatches -> "Título/modelo de la oferta archivada coincide con el producto seleccionado."
                 else -> "No coincide la identidad. Producto esperado: «$expectedTitleForTrace». Título(s) archivado(s): «$detectedTitlesForTrace». No se aceptará un precio de otra variante."
             }
         )
@@ -1421,7 +1436,7 @@ class WaybackPriceHistoryClient(
             if (valid) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
             when {
                 valid && quote != null -> "Precio validado: moneda EUR y rango permitido; identidad aceptada."
-                valid -> "Importe EUR válido, pero otro filtro impidió aceptarlo (revisa el paso 12)."
+                valid -> "Se encontró un importe EUR válido, pero no se guardará porque la identidad del producto no está confirmada (paso 15)."
                 !numericValid -> "No hay importe numérico positivo dentro del rango permitido."
                 else -> "Se detectó un importe, pero no se confirmó la moneda EUR."
             }
@@ -1460,11 +1475,15 @@ class WaybackPriceHistoryClient(
             (if (pageTitles.isNotEmpty() && visiblePrice != null) {
                 pageTitles.map { title -> Triple(title, visiblePrice, "EUR") }
             } else emptyList())
-        if (candidates.none { it.third.equals("EUR", ignoreCase = true) }) {
-            return "ARCHIVE_EUR_PRICE_MISSING"
-        }
+        if (jsonLd.isNotEmpty() &&
+            jsonLd.none { isMatchingProductTitle(expectedTitle, it.first) } &&
+            jsonLd.any { hasExplicitProductVariantConflict(expectedTitle, it.first) }
+        ) return "ARCHIVE_PRODUCT_TITLE_MISMATCH"
         if (candidates.none { isMatchingProductTitle(expectedTitle, it.first) }) {
             return "ARCHIVE_PRODUCT_TITLE_MISMATCH"
+        }
+        if (candidates.none { it.third.equals("EUR", ignoreCase = true) }) {
+            return "ARCHIVE_EUR_PRICE_MISSING"
         }
         return "ARCHIVE_PRICE_AMBIGUOUS_OR_INVALID"
     }
@@ -1495,20 +1514,23 @@ class WaybackPriceHistoryClient(
         val queryParameters = decodedPairs.groupBy({ it.first }, { it.second })
         val trackingNames = setOf(
             "gclid", "dclid", "fbclid", "msclkid", "mc_eid", "mc_cid", "igshid",
-            "gad_source", "gbraid", "wbraid", "ref", "ref_", "tag", "linkcode",
+            "gad_source", "gad_campaignid", "gbraid", "wbraid", "ref", "ref_", "tag", "linkcode",
             "campid", "scid", "affid", "affiliate", "sourceid", "srsltid",
             "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
             "utm_id", "utm_name", "campaignid", "adgroupid", "creative", "network",
-            "gclsrc", "dclid", "gbraid", "wbraid"
+            "gclsrc", "irclickid", "twclid", "ttclid", "li_fat_id", "epik", "yclid",
+            "awc", "afftrack", "zanpid", "s_kwcid", "mkt_tok", "_gl", "_ga"
         )
         val removedTracking = decodedPairs.map { it.first }
             .filter { it.startsWith("utm_") || it in trackingNames }
             .toSet()
         val variantKeys = setOf(
-            "sku", "skuid", "variant", "variantid", "variant_id", "productid", "product_id",
+            "sku", "skuid", "sku_id", "variant", "variantid", "variant_id", "id_variant",
+            "variant_sku", "variant_sku_id", "variation", "variationid", "variation_id",
+            "productid", "product_id", "id_product", "id_product_attribute", "offerid", "offer_id",
             "pid", "itemid", "item_id", "asin", "mpn", "gtin", "ean", "model", "modelid",
             "color", "colour", "colorid", "colourid", "storage", "capacity", "size",
-            "configuration", "config", "option", "optionid", "device", "style", "styleid"
+            "configuration", "config", "option", "optionid", "attribute_id", "device", "style", "styleid"
         )
         val variantParameters = queryParameters.filterKeys { it in variantKeys }
         val identifiers = linkedSetOf<String>()
@@ -1559,8 +1581,10 @@ class WaybackPriceHistoryClient(
         val candidates = linkedSetOf(parts.resolvedUrl)
         val trackingNames = setOf(
             "gclid", "dclid", "fbclid", "msclkid", "mc_eid", "mc_cid", "igshid",
-            "gad_source", "gbraid", "wbraid", "ref", "ref_", "tag", "linkcode",
-            "campid", "scid", "affid", "affiliate", "sourceid", "srsltid"
+            "gad_source", "gad_campaignid", "gbraid", "wbraid", "ref", "ref_", "tag", "linkcode",
+            "campid", "scid", "affid", "affiliate", "sourceid", "srsltid",
+            "irclickid", "twclid", "ttclid", "li_fat_id", "epik", "yclid",
+            "awc", "afftrack", "zanpid", "s_kwcid", "mkt_tok", "_gl", "_ga"
         )
         val queryParts = uri.rawQuery?.split('&').orEmpty()
         val cleanedParts = queryParts.filterNot { part ->
@@ -2701,18 +2725,33 @@ class WaybackPriceHistoryClient(
                 candidate.second in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE &&
                 isMatchingProductTitle(expectedTitle, candidate.first)
 
-        val explicitMeta = if (metaPrice != null && !metaCurrency.isNullOrBlank()) {
+        val matchingIdentityJsonLd = jsonLdCandidates.filter {
+            isMatchingProductTitle(expectedTitle, it.first)
+        }
+        val matchingJsonLd = matchingIdentityJsonLd.filter(::isValidCandidate)
+        val structuredVariantConflict = jsonLdCandidates.firstOrNull {
+            hasExplicitProductVariantConflict(expectedTitle, it.first)
+        }
+
+        // Do not borrow a generic page/meta title if its structured offer identifies another SKU,
+        // or if the matching structured offer carries a non-EUR/out-of-range price.
+        if (matchingJsonLd.isEmpty() &&
+            (matchingIdentityJsonLd.isNotEmpty() || structuredVariantConflict != null)
+        ) return null
+
+        val explicitMeta = if (matchingJsonLd.isEmpty() &&
+            structuredVariantConflict == null && metaPrice != null && !metaCurrency.isNullOrBlank()
+        ) {
             pageTitles.asSequence()
                 .filter { isMatchingProductTitle(expectedTitle, it) }
                 .map { title -> Triple(title, metaPrice, metaCurrency) }
                 .firstOrNull(::isValidCandidate)
         } else null
 
-        val matchingJsonLd = jsonLdCandidates.filter(::isValidCandidate)
-        val matching = explicitMeta ?: matchingJsonLd.minWithOrNull(
+        val matching = matchingJsonLd.minWithOrNull(
             compareBy<Triple<String, Double, String>> { it.second }
                 .thenBy { normalizeTitle(it.first) }
-        )
+        ) ?: explicitMeta
         if (matching != null) {
             return ArchivedPriceQuote(
                 observedAt = observedAt,
@@ -3056,9 +3095,7 @@ class WaybackPriceHistoryClient(
         // must never be treated as the same SKU. Normalize common Spanish/English/Italian names.
         val expectedColourFamily = productColourFamily(e)
         val archivedColourFamily = productColourFamily(a)
-        if (expectedColourFamily != null && archivedColourFamily != null &&
-            expectedColourFamily != archivedColourFamily
-        ) return false
+        if (expectedColourFamily != null && expectedColourFamily != archivedColourFamily) return false
 
         // Trim/model suffixes (Pro, Ultra, Max, etc.) are meaningful for phones and scooters.
         // Require the same explicit trim markers on both titles to avoid cross-variant prices.
@@ -3111,10 +3148,11 @@ class WaybackPriceHistoryClient(
         val sameIdentity =
             onlineProductIdentityKey(canonicalExpected) == onlineProductIdentityKey(canonicalArchived)
 
-        // Variant-defining numeric/model tokens must not conflict or silently disappear.
+        // Broad card identity ignores SKU distinctions such as storage. Require all variant
+        // tokens from the searched title before allowing an archived price to be accepted.
         val expectedVariants = requiredVariantTokens(canonicalExpected)
         val archivedVariants = requiredVariantTokens(canonicalArchived)
-        if (!sameIdentity && !archivedVariants.containsAll(expectedVariants)) return false
+        if (!archivedVariants.containsAll(expectedVariants)) return false
         if (sameIdentity) return true
 
         val expectedTokens = meaningfulTokens(canonicalExpected)
@@ -3124,6 +3162,39 @@ class WaybackPriceHistoryClient(
         return overlap.size >= minOf(2, expectedTokens.size) &&
             overlap.size.toDouble() / expectedTokens.size >= 0.72
     }
+    private fun hasExplicitProductVariantConflict(expected: String, archived: String): Boolean {
+        val e = canonicalizeArchiveTitle(normalizeTitle(expected))
+        val a = canonicalizeArchiveTitle(normalizeTitle(archived))
+        if (e.isBlank() || a.isBlank() || isMatchingProductTitle(expected, archived)) return false
+
+        val expectedIdentifiers = requiredVariantTokens(e)
+        val archivedIdentifiers = requiredVariantTokens(a)
+        val sharedIdentifier = expectedIdentifiers.intersect(archivedIdentifiers).isNotEmpty()
+        val sameBroadIdentity = onlineProductIdentityKey(e) == onlineProductIdentityKey(a)
+        if (!sharedIdentifier && !sameBroadIdentity) return false
+
+        val expectedColour = productColourFamily(e)
+        val archivedColour = productColourFamily(a)
+        if (expectedColour != null && expectedColour != archivedColour) return true
+
+        val expectedModelVariants = productModelVariantTokens(e)
+        val archivedModelVariants = productModelVariantTokens(a)
+        if (expectedModelVariants != archivedModelVariants &&
+            (expectedModelVariants.isNotEmpty() || archivedModelVariants.isNotEmpty())
+        ) return true
+
+        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+        val expectedStorage = storagePattern.findAll(e).map { it.value.replace(Regex("""\s+"""), "") }.toSet()
+        val archivedStorage = storagePattern.findAll(a).map { it.value.replace(Regex("""\s+"""), "") }.toSet()
+        if (expectedStorage.isNotEmpty() && archivedStorage.isNotEmpty() &&
+            expectedStorage != archivedStorage
+        ) return true
+
+        return expectedIdentifiers.isNotEmpty() &&
+            expectedIdentifiers.any { it.matches(Regex("""\d+(?:gb|tb|mah|wh|w|hz|mm|cm)?""")) } &&
+            !archivedIdentifiers.containsAll(expectedIdentifiers)
+    }
+
     private fun xiaomiMiModel(normalizedTitle: String): String? {
         if (!Regex("""\bxiaomi\b""").containsMatchIn(normalizedTitle) &&
             !Regex("""\bmi\s+\d{1,2}\s+(?:pro|lite|ultra|note)\b""").containsMatchIn(normalizedTitle)

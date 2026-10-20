@@ -2190,7 +2190,9 @@ class ExampleRobolectricTest {
         assertTrue("Unsafe HTTP must be rerouted to a secure destination", results[0].isGoogleShoppingProductLink)
         assertEquals("PcComponentes", results[1].storeName)
         assertEquals(79.99, results[1].price, 0.001)
-        assertTrue(results[1].isGoogleShoppingProductLink)
+        assertFalse("A decoded HTTPS seller destination is not an indirect Google URL",
+            results[1].isGoogleShoppingProductLink)
+        assertEquals("Google Shopping", results[1].sourceProvider)
         assertEquals("Google Shopping", results[1].linkType)
         assertEquals("Amazon.es", results[2].storeName)
         assertEquals(89.99, results[2].price, 0.001)

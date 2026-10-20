@@ -2193,7 +2193,7 @@ class ExampleRobolectricTest {
         assertFalse("A decoded HTTPS seller destination is not an indirect Google URL",
             results[1].isGoogleShoppingProductLink)
         assertEquals("Google Shopping", results[1].sourceProvider)
-        assertEquals("Google Shopping", results[1].linkType)
+        assertEquals("directo", results[1].linkType)
         assertEquals("Amazon.es", results[2].storeName)
         assertEquals(89.99, results[2].price, 0.001)
         assertFalse(results[2].isGoogleShoppingProductLink)
@@ -2478,6 +2478,7 @@ class ExampleRobolectricTest {
         assertTrue(result.sourceUrl.startsWith("https://www.fnac.es/SearchResult/ResultList.aspx?Search="))
         assertEquals("Búsqueda en tienda", result.linkType)
         assertEquals("Fnac", result.storeName)
+        assertEquals("Google Shopping", result.sourceProvider)
         assertEquals(0, report.rejectedForLink)
     }
 
@@ -2508,6 +2509,7 @@ class ExampleRobolectricTest {
         val result = report.results.single()
         assertTrue(result.sourceUrl.startsWith("https://www.anker.com/eu-en/search?q="))
         assertEquals("Búsqueda en tienda", result.linkType)
+        assertEquals("Google Shopping", result.sourceProvider)
         assertEquals(0, report.rejectedForLink)
     }
 

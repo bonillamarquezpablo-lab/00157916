@@ -2230,11 +2230,11 @@ class WaybackPriceHistoryClientTest {
                 .commit()
             assertTrue(
                 "A failed network request stays briefly cached to avoid amplifying server throttling",
-                client.wasAttemptedRecently(key, lastAttempt + 2L * 60L * 1000L)
+                client.wasAttemptedRecently(key, lastAttempt + 60_000L)
             )
             assertFalse(
-                "A failed network request can be retried after five minutes",
-                client.wasAttemptedRecently(key, lastAttempt + 6L * 60L * 1000L)
+                "A failed network request can be retried after the two-minute transient-failure window",
+                client.wasAttemptedRecently(key, lastAttempt + 3L * 60L * 1000L)
             )
 
             preferences.edit().putBoolean("${key}_failed", false).commit()

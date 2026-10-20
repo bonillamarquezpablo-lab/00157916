@@ -2,4 +2,9 @@
 <full-backup-content>
     <!-- The encrypted provider key is device-bound; do not copy its ciphertext into backups. -->
     <exclude domain="sharedpref" path="minimo_serpapi_secret.xml" />
+    <!-- Crash diagnostics contain device/build metadata and stack frames; keep them on-device. -->
+    <exclude domain="file" path="minimo_last_crash_report.txt" />
+    <exclude domain="file" path="minimo_last_crash_report.txt.tmp" />
+    <exclude domain="file" path="minimo_last_process_exit_report.txt" />
+    <exclude domain="file" path="minimo_last_process_exit_report.txt.tmp" />
 </full-backup-content>

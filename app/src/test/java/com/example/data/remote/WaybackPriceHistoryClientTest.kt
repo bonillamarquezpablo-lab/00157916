@@ -2193,7 +2193,7 @@ class WaybackPriceHistoryClientTest {
             domain = "notino.es",
             expectedTitle = "Académie Scientifique de Beauté Calendario de Adviento 2024",
             now = 1_800_000_000_000L,
-            lookbackDays = 1600
+            lookbackDays = 2920
         )
         assertNotNull(url)
         assertEquals("host", url!!.queryParameter("matchType"))
@@ -3180,7 +3180,7 @@ class WaybackPriceHistoryClientTest {
             domain = "shop.example",
             expectedTitle = "Anker Prime 27K Power Bank",
             now = 1_800_000_000_000L,
-            lookbackDays = 1600
+            lookbackDays = 2920
         )
         assertNotNull(url)
         assertEquals("web.archive.org", url!!.host)

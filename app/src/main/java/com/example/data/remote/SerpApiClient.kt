@@ -611,7 +611,10 @@ class SerpApiClient(
             val providerSource = item.optString("source").trim()
                 .takeIf { it.isNotBlank() && it != "null" }
             val fallbackProviderUrl = candidateUrls.firstOrNull()
-            val url = candidateUrls.firstNotNullOfOrNull(::extractDirectRetailerUrl)
+            val extractedCandidate = candidateUrls.firstNotNullOfOrNull { raw ->
+                extractDirectRetailerUrl(raw)?.let { resolved -> raw to resolved }
+            }
+            val url = extractedCandidate?.second
                 ?: fallbackProviderUrl?.let {
                     retailerDestinationForOffer(it, providerSource.orEmpty(), title)
                 }
@@ -621,6 +624,15 @@ class SerpApiClient(
                     title
                 )
                 ?: googleShoppingSearchUrl(title)
+            // The target used by Wayback may now be a seller URL, but retain the wrapper's source
+            // so the UI/report still says Google Shopping rather than pretending it was a direct
+            // retailer observation.
+            val linkSourceProvider = when {
+                extractedCandidate?.first?.let(::isGoogleShoppingUrl) == true -> "Google Shopping"
+                fallbackProviderUrl?.let(::isGoogleShoppingUrl) == true -> "Google Shopping"
+                isGoogleShoppingUrl(url) -> "Google Shopping"
+                else -> null
+            }
             val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()
             val source = providerSource ?: humanizeHost(host)
@@ -650,7 +662,8 @@ class SerpApiClient(
                 condition = condition,
                 googleProductId = googleProductId,
                 isFitmentUnverified = fitmentUnverified,
-                isCategoryUnverified = categoryUnverified
+                isCategoryUnverified = categoryUnverified,
+                sourceProvider = linkSourceProvider
             )
         }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
             .sortedBy { it.price }

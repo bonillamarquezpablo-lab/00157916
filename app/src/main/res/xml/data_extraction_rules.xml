@@ -3,8 +3,17 @@
     <cloud-backup>
         <!-- The matching Android Keystore key is device-bound and cannot be restored elsewhere. -->
         <exclude domain="sharedpref" path="minimo_serpapi_secret.xml" />
+        <!-- Keep crash diagnostics local; they can contain device metadata and stack frames. -->
+        <exclude domain="file" path="minimo_last_crash_report.txt" />
+        <exclude domain="file" path="minimo_last_crash_report.txt.tmp" />
+        <exclude domain="file" path="minimo_last_process_exit_report.txt" />
+        <exclude domain="file" path="minimo_last_process_exit_report.txt.tmp" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="minimo_serpapi_secret.xml" />
+        <exclude domain="file" path="minimo_last_crash_report.txt" />
+        <exclude domain="file" path="minimo_last_crash_report.txt.tmp" />
+        <exclude domain="file" path="minimo_last_process_exit_report.txt" />
+        <exclude domain="file" path="minimo_last_process_exit_report.txt.tmp" />
     </device-transfer>
 </data-extraction-rules>

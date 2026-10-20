@@ -103,14 +103,17 @@ internal fun mergeWaybackDiagnosticStatus(
     diagnosticStep: Int? = null,
     detail: String = ""
 ): WaybackTraceStatus = when {
-    // Stage 6 means "did this lookup recover archive captures?", not merely "did the
-    // server answer?". A final explicit no-capture summary must override an earlier green
-    // status from a valid-but-empty response. Other stages keep their strongest-outcome rule.
-    diagnosticStep == 6 && incoming == WaybackTraceStatus.FAILED &&
+    // Stages 6 and 7 describe recovery, not mere network reachability. A final explicit
+    // no-capture result must override an earlier green sub-attempt so the UI cannot display
+    // "superado" when no historical captures were recovered.
+    (diagnosticStep == 6 || diagnosticStep == 7) &&
+        incoming == WaybackTraceStatus.FAILED &&
         (
             detail.contains("no encontraron capturas utilizables", ignoreCase = true) ||
             detail.contains("no hay histórico que validar", ignoreCase = true) ||
-            detail.contains("no encontró capturas utilizables", ignoreCase = true)
+            detail.contains("no encontró capturas utilizables", ignoreCase = true) ||
+            detail.contains("no encontró capturas y alguna consulta falló", ignoreCase = true) ||
+            detail.contains("no se recuperaron capturas históricas utilizables", ignoreCase = true)
         ) -> WaybackTraceStatus.FAILED
     current == WaybackTraceStatus.PASSED || incoming == WaybackTraceStatus.PASSED ->
         WaybackTraceStatus.PASSED

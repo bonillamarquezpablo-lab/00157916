@@ -1397,11 +1397,13 @@ class WaybackPriceHistoryClient(
         }
         val fromDate = dateFormat.format(fromCalendar.time)
         val cacheKey = "fx_usd_eur_capture_" + captureDate
-        var rate = preferences.getString(cacheKey + "_rate", null)?.toDoubleOrNull()
-        var rateDate = preferences.getString(cacheKey + "_date", null)
-        if (rate == null || rateDate.isNullOrBlank() ||
-            rate !in 0.05..5.0 || rateDate > captureDate
-        ) {
+        val cachedRate = preferences.getString(cacheKey + "_rate", null)?.toDoubleOrNull()
+        val cachedDate = preferences.getString(cacheKey + "_date", null)
+        val cachedRateIsValid = cachedRate != null && cachedDate != null &&
+            cachedDate <= captureDate && cachedRate in 0.05..5.0
+        var rate: Double? = cachedRate.takeIf { cachedRateIsValid }
+        var rateDate: String? = cachedDate.takeIf { cachedRateIsValid }
+        if (rate == null || rateDate == null) {
             rate = null
             rateDate = null
             try {
@@ -1444,10 +1446,14 @@ class WaybackPriceHistoryClient(
             } catch (_: Exception) {
                 // FX is optional: a network/API failure must never create an estimated exchange rate.
             }
-            if (rate != null && !rateDate.isNullOrBlank()) {
+            val newlyResolvedRate = rate
+            val newlyResolvedDate = rateDate
+            if (newlyResolvedRate != null && !newlyResolvedDate.isNullOrBlank() &&
+                newlyResolvedDate <= captureDate
+            ) {
                 preferences.edit()
-                    .putString(cacheKey + "_rate", rate.toString())
-                    .putString(cacheKey + "_date", rateDate)
+                    .putString(cacheKey + "_rate", newlyResolvedRate.toString())
+                    .putString(cacheKey + "_date", newlyResolvedDate)
                     .apply()
             }
         }
@@ -2903,10 +2909,18 @@ class WaybackPriceHistoryClient(
                 .firstOrNull(::isValidCandidate)
         } else null
 
-        val matching = explicitMeta ?: matchingJsonLd.minWithOrNull(
-            compareBy<Triple<String, Double, String>> { it.second }
-                .thenBy { normalizeTitle(it.first) }
-        )
+        val eurStructured = matchingJsonLd.filter { it.third.equals("EUR", ignoreCase = true) }
+        val matching = when {
+            explicitMeta?.third.equals("EUR", ignoreCase = true) -> explicitMeta
+            eurStructured.isNotEmpty() -> eurStructured.minWithOrNull(
+                compareBy<Triple<String, Double, String>> { it.second }
+                    .thenBy { normalizeTitle(it.first) }
+            )
+            else -> explicitMeta ?: matchingJsonLd.minWithOrNull(
+                compareBy<Triple<String, Double, String>> { it.second }
+                    .thenBy { normalizeTitle(it.first) }
+            )
+        }
         if (matching != null) {
             return ArchivedPriceQuote(
                 observedAt = observedAt,

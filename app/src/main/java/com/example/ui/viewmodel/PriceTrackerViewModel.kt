@@ -156,7 +156,7 @@ private val WAYBACK_DIAGNOSTIC_TITLES = listOf(
     "Evaluación de barreras del HTML 2",
     "Verificación del título e identidad del producto",
     "Extracción del precio",
-    "Validación del importe y moneda EUR",
+    "Validación de importe, EUR y cambio histórico",
     "Consolidación de precios y eliminación de duplicados",
     "Guardado del histórico en la base de datos local",
     "Actualización de la ficha/gráfica y resultado final"

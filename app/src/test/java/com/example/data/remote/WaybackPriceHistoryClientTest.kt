@@ -68,6 +68,24 @@ class WaybackPriceHistoryClientTest {
                 "[00:40:02] Extracción no ejecutada: CDX no entregó una respuesta utilizable."
             )
         )
+        assertTrue(
+            "A CDX no-capture message must disappear once an alternate source downloads HTML",
+            isSupersededWaybackSkipDetail(
+                "[00:40:02] No se pudo comprobar la identidad: CDX no proporcionó ninguna captura para descargar."
+            )
+        )
+        assertTrue(
+            "A stale CDX price-extraction skip must disappear after a real HTML evaluation",
+            isSupersededWaybackSkipDetail(
+                "[00:40:02] Extracción de precio omitida: no se descargó HTML de una captura CDX."
+            )
+        )
+        assertTrue(
+            "An Availability no-capture skip must disappear if another attempt really checks a capture",
+            isSupersededWaybackSkipDetail(
+                "[00:40:02] Verificación del producto omitida: Availability no devolvió una captura para descargar."
+            )
+        )
         assertFalse(
             "A real product-identity mismatch must remain visible",
             isSupersededWaybackSkipDetail(
@@ -428,20 +446,27 @@ class WaybackPriceHistoryClientTest {
     @Test
     fun directUrlCandidatesStripTrackingWithoutDiscardingProductParameters() {
         val client = newClient()
-        val original = "https://www.shop.example/product/anker-prime?utm_source=shopping&gclid=click123&sku=27k"
+        val original = "https://www.shop.example/product/anker-prime?utm_source=shopping&gclid=click123&gad_campaignid=campaign1&irclickid=partner1&sku=27k&variant_id=yellow-256"
 
         val candidates = client.buildDirectUrlCandidates(original)
 
         assertEquals(original, candidates.first())
         assertEquals(2, candidates.size)
         assertEquals(
-            "https://www.shop.example/product/anker-prime?sku=27k",
+            "https://www.shop.example/product/anker-prime?sku=27k&variant_id=yellow-256",
             candidates[1]
         )
         assertTrue(candidates.all { client.isEligibleDirectUrl(it) })
         assertFalse(candidates[1].contains("utm_source"))
         assertFalse(candidates[1].contains("gclid"))
+        assertFalse(candidates[1].contains("gad_campaignid"))
+        assertFalse(candidates[1].contains("irclickid"))
         assertTrue("Functional SKU query parameters must be preserved", candidates[1].contains("sku=27k"))
+        assertTrue("Functional variant ID parameters must be preserved", candidates[1].contains("variant_id=yellow-256"))
+        val decomposed = client.decomposeProductUrl(original)
+        assertNotNull(decomposed)
+        assertTrue(decomposed!!.trackingParameters.containsAll(setOf("utm_source", "gclid", "gad_campaignid", "irclickid")))
+        assertEquals(listOf("yellow-256"), decomposed.variantParameters["variant_id"])
     }
 
     @Test
@@ -1579,8 +1604,10 @@ class WaybackPriceHistoryClientTest {
             </head><body></body></html>
         """.trimIndent()
         val cookieWallHtml = """
-            <html><head><title>Checking your browser</title></head>
-            <body>Enable JavaScript and cookies to continue.</body></html>
+            <html><head><title>Just a moment...</title></head>
+            <body><h1>DDoS protection</h1>
+              Enable JavaScript and cookies to continue.
+            </body></html>
         """.trimIndent()
 
         val http = OkHttpClient.Builder().addInterceptor { chain ->
@@ -2465,6 +2492,63 @@ class WaybackPriceHistoryClientTest {
         assertNotNull("An inherited product currency should be applied to its Offer", quote)
         assertEquals(183.71, quote!!.price, 0.001)
         assertEquals("EUR", quote.currency)
+    }
+
+    @Test
+    fun archivedProductVariantCannotBorrowMatchingGenericPageMetadata() {
+        val client = newClient()
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head>
+                  <meta property="og:title" content="Apple iPhone 15 256 GB Amarillo">
+                  <meta property="product:price:amount" content="399.99">
+                  <meta property="product:price:currency" content="EUR">
+                  <script type="application/ld+json">
+                    {"@type":"Product","name":"Apple iPhone 15 Plus 128 GB Negro",
+                     "offers":{"@type":"Offer","price":"299.99","priceCurrency":"EUR"}}
+                  </script>
+                </head><body>
+                  <h1>Apple iPhone 15 Plus 128 GB Negro</h1>
+                  <div class="product-price">299,99 €</div>
+                </body></html>
+            """.trimIndent(),
+            expectedTitle = "Apple iPhone 15 256 GB Amarillo",
+            originalUrl = "https://shop.example/product/iphone-15?sku=yellow-256",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/product/iphone-15?sku=yellow-256",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNull(
+            "A generic/stale page title must not override structured metadata for another colour, capacity and trim",
+            quote
+        )
+    }
+
+    @Test
+    fun archivedUsdOfferIsRejectedEvenWhenThePageTitleMatches() {
+        val client = newClient()
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head>
+                  <meta property="og:title" content="Apple iPhone 15 256 GB Amarillo">
+                  <meta property="product:price:amount" content="499.00">
+                  <meta property="product:price:currency" content="USD">
+                  <script type="application/ld+json">
+                    {"@type":"Product","name":"Apple iPhone 15 256 GB Amarillo",
+                     "offers":{"@type":"Offer","price":"499.00","priceCurrency":"USD"}}
+                  </script>
+                </head><body>
+                  <h1>Apple iPhone 15 256 GB Amarillo</h1>
+                  <div class="product-price" data-currency="USD">$499.00</div>
+                </body></html>
+            """.trimIndent(),
+            expectedTitle = "Apple iPhone 15 256 GB Amarillo",
+            originalUrl = "https://shop.example/product/iphone-15?sku=yellow-256",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/product/iphone-15?sku=yellow-256",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNull("USD must never be stored as EUR historical price", quote)
     }
 
     @Test

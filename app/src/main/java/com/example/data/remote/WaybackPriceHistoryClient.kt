@@ -2261,16 +2261,8 @@ class WaybackPriceHistoryClient(
             .callTimeout(cdxTimeoutSeconds, TimeUnit.SECONDS)
             .build()
         val request = Request.Builder().url(cdxUrl).header("User-Agent", USER_AGENT).get().build()
-        // CDX must share the same persisted 429 cooldown and minimum request spacing as
-        // Availability and snapshot downloads. Previously this path bypassed the shared gate,
-        // allowing repeated product fallbacks to hit the public index too quickly.
-        val requestGate = awaitArchiveRequestTurn()
-        if (requestGate != null) {
-            return CdxIndexOutcome(
-                requestFailed = true,
-                diagnosticCodes = setOf(requestGate)
-            )
-        }
+        // The caller queryCdxAndFetchPrices applies the shared persisted 429 cooldown and
+        // 1.5-second pacing gate before entering this response parser. Do not gate twice here.
         return try {
             executeCdxWithTransientRetry(cdxHttp, request, maxRetries = 0).use { response ->
                 if (response.code == 429) {

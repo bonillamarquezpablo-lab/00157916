@@ -352,13 +352,16 @@ private fun isSafeResolvedRetailerUrl(value: String): Boolean = runCatching {
  * click-tracking wrappers. URL parameters are decoded repeatedly but never logged. Unknown short
  * links without an embedded destination are rejected rather than mistaken for the retailer.
  */
-fun extractDirectRetailerUrl(sourceUrl: String): String? {
+fun extractDirectRetailerUrl(sourceUrl: String): String? =
+    extractDirectRetailerUrlWithDepth(sourceUrl)?.first
+
+internal fun extractDirectRetailerUrlWithDepth(sourceUrl: String): Pair<String, Int>? {
     var current = cleanRedirectUrlText(sourceUrl)
     if (current.isBlank()) return null
     val visited = linkedSetOf<String>()
     val maxRedirectHops = 6
 
-    repeat(maxRedirectHops) {
+    repeat(maxRedirectHops) { hop ->
         current = decodeRedirectParameter(current)
         if (current.startsWith("//")) current = "https:" + current
         val uri = runCatching { URI(current) }.getOrNull() ?: return null
@@ -376,7 +379,7 @@ fun extractDirectRetailerUrl(sourceUrl: String): String? {
             val secure = if (scheme == "http") {
                 current.replaceFirst(Regex("""(?i)^http://"""), "https://")
             } else current
-            return secure.takeIf(::isSafeResolvedRetailerUrl)
+            return secure.takeIf(::isSafeResolvedRetailerUrl)?.let { it to hop }
         }
 
         if (!visited.add(current)) return null
@@ -421,7 +424,7 @@ fun extractDirectRetailerUrl(sourceUrl: String): String? {
 
         current = next
     }
-    return current.takeIf(::isSafeResolvedRetailerUrl)
+    return current.takeIf(::isSafeResolvedRetailerUrl)?.let { it to maxRedirectHops }
 }
 
 fun linkTypeForUrl(sourceUrl: String): String {

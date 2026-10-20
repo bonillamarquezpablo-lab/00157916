@@ -282,11 +282,12 @@ internal fun mergeGoogleShoppingWithGameSupplement(
  * Return a retailer destination if a provider URL is already direct or if a Google redirect
  * embeds the actual destination. Never treats a generic Google Shopping/search page as a seller URL.
  */
-private val REDIRECT_QUERY_KEYS = setOf(
-    "url", "url1", "url2", "adurl", "q", "u", "dest", "destination", "target",
-    "redirect", "redirect_url", "redirect_uri", "url_source", "merchant_url", "final_url",
-    "uddg", "rut", "link", "href", "to", "out", "next", "continue"
+private val REDIRECT_QUERY_PRIORITY = listOf(
+    "url", "adurl", "url1", "url2", "dest", "destination", "target",
+    "redirect", "redirect_url", "redirect_uri", "final_url", "merchant_url", "url_source",
+    "uddg", "q", "u", "link", "href", "to", "out", "next", "continue", "rut"
 )
+private val REDIRECT_QUERY_KEYS = REDIRECT_QUERY_PRIORITY.toSet()
 
 private val REDIRECT_HOST_SUFFIXES = setOf(
     "google.com", "google.es", "googleadservices.com", "doubleclick.net", "bing.com",
@@ -392,7 +393,7 @@ fun extractDirectRetailerUrl(sourceUrl: String): String? {
 
         // Prefer explicitly named destination parameters before trying other URL-like values.
         val orderedValues = parameters.sortedBy { pair ->
-            val index = REDIRECT_QUERY_KEYS.indexOf(pair.first)
+            val index = REDIRECT_QUERY_PRIORITY.indexOf(pair.first)
             if (index < 0) Int.MAX_VALUE else index
         }.map { it.second }
         val fragmentParameters = uri.rawFragment.orEmpty()

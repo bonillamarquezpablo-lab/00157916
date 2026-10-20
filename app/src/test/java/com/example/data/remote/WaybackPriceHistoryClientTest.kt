@@ -2179,7 +2179,7 @@ class WaybackPriceHistoryClientTest {
         assertEquals("host", url!!.queryParameter("matchType"))
         assertEquals("20", url.queryParameter("limit"))
         assertNull("Host discovery avoids slow collapse processing", url.queryParameter("collapse"))
-        assertEquals("20250115", url.queryParameter("from"))
+        assertEquals("20190117", url.queryParameter("from"))
         assertTrue(url.queryParameterValues("filter").orEmpty().any { raw ->
             val filter = raw.orEmpty()
             filter.startsWith("original:") && filter.contains("academie") && filter.contains("scientifique")
@@ -2976,7 +2976,7 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun stepSixClarifiesThatSuccessfulAvailabilityResponseCanContainNoCaptures() {
+    fun stepSixDoesNotMarkRecoverySuccessfulWhenAvailabilityFindsNoCaptures() {
         val result = summarizeCdxStep5Events(
             events = listOf(
                 WaybackTraceEvent(
@@ -2991,7 +2991,7 @@ class WaybackPriceHistoryClientTest {
         )
 
         assertNotNull(result)
-        assertEquals(WaybackTraceStatus.PASSED, result!!.status)
+        assertEquals(WaybackTraceStatus.FAILED, result!!.status)
         assertTrue(result.detail.contains("Availability respondió, pero no encontró capturas utilizables"))
         assertTrue(result.detail.contains("no significa que se haya recuperado histórico"))
     }
@@ -3146,6 +3146,14 @@ class WaybackPriceHistoryClientTest {
 
 
     @Test
+    fun defaultHistoricalLookbackCoversOlderProductsBeyondFourYears() {
+        assertTrue(
+            "Historical lookup should include older products such as the Xiaomi Mi 10 Pro",
+            WaybackPriceHistoryClient.DEFAULT_LOOKBACK_DAYS >= 2_500
+        )
+    }
+
+    @Test
     fun domainCdxQueryHasBoundedProductSpecificRequestParameters() {
         val client = newClient()
         val url = client.buildDomainCdxUrl(
@@ -3177,7 +3185,7 @@ class WaybackPriceHistoryClientTest {
         assertTrue(url.queryParameterValues("filter").orEmpty().any { it == "statuscode:200" })
         assertTrue(url.queryParameterValues("filter").orEmpty().any { it == "mimetype:text/html" })
         assertTrue(url.queryParameterValues("filter").orEmpty().any { it.orEmpty().startsWith("original:") })
-        assertEquals("20250115", url.queryParameter("from"))
+        assertEquals("20190117", url.queryParameter("from"))
         assertEquals("20270115", url.queryParameter("to"))
     }
 

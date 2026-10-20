@@ -3804,7 +3804,7 @@ class WaybackPriceHistoryClient(
         // Give the public index up to 7 seconds on slower responses; no retry is added here,
         // and the bounded Availability fallback remains in place if CDX does not answer.
         private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 7L
-        private const val ALTERNATE_PRODUCT_CDX_TIMEOUT_SECONDS = 3L
+        private const val ALTERNATE_PRODUCT_CDX_TIMEOUT_SECONDS = 5L
         private const val MAX_DOMAIN_PRODUCT_URL_CANDIDATES = 2
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 12
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 8

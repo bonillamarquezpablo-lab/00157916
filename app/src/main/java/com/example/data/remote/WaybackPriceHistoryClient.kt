@@ -3216,13 +3216,28 @@ class WaybackPriceHistoryClient(
             ).map { element.attr(it) }.firstOrNull { it.isNotBlank() }
             val localCurrency = sequenceOf(element.attr("data-currency"), element.attr("currency"))
                 .firstOrNull { it.isNotBlank() }?.uppercase(Locale.ROOT)
+            val scopedEuroAmount = euroAmount.find(text)
+            val scopedUsdAmount = usdAmount.find(text)
+            // Some stores put the amount in a child span and the euro marker in its price wrapper.
+            // Infer EUR only from an explicit marker; never default an unlabelled number to EUR.
+            val visibleCurrency = when {
+                scopedEuroAmount != null &&
+                    !text.contains(36.toChar()) && !text.contains("£") &&
+                    !text.contains("USD", ignoreCase = true) && !text.contains("GBP", ignoreCase = true) &&
+                    !text.contains("CAD", ignoreCase = true) && !text.contains("AUD", ignoreCase = true) -> "EUR"
+                scopedUsdAmount != null &&
+                    !text.contains("€") && !text.contains("£") && !text.contains("EUR", ignoreCase = true) &&
+                    (localCurrency == "USD" || knownCurrency.equals("USD", ignoreCase = true)) -> "USD"
+                else -> null
+            }
             val effectiveCurrency = localCurrency?.takeIf { it in allowed }
                 ?: knownCurrency?.uppercase(Locale.ROOT)?.takeIf { it in allowed }
+                ?: visibleCurrency?.takeIf { it in allowed }
             if (effectiveCurrency == null) continue
 
             val visibleCurrencyAmount = when (effectiveCurrency) {
-                "USD" -> usdAmount.find(text)
-                "EUR" -> euroAmount.find(text)
+                "USD" -> scopedUsdAmount
+                "EUR" -> scopedEuroAmount
                 else -> null
             }
             val hasOpposingCurrency = when (effectiveCurrency) {

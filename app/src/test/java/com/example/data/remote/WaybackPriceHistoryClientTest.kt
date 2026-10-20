@@ -2755,6 +2755,33 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun acceptsExactIphoneModelAndCapacityWhenArchivedTitleOmitsColour() {
+        val client = newClient()
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head>
+                  <title>iPhone 15</title>
+                  <script type="application/ld+json">
+                    {
+                      "@type": "Product",
+                      "name": "Apple iPhone 15 256 GB",
+                      "offers": {"@type":"Offer","price":"499.00","priceCurrency":"EUR"}
+                    }
+                  </script>
+                </head><body></body></html>
+            """.trimIndent(),
+            expectedTitle = "Apple iPhone 15 256 GB Amarillo",
+            originalUrl = "https://shop.example/product/iphone-15?sku=yellow-256",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/product/iphone-15?sku=yellow-256",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("A missing archived colour is not a conflict when the model and capacity match", quote)
+        assertEquals(499.00, quote!!.price, 0.001)
+        assertTrue(quote.productTitle.contains("256 GB"))
+    }
+
+    @Test
     fun archivedUsdOfferIsRejectedEvenWhenThePageTitleMatches() {
         val client = newClient()
         val quote = client.parseArchivedPrice(

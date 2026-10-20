@@ -607,6 +607,10 @@ class WaybackPriceHistoryClientTest {
             "Spanish Apple product path should be tried before broad CDX domain scans",
             appleCandidates.contains("https://www.apple.com/es/iphone-16/")
         )
+        assertTrue(
+            "Apple's archived purchase flow should be tried when its marketing page has no price metadata",
+            appleCandidates.contains("https://www.apple.com/es/shop/buy-iphone/iphone-16/")
+        )
         assertTrue(appleCandidates.size <= 6)
         assertTrue(appleCandidates.any { it.startsWith("https://www.apple.com/") })
         assertTrue(appleCandidates.any { it.startsWith("https://apple.com/") })

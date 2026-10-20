@@ -1470,7 +1470,7 @@ class WaybackPriceHistoryClientTest {
         val archivedHtml = """
             <html><head>
               <script type="application/ld+json">
-                {"@type":"Product","name":"\$title",
+                {"@type":"Product","name":"$title",
                  "offers":{"@type":"Offer","price":"79.99","priceCurrency":"EUR"}}
               </script>
             </head><body></body></html>

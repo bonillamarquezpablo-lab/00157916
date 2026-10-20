@@ -222,7 +222,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         // Historical lookup is a user-triggered background action. Reserve time for the
         // CDX query and a representative set of dated captures; a too-short outer timeout
         // cancels useful HTML downloads before they can be validated and saved.
-        const val MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS = 60_000L
+        const val MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS = 85_000L
         // Domain recovery may include paced Availability probes and up to eight dated snapshots.
         // This is separate from live shopping search and still bounded per retailer.
         const val MAX_ARCHIVE_DOMAIN_FALLBACK_MS = 90_000L

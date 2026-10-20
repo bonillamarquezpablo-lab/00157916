@@ -311,7 +311,7 @@ class WaybackPriceHistoryClient(
                 requestFailed = true,
                 diagnosticCodes = setOf("DIRECT_URL_INVALID")
             )
-        val attempt = attemptKey("url-cdx-batch-v5|$directUrl|$expectedTitle")
+        val attempt = attemptKey("url-cdx-batch-v6|$directUrl|$expectedTitle")
         serializedArchiveLookup {
             if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
                 return@serializedArchiveLookup WaybackBackfillResult(
@@ -457,7 +457,7 @@ class WaybackPriceHistoryClient(
         if (expectedTitle.isBlank()) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("PRODUCT_TITLE_EMPTY"))
         }
-        val attempt = attemptKey("domain-cdx-batch-v5|$normalizedDomain|$expectedTitle")
+        val attempt = attemptKey("domain-cdx-batch-v6|$normalizedDomain|$expectedTitle")
         serializedArchiveLookup {
             if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
                 return@serializedArchiveLookup WaybackBackfillResult(
@@ -522,7 +522,7 @@ class WaybackPriceHistoryClient(
                 val productCdxUrl = buildCdxUrl(productUrlCandidate, now, lookbackDays)
                 if (productCdxUrl != null) {
                     val productAttemptKey = attemptKey(
-                        "domain-product-prefix-v3|$normalizedDomain|$expectedTitle|$productUrlCandidate"
+                        "domain-product-prefix-v4|$normalizedDomain|$expectedTitle|$productUrlCandidate"
                     )
                     val productResult = queryCdxAndFetchPrices(
                         cdxUrl = productCdxUrl,
@@ -720,7 +720,7 @@ class WaybackPriceHistoryClient(
                     "Availability no encontró un precio verificable; se comprueba una URL alternativa mediante CDX antes de cerrar la búsqueda."
                 )
                 val alternateCacheKey = attemptKey(
-                    "domain-alternate-product-prefix-v2|$normalizedDomain|$expectedTitle|$alternateUrl"
+                    "domain-alternate-product-prefix-v3|$normalizedDomain|$expectedTitle|$alternateUrl"
                 )
                 val candidateResult = queryCdxAndFetchPrices(
                     cdxUrl = alternateCdxUrl,
@@ -779,7 +779,7 @@ class WaybackPriceHistoryClient(
                 capturesFound = fallback.capturesFound + alternateResult.capturesFound,
                 capturesChecked = fallback.capturesChecked + alternateResult.capturesChecked,
                 available = fallback.available || alternateResult.available,
-                requestFailed = fallback.requestFailed && alternateResult.requestFailed,
+                requestFailed = fallback.requestFailed || alternateResult.requestFailed,
                 diagnosticCodes = fallback.diagnosticCodes + alternateResult.diagnosticCodes
             )
         }
@@ -2071,7 +2071,6 @@ class WaybackPriceHistoryClient(
         sourceUrl: String = "",
         knownStoreDomain: String = ""
     ): String? {
-        if (storeName.isBlank()) return null
         val explicitHost = Regex(
             """(?i)(?:https?://)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:es|com|net|org|eu|de|fr|it|nl|co\.uk))(?:[:/]|$)"""
         ).find(storeName.trim())?.groupValues?.getOrNull(1)
@@ -2084,6 +2083,9 @@ class WaybackPriceHistoryClient(
             runCatching { URI(sourceUrl).host }.getOrNull()
                 ?.let(::normalizeMerchantDomain)?.let { return it }
         }
+        // Empty seller labels are common for Google Shopping intermediary rows. A valid saved
+        // domain or real source URL above is still sufficient; only stop before alias matching.
+        if (storeName.isBlank()) return null
         val normalized = normalizeTitle(storeName)
         val aliases = listOf(
             "pccomponentes" to "pccomponentes.com",
@@ -3194,7 +3196,9 @@ class WaybackPriceHistoryClient(
         private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L
         const val NEGATIVE_RETRY_INTERVAL_MS = 6L * 60L * 60L * 1000L
-        const val FAILURE_RETRY_INTERVAL_MS = 5L * 60L * 1000L
+        // Timeouts/transport failures are transient; allow a manual retry after two minutes.
+        // Genuine empty results retain the longer negative cache to protect Internet Archive.
+        const val FAILURE_RETRY_INTERVAL_MS = 2L * 60L * 1000L
         private const val MIN_AVAILABILITY_REQUEST_INTERVAL_MS = 1_500L
         private const val KEY_LAST_AVAILABILITY_REQUEST_AT = "wayback_last_availability_request_at"
         private const val MIN_RATE_LIMIT_COOLDOWN_MS = 60L * 1000L

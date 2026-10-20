@@ -138,11 +138,11 @@ data class SerpApiShoppingResult(
     val sourceProvider: String? = null
 ) {
     /**
-     * True when the offer originated from Google Shopping, even if its embedded seller URL has
-     * been safely unwrapped for direct price-history lookup.
+     * True when the accepted destination still opens a Google Shopping page, not the retailer.
+     * Source provenance is tracked separately in sourceProvider.
      */
     val isGoogleShoppingProductLink: Boolean
-        get() = sourceProvider.equals("Google Shopping", ignoreCase = true) || isGoogleShoppingUrl(sourceUrl)
+        get() = isGoogleShoppingUrl(sourceUrl)
 
     val isSecondHand: Boolean
         get() {

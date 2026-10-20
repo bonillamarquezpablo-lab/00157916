@@ -278,7 +278,13 @@ internal fun summarizeCdxStep5Events(
             }
             return WaybackTraceEvent(
                 step = 5,
-                status = WaybackTraceStatus.PASSED,
+                // A responsive fallback is not a successful history recovery when it found no captures.
+                // This status drives the on-device report, so do not paint an empty result green.
+                status = if (availabilityCapturesFound > 0) {
+                    WaybackTraceStatus.PASSED
+                } else {
+                    WaybackTraceStatus.FAILED
+                },
                 detail = "CDX no respondió de forma válida en ${failures.size} intento(s). Último diagnóstico: ${lastFailure.detail.take(180)}.$recoveryDetail$recoverySummary",
                 durationMs = lastFailure.durationMs,
                 diagnosticStep = 6
@@ -764,7 +770,7 @@ class WaybackPriceHistoryClient(
         )
         emitWaybackTrace(
             onTrace, 6,
-            if (fallback.quotes.isNotEmpty() || !fallback.requestFailed) {
+            if (fallback.quotes.isNotEmpty() || fallback.capturesFound > 0) {
                 WaybackTraceStatus.PASSED
             } else {
                 WaybackTraceStatus.FAILED
@@ -773,11 +779,11 @@ class WaybackPriceHistoryClient(
                 fallback.quotes.isNotEmpty() ->
                     "Fallback completado: se recuperó un precio verificable."
                 fallback.capturesFound > 0 ->
-                    "Fallback completado: hay capturas; falta verificar precio/producto."
+                    "Fallback encontró capturas; falta verificar identidad y precio."
                 fallback.requestFailed ->
-                    "Fallback ejecutado pero falló: ${fallback.diagnosticCodes.joinToString(", ").take(180)}."
+                    "Fallback falló: ${fallback.diagnosticCodes.joinToString(", ").take(180)}."
                 else ->
-                    "Fallback respondió, pero no encontró capturas utilizables."
+                    "La red respondió, pero no se recuperaron capturas históricas utilizables; no hay precio que verificar."
             }
         )
         if (fallback.quotes.isNotEmpty()) {
@@ -840,31 +846,109 @@ class WaybackPriceHistoryClient(
                     }
                     candidateResult.requestFailed -> {
                         emitWaybackTrace(
-                            onTrace, 6, WaybackTraceStatus.PASSED,
-                            "Availability respondió sin capturas; la consulta CDX alternativa falló (${candidateResult.diagnosticCodes.joinToString(", ")})."
+                            onTrace, 6, WaybackTraceStatus.FAILED,
+                            "Availability respondió sin capturas y la consulta CDX alternativa falló (${candidateResult.diagnosticCodes.joinToString(", ")}); no se recuperó histórico."
                         )
                     }
                     else -> {
                         emitWaybackTrace(
-                            onTrace, 6, WaybackTraceStatus.PASSED,
-                            "Availability y la consulta CDX alternativa respondieron, pero no encontraron capturas utilizables."
+                            onTrace, 6, WaybackTraceStatus.FAILED,
+                            "Availability y CDX respondieron, pero ninguna ruta recuperó capturas históricas utilizables."
                         )
                     }
                 }
             }
         }
 
-        val combined = if (alternateResult == null) {
-            fallback
-        } else {
-            fallback.copy(
-                capturesFound = fallback.capturesFound + alternateResult.capturesFound,
-                capturesChecked = fallback.capturesChecked + alternateResult.capturesChecked,
-                available = fallback.available || alternateResult.available,
-                requestFailed = fallback.requestFailed || alternateResult.requestFailed,
-                diagnosticCodes = fallback.diagnosticCodes + alternateResult.diagnosticCodes
-            )
+        // Availability and exact-prefix CDX can miss a real archived page when the retailer
+        // changed its product URL. As a final bounded recovery, search the retailer's CDX index
+        // using product-specific path tokens; the parser still requires matching variant + price.
+        // This is background history work and never delays the live shopping results.
+        val domainDiscoveryResults = mutableListOf<WaybackBackfillResult>()
+        val priorRateLimited = fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ||
+            alternateResult?.diagnosticCodes?.contains("WAYBACK_RATE_LIMITED") == true
+        if (!priorRateLimited && activeRateLimitUntil(System.currentTimeMillis()) == null) {
+            val domainQueries = buildDomainCdxHostUrls(
+                domain = normalizedDomain,
+                expectedTitle = expectedTitle,
+                now = now,
+                lookbackDays = lookbackDays
+            ).orEmpty().take(MAX_DOMAIN_CDX_HOST_QUERIES)
+            for ((index, domainCdxUrl) in domainQueries.withIndex()) {
+                if (activeRateLimitUntil(System.currentTimeMillis()) != null) break
+                emitWaybackTrace(
+                    onTrace, 6, WaybackTraceStatus.RUNNING,
+                    "Las URL de producto previstas no dieron precio; se buscan páginas alternativas del dominio (\${index + 1}/\${domainQueries.size})."
+                )
+                val domainCacheKey = attemptKey(
+                    "domain-bounded-host-cdx-v1|\${normalizedDomain}|\${expectedTitle}|\${domainCdxUrl}"
+                )
+                val discovered = queryCdxAndFetchPrices(
+                    cdxUrl = domainCdxUrl,
+                    expectedTitle = expectedTitle,
+                    cacheKey = domainCacheKey,
+                    now = now,
+                    lookbackDays = lookbackDays,
+                    maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP,
+                    cdxTimeoutSeconds = DOMAIN_CDX_TIMEOUT_SECONDS,
+                    cdxStage = "CDX_DOMAIN",
+                    snapshotTimeoutSeconds = CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS,
+                    onTrace = onTrace
+                )
+                domainDiscoveryResults += discovered
+                when {
+                    discovered.quotes.isNotEmpty() -> {
+                        rememberAttempt(cacheKey, now, hasQuotes = true, failed = false)
+                        emitWaybackTrace(
+                            onTrace, 6, WaybackTraceStatus.PASSED,
+                            "El índice del dominio encontró \${discovered.quotes.size} precio(s) histórico(s) verificado(s)."
+                        )
+                        return discovered.copy(diagnosticCodes = emptySet())
+                    }
+                    discovered.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") -> {
+                        emitWaybackTrace(
+                            onTrace, 6, WaybackTraceStatus.SKIPPED,
+                            "El índice pidió reducir consultas (HTTP 429); se detiene la búsqueda."
+                        )
+                        break
+                    }
+                    discovered.requestFailed && discovered.diagnosticCodes.any {
+                        it.endsWith("_TIMEOUT") || it.endsWith("_DNS") ||
+                            (it.contains("_HTTP_") && it.substringAfterLast('_').toIntOrNull()
+                                ?.let { status -> status in RETRYABLE_CDX_HTTP_CODES } == true)
+                    } -> {
+                        emitWaybackTrace(
+                            onTrace, 6, WaybackTraceStatus.FAILED,
+                            "La búsqueda acotada del índice del dominio falló (\${discovered.diagnosticCodes.joinToString(", ")}); se evita insistir contra el archivo."
+                        )
+                        break
+                    }
+                    else -> {
+                        emitWaybackTrace(
+                            onTrace, 6,
+                            if (discovered.capturesFound > 0) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
+                            if (discovered.capturesFound > 0) {
+                                "El índice del dominio encontró capturas, pero ninguna dio un precio verificable para la variante seleccionada."
+                            } else {
+                                "El índice del dominio respondió, pero no encontró capturas para el producto en esa ruta."
+                            }
+                        )
+                    }
+                }
+            }
         }
+
+        val combined = (listOf(fallback) + listOfNotNull(alternateResult) + domainDiscoveryResults)
+            .drop(1)
+            .fold(fallback) { accumulated, result ->
+                accumulated.copy(
+                    capturesFound = accumulated.capturesFound + result.capturesFound,
+                    capturesChecked = accumulated.capturesChecked + result.capturesChecked,
+                    available = accumulated.available || result.available,
+                    requestFailed = accumulated.requestFailed || result.requestFailed,
+                    diagnosticCodes = accumulated.diagnosticCodes + result.diagnosticCodes
+                )
+            }
         rememberAttempt(
             cacheKey,
             now,
@@ -3630,7 +3714,7 @@ class WaybackPriceHistoryClient(
     )
 
     companion object {
-        const val DEFAULT_LOOKBACK_DAYS = 1600
+        const val DEFAULT_LOOKBACK_DAYS = 2920
         // CDX queries run in parallel for the exact URL and merchant-domain fallback.
         // A larger read budget is needed on slow archive responses; concurrency and row caps
         // below still bound total work per product.
@@ -3676,7 +3760,7 @@ class WaybackPriceHistoryClient(
         // Used only by historical backfill, never by the primary shopping search.
         private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 7L
         private const val MAX_DOMAIN_INDEX_ROWS = 20
-        private const val DOMAIN_LOOKBACK_DAYS = 730
+        private const val DOMAIN_LOOKBACK_DAYS = 2920
         private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L
         const val NEGATIVE_RETRY_INTERVAL_MS = 6L * 60L * 60L * 1000L

@@ -2159,6 +2159,7 @@ class ExampleRobolectricTest {
                   "title": "Auriculares Sony WH-1000XM5",
                   "price": "79,99 €",
                   "extracted_price": 79.99,
+                  "link": "https://www.google.com/url?q=https%3A%2F%2Fwww.pccomponentes.com%2Fauriculares-sony-wh-1000xm5",
                   "product_link": "https://www.google.com/shopping/product/987654321?gl=es",
                   "source": "PcComponentes"
                 },

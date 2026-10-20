@@ -29,6 +29,7 @@ import java.io.InterruptedIOException
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.text.Normalizer
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
@@ -40,7 +41,15 @@ data class ArchivedPriceQuote(
     val currency: String,
     val productTitle: String,
     val originalUrl: String,
-    val snapshotUrl: String
+    val snapshotUrl: String,
+    /** Currency and amount as found in the archived HTML, before any historical conversion. */
+    val sourceCurrency: String = currency,
+    val sourcePrice: Double = price,
+    /** EUR received for one source-currency unit, only when converted from a foreign currency. */
+    val exchangeRate: Double? = null,
+    /** Effective historical rate date (never later than the snapshot date). */
+    val exchangeRateDate: String? = null,
+    val conversionSource: String? = null
 )
 
 data class WaybackBackfillResult(
@@ -298,6 +307,11 @@ class WaybackPriceHistoryClient(
         .connectTimeout(4, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS)
         .callTimeout(5, TimeUnit.SECONDS)
+        .build(),
+    private val fxHttp: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(2, TimeUnit.SECONDS)
+        .readTimeout(3, TimeUnit.SECONDS)
+        .callTimeout(4, TimeUnit.SECONDS)
         .build()
 ) {
     private val preferences = context.applicationContext.getSharedPreferences(
@@ -1315,18 +1329,27 @@ class WaybackPriceHistoryClient(
                             } else {
                                 emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.PASSED, "HTML recibido y sin marcadores comunes de cookies, CAPTCHA o bloqueo.")
                                 val document = Jsoup.parse(html)
-                                val quote = parseArchivedPrice(
+                                val sourceQuote = parseArchivedPrice(
                                     document = document,
                                     expectedTitle = expectedTitle,
                                     originalUrl = capture.originalUrl,
                                     snapshotUrl = snapshotUrl,
-                                    observedAt = capture.timestamp
+                                    observedAt = capture.timestamp,
+                                    acceptedCurrencies = setOf("EUR", "USD")
                                 )
-                                reportArchiveFieldTrace(onTrace, document, expectedTitle, quote)
+                                val quote = when (sourceQuote?.currency?.uppercase(Locale.ROOT)) {
+                                    "USD" -> sourceQuote?.let { convertUsdQuoteToEurAtCaptureDate(it, onTrace) }
+                                    else -> sourceQuote
+                                }
+                                reportArchiveFieldTrace(onTrace, document, expectedTitle, quote, sourceQuote)
                                 SnapshotFetch(
                                     fetched = true,
                                     quote = quote,
-                                    diagnosticCode = if (quote == null) diagnoseArchivedPrice(document, expectedTitle) else null
+                                    diagnosticCode = when {
+                                        quote != null -> null
+                                        sourceQuote?.currency.equals("USD", ignoreCase = true) -> "ARCHIVE_USD_FX_UNAVAILABLE"
+                                        else -> diagnoseArchivedPrice(document, expectedTitle)
+                                    }
                                 )
                             }
                         }
@@ -2701,7 +2724,8 @@ class WaybackPriceHistoryClient(
         expectedTitle: String,
         originalUrl: String,
         snapshotUrl: String,
-        observedAt: Long
+        observedAt: Long,
+        acceptedCurrencies: Set<String> = setOf("EUR")
     ): ArchivedPriceQuote? {
         // The product price/title may exist only in <head> metadata or JSON-LD, so an empty
         // rendered body is not enough to reject an archived document.
@@ -2720,8 +2744,9 @@ class WaybackPriceHistoryClient(
             readMeta(document, setOf(key)) ?: readItemPropValue(document, key)
         }?.uppercase(Locale.ROOT)
 
+        val allowedCurrencies = acceptedCurrencies.map { it.uppercase(Locale.ROOT) }.toSet()
         fun isValidCandidate(candidate: Triple<String, Double, String>): Boolean =
-            candidate.third.equals("EUR", ignoreCase = true) &&
+            candidate.third.uppercase(Locale.ROOT) in allowedCurrencies &&
                 candidate.second in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE &&
                 isMatchingProductTitle(expectedTitle, candidate.first)
 
@@ -2758,24 +2783,30 @@ class WaybackPriceHistoryClient(
             return ArchivedPriceQuote(
                 observedAt = observedAt,
                 price = matching.second,
-                currency = "EUR",
+                currency = matching.third.uppercase(Locale.ROOT),
                 productTitle = decodeHtml(matching.first).trim(),
                 originalUrl = originalUrl,
-                snapshotUrl = snapshotUrl
+                snapshotUrl = snapshotUrl,
+                sourceCurrency = matching.third.uppercase(Locale.ROOT),
+                sourcePrice = matching.second
             )
         }
 
         // Use rendered price only from a price-specific element and only after product identity matches.
         val matchingPageTitle = pageTitles.firstOrNull { isMatchingProductTitle(expectedTitle, it) }
             ?: return null
-        val visiblePrice = extractVisibleProductPrice(document, metaCurrency) ?: return null
+        val visiblePrice = extractVisibleProductPrice(document, metaCurrency, allowedCurrencies) ?: return null
+        val visibleCurrency = metaCurrency?.uppercase(Locale.ROOT)
+            ?.takeIf { it in allowedCurrencies } ?: "EUR"
         return ArchivedPriceQuote(
             observedAt = observedAt,
             price = visiblePrice,
-            currency = "EUR",
+            currency = visibleCurrency,
             productTitle = decodeHtml(matchingPageTitle).trim(),
             originalUrl = originalUrl,
-            snapshotUrl = snapshotUrl
+            snapshotUrl = snapshotUrl,
+            sourceCurrency = visibleCurrency,
+            sourcePrice = visiblePrice
         )
     }
 

@@ -68,6 +68,16 @@ class WaybackPriceHistoryClientTest {
             )
         )
         assertEquals(
+            "A final no-capture fallback summary must also override an earlier green step 7",
+            WaybackTraceStatus.FAILED,
+            mergeWaybackDiagnosticStatus(
+                WaybackTraceStatus.PASSED,
+                WaybackTraceStatus.FAILED,
+                7,
+                "Availability respondió, pero no encontró capturas y alguna consulta falló: CDX_DOMAIN_TIMEOUT."
+            )
+        )
+        assertEquals(
             "The no-capture override must not rewrite unrelated diagnostic stages",
             WaybackTraceStatus.PASSED,
             mergeWaybackDiagnosticStatus(

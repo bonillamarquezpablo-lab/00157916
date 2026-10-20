@@ -755,10 +755,11 @@ class WaybackPriceHistoryClient(
             "$failureLabel. Se activa la alternativa limitada de Availability API."
         )
 
-        val candidateUrls = (
-            listOfNotNull(preferredUrl?.takeIf(::isEligibleDirectUrl)) +
-                buildAvailabilityCandidateUrls(normalizedDomain, expectedTitle)
-            ).distinct().take(MAX_AVAILABILITY_URL_CANDIDATES)
+        val candidateUrls = orderAvailabilityCandidateUrls(
+            preferredUrl = preferredUrl,
+            generatedUrls = buildAvailabilityCandidateUrls(normalizedDomain, expectedTitle),
+            expectedTitle = expectedTitle
+        ).take(MAX_AVAILABILITY_URL_CANDIDATES)
         if (candidateUrls.isEmpty()) {
             rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
             return WaybackBackfillResult(requestFailed = true, diagnosticCodes = failureCodes)
@@ -879,7 +880,27 @@ class WaybackPriceHistoryClient(
         val domainDiscoveryResults = mutableListOf<WaybackBackfillResult>()
         val priorRateLimited = fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ||
             alternateResult?.diagnosticCodes?.contains("WAYBACK_RATE_LIMITED") == true
-        if (!priorRateLimited && activeRateLimitUntil(System.currentTimeMillis()) == null) {
+        // If the one alternate product-prefix request has already timed out or failed at the
+        // transport/server level, do not fan out into two broad host scans. They hit the same
+        // CDX service, usually time out again, and can consume the rest of the per-product budget.
+        // Valid empty responses still allow discovery; only transient failures stop it.
+        val alternateTransientFailure = alternateResult?.let { result ->
+            result.requestFailed && result.diagnosticCodes.any { code ->
+                code.endsWith("_TIMEOUT") || code.endsWith("_DNS") ||
+                    (code.contains("_HTTP_") &&
+                        code.substringAfterLast('_').toIntOrNull()
+                            ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true)
+            }
+        } == true
+        if (alternateTransientFailure && !priorRateLimited) {
+            emitWaybackTrace(
+                onTrace, 6, WaybackTraceStatus.SKIPPED,
+                "Se detiene la búsqueda amplia del dominio tras un fallo temporal de CDX; no se repiten consultas al mismo archivo."
+            )
+        }
+        if (!priorRateLimited && !alternateTransientFailure &&
+            activeRateLimitUntil(System.currentTimeMillis()) == null
+        ) {
             val domainQueries = buildDomainCdxHostUrls(
                 domain = normalizedDomain,
                 expectedTitle = expectedTitle,
@@ -987,6 +1008,94 @@ class WaybackPriceHistoryClient(
             requestFailed = combined.requestFailed,
             diagnosticCodes = combined.diagnosticCodes + failureCodes
         )
+    }
+
+    /**
+     * Put product-shaped candidates ahead of a preferred URL only when the URL explicitly
+     * identifies a different purchasable variant. Missing colour/capacity in a family URL is
+     * unknown, not a conflict; strict archived-title and price validation remains authoritative.
+     */
+    internal fun orderAvailabilityCandidateUrls(
+        preferredUrl: String?,
+        generatedUrls: List<String>,
+        expectedTitle: String
+    ): List<String> {
+        val preferred = preferredUrl?.takeIf(::isEligibleDirectUrl)
+        val generated = generatedUrls.filter(::isEligibleDirectUrl).distinct()
+        if (preferred == null) return generated
+        val preferredHasConflict = hasExplicitVariantConflictInProductUrl(expectedTitle, preferred)
+        return if (preferredHasConflict) {
+            (generated + preferred).distinct()
+        } else {
+            (listOf(preferred) + generated).distinct()
+        }
+    }
+
+    /**
+     * Inspect only identity-bearing URL parts. A family URL that omits capacity/colour must not
+     * fail this check, while an explicit "iphone-15-plus", different capacity, or different colour
+     * must not be the first archive candidate for a base iPhone 15 variant.
+     */
+    internal fun hasExplicitVariantConflictInProductUrl(
+        expectedTitle: String,
+        candidateUrl: String
+    ): Boolean {
+        val uri = runCatching { URI(candidateUrl) }.getOrNull() ?: return false
+        val expected = normalizeTitle(expectedTitle)
+        if (expected.isBlank()) return false
+
+        val pathText = uri.path.orEmpty()
+            .split('/')
+            .filter { it.isNotBlank() }
+            .joinToString(" ") { decodePathUrlComponent(it) }
+        val identityQueryKeys = setOf(
+            "sku", "skuid", "sku_id", "variant", "variantid", "variant_id", "variation",
+            "variationid", "variation_id", "productid", "product_id", "id_product",
+            "offerid", "offer_id", "pid", "itemid", "item_id", "asin", "mpn", "gtin",
+            "ean", "model", "modelid", "color", "colour", "colorid", "colourid",
+            "storage", "capacity", "size", "configuration", "config", "option", "optionid"
+        )
+        val queryIdentityText = uri.rawQuery.orEmpty().split('&').mapNotNull { parameter ->
+            val rawKey = parameter.substringBefore('=')
+            val rawValue = parameter.substringAfter('=', "")
+            val key = decodeQueryUrlComponent(rawKey).lowercase(Locale.ROOT)
+            if (key !in identityQueryKeys) return@mapNotNull null
+            decodeQueryUrlComponent(rawValue).takeIf { it.isNotBlank() }
+        }.joinToString(" ")
+        val candidate = normalizeTitle("$pathText $queryIdentityText")
+        if (candidate.isBlank()) return false
+
+        // Compare numeric model family where the URL names one explicitly (e.g. iPhone 15 vs 16).
+        val modelPattern = Regex(
+            """\b(iphone|ipad|pixel|redmi|poco|galaxy\s+s|galaxy\s+a|galaxy\s+z)\s*(\d{1,3})\b"""
+        )
+        val expectedModel = modelPattern.find(expected)
+        val candidateModel = modelPattern.find(candidate)
+        if (expectedModel != null && candidateModel != null &&
+            (expectedModel.groupValues[1].replace(Regex("\\s+"), "") !=
+                candidateModel.groupValues[1].replace(Regex("\\s+"), "") ||
+                expectedModel.groupValues[2] != candidateModel.groupValues[2])
+        ) return true
+
+        // Do not treat omitted qualifiers as a conflict. Only reject qualifiers explicitly named
+        // by the candidate that contradict the selected product.
+        val expectedVariants = productModelVariantTokens(expected)
+        val candidateVariants = productModelVariantTokens(candidate)
+        if (candidateVariants.any { it !in expectedVariants }) return true
+
+        val expectedColour = productColourFamily(expected)
+        val candidateColour = productColourFamily(candidate)
+        if (expectedColour != null && candidateColour != null && expectedColour != candidateColour) {
+            return true
+        }
+
+        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+        val expectedStorage = storagePattern.findAll(expected)
+            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
+        val candidateStorage = storagePattern.findAll(candidate)
+            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
+        return expectedStorage.isNotEmpty() && candidateStorage.isNotEmpty() &&
+            expectedStorage.intersect(candidateStorage).isEmpty()
     }
 
     private suspend fun queryAvailabilityAndFetchPrices(

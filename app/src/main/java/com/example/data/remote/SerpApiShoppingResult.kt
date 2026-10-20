@@ -1,5 +1,6 @@
 package com.example.data.remote
 
+import android.text.Html
 import com.example.data.model.Store
 import java.net.URI
 import java.net.URLDecoder
@@ -281,56 +282,145 @@ internal fun mergeGoogleShoppingWithGameSupplement(
  * Return a retailer destination if a provider URL is already direct or if a Google redirect
  * embeds the actual destination. Never treats a generic Google Shopping/search page as a seller URL.
  */
-fun extractDirectRetailerUrl(sourceUrl: String): String? {
-    var current = sourceUrl.trim()
-    if (current.isBlank()) return null
-    val visited = mutableSetOf<String>()
-    val redirectKeys = setOf(
-        "url", "adurl", "q", "u", "dest", "destination", "target",
-        "redirect", "redirect_url", "url_source", "merchant_url", "final_url"
-    )
+private val REDIRECT_QUERY_KEYS = setOf(
+    "url", "url1", "url2", "adurl", "q", "u", "dest", "destination", "target",
+    "redirect", "redirect_url", "redirect_uri", "url_source", "merchant_url", "final_url",
+    "uddg", "rut", "link", "href", "to", "out", "next", "continue"
+)
 
-    repeat(3) {
-        if (!visited.add(current)) return null
+private val REDIRECT_HOST_SUFFIXES = setOf(
+    "google.com", "google.es", "googleadservices.com", "doubleclick.net", "bing.com",
+    "duckduckgo.com", "search.yahoo.com", "t.co", "bit.ly", "tinyurl.com", "lnkd.in",
+    "l.facebook.com", "l.instagram.com", "safelinks.protection.outlook.com"
+)
+
+private fun isIntermediaryRedirectHost(rawHost: String): Boolean {
+    val host = rawHost.lowercase(Locale.ROOT).trimEnd('.').removePrefix("www.")
+    return REDIRECT_HOST_SUFFIXES.any { host == it || host.endsWith("." + it) } ||
+        isGoogleShoppingUrl("https://" + host + "/")
+}
+
+private fun isNonRetailerArchiveOrSearchHost(rawHost: String): Boolean {
+    val host = rawHost.lowercase(Locale.ROOT).trimEnd('.').removePrefix("www.")
+    return host == "web.archive.org" || host == "archive.org" ||
+        host == "google.com" || host.endsWith(".google.com") ||
+        host == "google.es" || host.endsWith(".google.es") ||
+        host == "bing.com" || host.endsWith(".bing.com")
+}
+
+private fun cleanRedirectUrlText(raw: String): String =
+    Html.fromHtml(raw, Html.FROM_HTML_MODE_LEGACY).toString()
+        .trim()
+        .trim('"', '\'', '<', '>')
+
+private fun decodeRedirectParameter(raw: String): String {
+    var value = cleanRedirectUrlText(raw)
+    repeat(4) {
+        val candidate = when {
+            value.startsWith("//") -> "https:" + value
+            value.startsWith("www.", ignoreCase = true) -> "https://" + value
+            else -> value
+        }
+        if (candidate.startsWith("https://", ignoreCase = true) ||
+            candidate.startsWith("http://", ignoreCase = true)
+        ) return candidate
+
+        val decoded = runCatching {
+            URLDecoder.decode(value, Charsets.UTF_8.name())
+        }.getOrDefault(value)
+        val cleaned = cleanRedirectUrlText(decoded)
+        if (cleaned == value) return value
+        value = cleaned
+    }
+    return value
+}
+
+private fun isSafeResolvedRetailerUrl(value: String): Boolean = runCatching {
+    val uri = URI(value)
+    val scheme = uri.scheme?.lowercase(Locale.ROOT)
+    val host = uri.host?.lowercase(Locale.ROOT)?.trimEnd('.').orEmpty()
+    scheme == "https" &&
+        host.isNotBlank() &&
+        uri.rawUserInfo == null &&
+        !isNonRetailerArchiveOrSearchHost(host) &&
+        !isIntermediaryRedirectHost(host)
+}.getOrDefault(false)
+
+/**
+ * Extract a real HTTPS retailer page, following nested Google Shopping/Ads links and common
+ * click-tracking wrappers. URL parameters are decoded repeatedly but never logged. Unknown short
+ * links without an embedded destination are rejected rather than mistaken for the retailer.
+ */
+fun extractDirectRetailerUrl(sourceUrl: String): String? {
+    var current = cleanRedirectUrlText(sourceUrl)
+    if (current.isBlank()) return null
+    val visited = linkedSetOf<String>()
+    val maxRedirectHops = 6
+
+    repeat(maxRedirectHops) {
+        current = decodeRedirectParameter(current)
+        if (current.startsWith("//")) current = "https:" + current
         val uri = runCatching { URI(current) }.getOrNull() ?: return null
         val scheme = uri.scheme?.lowercase(Locale.ROOT)
-        val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
-        if (scheme !in setOf("http", "https") || host.isBlank()) return null
-        if (!isGoogleShoppingUrl(current)) {
-            // Mínimo only opens secure retailer destinations. An HTTP target is not safe to
-            // treat as a successful redirect; let the caller choose a verified HTTPS store page.
-            return current.takeIf {
-                scheme == "https" && uri.rawUserInfo == null
-            }
+        val host = uri.host?.lowercase(Locale.ROOT)?.trimEnd('.').orEmpty()
+        if (scheme !in setOf("http", "https") || host.isBlank() || uri.rawUserInfo != null) return null
+
+        // A direct destination is done. Never archive or return a search, Wayback, or URL-shortener
+        // host as if it were the merchant's product page.
+        val redirectEndpoint = Regex(
+            """(?i)(?:^|/)(?:url|aclk|redirect|redir|out|outbound|away|click|link|track|go)(?:/|$)"""
+        ).containsMatchIn(uri.rawPath.orEmpty())
+        val intermediate = isIntermediaryRedirectHost(host) || redirectEndpoint
+        if (!intermediate) {
+            val secure = if (scheme == "http") {
+                current.replaceFirst(Regex("""(?i)^http://"""), "https://")
+            } else current
+            return secure.takeIf(::isSafeResolvedRetailerUrl)
         }
 
-        val nestedCandidates = uri.rawQuery.orEmpty()
+        if (!visited.add(current)) return null
+
+        val parameters = uri.rawQuery.orEmpty().split('&').mapNotNull { parameter ->
+            if (parameter.isBlank()) return@mapNotNull null
+            val keyValue = parameter.split('=', limit = 2)
+            if (keyValue.size < 2) return@mapNotNull null
+            val key = runCatching {
+                URLDecoder.decode(keyValue[0].replace("+", "%2B"), Charsets.UTF_8.name())
+            }.getOrDefault(keyValue[0]).lowercase(Locale.ROOT)
+            key to decodeRedirectParameter(keyValue[1])
+        }
+
+        // Prefer explicitly named destination parameters before trying other URL-like values.
+        val orderedValues = parameters.sortedBy { pair ->
+            val index = REDIRECT_QUERY_KEYS.indexOf(pair.first)
+            if (index < 0) Int.MAX_VALUE else index
+        }.map { it.second }
+        val fragmentParameters = uri.rawFragment.orEmpty()
+            .substringAfter('?', uri.rawFragment.orEmpty())
             .split('&')
             .mapNotNull { parameter ->
                 if (parameter.isBlank()) return@mapNotNull null
                 val keyValue = parameter.split('=', limit = 2)
+                if (keyValue.size < 2) return@mapNotNull null
                 val key = runCatching {
                     URLDecoder.decode(keyValue[0].replace("+", "%2B"), Charsets.UTF_8.name())
                 }.getOrDefault(keyValue[0]).lowercase(Locale.ROOT)
-                if (key !in redirectKeys || keyValue.size < 2) return@mapNotNull null
-                var decoded = runCatching {
-                    URLDecoder.decode(keyValue[1], Charsets.UTF_8.name())
-                }.getOrDefault(keyValue[1]).trim()
-                if (decoded.startsWith("//")) decoded = "https:$decoded"
-                val target = runCatching { URI(decoded) }.getOrNull() ?: return@mapNotNull null
-                val targetScheme = target.scheme?.lowercase(Locale.ROOT)
-                val targetHost = target.host?.lowercase(Locale.ROOT).orEmpty()
-                if (targetScheme != "https" || targetHost.isBlank() || target.rawUserInfo != null) {
-                    return@mapNotNull null
-                }
-                decoded
+                if (key !in REDIRECT_QUERY_KEYS) return@mapNotNull null
+                decodeRedirectParameter(keyValue[1])
             }
-        val next = nestedCandidates.firstOrNull { !isGoogleShoppingUrl(it) }
-            ?: nestedCandidates.firstOrNull()
-            ?: return null
+        val candidates = (orderedValues + fragmentParameters).distinct()
+        val next = candidates.firstOrNull { candidate ->
+            val target = runCatching { URI(candidate) }.getOrNull() ?: return@firstOrNull false
+            val targetHost = target.host?.lowercase(Locale.ROOT).orEmpty()
+            target.scheme?.lowercase(Locale.ROOT) in setOf("http", "https") &&
+                targetHost.isNotBlank() &&
+                target.rawUserInfo == null &&
+                candidate != current
+        } ?: return null
+
         current = next
     }
-    return current.takeIf { !isGoogleShoppingUrl(it) }
+    return current.takeIf(::isSafeResolvedRetailerUrl)
 }
 
 fun linkTypeForUrl(sourceUrl: String): String {

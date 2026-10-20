@@ -624,15 +624,11 @@ class SerpApiClient(
                     title
                 )
                 ?: googleShoppingSearchUrl(title)
-            // The target used by Wayback may now be a seller URL, but retain the wrapper's source
-            // so the UI/report still says Google Shopping rather than pretending it was a direct
-            // retailer observation.
-            val linkSourceProvider = when {
-                extractedCandidate?.first?.let(::isGoogleShoppingUrl) == true -> "Google Shopping"
-                fallbackProviderUrl?.let(::isGoogleShoppingUrl) == true -> "Google Shopping"
-                isGoogleShoppingUrl(url) -> "Google Shopping"
-                else -> null
-            }
+            // This parser is fed by the Google Shopping provider. Provider provenance must
+            // survive even when the URL was decoded to a direct HTTPS seller destination, or when
+            // we generate the retailer's search page because the response omitted a link entirely.
+            // Destination classification remains derived separately from sourceUrl/linkType.
+            val linkSourceProvider = "Google Shopping"
             val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()
             val source = providerSource ?: humanizeHost(host)

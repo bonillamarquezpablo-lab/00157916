@@ -927,6 +927,18 @@ class WaybackPriceHistoryClient(
                             (it.contains("_HTTP_") && it.substringAfterLast('_').toIntOrNull()
                                 ?.let { status -> status in RETRYABLE_CDX_HTTP_CODES } == true)
                     } -> {
+                        val tryNextDistinctHost = shouldTryNextDomainHostAfterTimeout(
+                            currentIndex = index,
+                            hostUrls = domainQueries,
+                            diagnosticCodes = discovered.diagnosticCodes
+                        )
+                        if (tryNextDistinctHost) {
+                            emitWaybackTrace(
+                                onTrace, 6, WaybackTraceStatus.RUNNING,
+                                "El host www agotó el tiempo; se probará una sola vez el dominio raíz, sin repetir consultas al mismo host."
+                            )
+                            continue
+                        }
                         emitWaybackTrace(
                             onTrace, 6, WaybackTraceStatus.FAILED,
                             "La búsqueda acotada del índice del dominio falló (${discovered.diagnosticCodes.joinToString(", ")}); se evita insistir contra el archivo."
@@ -2807,6 +2819,23 @@ class WaybackPriceHistoryClient(
             .build()
     }
 
+    /**
+     * A timeout on www does not prove that the apex host has no archived pages. Permit exactly
+     * one next-host probe when it is a distinct URL; never retry the same host or continue after
+     * HTTP 429. The caller caps the host list to two candidates.
+     */
+    internal fun shouldTryNextDomainHostAfterTimeout(
+        currentIndex: Int,
+        hostUrls: List<HttpUrl>,
+        diagnosticCodes: Set<String>
+    ): Boolean {
+        if (diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) return false
+        if ("CDX_DOMAIN_TIMEOUT" !in diagnosticCodes) return false
+        val current = hostUrls.getOrNull(currentIndex) ?: return false
+        val next = hostUrls.getOrNull(currentIndex + 1) ?: return false
+        return next.queryParameter("url") != current.queryParameter("url")
+    }
+
     /** Build www-host and apex-host requests for a registrable retailer root. */
     internal fun buildDomainCdxHostUrls(
         domain: String,
@@ -3765,7 +3794,7 @@ class WaybackPriceHistoryClient(
         private const val DIRECT_CDX_TIMEOUT_SECONDS = 7L
         // This last-resort host scan only runs if no product URL can be built. Keep it
         // short enough to leave time for the two bounded Availability probes.
-        private const val DOMAIN_CDX_TIMEOUT_SECONDS = 3L
+        private const val DOMAIN_CDX_TIMEOUT_SECONDS = 5L
         // Product-specific CDX lookup is narrower than scanning every URL on a retailer host.
         // Give the public index up to 7 seconds on slower responses; no retry is added here,
         // and the bounded Availability fallback remains in place if CDX does not answer.

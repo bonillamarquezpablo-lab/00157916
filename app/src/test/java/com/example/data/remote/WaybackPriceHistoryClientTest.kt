@@ -467,6 +467,7 @@ class WaybackPriceHistoryClientTest {
         assertTrue(decomposed.productIdentifiers.contains("iphone-15"))
         assertTrue(decomposed.productIdentifiers.contains("iphone15-yellow-256"))
         assertTrue(decomposed.trackingParameters.contains("utm_source"))
+        assertEquals("The resolver should report the single embedded redirect hop", 1, decomposed.redirectDepth)
         assertEquals(
             "https://shop.example/product/iphone-15?sku=iphone15-yellow-256&color=yellow&storage=256GB",
             decomposed.canonicalUrl
@@ -495,9 +496,10 @@ class WaybackPriceHistoryClientTest {
         val client = newClient()
         val queryless = client.buildDirectUrlCandidates("https://shop.example/product/anker-prime")
         assertEquals(
+            "Try the slash variant, but keep the exact archived target last for the lookup",
             listOf(
-                "https://shop.example/product/anker-prime",
-                "https://shop.example/product/anker-prime/"
+                "https://shop.example/product/anker-prime/",
+                "https://shop.example/product/anker-prime"
             ),
             queryless
         )

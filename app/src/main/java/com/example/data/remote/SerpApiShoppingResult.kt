@@ -295,13 +295,13 @@ private val REDIRECT_HOST_SUFFIXES = setOf(
     "l.facebook.com", "l.instagram.com", "safelinks.protection.outlook.com"
 )
 
-private fun isIntermediaryRedirectHost(rawHost: String): Boolean {
+internal fun isIntermediaryRedirectHost(rawHost: String): Boolean {
     val host = rawHost.lowercase(Locale.ROOT).trimEnd('.').removePrefix("www.")
     return REDIRECT_HOST_SUFFIXES.any { host == it || host.endsWith("." + it) } ||
         isGoogleShoppingUrl("https://" + host + "/")
 }
 
-private fun isNonRetailerArchiveOrSearchHost(rawHost: String): Boolean {
+internal fun isNonRetailerArchiveOrSearchHost(rawHost: String): Boolean {
     val host = rawHost.lowercase(Locale.ROOT).trimEnd('.').removePrefix("www.")
     return host == "web.archive.org" || host == "archive.org" ||
         host == "google.com" || host.endsWith(".google.com") ||

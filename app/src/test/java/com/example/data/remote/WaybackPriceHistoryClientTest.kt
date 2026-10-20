@@ -228,7 +228,7 @@ class WaybackPriceHistoryClientTest {
         val originalUrl = "https://shop.example/products/anker-prime-cache-test"
         val baseClient = WaybackPriceHistoryClient(context)
         val canonicalUrl = baseClient.buildDirectUrlCandidates(originalUrl).last()
-        val rawKey = "url-cdx-batch-v5|" + canonicalUrl + "|" + title
+        val rawKey = "url-cdx-batch-v6|" + canonicalUrl + "|" + title
         val digest = java.security.MessageDigest.getInstance("SHA-256")
             .digest(rawKey.toByteArray(Charsets.UTF_8))
         val cacheKey = "attempt_" + digest.take(16).joinToString("") {
@@ -984,6 +984,96 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun availabilityEmptyPlusAlternateCdxTimeoutIsCachedAsFailureNotSixHourNegative() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .commit()
+
+        val title = "Anker Prime timeout must retry " + System.currentTimeMillis()
+        val preferredUrl = "https://shop.example/products/anker-prime-timeout-cache.html"
+        val client = WaybackPriceHistoryClient(context)
+        val rawKey = "domain-cdx-batch-v6|shop.example|" + title
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(rawKey.toByteArray(Charsets.UTF_8))
+        val attemptKey = "attempt_" + digest.take(16).joinToString("") {
+            "%02x".format(it.toInt() and 0xff)
+        }
+        val requestHosts = CopyOnWriteArrayList<String>()
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            requestHosts += request.url.host + request.url.encodedPath
+            when {
+                request.url.host == "archive.org" &&
+                    request.url.encodedPath == "/wayback/available" -> {
+                    val body = """{"archived_snapshots":{"closest":{"available":false}}}"""
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(body.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") ->
+                    throw java.net.SocketTimeoutException("simulated alternate CDX timeout")
+                else -> throw AssertionError("Unexpected Wayback request: " + request.url)
+            }
+        }.build()
+
+        try {
+            val result = withTimeout(20_000L) {
+                WaybackPriceHistoryClient(context, http).fetchHistoryByMerchantDomain(
+                    domain = "shop.example",
+                    expectedTitle = title,
+                    lookbackDays = 730,
+                    preferredUrl = preferredUrl,
+                    preferredUrlAlreadyQueried = true
+                )
+            }
+
+            assertTrue("Availability empty + CDX timeout is a partial transport failure", result.requestFailed)
+            assertTrue(
+                "The combined lookup must retain the alternate CDX timeout diagnosis",
+                result.diagnosticCodes.any { it.contains("TIMEOUT") }
+            )
+            assertTrue(
+                "The parent domain attempt must be marked as failed, not as a clean negative result",
+                preferences.getBoolean(attemptKey + "_failed", false)
+            )
+            val beforeRetry = requestHosts.size
+            val immediateRetry = WaybackPriceHistoryClient(
+                context,
+                OkHttpClient.Builder().addInterceptor {
+                    throw AssertionError("A failed lookup is briefly cached to avoid a rapid repeat")
+                }.build()
+            ).fetchHistoryByMerchantDomain(
+                domain = "shop.example",
+                expectedTitle = title,
+                lookbackDays = 730,
+                preferredUrl = preferredUrl,
+                preferredUrlAlreadyQueried = true
+            )
+            assertTrue("The immediate repeat should be tagged as a failed-attempt cache skip", immediateRetry.skippedRecently)
+            assertTrue(immediateRetry.diagnosticCodes.contains("CACHE_SKIPPED_AFTER_FAILURE"))
+            assertTrue("The first attempt must have contacted both services", beforeRetry >= 3)
+        } finally {
+            preferences.edit()
+                .remove(attemptKey)
+                .remove(attemptKey + "_has_quotes")
+                .remove(attemptKey + "_failed")
+                .remove(attemptKey + "_rate_limited")
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .commit()
+        }
+    }
+
+    @Test
     fun domainCdxHttp500FallsBackToAvailabilityAndSavesVerifiedPrice() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
@@ -1572,6 +1662,16 @@ class WaybackPriceHistoryClientTest {
 
         assertEquals("lamanzanita.es", client.resolveMerchantDomain("La Manzanita", googleUrl))
         assertEquals("nike.com", client.resolveMerchantDomain("Nike Oficial", googleUrl))
+        assertEquals(
+            "A blank seller label must still resolve from the saved store domain",
+            "pixmania.com",
+            client.resolveMerchantDomain("", googleUrl, "https://www.pixmania.com/es/")
+        )
+        assertEquals(
+            "A blank seller label must still resolve from a verified direct retailer URL",
+            "pccomponentes.com",
+            client.resolveMerchantDomain("", "https://www.pccomponentes.com/smartphones")
+        )
         assertEquals("sprinter.es", client.resolveMerchantDomain("Sprinter Deportes", googleUrl))
         assertEquals(
             "A bad saved domain label must not override a recognised merchant name",

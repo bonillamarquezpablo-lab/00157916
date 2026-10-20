@@ -757,14 +757,56 @@ class WaybackPriceHistoryClientTest {
             domain = "apple.com",
             expectedTitle = "Apple iPhone 15 128 GB Negro"
         )
-        assertEquals(
-            "Apple's purchase flow must be the first probe because it can expose offer-specific metadata",
-            "https://www.apple.com/es/shop/buy-iphone/iphone-15/",
-            appleStorageColorCandidates.first()
+        assertTrue(
+            "The archived lookup must try the exact iPhone 15 storage/colour route before a generic family page",
+            appleStorageColorCandidates.first().contains(
+                "/shop/buy-iphone/iphone-15/pantalla-de-6,1%E2%80%B3-128gb-negro",
+                ignoreCase = true
+            )
+        )
+        assertFalse(
+            "An exact SKU route has no trailing slash, matching Apple's published URL",
+            appleStorageColorCandidates.first().endsWith("/")
+        )
+        assertTrue(
+            "The generic purchase route remains available as a fallback",
+            appleStorageColorCandidates.contains("https://www.apple.com/es/shop/buy-iphone/iphone-15/")
         )
         assertTrue(
             "The canonical marketing page remains as a fallback after the purchase route",
             appleStorageColorCandidates.contains("https://www.apple.com/es/iphone-15/")
+        )
+
+        val appleYellowCandidates = client.buildAvailabilityCandidateUrls(
+            domain = "apple.com",
+            expectedTitle = "Apple iPhone 15 256 GB Amarillo"
+        )
+        assertTrue(
+            "The expected base iPhone 15 SKU must use the 6.1-inch yellow configurator route",
+            appleYellowCandidates.first().contains(
+                "/pantalla-de-6,1%E2%80%B3-256gb-amarillo",
+                ignoreCase = true
+            )
+        )
+        val applePlusCandidates = client.buildAvailabilityCandidateUrls(
+            domain = "apple.com",
+            expectedTitle = "Apple iPhone 15 Plus 256 GB Amarillo"
+        )
+        assertTrue(
+            "The Plus SKU must use the 6.7-inch route, not the base model's 6.1-inch route",
+            applePlusCandidates.first().contains(
+                "/pantalla-de-6,7%E2%80%B3-256gb-amarillo",
+                ignoreCase = true
+            )
+        )
+        val orderedWithGenericSku = client.orderAvailabilityCandidateUrls(
+            preferredUrl = "https://www.apple.com/es/shop/buy-iphone/iphone-15/?sku=SKU123456",
+            generatedUrls = appleYellowCandidates,
+            expectedTitle = "Apple iPhone 15 256 GB Amarillo"
+        )
+        assertTrue(
+            "A matching Apple configurator route must outrank an opaque SKU attached to a generic family URL",
+            orderedWithGenericSku.first().contains("/pantalla-de-6,1%E2%80%B3-256gb-amarillo", ignoreCase = true)
         )
 
         val pcCandidates = client.buildAvailabilityCandidateUrls(

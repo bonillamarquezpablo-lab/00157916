@@ -1088,6 +1088,20 @@ class WaybackPriceHistoryClient(
         val urlVariants = productModelVariantTokens(normalized)
         if (expectedVariants.isNotEmpty() && urlVariants.containsAll(expectedVariants)) score += 5
 
+        // The official Apple iPhone 15 configurator encodes display, capacity and colour in its
+        // path. Treat a fully matching configurator URL as stronger than an opaque SKU on a
+        // generic family page; that generic URL can still expose a sibling offer in archived HTML.
+        val expectedIphone15 = Regex("""\biphone\s+15\b""").containsMatchIn(expected)
+        val host = uri.host?.lowercase(Locale.ROOT).orEmpty()
+        val applePath = (host == "apple.com" || host.endsWith(".apple.com")) &&
+            uri.path.orEmpty().contains("/shop/buy-iphone/iphone-15/pantalla-de-")
+        val expectedDisplay = if ("plus" in expectedVariants) "6,7" else "6,1"
+        if (expectedIphone15 && applePath &&
+            uri.path.orEmpty().contains("pantalla-de-$expectedDisplay") &&
+            expectedStorage.isNotEmpty() && urlStorage.containsAll(expectedStorage) &&
+            expectedColour != null && urlColour == expectedColour
+        ) score += 20
+
         // Opaque SKU/variant IDs still carry useful product-specific intent even when the URL
         // does not repeat colour or capacity in readable text.
         if (queryParts.any { (key, _) ->
@@ -2153,6 +2167,46 @@ class WaybackPriceHistoryClient(
         return result.joinToString("-").replace(Regex("-+"), "-").trim('-')
     }
 
+    /**
+     * Apple's generic iPhone 15 family URL can expose JSON-LD for a sibling model (notably
+     * iPhone 15 Plus) instead of the requested SKU. Build the official Spain configurator path
+     * when model, storage and colour are known, so Availability looks up the exact archived
+     * variant before spending its small probe budget on generic family pages.
+     */
+    private fun buildAppleIphone15VariantUrl(host: String, expectedTitle: String): String? {
+        val normalized = normalizeTitle(expectedTitle)
+        if (!Regex("""\biphone\s+15\b""").containsMatchIn(normalized)) return null
+
+        val variantTokens = productModelVariantTokens(normalized)
+        // iPhone 15's Apple configurator has base and Plus variants only. Do not guess a route for
+        // Pro/Max/other trims, whose page layout and display dimensions differ.
+        if (variantTokens.any { it != "plus" }) return null
+
+        val capacity = Regex("""\b(128|256|512)\s*gb\b""")
+            .find(normalized)?.groupValues?.get(1) ?: return null
+        val colourSlug = when (productColourFamily(normalized)) {
+            "black" -> "negro"
+            "blue" -> "azul"
+            "green" -> "verde"
+            "yellow" -> "amarillo"
+            "pink" -> "rosa"
+            else -> return null
+        }
+        val display = if ("plus" in variantTokens) "6,7" else "6,1"
+
+        return runCatching {
+            HttpUrl.Builder()
+                .scheme("https")
+                .host(host)
+                .addPathSegments("es/shop/buy-iphone/iphone-15")
+                // Keep this as one path segment. OkHttp encodes Apple's double-prime character
+                // using the same %E2%80%B3 form used by official Apple Spain product URLs.
+                .addPathSegment("pantalla-de-$display″-" + capacity + "gb-$colourSlug")
+                .build()
+                .toString()
+        }.getOrNull()
+    }
+
     internal fun buildAvailabilityCandidateUrls(domain: String, expectedTitle: String): List<String> {
         val normalizedDomain = normalizeMerchantDomain(domain) ?: return emptyList()
         if (expectedTitle.isBlank()) return emptyList()
@@ -2287,7 +2341,13 @@ class WaybackPriceHistoryClient(
                 listOfNotNull(storeSearchUrl) +
                 guessedProductUrls.drop(3)
         }
-        return orderedCandidates.distinct().take(MAX_AVAILABILITY_URL_CANDIDATES)
+        // Try the exact Apple SKU configurator before the generic family/marketing pages.
+        val appleVariantUrl = if (normalizedDomain == "apple.com") {
+            hosts.firstNotNullOfOrNull { host -> buildAppleIphone15VariantUrl(host, expectedTitle) }
+        } else null
+        return (listOfNotNull(appleVariantUrl) + orderedCandidates)
+            .distinct()
+            .take(MAX_AVAILABILITY_URL_CANDIDATES)
     }
 
     private fun availabilityTargetDates(now: Long, lookbackDays: Int, count: Int): List<String> {

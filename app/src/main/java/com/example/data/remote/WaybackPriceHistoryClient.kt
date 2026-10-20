@@ -1347,7 +1347,7 @@ class WaybackPriceHistoryClient(
                                     quote = quote,
                                     diagnosticCode = when {
                                         quote != null -> null
-                                        sourceQuote?.currency.equals("USD", ignoreCase = true) -> "ARCHIVE_USD_FX_UNAVAILABLE"
+                                        sourceQuote?.currency?.equals("USD", ignoreCase = true) == true -> "ARCHIVE_USD_FX_UNAVAILABLE"
                                         else -> diagnoseArchivedPrice(document, expectedTitle)
                                     }
                                 )
@@ -1573,8 +1573,8 @@ class WaybackPriceHistoryClient(
         )
         val prices = jsonLd.map { it.second } + listOfNotNull(metaPrice, visiblePrice, sourceQuote?.price, quote?.price)
         val numericValid = prices.any { it.isFinite() && it in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE }
-        val valid = numericValid &&
-            quote?.currency.equals("EUR", ignoreCase = true) &&
+        val valid = numericValid && quote != null &&
+            quote.currency.equals("EUR", ignoreCase = true) &&
             quote.price.isFinite() && quote.price in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE
         emitWaybackTrace(
             onTrace, 14,
@@ -1586,7 +1586,7 @@ class WaybackPriceHistoryClient(
                         " = " + String.format(Locale.ROOT, "%.2f", quote.price) + " EUR. Cambio fechado " +
                         (quote.exchangeRateDate ?: "sin fecha") + " (" + (quote.conversionSource ?: "fuente no indicada") + ")."
                 valid && quote != null -> "Precio validado: moneda EUR y rango permitido; identidad aceptada."
-                sourceQuote?.currency.equals("USD", ignoreCase = true) && quote == null ->
+                sourceQuote?.currency?.equals("USD", ignoreCase = true) == true && quote == null ->
                     "Se encontró un importe USD, pero no hay cambio histórico fechado verificable; no se guardó."
                 !numericValid -> "No hay importe numérico positivo dentro del rango permitido."
                 else -> "Se detectó un importe, pero no se confirmó EUR ni una conversión histórica válida."

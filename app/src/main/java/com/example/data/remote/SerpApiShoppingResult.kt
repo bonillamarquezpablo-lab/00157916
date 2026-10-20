@@ -284,8 +284,10 @@ internal fun mergeGoogleShoppingWithGameSupplement(
  */
 private val REDIRECT_QUERY_PRIORITY = listOf(
     "url", "adurl", "url1", "url2", "dest", "destination", "target",
-    "redirect", "redirect_url", "redirect_uri", "final_url", "merchant_url", "url_source",
-    "uddg", "q", "u", "link", "href", "to", "out", "next", "continue", "rut"
+    "redirect", "redirect_url", "redirect_uri", "redirected", "final_url", "merchant_url",
+    "merchant", "merchanturl", "url_source", "dest_url", "destination_url", "clickurl",
+    "affiliate_url", "encoded_url", "uddg", "q", "u", "r", "link", "href", "to", "out",
+    "next", "continue", "rut"
 )
 private val REDIRECT_QUERY_KEYS = REDIRECT_QUERY_PRIORITY.toSet()
 
@@ -391,6 +393,9 @@ internal fun extractDirectRetailerUrlWithDepth(sourceUrl: String): Pair<String, 
             val key = runCatching {
                 URLDecoder.decode(keyValue[0].replace("+", "%2B"), Charsets.UTF_8.name())
             }.getOrDefault(keyValue[0]).lowercase(Locale.ROOT)
+            // Ignore ordinary product parameters such as sku/color/variant: only known
+            // redirect keys can advance the chain, so data is not mistaken for another URL.
+            if (key !in REDIRECT_QUERY_KEYS) return@mapNotNull null
             key to decodeRedirectParameter(keyValue[1])
         }
 

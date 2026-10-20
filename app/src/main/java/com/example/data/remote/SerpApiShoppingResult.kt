@@ -109,10 +109,6 @@ data class RejectedOnlineOffer(
 )
 
 /**
- * One result from a manual Google Shopping query.
- * Prices are point-in-time observations and must be rechecked at the seller.
- */
-/**
  * Ranks result titles by the query's model and variant tokens before using price as a tie-breaker.
  * This operates locally over the provider response and does not consume additional quota.
  */
@@ -173,6 +169,10 @@ internal fun formatOnlineSnapshotAge(
     }
 }
 
+/**
+ * One result from a manual Google Shopping query.
+ * Prices are point-in-time observations and must be rechecked at the seller.
+ */
 data class SerpApiShoppingResult(
     val title: String,
     val price: Double,
@@ -568,6 +568,7 @@ fun retailerDestinationForOffer(sourceUrl: String, storeName: String, productTit
     // Unknown-seller offers must never fall back to a generic Google search page. If we
     // cannot resolve a seller destination, let the caller disable the link rather than misdirect.
     return sourceUrl.takeIf { !isGoogleShoppingUrl(it) && isSecureRetailerDestination(it) }
+}
 
 fun isSecondHandCondition(condition: String): Boolean = Regex(
     """(?i)\b(used|second[\s_-]*hand|pre[\s_-]*owned|usad[oa]s?|seminuev[oa]s?|refurbished|reacondicionad[oa]s?|renewed|open[\s_-]*box)\b"""

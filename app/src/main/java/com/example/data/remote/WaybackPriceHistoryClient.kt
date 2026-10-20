@@ -1989,14 +1989,12 @@ class WaybackPriceHistoryClient(
                 canonicalAppleSlug.startsWith("ipad-") ||
                 canonicalAppleSlug.startsWith("macbook-")
             ) {
-                paths += "/es/$canonicalAppleSlug/"
-                // Apple's marketing page can omit all purchase-specific price markup from
-                // archived HTML, whereas the buy flow has the model/offer metadata used by
-                // historical extraction. Keep the canonical marketing page first, then probe
-                // this purchase route as an exact bounded fallback.
+                // Probe Apple's purchase flow first because its archived HTML is more likely
+                // to expose model/offer metadata than the general marketing landing page.
                 if (canonicalAppleSlug.startsWith("iphone-")) {
                     paths += "/es/shop/buy-iphone/$canonicalAppleSlug/"
                 }
+                paths += "/es/$canonicalAppleSlug/"
             }
             slugs.filter { it.startsWith("iphone-") || it.startsWith("ipad-") || it.startsWith("macbook-") }
                 .forEach { paths += "/es/$it/" }

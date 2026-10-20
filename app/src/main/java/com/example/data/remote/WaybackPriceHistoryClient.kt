@@ -1564,7 +1564,9 @@ class WaybackPriceHistoryClient(
             .firstNotNullOfOrNull { key ->
                 readMeta(document, setOf(key)) ?: readItemPropValue(document, key)
             }?.uppercase(Locale.ROOT)
-        val visiblePrice = if (quote == null) extractVisibleProductPrice(document, metaCurrency) else null
+        val visiblePrice = if (quote == null) {
+            extractVisibleProductPrice(document, metaCurrency, setOf("EUR", "USD"))?.first
+        } else null
         val hasPriceCandidate = jsonLd.isNotEmpty() || metaPrice != null || visiblePrice != null || quote != null || sourceQuote != null
         emitWaybackTrace(
             onTrace, 13,
@@ -1623,7 +1625,7 @@ class WaybackPriceHistoryClient(
             readMeta(document, setOf(key)) ?: readItemPropValue(document, key)
         }?.uppercase(Locale.ROOT)
         if (pageTitles.isEmpty() && jsonLd.isEmpty()) return "ARCHIVE_TITLE_MISSING"
-        val visiblePrice = extractVisibleProductPrice(document, metaCurrency)
+        val visiblePrice = extractVisibleProductPrice(document, metaCurrency)?.first
         if (metaPrice == null && jsonLd.isEmpty() && visiblePrice == null) return "ARCHIVE_PRICE_METADATA_MISSING"
         val candidates = jsonLd +
             (if (pageTitles.isNotEmpty() && metaPrice != null && !metaCurrency.isNullOrBlank()) {
@@ -2937,9 +2939,9 @@ class WaybackPriceHistoryClient(
         // Use rendered price only from a price-specific element and only after product identity matches.
         val matchingPageTitle = pageTitles.firstOrNull { isMatchingProductTitle(expectedTitle, it) }
             ?: return null
-        val visiblePrice = extractVisibleProductPrice(document, metaCurrency, allowedCurrencies) ?: return null
-        val visibleCurrency = metaCurrency?.uppercase(Locale.ROOT)
-            ?.takeIf { it in allowedCurrencies } ?: "EUR"
+        val visibleCandidate = extractVisibleProductPrice(document, metaCurrency, allowedCurrencies) ?: return null
+        val visiblePrice = visibleCandidate.first
+        val visibleCurrency = visibleCandidate.second
         return ArchivedPriceQuote(
             observedAt = observedAt,
             price = visiblePrice,
@@ -3184,7 +3186,7 @@ class WaybackPriceHistoryClient(
         document: Document,
         knownCurrency: String?,
         acceptedCurrencies: Set<String> = setOf("EUR")
-    ): Double? {
+    ): Pair<Double, String>? {
         val priceSelector = Regex("""(?i)(product[-_ ]?price|current[-_ ]?price|sale[-_ ]?price|selling[-_ ]?price|final[-_ ]?price|special[-_ ]?price|price__current|price--current|price__sale|price--sale|price__amount|price-amount|pricevalue|price-value|a-price|pdp-price|priceblock_(?:our|deal|sale)price|^price$)""")
         val rejectedSelector = Regex("""(?i)(old|previous|regular|original|was[-_ ]?price|list[-_ ]?price|strike|crossed|installment|monthly|shipping|unit[-_ ]?price|price[-_ ]?before)""")
         val voidTags = setOf("meta", "input", "img", "br", "hr", "link", "source", "area", "embed", "track", "wbr")
@@ -3192,7 +3194,7 @@ class WaybackPriceHistoryClient(
         val usdAmount = Regex("""(?i)(?:\$\s*[0-9][0-9., \u00a0]*|[0-9][0-9., \u00a0]*\s*\$|\bUSD\s*[0-9][0-9., \u00a0]*|[0-9][0-9., \u00a0]*\s*\bUSD\b)""")
         val number = Regex("""(?<![A-Za-z0-9])(?:[0-9]{1,3}(?:[., \u00a0][0-9]{3})+|[0-9]+)(?:[.,][0-9]{1,2})?(?![A-Za-z0-9])""")
         val allowed = acceptedCurrencies.map { it.uppercase(Locale.ROOT) }.toSet()
-        val candidates = mutableListOf<Pair<Int, Double>>()
+        val candidates = mutableListOf<Triple<Int, Double, String>>()
         val preferredCurrentPrice = Regex("""(?i)(current[-_ ]?price|sale[-_ ]?price|selling[-_ ]?price|price__current|price--current|price__sale|price--sale|priceblock_(?:deal|sale)price)""")
         for (element in document.getAllElements()) {
             val tagName = element.normalName()
@@ -3248,9 +3250,9 @@ class WaybackPriceHistoryClient(
                 preferredCurrentPrice.containsMatchIn(selector) -> 1
                 else -> 2
             }
-            candidates += priority to parsed
+            candidates += Triple(priority, parsed, effectiveCurrency)
         }
-        return candidates.minByOrNull { it.first }?.second
+        return candidates.minByOrNull { it.first }?.let { it.second to it.third }
     }
 
         private fun readMeta(document: Document, names: Set<String>): String? {

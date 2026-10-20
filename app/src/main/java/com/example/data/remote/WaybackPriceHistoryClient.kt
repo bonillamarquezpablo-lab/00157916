@@ -1591,6 +1591,8 @@ class WaybackPriceHistoryClient(
                 valid && quote != null && quote.sourceCurrency.equals("USD", ignoreCase = true) ->
                     "Importe final convertido a EUR validado; tipo de cambio y fecha efectiva constan en el detalle anterior."
                 valid && quote != null -> "Precio validado: moneda EUR y rango permitido; identidad aceptada."
+                !titleMatches ->
+                    "Se detectó un importe, pero no coincide la identidad del producto (paso 15); el precio se descarta."
                 sourceQuote?.currency?.equals("USD", ignoreCase = true) == true && quote == null ->
                     "Se encontró un importe USD, pero no hay cambio histórico fechado verificable; no se guardó."
                 !numericValid -> "No hay importe numérico positivo dentro del rango permitido."

@@ -211,9 +211,9 @@ internal fun diagnosticIndexForWaybackTrace(event: WaybackTraceEvent): Int {
 }
 
 /**
- * Step 5 aggregates several bounded CDX requests. A valid empty response is still successfully
- * received and classified; a later secondary timeout must not overwrite that fact and make the
- * whole step appear broken. Capture discovery remains step 7's responsibility.
+ * Step 5 aggregates bounded CDX requests. Network reachability is not enough to call historical
+ * recovery successful: a valid but empty index is a failed recovery unless another source found
+ * captures. Capture identity and price are validated in later stages.
  */
 internal fun summarizeCdxStep5Events(
     events: List<WaybackTraceEvent>,
@@ -240,7 +240,14 @@ internal fun summarizeCdxStep5Events(
         val candidateCount = Regex(
             """respuesta válida;\s*(\d+)\s+captura\(s\) candidatas""",
             RegexOption.IGNORE_CASE
-        ).find(lastValid.detail)?.groupValues?.getOrNull(1)
+        ).find(lastValid.detail)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        val usableCaptureCount = valid.sumOf { event ->
+            Regex(
+                """respuesta válida;\s*(\d+)\s+captura\(s\) candidatas""",
+                RegexOption.IGNORE_CASE
+            ).find(event.detail)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+        } + availabilityCapturesFound
+        val recoveredCaptures = usableCaptureCount > 0
         val detail = buildString {
             append("Se recibieron y clasificaron ${valid.size} respuesta(s) CDX válida(s).")
             if (candidateCount != null) {
@@ -249,14 +256,17 @@ internal fun summarizeCdxStep5Events(
             if (failures.isNotEmpty()) {
                 append(" Además, una consulta secundaria falló: ")
                 append(failures.last().detail.take(180))
-                append(". Este fallo no invalida la respuesta válida; el paso 7 determina si hay capturas utilizables.")
+                append(".")
+            }
+            if (recoveredCaptures) {
+                append(" Se encontraron capturas para verificar; el paso 7 confirma si producen un precio válido.")
             } else {
-                append(" El paso 7 determina si las capturas encontradas son utilizables.")
+                append(" Las respuestas llegaron, pero no encontraron capturas utilizables; no hay histórico que validar.")
             }
         }
         return WaybackTraceEvent(
             step = 5,
-            status = WaybackTraceStatus.PASSED,
+            status = if (recoveredCaptures) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
             detail = detail,
             durationMs = lastValid.durationMs,
             diagnosticStep = 6
@@ -1059,7 +1069,9 @@ class WaybackPriceHistoryClient(
         val probeDiagnostics = probes.mapNotNull { it.diagnosticCode }.toSet()
         val availabilityTraceStatus = when {
             probeDiagnostics.contains("WAYBACK_RATE_LIMITED") -> WaybackTraceStatus.SKIPPED
-            captures.isNotEmpty() || successfulProbes > 0 -> WaybackTraceStatus.PASSED
+            captures.isNotEmpty() -> WaybackTraceStatus.PASSED
+            // HTTP 200 with an empty Availability result means the network responded, not that
+            // historical captures were recovered. Keep the step red rather than implying success.
             else -> WaybackTraceStatus.FAILED
         }
         val availabilityTraceDetail = when {

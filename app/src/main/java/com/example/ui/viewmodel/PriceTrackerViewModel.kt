@@ -219,12 +219,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         const val TRACKED_REFRESH_COOLDOWN_MS = 24L * 60L * 60L * 1000L
         const val MAX_TRACKED_REFRESH_PER_TAP = 10
         const val MAX_ARCHIVE_PAGES_PER_SEARCH = 2
-        // The CDX domain endpoint is frequently unavailable or rate-limited. Keep the exact
-        // page lookup first, but reserve only a short, separate budget for the broad fallback.
-        const val MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS = 16_000L
-        // Availability probes and archived HTML downloads have separate bounded network timeouts.
-        // Reserve enough time for two captures plus request pacing; this affects only manual history.
-        const val MAX_ARCHIVE_DOMAIN_FALLBACK_MS = 28_000L
+        // Historical lookup is a user-triggered background action. Reserve time for the
+        // CDX query and a representative set of dated captures; a too-short outer timeout
+        // cancels useful HTML downloads before they can be validated and saved.
+        const val MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS = 60_000L
+        // Domain recovery may include paced Availability probes and up to eight dated snapshots.
+        // This is separate from live shopping search and still bounded per retailer.
+        const val MAX_ARCHIVE_DOMAIN_FALLBACK_MS = 90_000L
     }
 
     private val database = AppDatabase.getInstance(application)

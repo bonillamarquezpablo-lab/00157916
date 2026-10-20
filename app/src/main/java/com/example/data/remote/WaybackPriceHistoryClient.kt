@@ -1589,10 +1589,7 @@ class WaybackPriceHistoryClient(
             if (valid) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
             when {
                 valid && quote != null && quote.sourceCurrency.equals("USD", ignoreCase = true) ->
-                    "Precio convertido y validado: " + String.format(Locale.ROOT, "%.2f", quote.sourcePrice) +
-                        " USD × " + String.format(Locale.ROOT, "%.4f", quote.exchangeRate ?: 0.0) +
-                        " = " + String.format(Locale.ROOT, "%.2f", quote.price) + " EUR. Cambio fechado " +
-                        (quote.exchangeRateDate ?: "sin fecha") + " (" + (quote.conversionSource ?: "fuente no indicada") + ")."
+                    "Importe final convertido a EUR validado; tipo de cambio y fecha efectiva constan en el detalle anterior."
                 valid && quote != null -> "Precio validado: moneda EUR y rango permitido; identidad aceptada."
                 sourceQuote?.currency?.equals("USD", ignoreCase = true) == true && quote == null ->
                     "Se encontró un importe USD, pero no hay cambio histórico fechado verificable; no se guardó."

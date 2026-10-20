@@ -49,7 +49,7 @@ data class WaybackBackfillResult(
     val capturesChecked: Int = 0,
     val skippedRecently: Boolean = false,
     val available: Boolean = false,
-    /** True when the archive request or every snapshot download failed; distinct from no captures. */
+    /** True when at least one archive request/download failed; valid partial results may still exist. */
     val requestFailed: Boolean = false,
     /** Sanitized stage codes for actionable UI diagnostics; never contains raw URLs or exception text. */
     val diagnosticCodes: Set<String> = emptySet()
@@ -963,6 +963,11 @@ class WaybackPriceHistoryClient(
 
         if (captures.isEmpty()) {
             val allFailed = successfulProbes == 0
+            // A mixture of timeouts/404s and successful empty responses is not a confirmed
+            // "no history" result. Mark it as a failure so it gets the short retry window rather
+            // than being cached as a clean negative for six hours.
+            val anyProbeFailed = failedProbeCount > 0
+            val attemptFailed = allFailed || anyProbeFailed
             val diagnostics = linkedSetOf<String>().apply {
                 addAll(probeDiagnostics)
                 if (isEmpty()) add("${stage}_NO_CAPTURES")
@@ -970,6 +975,8 @@ class WaybackPriceHistoryClient(
             }
             val noCaptureDetail = if (allFailed) {
                 "No se descargó ninguna captura porque todas las consultas Availability fallaron."
+            } else if (anyProbeFailed) {
+                "Availability no encontró capturas y al menos una URL falló; no se cacheará como ausencia confirmada de histórico."
             } else {
                 "Availability respondió, pero no encontró capturas en las URL consultadas dentro del período."
             }
@@ -1015,12 +1022,12 @@ class WaybackPriceHistoryClient(
                 cacheKey,
                 now,
                 hasQuotes = false,
-                failed = allFailed,
+                failed = attemptFailed,
                 rateLimited = probeDiagnostics.contains("WAYBACK_RATE_LIMITED")
             )
             return WaybackBackfillResult(
                 available = successfulProbes > 0,
-                requestFailed = allFailed,
+                requestFailed = attemptFailed,
                 diagnosticCodes = diagnostics
             )
         }
@@ -1073,8 +1080,12 @@ class WaybackPriceHistoryClient(
             diagnosticStep = 18
         )
         val anySnapshotFailed = fetched.any { !it.fetched }
-        val allSnapshotsFailed = fetched.isNotEmpty() && fetched.none { it.fetched }
-        val failed = quotes.isEmpty() && (successfulProbes == 0 || allSnapshotsFailed)
+        // If no verified quote was obtained and any probe/download failed, treat the attempt as
+        // transient. A successful HTML download with a mismatching title is a clean negative;
+        // a timeout of a sibling capture is not.
+        val failed = quotes.isEmpty() && (
+            successfulProbes == 0 || failedProbeCount > 0 || anySnapshotFailed
+        )
         rememberAttempt(
             cacheKey,
             now,

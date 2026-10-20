@@ -1368,6 +1368,129 @@ class WaybackPriceHistoryClient(
         }
     }
 
+    /**
+     * Converts an explicitly identified USD archive price with a historical rate dated no later
+     * than the capture. Failed/missing rates never fall back to today's exchange rate.
+     */
+    internal suspend fun convertUsdQuoteToEurAtCaptureDate(
+        quote: ArchivedPriceQuote,
+        onTrace: ((WaybackTraceEvent) -> Unit)? = null
+    ): ArchivedPriceQuote? = withContext(Dispatchers.IO) {
+        if (!quote.currency.equals("USD", ignoreCase = true)) return@withContext quote
+        if (!quote.price.isFinite() || quote.price !in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE ||
+            quote.observedAt <= 0L
+        ) {
+            emitWaybackTrace(
+                onTrace, 14, WaybackTraceStatus.FAILED,
+                "El importe USD no supera la validación numérica; no se convirtió ni se guardó.",
+                diagnosticStep = 17
+            )
+            return@withContext null
+        }
+
+        val utc = TimeZone.getTimeZone("UTC")
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).apply { timeZone = utc }
+        val captureDate = dateFormat.format(Date(quote.observedAt))
+        val fromCalendar = Calendar.getInstance(utc, Locale.ROOT).apply {
+            time = Date(quote.observedAt)
+            add(Calendar.DAY_OF_YEAR, -14)
+        }
+        val fromDate = dateFormat.format(fromCalendar.time)
+        val cacheKey = "fx_usd_eur_capture_" + captureDate
+        var rate = preferences.getString(cacheKey + "_rate", null)?.toDoubleOrNull()
+        var rateDate = preferences.getString(cacheKey + "_date", null)
+        if (rate == null || rateDate.isNullOrBlank() ||
+            rate !in 0.05..5.0 || rateDate > captureDate
+        ) {
+            rate = null
+            rateDate = null
+            try {
+                val url = HttpUrl.Builder()
+                    .scheme("https")
+                    .host("api.frankfurter.dev")
+                    .addPathSegment("v2")
+                    .addPathSegment("rates")
+                    .addQueryParameter("from", fromDate)
+                    .addQueryParameter("to", captureDate)
+                    .addQueryParameter("base", "USD")
+                    .addQueryParameter("quotes", "EUR")
+                    .addQueryParameter("providers", "ECB")
+                    .build()
+                val request = Request.Builder().url(url).header("Accept", "application/json").get().build()
+                fxHttp.newCall(request).execute().use { response ->
+                    val body = readBodyLimited(response.body, 96 * 1024)
+                    if (response.isSuccessful && body != null) {
+                        val rows = JSONArray(body)
+                        for (index in 0 until rows.length()) {
+                            val row = rows.optJSONObject(index) ?: continue
+                            val candidateDate = row.optString("date")
+                            val candidateBase = row.optString("base").uppercase(Locale.ROOT)
+                            val candidateQuote = row.optString("quote").uppercase(Locale.ROOT)
+                            val candidateRate = row.optDouble("rate", Double.NaN)
+                            if (candidateDate.matches(Regex("""\d{4}-\d{2}-\d{2}""")) &&
+                                candidateDate <= captureDate &&
+                                candidateBase == "USD" && candidateQuote == "EUR" &&
+                                candidateRate.isFinite() && candidateRate in 0.05..5.0 &&
+                                (rateDate == null || candidateDate > rateDate!!)
+                            ) {
+                                rate = candidateRate
+                                rateDate = candidateDate
+                            }
+                        }
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // FX is optional: a network/API failure must never create an estimated exchange rate.
+            }
+            if (rate != null && !rateDate.isNullOrBlank()) {
+                preferences.edit()
+                    .putString(cacheKey + "_rate", rate.toString())
+                    .putString(cacheKey + "_date", rateDate)
+                    .apply()
+            }
+        }
+
+        val usableRate = rate
+        val effectiveDate = rateDate
+        if (usableRate == null || effectiveDate.isNullOrBlank() || effectiveDate > captureDate) {
+            emitWaybackTrace(
+                onTrace, 14, WaybackTraceStatus.FAILED,
+                "Se detectó un precio en USD, pero no se encontró un cambio histórico USD/EUR verificable anterior o igual a la captura. Precio descartado.",
+                diagnosticStep = 17
+            )
+            return@withContext null
+        }
+
+        val convertedPrice = quote.price * usableRate
+        if (!convertedPrice.isFinite() || convertedPrice !in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE) {
+            emitWaybackTrace(
+                onTrace, 14, WaybackTraceStatus.FAILED,
+                "La conversión histórica quedó fuera del rango de precios permitido; no se guardó.",
+                diagnosticStep = 17
+            )
+            return@withContext null
+        }
+
+        emitWaybackTrace(
+            onTrace, 14, WaybackTraceStatus.PASSED,
+            "Precio USD convertido a EUR con tipo de cambio histórico " +
+                effectiveDate + " (1 USD = " + String.format(Locale.ROOT, "%.4f", usableRate) +
+                " EUR). Fuente: Frankfurter/ECB.",
+            diagnosticStep = 17
+        )
+        quote.copy(
+            price = convertedPrice,
+            currency = "EUR",
+            sourceCurrency = "USD",
+            sourcePrice = quote.price,
+            exchangeRate = usableRate,
+            exchangeRateDate = effectiveDate,
+            conversionSource = "Frankfurter/ECB"
+        )
+    }
+
     private fun detectArchivedHtmlBarrier(html: String): String? {
         val head = html.take(160_000).lowercase(Locale.ROOT)
         return when {
@@ -1397,7 +1520,8 @@ class WaybackPriceHistoryClient(
         onTrace: ((WaybackTraceEvent) -> Unit)?,
         document: Document,
         expectedTitle: String,
-        quote: ArchivedPriceQuote?
+        quote: ArchivedPriceQuote?,
+        sourceQuote: ArchivedPriceQuote? = quote
     ) {
         val jsonLd = extractJsonLdProductOffers(document)
         val pageTitles = extractArchivedPageTitles(document)
@@ -1435,7 +1559,7 @@ class WaybackPriceHistoryClient(
                 readMeta(document, setOf(key)) ?: readItemPropValue(document, key)
             }?.uppercase(Locale.ROOT)
         val visiblePrice = if (quote == null) extractVisibleProductPrice(document, metaCurrency) else null
-        val hasPriceCandidate = jsonLd.isNotEmpty() || metaPrice != null || visiblePrice != null || quote != null
+        val hasPriceCandidate = jsonLd.isNotEmpty() || metaPrice != null || visiblePrice != null || quote != null || sourceQuote != null
         emitWaybackTrace(
             onTrace, 13,
             if (hasPriceCandidate) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
@@ -1447,21 +1571,25 @@ class WaybackPriceHistoryClient(
                 else -> "No se encontró precio numérico en datos estructurados, metadatos ni bloques de precio reconocidos."
             }
         )
-        val prices = jsonLd.map { it.second } + listOfNotNull(metaPrice, visiblePrice, quote?.price)
+        val prices = jsonLd.map { it.second } + listOfNotNull(metaPrice, visiblePrice, sourceQuote?.price, quote?.price)
         val numericValid = prices.any { it.isFinite() && it in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE }
-        val euroValid = jsonLd.any { it.third.equals("EUR", ignoreCase = true) } ||
-            (metaPrice != null && metaCurrency.equals("EUR", ignoreCase = true)) ||
-            visiblePrice != null ||
-            quote?.currency.equals("EUR", ignoreCase = true)
-        val valid = numericValid && euroValid
+        val valid = numericValid &&
+            quote?.currency.equals("EUR", ignoreCase = true) &&
+            quote.price.isFinite() && quote.price in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE
         emitWaybackTrace(
             onTrace, 14,
             if (valid) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
             when {
+                valid && quote != null && quote.sourceCurrency.equals("USD", ignoreCase = true) ->
+                    "Precio convertido y validado: " + String.format(Locale.ROOT, "%.2f", quote.sourcePrice) +
+                        " USD × " + String.format(Locale.ROOT, "%.4f", quote.exchangeRate ?: 0.0) +
+                        " = " + String.format(Locale.ROOT, "%.2f", quote.price) + " EUR. Cambio fechado " +
+                        (quote.exchangeRateDate ?: "sin fecha") + " (" + (quote.conversionSource ?: "fuente no indicada") + ")."
                 valid && quote != null -> "Precio validado: moneda EUR y rango permitido; identidad aceptada."
-                valid -> "Se encontró un importe EUR válido, pero no se guardará porque la identidad del producto no está confirmada (paso 15)."
+                sourceQuote?.currency.equals("USD", ignoreCase = true) && quote == null ->
+                    "Se encontró un importe USD, pero no hay cambio histórico fechado verificable; no se guardó."
                 !numericValid -> "No hay importe numérico positivo dentro del rango permitido."
-                else -> "Se detectó un importe, pero no se confirmó la moneda EUR."
+                else -> "Se detectó un importe, pero no se confirmó EUR ni una conversión histórica válida."
             }
         )
     }
@@ -3038,13 +3166,18 @@ class WaybackPriceHistoryClient(
      * Prefer itemprop price and current/sale selectors over wrappers containing crossed-out prices.
      * A EUR marker or currency metadata scoped to the price/product is required.
      */
-    private fun extractVisibleProductPrice(document: Document, knownCurrency: String?): Double? {
+    private fun extractVisibleProductPrice(
+        document: Document,
+        knownCurrency: String?,
+        acceptedCurrencies: Set<String> = setOf("EUR")
+    ): Double? {
         val priceSelector = Regex("""(?i)(product[-_ ]?price|current[-_ ]?price|sale[-_ ]?price|selling[-_ ]?price|final[-_ ]?price|special[-_ ]?price|price__current|price--current|price__sale|price--sale|price__amount|price-amount|pricevalue|price-value|a-price|pdp-price|priceblock_(?:our|deal|sale)price|^price$)""")
         val rejectedSelector = Regex("""(?i)(old|previous|regular|original|was[-_ ]?price|list[-_ ]?price|strike|crossed|installment|monthly|shipping|unit[-_ ]?price|price[-_ ]?before)""")
         val voidTags = setOf("meta", "input", "img", "br", "hr", "link", "source", "area", "embed", "track", "wbr")
         val euroAmount = Regex("""(?i)(?:€\s*[0-9][0-9., \u00a0]*|[0-9][0-9., \u00a0]*\s*€|\bEUR\s*[0-9][0-9., \u00a0]*|[0-9][0-9., \u00a0]*\s*\bEUR\b)""")
-        val foreignCurrency = Regex("""(?i)(?:\$|£|\b(?:USD|GBP|CAD|AUD|PLN|SEK|NOK|DKK|CHF)\b)""")
+        val usdAmount = Regex("""(?i)(?:\$\s*[0-9][0-9., \u00a0]*|[0-9][0-9., \u00a0]*\s*\$|\bUSD\s*[0-9][0-9., \u00a0]*|[0-9][0-9., \u00a0]*\s*\bUSD\b)""")
         val number = Regex("""(?<![A-Za-z0-9])(?:[0-9]{1,3}(?:[., \u00a0][0-9]{3})+|[0-9]+)(?:[.,][0-9]{1,2})?(?![A-Za-z0-9])""")
+        val allowed = acceptedCurrencies.map { it.uppercase(Locale.ROOT) }.toSet()
         val candidates = mutableListOf<Pair<Int, Double>>()
         val preferredCurrentPrice = Regex("""(?i)(current[-_ ]?price|sale[-_ ]?price|selling[-_ ]?price|price__current|price--current|price__sale|price--sale|priceblock_(?:deal|sale)price)""")
         for (element in document.getAllElements()) {
@@ -3066,17 +3199,34 @@ class WaybackPriceHistoryClient(
             val directValue = sequenceOf(
                 "content", "data-price", "data-price-amount", "data-product-price", "value", "data-value"
             ).map { element.attr(it) }.firstOrNull { it.isNotBlank() }
-            val visibleEuroMatch = euroAmount.find(text)
             val localCurrency = sequenceOf(element.attr("data-currency"), element.attr("currency"))
-                .firstOrNull { it.isNotBlank() }
-            val hasForeignCurrency = foreignCurrency.containsMatchIn(text) ||
-                (!localCurrency.isNullOrBlank() && !localCurrency.equals("EUR", true) && localCurrency != "€")
-            if (hasForeignCurrency) continue
-            val currencyIsEuro = visibleEuroMatch != null ||
-                localCurrency.equals("EUR", true) || localCurrency == "€" ||
-                knownCurrency.equals("EUR", true)
-            if (!currencyIsEuro) continue
-            val rawNumber = visibleEuroMatch?.value ?: directValue ?: number.find(text)?.value ?: continue
+                .firstOrNull { it.isNotBlank() }?.uppercase(Locale.ROOT)
+            val effectiveCurrency = localCurrency?.takeIf { it in allowed }
+                ?: knownCurrency?.uppercase(Locale.ROOT)?.takeIf { it in allowed }
+            if (effectiveCurrency == null) continue
+
+            val visibleCurrencyAmount = when (effectiveCurrency) {
+                "USD" -> usdAmount.find(text)
+                "EUR" -> euroAmount.find(text)
+                else -> null
+            }
+            val hasOpposingCurrency = when (effectiveCurrency) {
+                "USD" -> Regex("""(?i)(€|£|\bEUR\b|\bGBP\b|\bCAD\b|\bAUD\b)""").containsMatchIn(text)
+                "EUR" -> Regex("""(?i)(\$|£|\bUSD\b|\bGBP\b|\bCAD\b|\bAUD\b|\bPLN\b|\bSEK\b|\bNOK\b|\bDKK\b|\bCHF\b)""").containsMatchIn(text)
+                else -> true
+            }
+            if (hasOpposingCurrency) continue
+
+            // A bare dollar sign is ambiguous (USD/CAD/AUD), so USD requires explicit USD
+            // currency metadata or a data-currency marker on this price element.
+            if (effectiveCurrency == "USD" &&
+                localCurrency != "USD" && knownCurrency?.equals("USD", ignoreCase = true) != true
+            ) continue
+            if (visibleCurrencyAmount == null && localCurrency != effectiveCurrency &&
+                knownCurrency?.uppercase(Locale.ROOT) != effectiveCurrency
+            ) continue
+
+            val rawNumber = visibleCurrencyAmount?.value ?: directValue ?: number.find(text)?.value ?: continue
             val parsed = parsePositivePrice(rawNumber) ?: continue
             if (parsed !in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE) continue
             val priority = when {
@@ -3089,7 +3239,7 @@ class WaybackPriceHistoryClient(
         return candidates.minByOrNull { it.first }?.second
     }
 
-    private fun readMeta(document: Document, names: Set<String>): String? {
+        private fun readMeta(document: Document, names: Set<String>): String? {
         val normalizedNames = names.map { it.lowercase(Locale.ROOT) }.toSet()
         for (element in document.select("meta")) {
             val keys = listOf(element.attr("property"), element.attr("name"), element.attr("itemprop"))

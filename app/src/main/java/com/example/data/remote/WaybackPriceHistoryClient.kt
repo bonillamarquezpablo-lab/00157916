@@ -898,9 +898,20 @@ class WaybackPriceHistoryClient(
         // If the URL list has fewer items than the request budget, spend only the remaining slots
         // on older target dates for captures already found. Never issue an extra sixth probe just
         // because a URL had both a recent and an older snapshot.
+        val hasTerminalAvailabilityFailure = probes.any { probe ->
+            if (!probe.requestFailed) {
+                false
+            } else {
+                val code = probe.diagnosticCode.orEmpty()
+                code != "WAYBACK_RATE_LIMITED" &&
+                    code != "${stage}_HTTP_404" &&
+                    !code.endsWith("_TIMEOUT")
+            }
+        }
         if (probeOlderCapture &&
             probes.size < maxCandidates.coerceAtLeast(1) &&
-            probes.none { it.diagnosticCode == "WAYBACK_RATE_LIMITED" }
+            probes.none { it.diagnosticCode == "WAYBACK_RATE_LIMITED" } &&
+            !hasTerminalAvailabilityFailure
         ) {
             val recentCaptures = probes.mapNotNull { it.capture }
                 .distinctBy { it.rawTimestamp to it.originalUrl }

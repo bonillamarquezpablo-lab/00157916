@@ -393,12 +393,14 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun cdxHttp429StopsFurtherRequestsAndPersistsRetryAfter() = runBlocking {
+    fun availabilityHttp429StopsFurtherRequestsAndPersistsRetryAfter() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
         preferences.edit()
             .remove("wayback_rate_limit_until")
             .remove("wayback_last_availability_request_at")
+            .remove("wayback_rate_limit_last_hit_at")
+            .remove("wayback_rate_limit_hit_count")
             .commit()
         val requests = CopyOnWriteArrayList<String>()
         val http = OkHttpClient.Builder().addInterceptor { chain ->
@@ -436,6 +438,63 @@ class WaybackPriceHistoryClientTest {
             preferences.edit()
                 .remove("wayback_rate_limit_until")
                 .remove("wayback_last_availability_request_at")
+                .remove("wayback_rate_limit_last_hit_at")
+                .remove("wayback_rate_limit_hit_count")
+                .commit()
+        }
+    }
+
+    @Test
+    fun directCdx429ActivatesTheSharedPauseAndPreventsASecondRequest() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .remove("wayback_rate_limit_last_hit_at")
+            .remove("wayback_rate_limit_hit_count")
+            .commit()
+
+        val requests = CopyOnWriteArrayList<String>()
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            requests += request.url.host + request.url.encodedPath
+            Response.Builder()
+                .request(request)
+                .protocol(Protocol.HTTP_1_1)
+                .code(429)
+                .message("Too Many Requests")
+                .header("Retry-After", "300")
+                .body("rate limited".toResponseBody("text/plain; charset=utf-8".toMediaType()))
+                .build()
+        }.build()
+
+        try {
+            val client = WaybackPriceHistoryClient(context, http)
+            val title = "Anker Prime 27K Direct CDX Rate Limit ${System.currentTimeMillis()}"
+            val originalUrl = "https://shop.example/product/anker-prime-27k"
+            val first = withTimeout(5_000L) {
+                client.fetchHistory(originalUrl, title)
+            }
+            assertTrue(first.requestFailed)
+            assertTrue(first.diagnosticCodes.contains("WAYBACK_RATE_LIMITED"))
+            assertEquals("The first direct CDX request is the only network request", 1, requests.size)
+            assertTrue(
+                "The shared cooldown remains active after CDX responds with 429",
+                client.activeRateLimitUntil() != null
+            )
+
+            val second = withTimeout(1_000L) {
+                client.fetchHistory(originalUrl, title)
+            }
+            assertTrue(second.diagnosticCodes.contains("WAYBACK_RATE_LIMITED"))
+            assertEquals("No direct CDX retry may be sent during the shared pause", 1, requests.size)
+        } finally {
+            preferences.edit()
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .remove("wayback_rate_limit_last_hit_at")
+                .remove("wayback_rate_limit_hit_count")
                 .commit()
         }
     }
@@ -2948,6 +3007,28 @@ class WaybackPriceHistoryClientTest {
             "Missing or invalid Retry-After headers use a short five-minute safety pause",
             now + 5L * 60L * 1000L,
             client.computeRateLimitUntil("not-a-date", now)
+        )
+    }
+
+    @Test
+    fun repeatedRateLimitsIncreaseCooldownAndRemainCappedAtSixHours() {
+        val client = newClient()
+        val now = 1_800_000_000_000L
+        val minute = 60_000L
+        val hour = 60L * minute
+
+        assertEquals(now + 5L * minute, client.computeAdaptiveRateLimitUntil(null, now, 1))
+        assertEquals(now + 10L * minute, client.computeAdaptiveRateLimitUntil(null, now, 2))
+        assertEquals(now + 20L * minute, client.computeAdaptiveRateLimitUntil(null, now, 3))
+        assertEquals(
+            "A server Retry-After longer than the local escalation remains authoritative",
+            now + hour,
+            client.computeAdaptiveRateLimitUntil("3600", now, 2)
+        )
+        assertEquals(
+            "Repeated HTTP 429 responses must never pause the app for more than six hours",
+            now + 6L * hour,
+            client.computeAdaptiveRateLimitUntil(null, now, 99)
         )
     }
 

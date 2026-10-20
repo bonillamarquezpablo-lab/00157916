@@ -639,12 +639,21 @@ fun ProductDetailSheet(
                             val activeDiagnosticStep = waybackDiagnosticSteps.firstOrNull {
                                 it.status == WaybackTraceStatus.RUNNING
                             }
+                            val rateLimitReported =
+                                freeHistoryStatus.orEmpty().contains("HTTP 429", ignoreCase = true) ||
+                                    waybackDiagnosticSteps.any { entry ->
+                                        entry.detail.contains("HTTP 429", ignoreCase = true) ||
+                                            entry.detail.contains("WAYBACK_RATE_LIMITED", ignoreCase = true) ||
+                                            entry.detail.contains("pausa global", ignoreCase = true)
+                                    }
                             val firstFailedDiagnosticStep = waybackDiagnosticSteps.firstOrNull {
                                 it.status == WaybackTraceStatus.FAILED
                             }
                             val diagnosisSummary = when {
                                 activeDiagnosticStep != null ->
                                     "Fase en curso: ${activeDiagnosticStep.step}. ${activeDiagnosticStep.title}"
+                                rateLimitReported ->
+                                    "Pausa temporal de Internet Archive (HTTP 429). Mínimo ha detenido las consultas; no implica que falten capturas."
                                 firstFailedDiagnosticStep != null ->
                                     "Primer fallo detectado: paso ${firstFailedDiagnosticStep.step}. ${firstFailedDiagnosticStep.title}"
                                 waybackDiagnosticSteps.any { it.status == WaybackTraceStatus.PASSED } ->

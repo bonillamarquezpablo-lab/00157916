@@ -780,18 +780,20 @@ class WaybackPriceHistoryClient(
         )
         emitWaybackTrace(
             onTrace, 6,
-            if (fallback.quotes.isNotEmpty() || fallback.capturesFound > 0) {
-                WaybackTraceStatus.PASSED
-            } else {
-                WaybackTraceStatus.FAILED
+            when {
+                fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") -> WaybackTraceStatus.SKIPPED
+                fallback.quotes.isNotEmpty() || fallback.capturesFound > 0 -> WaybackTraceStatus.PASSED
+                else -> WaybackTraceStatus.FAILED
             },
             when {
+                fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ->
+                    "Pausa temporal de Internet Archive (HTTP 429). Mínimo ha detenido las consultas; no se puede concluir si existen capturas."
                 fallback.quotes.isNotEmpty() ->
                     "Fallback completado: se recuperó un precio verificable."
                 fallback.capturesFound > 0 ->
                     "Fallback encontró capturas; falta verificar identidad y precio."
                 fallback.requestFailed ->
-                    "Fallback falló: ${fallback.diagnosticCodes.joinToString(", ").take(180)}."
+                    "La recuperación no pudo completarse: ${fallback.diagnosticCodes.joinToString(", ").take(180)}."
                 else ->
                     "La red respondió, pero no se recuperaron capturas históricas utilizables; no hay precio que verificar."
             }
@@ -2174,12 +2176,47 @@ class WaybackPriceHistoryClient(
         )
     }
 
+    /**
+     * Escalates the local pause after repeated HTTP 429 responses within one day. Some archive
+     * limits are imposed upstream without a useful Retry-After header, so retrying after the same
+     * five-minute default can reproduce the same block. The pause honours a longer server-provided
+     * Retry-After, never exceeds six hours, and does not probe Wayback to test whether it expired.
+     */
+    internal fun computeAdaptiveRateLimitUntil(
+        retryAfter: String?,
+        now: Long,
+        consecutiveRateLimitCount: Int
+    ): Long {
+        val hits = consecutiveRateLimitCount.coerceIn(1, MAX_RATE_LIMIT_HITS)
+        val exponent = (hits - 1).coerceAtMost(10)
+        val multiplier = 1L shl exponent
+        val adaptiveDelay = (DEFAULT_RATE_LIMIT_COOLDOWN_MS * multiplier)
+            .coerceAtMost(MAX_RATE_LIMIT_COOLDOWN_MS)
+        val serverDelayUntil = computeRateLimitUntil(retryAfter, now)
+        return maxOf(serverDelayUntil, now + adaptiveDelay)
+            .coerceAtMost(now + MAX_RATE_LIMIT_COOLDOWN_MS)
+    }
+
     private fun activateRateLimit(retryAfter: String?, now: Long): Long {
+        val lastRateLimitAt = preferences.getLong(KEY_RATE_LIMIT_LAST_HIT_AT, 0L)
+        val previousHits = preferences.getInt(KEY_RATE_LIMIT_HIT_COUNT, 0)
+        val repeatedWithinWindow = lastRateLimitAt > 0L &&
+            now >= lastRateLimitAt &&
+            now - lastRateLimitAt <= RATE_LIMIT_ESCALATION_WINDOW_MS
+        val hitCount = if (repeatedWithinWindow) {
+            (previousHits + 1).coerceAtMost(MAX_RATE_LIMIT_HITS)
+        } else {
+            1
+        }
         val until = maxOf(
             preferences.getLong(KEY_RATE_LIMIT_UNTIL, 0L),
-            computeRateLimitUntil(retryAfter, now)
+            computeAdaptiveRateLimitUntil(retryAfter, now, hitCount)
         )
-        preferences.edit().putLong(KEY_RATE_LIMIT_UNTIL, until).apply()
+        preferences.edit()
+            .putLong(KEY_RATE_LIMIT_UNTIL, until)
+            .putLong(KEY_RATE_LIMIT_LAST_HIT_AT, now)
+            .putInt(KEY_RATE_LIMIT_HIT_COUNT, hitCount)
+            .apply()
         return until
     }
 
@@ -2191,7 +2228,12 @@ class WaybackPriceHistoryClient(
         preferences.getLong(KEY_RATE_LIMIT_UNTIL, 0L).takeIf { it > now }
 
     internal fun clearRateLimitForTests() {
-        preferences.edit().remove(KEY_RATE_LIMIT_UNTIL).apply()
+        preferences.edit()
+            .remove(KEY_RATE_LIMIT_UNTIL)
+            .remove(KEY_RATE_LIMIT_LAST_HIT_AT)
+            .remove(KEY_RATE_LIMIT_HIT_COUNT)
+            .remove(KEY_LAST_AVAILABILITY_REQUEST_AT)
+            .apply()
     }
 
     private fun rememberAttempt(
@@ -2219,6 +2261,16 @@ class WaybackPriceHistoryClient(
             .callTimeout(cdxTimeoutSeconds, TimeUnit.SECONDS)
             .build()
         val request = Request.Builder().url(cdxUrl).header("User-Agent", USER_AGENT).get().build()
+        // CDX must share the same persisted 429 cooldown and minimum request spacing as
+        // Availability and snapshot downloads. Previously this path bypassed the shared gate,
+        // allowing repeated product fallbacks to hit the public index too quickly.
+        val requestGate = awaitArchiveRequestTurn()
+        if (requestGate != null) {
+            return CdxIndexOutcome(
+                requestFailed = true,
+                diagnosticCodes = setOf(requestGate)
+            )
+        }
         return try {
             executeCdxWithTransientRetry(cdxHttp, request, maxRetries = 0).use { response ->
                 if (response.code == 429) {
@@ -3818,12 +3870,18 @@ class WaybackPriceHistoryClient(
         // Timeouts/transport failures are transient; allow a manual retry after two minutes.
         // Genuine empty results retain the longer negative cache to protect Internet Archive.
         const val FAILURE_RETRY_INTERVAL_MS = 2L * 60L * 1000L
+        // Kept at 1.5 seconds globally across CDX, Availability, and snapshot requests.
         private const val MIN_AVAILABILITY_REQUEST_INTERVAL_MS = 1_500L
+        // Retain this legacy preference key so older saved pacing timestamps still apply.
         private const val KEY_LAST_AVAILABILITY_REQUEST_AT = "wayback_last_availability_request_at"
         private const val MIN_RATE_LIMIT_COOLDOWN_MS = 60L * 1000L
         private const val DEFAULT_RATE_LIMIT_COOLDOWN_MS = 5L * 60L * 1000L
         private const val MAX_RATE_LIMIT_COOLDOWN_MS = 6L * 60L * 60L * 1000L
+        private const val RATE_LIMIT_ESCALATION_WINDOW_MS = 24L * 60L * 60L * 1000L
+        private const val MAX_RATE_LIMIT_HITS = 8
         private const val KEY_RATE_LIMIT_UNTIL = "wayback_rate_limit_until"
+        private const val KEY_RATE_LIMIT_LAST_HIT_AT = "wayback_rate_limit_last_hit_at"
+        private const val KEY_RATE_LIMIT_HIT_COUNT = "wayback_rate_limit_hit_count"
         private val GLOBAL_AVAILABILITY_SEMAPHORE = Semaphore(1)
         private val GLOBAL_BACKFILL_MUTEX = Mutex()
         private const val MAX_CDX_BODY_BYTES = 256 * 1024

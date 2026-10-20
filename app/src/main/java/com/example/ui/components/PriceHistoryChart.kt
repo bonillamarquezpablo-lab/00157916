@@ -88,6 +88,58 @@ private enum class HistoryEvidenceSeries(val label: String, val description: Str
     GOOGLE_INSIGHTS("Google histórico", "Datos históricos externos de Google Shopping; no son cotizaciones en vivo.")
 }
 
+/**
+ * A monotone cubic Bezier path: smoother than straight segments, with tangent limiting so
+ * visual interpolation does not create artificial new highs/lows between captured observations.
+ * The chart remains an O(n) Canvas draw, with no per-frame animation or blur filter.
+ */
+private fun createMonotoneBezierPath(points: List<Offset>): Path {
+    val path = Path()
+    if (points.isEmpty()) return path
+    path.moveTo(points.first().x, points.first().y)
+    if (points.size < 2) return path
+
+    val count = points.size
+    val dx = FloatArray(count - 1) { index ->
+        (points[index + 1].x - points[index].x).coerceAtLeast(0.1f)
+    }
+    val secants = FloatArray(count - 1) { index ->
+        (points[index + 1].y - points[index].y) / dx[index]
+    }
+    val tangents = FloatArray(count)
+    tangents[0] = secants.first()
+    tangents[count - 1] = secants.last()
+
+    for (index in 1 until count - 1) {
+        val before = secants[index - 1]
+        val after = secants[index]
+        if (before == 0f || after == 0f || before * after <= 0f) {
+            tangents[index] = 0f
+        } else {
+            val beforeDx = dx[index - 1]
+            val afterDx = dx[index]
+            val w1 = 2f * afterDx + beforeDx
+            val w2 = afterDx + 2f * beforeDx
+            tangents[index] = (w1 + w2) / (w1 / before + w2 / after)
+        }
+    }
+
+    for (index in 0 until count - 1) {
+        val start = points[index]
+        val end = points[index + 1]
+        val third = dx[index] / 3f
+        path.cubicTo(
+            start.x + third,
+            start.y + tangents[index] * third,
+            end.x - third,
+            end.y - tangents[index + 1] * third,
+            end.x,
+            end.y
+        )
+    }
+    return path
+}
+
 @Composable
 fun PriceHistoryChart(
     priceHistory: List<PricePoint>,
@@ -396,43 +448,40 @@ fun PriceHistoryChart(
                     )
                 }
 
-                // Use straight segments between observed dates; do not imply unobserved prices.
+                // The monotone Bezier path follows dated observations without overshooting them.
+                val strokePath = createMonotoneBezierPath(coords)
+                val baselineY = height - paddingBottom
                 val fillPath = Path().apply {
-                    moveTo(coords.first().x, coords.first().y)
-                    for (i in 1 until coords.size) {
-                        val curr = coords[i]
-                        lineTo(curr.x, curr.y)
-                    }
-                    lineTo(coords.last().x, height - paddingBottom)
-                    lineTo(coords.first().x, height - paddingBottom)
+                    addPath(strokePath)
+                    lineTo(coords.last().x, baselineY)
+                    lineTo(coords.first().x, baselineY)
                     close()
                 }
 
+                // Linear orange fade: strongest just below the highest point, fully transparent
+                // at the baseline; clipped to the area under the curve.
                 drawPath(
                     path = fillPath,
                     brush = Brush.verticalGradient(
                         colors = listOf(
-                            chartAccent.copy(alpha = 0.32f),
-                            chartAccent.copy(alpha = 0.015f)
+                            chartAccent.copy(alpha = 0.38f),
+                            chartAccent.copy(alpha = 0.0f)
                         ),
-                        startY = paddingTop,
-                        endY = height - paddingBottom
+                        startY = coords.minOf { it.y },
+                        endY = baselineY
                     )
                 )
 
-                // Stroke line
-                val strokePath = Path().apply {
-                    moveTo(coords.first().x, coords.first().y)
-                    for (i in 1 until coords.size) {
-                        val curr = coords[i]
-                        lineTo(curr.x, curr.y)
-                    }
-                }
-
+                // A wider translucent stroke creates a subtle glow without a costly blur/shadow.
+                drawPath(
+                    path = strokePath,
+                    color = chartAccent.copy(alpha = 0.14f),
+                    style = Stroke(width = 7.dp.toPx(), cap = StrokeCap.Round)
+                )
                 drawPath(
                     path = strokePath,
                     color = chartAccent,
-                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                    style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
                 )
 
                 // Draw node points
@@ -469,8 +518,8 @@ fun PriceHistoryChart(
                         }
                         else -> {
                             drawCircle(
-                                color = Color(0xFF64748B),
-                                radius = 3.5.dp.toPx(),
+                                color = chartAccent,
+                                radius = 2.5.dp.toPx(),
                                 center = coord
                             )
                         }

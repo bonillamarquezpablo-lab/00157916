@@ -1074,6 +1074,92 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun partialAvailabilityTimeoutPlusEmptyCdxDoesNotBecomeLongNegativeCache() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .commit()
+
+        val title = "Anker partial availability failure " + System.currentTimeMillis()
+        val preferredUrl = "https://shop.example/products/anker-partial-timeout.html"
+        val rawKey = "domain-cdx-batch-v6|shop.example|" + title
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(rawKey.toByteArray(Charsets.UTF_8))
+        val attemptKey = "attempt_" + digest.take(16).joinToString("") {
+            "%02x".format(it.toInt() and 0xff)
+        }
+        val availabilityRequests = java.util.concurrent.atomic.AtomicInteger()
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            when {
+                request.url.host == "archive.org" &&
+                    request.url.encodedPath == "/wayback/available" -> {
+                    val count = availabilityRequests.incrementAndGet()
+                    if (count == 1) {
+                        throw java.net.SocketTimeoutException("simulated first Availability timeout")
+                    }
+                    val body = """{"archived_snapshots":{"closest":{"available":false}}}"""
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(body.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    val emptyIndex = """[["timestamp","original","statuscode","mimetype"]]"""
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(emptyIndex.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                else -> throw AssertionError("Unexpected Wayback request: " + request.url)
+            }
+        }.build()
+
+        try {
+            val result = withTimeout(20_000L) {
+                WaybackPriceHistoryClient(context, http).fetchHistoryByMerchantDomain(
+                    domain = "shop.example",
+                    expectedTitle = title,
+                    lookbackDays = 730,
+                    preferredUrl = preferredUrl,
+                    preferredUrlAlreadyQueried = true
+                )
+            }
+
+            assertTrue("The fixture must include both a timeout and valid empty API responses", availabilityRequests.get() >= 2)
+            assertTrue(
+                "A timeout from one Availability URL must remain a transient failure even if other URLs return empty",
+                result.requestFailed
+            )
+            assertTrue(
+                "The parent attempt must be eligible for a short retry instead of a six-hour negative cache",
+                preferences.getBoolean(attemptKey + "_failed", false)
+            )
+            assertTrue(result.diagnosticCodes.any { it.contains("TIMEOUT") })
+        } finally {
+            preferences.edit()
+                .remove(attemptKey)
+                .remove(attemptKey + "_has_quotes")
+                .remove(attemptKey + "_failed")
+                .remove(attemptKey + "_rate_limited")
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .commit()
+        }
+    }
+
+    @Test
     fun domainCdxHttp500FallsBackToAvailabilityAndSavesVerifiedPrice() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)

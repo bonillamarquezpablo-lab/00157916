@@ -71,7 +71,7 @@ class PriceHistoryRestartPersistenceTest {
                 )
             )
 
-            val olderObservedAt = now - TimeUnit.DAYS.toMillis(30)
+            val olderObservedAt = now - TimeUnit.DAYS.toMillis(2)
             val latestObservedAt = now - TimeUnit.HOURS.toMillis(1)
             database!!.priceObservationDao().insertAll(
                 listOf(

@@ -3857,6 +3857,41 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun snapshotHttpClientAppliesTimeoutToConnectReadAndWholeCall() {
+        val configured = newClient().buildSnapshotHttpClient(8L)
+        assertEquals("Connection timeout must not remain at the base client's 4 seconds", 8_000, configured.connectTimeoutMillis)
+        assertEquals("HTML read timeout must use the same bounded budget", 8_000, configured.readTimeoutMillis)
+        assertEquals("Whole snapshot call timeout must use the same bounded budget", 8_000, configured.callTimeoutMillis)
+    }
+
+    @Test
+    fun snapshotTimeoutSkipsRedundantAvailabilityFallbackButNotWhenNoCaptureWasFound() {
+        val timedOutCaptures = WaybackBackfillResult(
+            capturesFound = 3,
+            requestFailed = true,
+            diagnosticCodes = setOf("SNAPSHOT_TIMEOUT", "ALL_SNAPSHOTS_FAILED")
+        )
+        assertTrue(shouldSkipDomainFallbackAfterSnapshotTimeout(listOf(timedOutCaptures)))
+
+        val noCaptures = timedOutCaptures.copy(capturesFound = 0)
+        assertFalse(shouldSkipDomainFallbackAfterSnapshotTimeout(listOf(noCaptures)))
+
+        val verifiedPartialPrice = timedOutCaptures.copy(
+            quotes = listOf(
+                ArchivedPriceQuote(
+                    observedAt = 1_700_000_000_000L,
+                    price = 79.99,
+                    currency = "EUR",
+                    productTitle = "Producto de prueba",
+                    originalUrl = "https://shop.example/product",
+                    snapshotUrl = "https://web.archive.org/web/20231114000000/https://shop.example/product"
+                )
+            )
+        )
+        assertFalse(shouldSkipDomainFallbackAfterSnapshotTimeout(listOf(verifiedPartialPrice)))
+    }
+
+    @Test
     fun classifiesWaybackNetworkFailuresWithoutLeakingExceptionText() {
         val client = newClient()
         assertEquals("CDX_URL_PREFIX_TIMEOUT", client.classifyNetworkFailure("CDX_URL_PREFIX", java.net.SocketTimeoutException("secret url")))

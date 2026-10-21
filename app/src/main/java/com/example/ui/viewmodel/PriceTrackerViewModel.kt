@@ -9,6 +9,7 @@ import com.example.data.remote.OnlineSearchCache
 import com.example.data.remote.formatOnlineSnapshotAge
 import com.example.data.remote.OnlineSearchQuotaGuard
 import com.example.data.remote.MementoClient
+import com.example.data.remote.shouldSkipDomainFallbackAfterSnapshotTimeout
 import com.example.data.remote.WaybackPriceHistoryClient
 import com.example.data.remote.diagnosticIndexForWaybackTrace
 import com.example.data.remote.summarizeCdxStep5Events
@@ -2025,9 +2026,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     // Its shorter independent timeout leaves time for result rendering and other stores.
                     val rateLimitedAtDirectStage =
                         attempts.any { it.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") }
+                    val allDirectSnapshotsTimedOut =
+                        shouldSkipDomainFallbackAfterSnapshotTimeout(attempts)
                     if (candidate.merchantDomain != null &&
                         attempts.none { it.quotes.isNotEmpty() } &&
-                        !rateLimitedAtDirectStage
+                        !rateLimitedAtDirectStage &&
+                        !allDirectSnapshotsTimedOut
                     ) {
                         if (diagnosticProductId != null) {
                             reportWaybackDiagnostic(
@@ -2126,6 +2130,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 )
                             }
                         }
+                    } else if (allDirectSnapshotsTimedOut && diagnosticProductId != null) {
+                        reportWaybackDiagnostic(
+                            diagnosticProductId, 7, WaybackTraceStatus.SKIPPED,
+                            "CDX encontró capturas, pero todas las descargas HTML agotaron el tiempo; no se repite Availability en esta ejecución para evitar solicitudes duplicadas."
+                        )
                     }
                     // Independent archive fallback: Wayback can be empty or rate-limited while
                     // Arquivo.pt still has snapshots. Run Memento at most once, only for a verified

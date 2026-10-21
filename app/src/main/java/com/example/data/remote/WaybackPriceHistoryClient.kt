@@ -72,6 +72,21 @@ data class WaybackBackfillResult(
     val diagnosticCodes: Set<String> = emptySet()
 )
 
+/**
+ * A valid CDX time series followed by timeouts for every HTML download is a transport failure,
+ * not evidence that the archive has no captures. Avoid broad Availability/CDX probes in the same
+ * lookup; let the caller use the independent Memento source and retry Wayback after its cooldown.
+ */
+internal fun shouldSkipDomainFallbackAfterSnapshotTimeout(
+    results: Iterable<WaybackBackfillResult>
+): Boolean = results.any { result ->
+    result.quotes.isEmpty() &&
+        result.capturesFound > 0 &&
+        result.diagnosticCodes.contains("ALL_SNAPSHOTS_FAILED") &&
+        result.diagnosticCodes.contains("SNAPSHOT_TIMEOUT") &&
+        !result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
+}
+
 enum class WaybackTraceStatus { PENDING, RUNNING, PASSED, FAILED, SKIPPED }
 
 /** Local-only event; complete URLs, headers, API keys and HTML are deliberately omitted. */
@@ -420,6 +435,14 @@ class WaybackPriceHistoryClient(
             }
             if (exactResult.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) {
                 rememberAttempt(attempt, now, hasQuotes = false, failed = true, rateLimited = true)
+                return@serializedArchiveLookup exactResult
+            }
+            if (shouldSkipDomainFallbackAfterSnapshotTimeout(listOf(exactResult))) {
+                rememberAttempt(attempt, now, hasQuotes = false, failed = true)
+                emitWaybackTrace(
+                    onTrace, 6, WaybackTraceStatus.SKIPPED,
+                    "CDX encontró capturas, pero todas las descargas HTML agotaron el tiempo; se omite la consulta de prefijo para evitar peticiones duplicadas."
+                )
                 return@serializedArchiveLookup exactResult
             }
             // If exact URL already yields a usable series, avoid the more expensive prefix scan.
@@ -1808,6 +1831,15 @@ class WaybackPriceHistoryClient(
         }
     }
 
+    internal fun buildSnapshotHttpClient(snapshotTimeoutSeconds: Long): OkHttpClient {
+        val timeout = snapshotTimeoutSeconds.coerceAtLeast(1L)
+        return http.newBuilder()
+            .connectTimeout(timeout, TimeUnit.SECONDS)
+            .readTimeout(timeout, TimeUnit.SECONDS)
+            .callTimeout(timeout, TimeUnit.SECONDS)
+            .build()
+    }
+
     private suspend fun fetchAndVerifySnapshot(
         capture: WaybackCapture,
         expectedTitle: String,
@@ -1829,10 +1861,7 @@ class WaybackPriceHistoryClient(
             return SnapshotFetch(false, null, "SNAPSHOT_URL_INVALID")
         }
         val request = Request.Builder().url(snapshotUrl).header("User-Agent", USER_AGENT).get().build()
-        val snapshotHttp = http.newBuilder()
-            .readTimeout(snapshotTimeoutSeconds, TimeUnit.SECONDS)
-            .callTimeout(snapshotTimeoutSeconds, TimeUnit.SECONDS)
-            .build()
+        val snapshotHttp = buildSnapshotHttpClient(snapshotTimeoutSeconds)
         val startedAt = System.nanoTime()
 
         return availabilitySemaphore.withPermit {
@@ -4707,10 +4736,11 @@ class WaybackPriceHistoryClient(
         // Broad host scans are a last resort; retain a short bound so they cannot starve
         // Availability fallback or delay the primary shopping-search experience.
         private const val CDX_FALLBACK_TIMEOUT_SECONDS = 3L
-        // Snapshot downloads are bounded individually; the outer manual-history time budget
-        // reserves enough room for a representative set of captures without blocking live search.
-        private const val CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS = 4L
-        private const val DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS = 4L
+        // Historical snapshots sometimes establish the archive connection slowly. The connect,
+        // read and whole-call budgets are aligned at 8 seconds; archive work remains bounded and
+        // does not run in the live shopping-search request path.
+        private const val CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS = 8L
+        private const val DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS = 8L
         private const val MAX_AVAILABILITY_BODY_BYTES = 64 * 1024
         private const val CDX_RETRY_DELAY_MS = 500L
         private const val CDX_RETRY_JITTER_MS = 350L

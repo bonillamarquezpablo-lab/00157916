@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TrackedProductEntity::class,
         PriceObservationEntity::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -176,6 +176,23 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Adds composite indexes for history retrieval and evidence-aware same-day consolidation.
+         * This migration creates indexes only; all saved products and historical observations survive.
+         */
+        val MIGRATION_10_11: Migration = object : Migration(10, 11) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_price_observations_productId_storeId_observedAt` " +
+                        "ON `price_observations` (`productId`, `storeId`, `observedAt`)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_price_observations_productId_evidenceType_observedAt` " +
+                        "ON `price_observations` (`productId`, `evidenceType`, `observedAt`)"
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -186,7 +203,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "minimo_spanish_market.db"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                     .build()
                 INSTANCE = instance
                 instance

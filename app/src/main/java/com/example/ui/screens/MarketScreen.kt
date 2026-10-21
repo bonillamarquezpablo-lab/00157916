@@ -559,8 +559,8 @@ fun MarketScreen(
                                 .clickable {
                                     if (familyExpanded) {
                                         expandedFamilyKeys = expandedFamilyKeys - family.key
-                                        expandedVariantKeys = expandedVariantKeys.filterNot { it.startsWith(familyPrefix) }
-                                        expandedStorageKeys = expandedStorageKeys.filterNot { it.startsWith(familyPrefix) }
+                                        expandedVariantKeys = expandedVariantKeys.filterNot { it.startsWith(familyPrefix) }.toSet()
+                                        expandedStorageKeys = expandedStorageKeys.filterNot { it.startsWith(familyPrefix) }.toSet()
                                     } else {
                                         expandedFamilyKeys = expandedFamilyKeys + family.key
                                     }
@@ -603,12 +603,12 @@ fun MarketScreen(
                                                     expandedVariantKeys = expandedVariantKeys - variantExpansionKey
                                                     expandedStorageKeys = expandedStorageKeys.filterNot {
                                                         it.startsWith("$variantExpansionKey::")
-                                                    }
+                                                    }.toSet()
                                                 } else {
-                                                    expandedVariantKeys = expandedVariantKeys
-                                                        .filterNot { it.startsWith(familyPrefix) } + variantExpansionKey
+                                                    expandedVariantKeys = (expandedVariantKeys
+                                                        .filterNot { it.startsWith(familyPrefix) } + variantExpansionKey).toSet()
                                                     expandedStorageKeys = expandedStorageKeys
-                                                        .filterNot { it.startsWith(familyPrefix) }
+                                                        .filterNot { it.startsWith(familyPrefix) }.toSet()
                                                 }
                                             }
                                             .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -648,8 +648,8 @@ fun MarketScreen(
                                                             if (storageExpanded) {
                                                                 expandedStorageKeys = expandedStorageKeys - storageExpansionKey
                                                             } else {
-                                                                expandedStorageKeys = expandedStorageKeys
-                                                                    .filterNot { it.startsWith("$variantExpansionKey::") } + storageExpansionKey
+                                                                expandedStorageKeys = (expandedStorageKeys
+                                                                    .filterNot { it.startsWith("$variantExpansionKey::") } + storageExpansionKey).toSet()
                                                             }
                                                         }
                                                         .padding(horizontal = 10.dp, vertical = 9.dp),

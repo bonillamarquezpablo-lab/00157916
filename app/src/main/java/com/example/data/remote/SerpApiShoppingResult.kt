@@ -741,9 +741,41 @@ data class OnlineProductGroup(
 }
 
 /**
+ * Canonicalizes common colour names before they participate in product identity.
+ * Unknown or conflicting multi-colour descriptions stay unclassified instead of guessed.
+ */
+internal fun onlineProductColorFamily(title: String): String? {
+    var normalized = normalizeOnlineSearchText(title)
+    // "Black Shark" is a model/brand phrase, not a colour qualifier.
+    normalized = normalized.replace(Regex("""\bblack shark\b"""), " ")
+
+    val aliases = linkedMapOf(
+        "black" to listOf("black", "negro", "negra", "negros", "negras", "nero"),
+        "white" to listOf("white", "blanco", "blanca", "bianco"),
+        "blue" to listOf("blue", "azul", "bleu", "navy", "celeste", "ultramarine", "teal"),
+        "green" to listOf("green", "verde", "mint", "alpine green"),
+        "yellow" to listOf("yellow", "amarillo", "amarilla", "giallo"),
+        "red" to listOf("red", "rojo", "roja", "rosso", "coral"),
+        "pink" to listOf("pink", "rosa", "rose"),
+        "purple" to listOf("purple", "morado", "morada", "violet", "violeta", "lavender"),
+        "grey" to listOf("grey", "gray", "gris", "silver", "plata", "plateado", "graphite", "space grey"),
+        "orange" to listOf("orange", "naranja"),
+        "gold" to listOf("gold", "dorado", "dorada", "oro"),
+        "brown" to listOf("brown", "marron", "cafe"),
+        "beige" to listOf("beige", "arena", "sand")
+    )
+    val found = aliases.filterValues { words ->
+        words.any { word ->
+            Regex("\\b" + Regex.escape(word) + "\\b").containsMatchIn(normalized)
+        }
+    }.keys
+    return found.singleOrNull()
+}
+
+/**
  * Stable grouping key shared by the result cards, Room product rows and the product detail sheet.
  * Model IDs such as Redmi 17, Redmi A5, WH-1000XM5 and Dyson G10 take precedence over marketing
- * descriptions; capacity, color and copy differences do not create duplicate cards.
+ * descriptions; model edition, storage and explicit colour are identity qualifiers.
  */
 fun onlineProductIdentityKey(title: String): String {
     // Convert both "4GB/256GB" and "4+256GB" to the same RAM/storage spelling first.
@@ -887,6 +919,7 @@ fun onlineProductIdentityKey(title: String): String {
         accessoryType.takeIf { it.isNotBlank() }?.let { "accessory:$it" },
         variants.takeIf { it.isNotBlank() }?.let { "variant:$it" },
         memorySpecs.takeIf { it.isNotBlank() }?.let { "memory:$it" },
+        onlineProductColorFamily(title)?.let { "color:$it" },
         technicalSpecs.takeIf { it.isNotBlank() }?.let { "specs:$it" }
     ).filterNotNull().joinToString("|")
 

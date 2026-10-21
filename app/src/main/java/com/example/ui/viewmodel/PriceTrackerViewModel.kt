@@ -2091,10 +2091,16 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                     domainResult.diagnosticCodes.contains("DOMAIN_UNRESOLVED")
                                 val step7Status = when {
                                     domainWasCached -> WaybackTraceStatus.SKIPPED
-                                    domainWasUnresolved || (fallbackTransportFailed && !fallbackReturnedNoCaptures &&
-                                        domainResult.capturesFound == 0 && domainResult.quotes.isEmpty()) ->
-                                        WaybackTraceStatus.FAILED
-                                    else -> WaybackTraceStatus.PASSED
+                                    domainWasUnresolved -> WaybackTraceStatus.FAILED
+                                    domainResult.quotes.isNotEmpty() -> WaybackTraceStatus.PASSED
+                                    // Network reachability is not historical recovery. A valid
+                                    // Availability response with zero captures must be red, not
+                                    // green: otherwise the report says "superado" while the chart
+                                    // remains empty, exactly the failure seen on-device.
+                                    fallbackReturnedNoCaptures -> WaybackTraceStatus.FAILED
+                                    domainResult.capturesFound > 0 -> WaybackTraceStatus.PASSED
+                                    fallbackTransportFailed -> WaybackTraceStatus.FAILED
+                                    else -> WaybackTraceStatus.FAILED
                                 }
                                 reportWaybackDiagnostic(
                                     diagnosticProductId, 7,

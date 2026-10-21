@@ -1044,6 +1044,10 @@ class WaybackPriceHistoryClient(
             .filter { it.isNotBlank() }
             .joinToString(" ") { decodePathUrlComponent(it) }
         val identityQueryKeys = setOf(
+            // Include retailer search-query parameters when ranking a store's real search URL.
+            // Otherwise exact product-shaped guesses always outrank this URL and can consume
+            // the whole bounded Availability budget before the known search route is tried.
+            "query", "q", "keyword", "search",
             "sku", "skuid", "sku_id", "variant", "variantid", "variant_id", "variation",
             "variationid", "variation_id", "productid", "product_id", "id_product",
             "offerid", "offer_id", "pid", "itemid", "item_id", "asin", "mpn", "gtin",

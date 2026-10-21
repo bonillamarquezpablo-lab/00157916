@@ -903,7 +903,7 @@ class ProductRepository(
                 sourceUrl = quote.snapshotUrl,
                 sourceName = if (snapshotIdentity.archiveHost == "arquivo.pt") "Arquivo.pt (Memento)" else "Internet Archive (Wayback Machine)",
                 isVerified = true,
-                verificationNote = if (
+                verificationNote = (if (
                     quote.sourceCurrency.equals("USD", ignoreCase = true) && quote.exchangeRate != null &&
                     !quote.exchangeRateDate.isNullOrBlank()
                 ) {
@@ -919,8 +919,18 @@ class ProductRepository(
                 } else {
                     "Precio EUR extraído de metadatos de producto en una captura pública archivada. " +
                         "Es un precio histórico anunciado; no confirma impuestos, envío, disponibilidad ni precio final."
+                }).let { note ->
+                    if (quote.variantIdentityConfirmedByUrl) {
+                        note + " El título archivado omitía detalles de variante; la URL de captura confirmó la variante exacta antes de guardar."
+                    } else {
+                        note
+                    }
                 },
-                productTitle = quote.productTitle,
+                // Store the already-validated canonical product title, not the potentially generic
+                // HTML title. Room re-validates observation titles on every reload; retaining a
+                // generic archive heading here meant the history point was silently filtered back
+                // out after save/restart even though parser validation had succeeded.
+                productTitle = product.title,
                 storeName = merchantName,
                 sourceType = when {
                     snapshotIdentity.archiveHost == "arquivo.pt" -> "Memento (Arquivo.pt)"

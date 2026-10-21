@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import com.example.data.model.ProductCategory
 import com.example.data.repository.SpanishMarketData
+import com.example.ui.viewmodel.SortOption
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -48,5 +49,48 @@ class SavedProductFamilyBrowserTest {
         )
         assertEquals(3, plus.products.size)
         assertTrue(family.storeCount >= 1)
+    }
+
+    @Test
+    fun priceSortIsPreservedAcrossFamiliesAndInsideSelectedCapacity() {
+        val template = SpanishMarketData.getInitialProducts().first()
+        fun product(id: String, title: String, price: Double) = template.copy(
+            id = id,
+            title = title,
+            brand = "Apple",
+            category = ProductCategory.TV_AUDIO,
+            currentPrice = price,
+            isPriceVerified = true,
+            priceObservedAt = System.currentTimeMillis(),
+            priceHistory = emptyList()
+        )
+
+        val rows = listOf(
+            product("iphone15-yellow", "Apple iPhone 15 256 GB Amarillo", 700.0),
+            product("iphone15-black", "Apple iPhone 15 256 GB Negro", 1_200.0),
+            product("iphone16-blue", "Apple iPhone 16 256 GB Azul", 900.0)
+        )
+
+        val highToLow = buildSavedProductFamilyBuckets(rows, SortOption.PRICE_HIGH_LOW)
+        assertEquals(
+            "Families must follow price order instead of reverting to alphabetical order after grouping",
+            listOf("Apple iPhone 15", "Apple iPhone 16"),
+            highToLow.map { it.label }
+        )
+        assertEquals(
+            "Products inside one selected capacity must also respect price order",
+            listOf("iphone15-black", "iphone15-yellow"),
+            highToLow.first().variants.single().storages.single().products.map { it.id }
+        )
+
+        val lowToHigh = buildSavedProductFamilyBuckets(rows, SortOption.PRICE_LOW_HIGH)
+        assertEquals(
+            listOf("Apple iPhone 16", "Apple iPhone 15"),
+            lowToHigh.map { it.label }
+        )
+        assertEquals(
+            listOf("iphone15-yellow", "iphone15-black"),
+            lowToHigh.last().variants.single().storages.single().products.map { it.id }
+        )
     }
 }

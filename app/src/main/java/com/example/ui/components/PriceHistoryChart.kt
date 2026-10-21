@@ -56,6 +56,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+private fun formatChartPrice(price: Double): String =
+    String.format(Locale("es", "ES"), "%.2f", price)
+
 enum class ChartRange(val label: String, val days: Int?) {
     DAYS_30("30D", 30),
     DAYS_90("90D", 90),
@@ -302,7 +305,7 @@ fun PriceHistoryChart(
                         val observedMinimum = historySummary.minimumObservedPoint
                         Text(
                             text = observedMinimum?.let {
-                                "Mín. del rango: ${String.format("%.2f", it.price)} €"
+                                "Mín. del rango: ${formatChartPrice(it.price)} €"
                             } ?: "${historySummary.observationCount} observación${if (historySummary.observationCount == 1) "" else "es"}",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
@@ -318,9 +321,9 @@ fun PriceHistoryChart(
                     ) {
                         Text(
                             text = if (selectedSeries == HistoryEvidenceSeries.LIVE) {
-                                "Media 90 d: ${valid90dAverage?.let { String.format("%.2f", it) + " €" } ?: "—"}"
+                                "Media 90 d: ${valid90dAverage?.let { formatChartPrice(it) + " €" } ?: "—"}"
                             } else {
-                                "Media histórica externa: ${filteredPoints.map { it.price }.average().let { String.format("%.2f", it) + " €" }}"
+                                "Media histórica externa: ${filteredPoints.map { it.price }.average().let { formatChartPrice(it) + " €" }}"
                             },
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
@@ -599,7 +602,7 @@ fun PriceHistoryChart(
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "${String.format("%.2f", selectedPoint.price)} €",
+                                text = formatChartPrice(selectedPoint.price) + " €",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
                                 color = if (historySummary.minimumObservedPoint?.let { selectedPoint.price <= it.price + 0.005 } == true) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface

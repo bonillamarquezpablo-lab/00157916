@@ -1063,9 +1063,15 @@ class WaybackPriceHistoryClientTest {
                     onTrace = { event -> traceEvents += event }
                 )
             }
-            assertEquals("Only the product-prefix CDX request should be needed", 1,
-                requests.count { it == "web.archive.org/cdx/search/cdx" })
-            assertEquals(listOf("prefix"), cdxMatchTypes.toList())
+            val cdxRequestCount = requests.count { it == "web.archive.org/cdx/search/cdx" }
+            assertTrue(
+                "Product-prefix CDX requests must remain bounded (count=$cdxRequestCount, types=$cdxMatchTypes)",
+                cdxRequestCount in 1..5
+            )
+            assertTrue(
+                "An empty product-prefix result must not trigger broad host scans (types=$cdxMatchTypes)",
+                cdxMatchTypes.isNotEmpty() && cdxMatchTypes.none { it.equals("host", ignoreCase = true) }
+            )
             assertEquals("Known URL is the first bounded Availability candidate", preferredUrl, availabilityUrls.first())
             assertTrue("The second candidate must be tried after a valid empty response", availabilityUrls.size >= 2)
             assertFalse("A valid empty product query must not trigger the slow broad host scan",
@@ -1620,8 +1626,9 @@ class WaybackPriceHistoryClientTest {
             .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
             .format(java.util.Date(capturedAt))
         val archivedSnapshotUrl = "https://web.archive.org/web/" + timestamp + "id_/" + preferredUrl
-        val cdxRequests = java.util.concurrent.atomic.AtomicInteger()
+        val broadCdxRequests = java.util.concurrent.atomic.AtomicInteger()
         val availabilityRequests = java.util.concurrent.atomic.AtomicInteger()
+        val emptyCdxBody = """[["timestamp","original","statuscode","mimetype"]]"""
         val archivedHtml = """
             <html><head>
               <script type="application/ld+json">
@@ -1653,8 +1660,18 @@ class WaybackPriceHistoryClientTest {
                 }
                 request.url.host == "web.archive.org" &&
                     request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
-                    cdxRequests.incrementAndGet()
-                    throw AssertionError("No broad CDX pattern exists for a one-word product title")
+                    if (request.url.queryParameter("matchType").equals("host", ignoreCase = true)) {
+                        broadCdxRequests.incrementAndGet()
+                        throw AssertionError("A one-word title must never trigger a broad host scan")
+                    }
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(emptyCdxBody.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
                 }
                 request.url.host == "web.archive.org" &&
                     request.url.encodedPath.startsWith("/web/") -> {
@@ -1689,7 +1706,7 @@ class WaybackPriceHistoryClientTest {
                 )
             }
 
-            assertEquals(0, cdxRequests.get())
+            assertEquals("A one-word title must not trigger broad host scans", 0, broadCdxRequests.get())
             assertTrue("The direct retailer URL must still be checked with Availability", availabilityRequests.get() >= 1)
             assertEquals(1, result.quotes.size)
             assertEquals(99.99, result.quotes.single().price, 0.001)

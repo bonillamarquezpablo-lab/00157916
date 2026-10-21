@@ -43,7 +43,7 @@ class PriceHistoryChartEvidenceTest {
         composeRule.onNodeWithText("1 observación").assertIsDisplayed()
         // A single archived price must be visible with its date and store immediately;
         // a lone tiny dot with no value makes a successful history recovery look empty.
-        composeRule.onNodeWithText("89.99 €").assertIsDisplayed()
+        composeRule.onNodeWithText("89,99 €").assertIsDisplayed()
         composeRule.onNodeWithText("01/01/2026 en Tienda de prueba").assertIsDisplayed()
     }
 
@@ -63,7 +63,7 @@ class PriceHistoryChartEvidenceTest {
         }
 
         // A real point and its exact value/date should be visible without a first tap.
-        composeRule.onNodeWithText("49.99 €").assertIsDisplayed()
+        composeRule.onNodeWithText("49,99 €").assertIsDisplayed()
         composeRule.onNodeWithText("01/01/2026 en Tienda de prueba").assertIsDisplayed()
     }
 

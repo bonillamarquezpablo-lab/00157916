@@ -831,6 +831,16 @@ class WaybackPriceHistoryClient(
             return WaybackBackfillResult(requestFailed = true, diagnosticCodes = failureCodes)
         }
 
+        val transientCdxFailure = failureCodes.any { code ->
+            code.endsWith("_TIMEOUT") ||
+                code.substringAfterLast('_').toIntOrNull()
+                    ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true
+        }
+        val availabilityProbeLimit = if (transientCdxFailure) {
+            minOf(MAX_DOMAIN_AVAILABILITY_PROBE_CANDIDATES, 3)
+        } else {
+            MAX_DOMAIN_AVAILABILITY_PROBE_CANDIDATES
+        }
         val fallback = queryAvailabilityAndFetchPrices(
             candidateUrls = candidateUrls,
             expectedTitle = expectedTitle,
@@ -838,9 +848,9 @@ class WaybackPriceHistoryClient(
             now = now,
             lookbackDays = lookbackDays,
             maxSnapshots = MAX_CDX_FALLBACK_SNAPSHOTS,
-            // Keep the known offer URL + guessed product URL, but also allow the real retailer
-            // search URL to be checked when those first two archived variants are absent.
-            maxCandidates = MAX_DOMAIN_AVAILABILITY_PROBE_CANDIDATES,
+            // Keep probes bounded after a transient index error. The known URL comes first,
+            // followed by only two alternates; we still try CDX afterward if one quote is found.
+            maxCandidates = availabilityProbeLimit,
             stage = "DOMAIN_AVAILABILITY_FALLBACK",
             probeOlderCapture = true,
             onTrace = onTrace,

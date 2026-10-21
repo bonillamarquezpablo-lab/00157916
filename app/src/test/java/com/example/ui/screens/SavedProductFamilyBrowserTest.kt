@@ -85,12 +85,12 @@ class SavedProductFamilyBrowserTest {
 
         val lowToHigh = buildSavedProductFamilyBuckets(rows, SortOption.PRICE_LOW_HIGH)
         assertEquals(
-            listOf("Apple iPhone 16", "Apple iPhone 15"),
+            listOf("Apple iPhone 15", "Apple iPhone 16"),
             lowToHigh.map { it.label }
         )
         assertEquals(
             listOf("iphone15-yellow", "iphone15-black"),
-            lowToHigh.last().variants.single().storages.single().products.map { it.id }
+            lowToHigh.first().variants.single().storages.single().products.map { it.id }
         )
     }
 

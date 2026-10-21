@@ -137,4 +137,57 @@ class SavedProductFamilyBrowserTest {
             standardLowToHigh.storages.map { it.label }
         )
     }
+
+    @Test
+    fun redmiNoteFamiliesNestEditionNetworkStorageAndCollapseDuplicateSellerRows() {
+        val template = SpanishMarketData.getInitialProducts().first()
+        fun product(id: String, title: String) = template.copy(
+            id = id,
+            title = title,
+            brand = "Xiaomi",
+            category = ProductCategory.SMARTPHONES,
+            priceHistory = emptyList()
+        )
+
+        val rows = listOf(
+            product("redmi15-standard-128", "Xiaomi Redmi Note 15 6GB/128GB"),
+            product("redmi15-pro5g-256-a", "Xiaomi Redmi Note 15 Pro 5G 8GB/256GB Titanio"),
+            // A second row for the same exact variant must be displayed as one product card.
+            product("redmi15-pro5g-256-b", "Xiaomi Redmi Note 15 Pro 5G 8GB/256GB Titanio"),
+            product("redmi15-pro4g-512", "Xiaomi Redmi Note 15 Pro 4G 12GB + 512GB Titanio"),
+            product("redmi10-pro5g", "Xiaomi Redmi Note 10 Pro 5G 8GB/256GB")
+        )
+
+        val families = buildSavedProductFamilyBuckets(rows)
+        assertEquals(
+            "Redmi Note 15 variants should share one family, while Redmi Note 10 remains separate",
+            2,
+            families.size
+        )
+        val note15 = families.single { it.label == "Xiaomi Redmi Note 15" }
+        assertEquals(
+            "Base, Pro 4G and Pro 5G are distinct versions nested under the same family",
+            setOf("Estándar", "Pro 4G", "Pro 5G"),
+            note15.variants.map { it.label }.toSet()
+        )
+        assertEquals(
+            "The duplicate exact Pro 5G listing must collapse without merging its 4G sibling",
+            3,
+            note15.productCount
+        )
+        assertEquals(
+            setOf("128 GB"),
+            note15.variants.single { it.label == "Estándar" }.storages.map { it.label }.toSet()
+        )
+        assertEquals(
+            setOf("256 GB"),
+            note15.variants.single { it.label == "Pro 5G" }.storages.map { it.label }.toSet()
+        )
+        assertEquals(
+            setOf("512 GB"),
+            note15.variants.single { it.label == "Pro 4G" }.storages.map { it.label }.toSet()
+        )
+        assertEquals("Xiaomi Redmi Note 10", families.single { it.label == "Xiaomi Redmi Note 10" }.label)
+    }
+
 }

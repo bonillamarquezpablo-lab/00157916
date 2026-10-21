@@ -102,6 +102,43 @@ class ProductFamilyBrowserTest {
     }
 
     @Test
+    fun redmiNoteModelIdentityUnifiesFamilyButSeparatesEditionStorageAndNetwork() {
+        val base = onlineProductIdentityKey("Xiaomi Redmi Note 17 6GB/256GB")
+        val proMax5g = onlineProductIdentityKey("XIAOMI Redmi Note 17 Pro Max 5G 8GB + 256GB")
+        val note10 = onlineProductIdentityKey("Xiaomi Redmi Note 10 Pro 5G 8GB/256GB")
+        val pro4g = onlineProductIdentityKey("Xiaomi Redmi Note 15 Pro 4G 12GB + 512GB")
+        val pro5g = onlineProductIdentityKey("Xiaomi Redmi Note 15 Pro 5G 8GB/256GB")
+
+        fun modelFamily(key: String) = key.split('|').take(2)
+
+        assertEquals(
+            "Base, Pro and Pro Max configurations of Redmi Note 17 must share the same family identifier",
+            modelFamily(base),
+            modelFamily(proMax5g)
+        )
+        assertTrue(
+            "Redmi Note 10 and Redmi Note 17 must remain distinct models",
+            modelFamily(note10) != modelFamily(proMax5g)
+        )
+        assertTrue(
+            "The 4G and 5G editions must not collapse into one exact product identity",
+            pro4g != pro5g
+        )
+        assertTrue(
+            "Different RAM/storage configurations remain distinct purchasable identities",
+            base != proMax5g
+        )
+
+        val exactGroups = groupOnlineShoppingResults(
+            listOf(
+                offer("Xiaomi Redmi Note 15 Pro 4G 12GB + 512GB", 309.99, "Amazon España", "redmi15-pro-4g"),
+                offer("Xiaomi Redmi Note 15 Pro 5G 8GB/256GB", 319.90, "El Corte Inglés", "redmi15-pro-5g")
+            )
+        )
+        assertEquals("4G and 5G listings remain two exact product cards under the same family", 2, exactGroups.size)
+    }
+
+    @Test
     fun broadConsoleSearchDoesNotOverrideSpecificVariantOrAccessorySearches() {
         assertTrue(isConsoleFamilyOverviewQuery("PS5"))
         assertTrue(isConsoleFamilyOverviewQuery("PlayStation 5"))

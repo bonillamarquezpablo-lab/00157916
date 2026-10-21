@@ -289,7 +289,7 @@ class MementoClient(
             if (timestamp !in earliest..now) continue
 
             val targetInLink = Regex("""^https://arquivo\.pt/wayback/(\d{14})(?:id_)?/(https://.+)$""")
-                .find(secureLink)?.groupValues?.getOrNull(1) ?: continue
+                .find(secureLink)?.groupValues?.getOrNull(2) ?: continue
             if (!sameOriginalUrl(targetInLink, originalUrl)) continue
             output += MementoCapture(rawTimestamp, timestamp, secureLink, target.toString())
         }

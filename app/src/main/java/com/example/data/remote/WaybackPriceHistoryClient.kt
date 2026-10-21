@@ -1662,14 +1662,14 @@ class WaybackPriceHistoryClient(
                                     "USD" -> sourceQuote?.let { convertUsdQuoteToEurAtCaptureDate(it, onTrace) }
                                     else -> sourceQuote
                                 }
-                                reportArchiveFieldTrace(onTrace, document, expectedTitle, quote, sourceQuote)
+                                reportArchiveFieldTrace(onTrace, document, expectedTitle, originalUrl, quote, sourceQuote)
                                 SnapshotFetch(
                                     fetched = true,
                                     quote = quote,
                                     diagnosticCode = when {
                                         quote != null -> null
                                         sourceQuote?.currency?.equals("USD", ignoreCase = true) == true -> "ARCHIVE_USD_FX_UNAVAILABLE"
-                                        else -> diagnoseArchivedPrice(document, expectedTitle)
+                                        else -> diagnoseArchivedPrice(document, expectedTitle, originalUrl)
                                     }
                                 )
                             }
@@ -1847,6 +1847,7 @@ class WaybackPriceHistoryClient(
         onTrace: ((WaybackTraceEvent) -> Unit)?,
         document: Document,
         expectedTitle: String,
+        originalUrl: String,
         quote: ArchivedPriceQuote?,
         sourceQuote: ArchivedPriceQuote? = quote
     ) {
@@ -1856,11 +1857,12 @@ class WaybackPriceHistoryClient(
         val expectedTitleForTrace = expectedTitle.replace(Regex("""\s+"""), " ").trim().take(100)
         val detectedTitlesForTrace = titles.take(3)
             .joinToString(" | ") { it.replace(Regex("""\s+"""), " ").trim().take(100) }
-        val structuredMatch = jsonLd.any { isMatchingProductTitle(expectedTitle, it.first) }
+        val structuredMatch = jsonLd.any { isMatchingTitleForArchivedUrl(expectedTitle, it.first, originalUrl) }
         val structuredConflict = jsonLd.firstOrNull {
-            hasExplicitProductVariantConflict(expectedTitle, it.first)
+            hasExplicitProductVariantConflict(expectedTitle, it.first) &&
+                !isMatchingTitleForArchivedUrl(expectedTitle, it.first, originalUrl)
         }
-        val pageTitleMatch = pageTitles.any { isMatchingProductTitle(expectedTitle, it) }
+        val pageTitleMatch = pageTitles.any { isMatchingTitleForArchivedUrl(expectedTitle, it, originalUrl) }
         val titleMatches = structuredMatch || (structuredConflict == null && pageTitleMatch)
         emitWaybackTrace(
             onTrace, 12,
@@ -1931,7 +1933,7 @@ class WaybackPriceHistoryClient(
         emitWaybackTrace(onTrace, 14, WaybackTraceStatus.SKIPPED, detail)
     }
 
-    private fun diagnoseArchivedPrice(document: Document, expectedTitle: String): String {
+    private fun diagnoseArchivedPrice(document: Document, expectedTitle: String, originalUrl: String): String {
         val jsonLd = extractJsonLdProductOffers(document)
         val pageTitles = extractArchivedPageTitles(document)
         val metaPrice = listOf(
@@ -1955,10 +1957,10 @@ class WaybackPriceHistoryClient(
                 pageTitles.map { title -> Triple(title, visiblePrice, "EUR") }
             } else emptyList())
         if (jsonLd.isNotEmpty() &&
-            jsonLd.none { isMatchingProductTitle(expectedTitle, it.first) } &&
+            jsonLd.none { isMatchingTitleForArchivedUrl(expectedTitle, it.first, originalUrl) } &&
             jsonLd.any { hasExplicitProductVariantConflict(expectedTitle, it.first) }
         ) return "ARCHIVE_PRODUCT_TITLE_MISMATCH"
-        if (candidates.none { isMatchingProductTitle(expectedTitle, it.first) }) {
+        if (candidates.none { isMatchingTitleForArchivedUrl(expectedTitle, it.first, originalUrl) }) {
             return "ARCHIVE_PRODUCT_TITLE_MISMATCH"
         }
         if (candidates.none { it.third.equals("EUR", ignoreCase = true) }) {
@@ -3315,17 +3317,19 @@ class WaybackPriceHistoryClient(
         }?.uppercase(Locale.ROOT)
 
         val allowedCurrencies = acceptedCurrencies.map { it.uppercase(Locale.ROOT) }.toSet()
+        fun matchesArchivedTitle(title: String): Boolean =
+            isMatchingTitleForArchivedUrl(expectedTitle, title, originalUrl)
+
         fun isValidCandidate(candidate: Triple<String, Double, String>): Boolean =
             candidate.third.uppercase(Locale.ROOT) in allowedCurrencies &&
                 candidate.second in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE &&
-                isMatchingProductTitle(expectedTitle, candidate.first)
+                matchesArchivedTitle(candidate.first)
 
-        val matchingIdentityJsonLd = jsonLdCandidates.filter {
-            isMatchingProductTitle(expectedTitle, it.first)
-        }
+        val matchingIdentityJsonLd = jsonLdCandidates.filter { matchesArchivedTitle(it.first) }
         val matchingJsonLd = matchingIdentityJsonLd.filter(::isValidCandidate)
         val structuredVariantConflict = jsonLdCandidates.firstOrNull {
-            hasExplicitProductVariantConflict(expectedTitle, it.first)
+            hasExplicitProductVariantConflict(expectedTitle, it.first) &&
+                !matchesArchivedTitle(it.first)
         }
 
         // Do not borrow a generic page/meta title if its structured offer identifies another SKU,
@@ -3340,7 +3344,7 @@ class WaybackPriceHistoryClient(
             metaPrice != null && !metaCurrency.isNullOrBlank()
         ) {
             pageTitles.asSequence()
-                .filter { isMatchingProductTitle(expectedTitle, it) }
+                .filter(::matchesArchivedTitle)
                 .map { title -> Triple(title, metaPrice, metaCurrency) }
                 .firstOrNull(::isValidCandidate)
         } else null
@@ -3371,7 +3375,7 @@ class WaybackPriceHistoryClient(
         }
 
         // Use rendered price only from a price-specific element and only after product identity matches.
-        val matchingPageTitle = pageTitles.firstOrNull { isMatchingProductTitle(expectedTitle, it) }
+        val matchingPageTitle = pageTitles.firstOrNull(::matchesArchivedTitle)
             ?: return null
         val visibleCandidate = extractVisibleProductPrice(document, metaCurrency, allowedCurrencies) ?: return null
         val visiblePrice = visibleCandidate.first
@@ -3731,6 +3735,60 @@ class WaybackPriceHistoryClient(
             if (text.isNotBlank() && text.length <= 120) return text
         }
         return null
+    }
+
+    /**
+     * Apple can archive the exact configurator URL while its structured product title omits
+     * storage and colour (for example, just "iPhone 15"). In that narrow case the canonical
+     * configurator path is the SKU identity anchor. Do not use this for generic family pages or
+     * for titles that explicitly contradict the selected model, storage, or colour.
+     */
+    private fun isMatchingTitleForArchivedUrl(
+        expectedTitle: String,
+        archivedTitle: String,
+        originalUrl: String
+    ): Boolean {
+        if (isMatchingProductTitle(expectedTitle, archivedTitle)) return true
+
+        val expected = normalizeTitle(expectedTitle)
+        val archived = normalizeTitle(archivedTitle)
+        if (!Regex("""\biphone\s+15\b""").containsMatchIn(expected) ||
+            !Regex("""\biphone\s+15\b""").containsMatchIn(archived)
+        ) return false
+
+        val expectedVariants = productModelVariantTokens(expected)
+        if (expectedVariants.any { it != "plus" }) return false
+        val uri = runCatching { URI(originalUrl) }.getOrNull() ?: return false
+        val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.")
+        if (host != "apple.com") return false
+
+        val capacity = Regex("""\b(128|256|512)\s*gb\b""")
+            .find(expected)?.groupValues?.get(1) ?: return false
+        val colourSlug = when (productColourFamily(expected)) {
+            "black" -> "negro"
+            "blue" -> "azul"
+            "green" -> "verde"
+            "yellow" -> "amarillo"
+            "pink" -> "rosa"
+            else -> return false
+        }
+        val display = if ("plus" in expectedVariants) "6,7" else "6,1"
+        val expectedPath = "/es/shop/buy-iphone/iphone-15/pantalla-de-$display″-${capacity}gb-$colourSlug"
+        if (!uri.path.orEmpty().lowercase(Locale.ROOT).contains(expectedPath)) return false
+
+        // Missing variant labels on Apple's page title are acceptable because the exact route
+        // has been verified. An explicit mismatch is not.
+        val archivedVariants = productModelVariantTokens(archived)
+        if (archivedVariants.any { it !in expectedVariants }) return false
+        val archivedColour = productColourFamily(archived)
+        val expectedColour = productColourFamily(expected)
+        if (archivedColour != null && archivedColour != expectedColour) return false
+
+        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+        val archivedStorage = storagePattern.findAll(archived)
+            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
+        if (archivedStorage.isNotEmpty() && "${capacity}gb" !in archivedStorage) return false
+        return true
     }
 
     private fun isMatchingProductTitle(expected: String, archived: String): Boolean {

@@ -174,10 +174,12 @@ fun PriceHistoryChart(
             }
             userSelectedSeries = false
             selectedPointIndex = -1
-        } else if (!userSelectedSeries && priceHistory.isEmpty()) {
-            // The live series is deliberately separate from archive/Google evidence. When no
-            // live points exist, select actual external history so a recovered Wayback series
-            // does not leave the graph looking empty by default.
+        } else if (!userSelectedSeries &&
+            // One live quote is enough to show today's price, but not enough to establish a
+            // useful price history. If external captures exist, show them by default instead
+            // of leaving the chart on a nearly empty live series while hiding recovered history.
+            priceHistory.count { it.timestamp > 0L && it.price.isFinite() && it.price > 0.0 } < 2
+        ) {
             val preferredSeries = when {
                 archiveHistory.isNotEmpty() -> HistoryEvidenceSeries.WAYBACK
                 googleInsightHistory.isNotEmpty() -> HistoryEvidenceSeries.GOOGLE_INSIGHTS

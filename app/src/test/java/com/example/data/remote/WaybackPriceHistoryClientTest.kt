@@ -764,6 +764,14 @@ class WaybackPriceHistoryClientTest {
                 ignoreCase = true
             )
         )
+        assertTrue(
+            "Try the exact SKU route on the apex host before falling back to a generic Apple page",
+            appleStorageColorCandidates.getOrNull(1)?.startsWith("https://apple.com/es/shop/buy-iphone/iphone-15/") == true &&
+                appleStorageColorCandidates[1].contains(
+                    "/pantalla-de-6,1%E2%80%B3-128gb-negro",
+                    ignoreCase = true
+                )
+        )
         assertFalse(
             "An exact SKU route has no trailing slash, matching Apple's published URL",
             appleStorageColorCandidates.first().endsWith("/")

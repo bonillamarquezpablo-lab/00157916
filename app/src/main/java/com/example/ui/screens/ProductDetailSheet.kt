@@ -85,16 +85,33 @@ internal fun buildWaybackDiagnosticSummary(
         precheck.detail.contains("no hay pausa global activa", ignoreCase = true)
     val precheckConfirmsPause = precheck?.status == WaybackTraceStatus.SKIPPED &&
         precheck.detail.contains("pausa global", ignoreCase = true)
-    // Status text can survive a cache-only retry. Distinguish old 429 details from a rate limit
-    // recorded by the current diagnostic's own request/capture rows.
+    // Status and capture rows can survive a cache-only retry. When step 4 says that
+    // no global pause was active, only a rate-limit event logged AFTER that precheck
+    // belongs to this run. An older 429 row must not resurrect a stale pause banner.
+    fun diagnosticSeconds(entry: WaybackDiagnosticEntry): Int? =
+        Regex("""\\[(\\d{2}):(\\d{2}):(\\d{2})]""")
+            .find(entry.detail)
+            ?.destructured
+            ?.let { (hour, minute, second) ->
+                hour.toInt() * 3600 + minute.toInt() * 60 + second.toInt()
+            }
+    val precheckSeconds = precheck?.let(::diagnosticSeconds)
     val currentTraceRateLimit = steps.any { entry ->
-        entry.step != 4 && (
+        if (entry.step == 4) return@any false
+        val mentionsRateLimit =
             entry.detail.contains("HTTP 429", ignoreCase = true) ||
                 entry.detail.contains("WAYBACK_RATE_LIMITED", ignoreCase = true) ||
                 (entry.detail.contains("pausa global", ignoreCase = true) &&
                     (entry.detail.contains("bloqueó", ignoreCase = true) ||
                         entry.detail.contains("activa", ignoreCase = true)))
-        )
+        if (!mentionsRateLimit) return@any false
+        val eventSeconds = diagnosticSeconds(entry)
+        when {
+            precheckSeconds != null && eventSeconds != null ->
+                eventSeconds > precheckSeconds
+            precheckConfirmsNoPause -> false
+            else -> true
+        }
     }
     val hasActivePauseCountdown =
         statusText.contains("HTTP 429", ignoreCase = true) &&

@@ -240,7 +240,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     private companion object {
         const val TRACKED_REFRESH_COOLDOWN_MS = 24L * 60L * 60L * 1000L
         const val MAX_TRACKED_REFRESH_PER_TAP = 10
-        const val MAX_ARCHIVE_PAGES_PER_SEARCH = 2
+        const val MAX_ARCHIVE_PAGES_PER_SEARCH = 3
         // Historical lookup is a user-triggered background action. Reserve time for the
         // CDX query and a representative set of dated captures; a too-short outer timeout
         // cancels useful HTML downloads before they can be validated and saved.
@@ -1362,13 +1362,45 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
             }
         }
-        val orderedCandidates = candidateBuilder.sortedWith(
+        // A product history lookup should also check its own manufacturer archive, even
+        // when the saved live offer belongs to a marketplace retailer. Manufacturer URLs often
+        // preserve canonical model/variant pages that the retailer never archived. Keep this
+        // as a separate, last-priority candidate and only for products (not cases/cables/etc.).
+        val accessoryQuery = Regex(
+            """(?i)\b(funda|carcasa|case|cover|protector|cable|cargador|adaptador|hub|filtro|recambio|repuesto|soporte|screen protector|glass protector)\b"""
+        ).containsMatchIn(product.title)
+        val manufacturer = if (accessoryQuery) null
+            else waybackPriceHistoryClient.resolveBrandMerchant(product.title)
+        val existingDomains = candidateBuilder.mapNotNull { it.merchantDomain }
+            .map { it.lowercase(Locale.ROOT).removePrefix("www.") }.toSet()
+        val manufacturerCandidate = manufacturer?.takeIf { (_, domain) ->
+            val normalized = domain.lowercase(Locale.ROOT).removePrefix("www.")
+            normalized !in existingDomains &&
+                existingDomains.none { it.endsWith(".$normalized") || normalized.endsWith(".$it") }
+        }?.let { (brandName, domain) ->
+            FreeArchiveCandidate(
+                title = product.title,
+                storeName = brandName,
+                directUrl = null,
+                merchantDomain = domain
+            )
+        }
+
+        val retailerCandidates = candidateBuilder.sortedWith(
             compareBy<FreeArchiveCandidate> { if (it.directUrl != null) 0 else 1 }
                 .thenBy { it.merchantDomain.orEmpty() }
         ).distinctBy {
             // Search one page per retailer: a seller's alternate URL must not consume another slot.
             it.title.trim().lowercase(Locale.ROOT) + "|" + (it.merchantDomain ?: it.directUrl ?: "unknown")
-        }.take(MAX_ARCHIVE_PAGES_PER_SEARCH)
+        }
+        // Reserve one slot for a distinct manufacturer archive, so a list of retailer links
+        // cannot crowd out the canonical product archive. The manufacturer is always tried last.
+        val retailerBudget = if (manufacturerCandidate != null) MAX_ARCHIVE_PAGES_PER_SEARCH - 1
+            else MAX_ARCHIVE_PAGES_PER_SEARCH
+        val orderedCandidates = (retailerCandidates.take(retailerBudget) +
+            listOfNotNull(manufacturerCandidate)).distinctBy {
+            it.title.trim().lowercase(Locale.ROOT) + "|" + (it.merchantDomain ?: it.directUrl ?: "unknown")
+        }
 
         val directCandidates = orderedCandidates.count { it.directUrl != null }
         val domainCandidates = orderedCandidates.count { it.merchantDomain != null }

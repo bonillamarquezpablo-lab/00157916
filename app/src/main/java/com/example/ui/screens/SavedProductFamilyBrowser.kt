@@ -3,6 +3,7 @@ package com.example.ui.screens
 import com.example.data.model.Product
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.model.StoreOffer
+import com.example.ui.viewmodel.SortOption
 import java.net.URI
 import java.text.Normalizer
 import java.util.Locale
@@ -243,8 +244,74 @@ private fun familyLabel(products: List<Product>): String =
         .orEmpty()
         .ifBlank { products.first().brand.ifBlank { products.first().title } }
 
+private fun hasValidSortablePrice(product: Product): Boolean =
+    product.isPriceVerified && product.currentPrice.isFinite() && product.currentPrice > 0.0
+
+private fun savedProductComparator(sortOption: SortOption): Comparator<Product> = when (sortOption) {
+    SortOption.BEST_ATH_DISCOUNT -> compareByDescending<Product> { hasValidSortablePrice(it) }
+        .thenByDescending { if (hasValidSortablePrice(it)) it.realSavingsPercent else Double.NEGATIVE_INFINITY }
+        .thenBy { it.title.lowercase(Locale.ROOT) }
+        .thenBy { it.id }
+    SortOption.PRICE_LOW_HIGH -> compareByDescending<Product> { hasValidSortablePrice(it) }
+        .thenBy { if (hasValidSortablePrice(it)) it.currentPrice else Double.POSITIVE_INFINITY }
+        .thenBy { it.title.lowercase(Locale.ROOT) }
+        .thenBy { it.id }
+    SortOption.PRICE_HIGH_LOW -> compareByDescending<Product> { hasValidSortablePrice(it) }
+        .thenByDescending { if (hasValidSortablePrice(it)) it.currentPrice else Double.NEGATIVE_INFINITY }
+        .thenBy { it.title.lowercase(Locale.ROOT) }
+        .thenBy { it.id }
+    SortOption.NAME_AZ -> compareBy<Product> { it.title.lowercase(Locale.ROOT) }.thenBy { it.id }
+    SortOption.NAME_ZA -> compareByDescending<Product> { it.title.lowercase(Locale.ROOT) }.thenBy { it.id }
+    SortOption.CATEGORY_AZ -> compareBy<Product> { it.category.displayName.lowercase(Locale.ROOT) }
+        .thenBy { it.title.lowercase(Locale.ROOT) }
+        .thenBy { it.id }
+    SortOption.RATING -> compareByDescending<Product> { it.isRatingVerified }
+        .thenByDescending { if (it.isRatingVerified) it.rating else Double.NEGATIVE_INFINITY }
+        .thenBy { it.title.lowercase(Locale.ROOT) }
+        .thenBy { it.id }
+}
+
+private fun savedFamilyComparator(sortOption: SortOption): Comparator<SavedProductFamily> {
+    fun verifiedPrices(family: SavedProductFamily) =
+        family.products.filter(::hasValidSortablePrice).map { it.currentPrice }
+    fun verifiedRows(family: SavedProductFamily) =
+        family.products.filter(::hasValidSortablePrice)
+
+    return when (sortOption) {
+        SortOption.BEST_ATH_DISCOUNT -> compareByDescending<SavedProductFamily> {
+            verifiedRows(it).isNotEmpty()
+        }.thenByDescending {
+            verifiedRows(it).maxOfOrNull { product -> product.realSavingsPercent } ?: Double.NEGATIVE_INFINITY
+        }.thenBy { it.label.lowercase(Locale.ROOT) }.thenBy { it.key }
+        SortOption.PRICE_LOW_HIGH -> compareByDescending<SavedProductFamily> {
+            verifiedPrices(it).isNotEmpty()
+        }.thenBy {
+            verifiedPrices(it).minOrNull() ?: Double.POSITIVE_INFINITY
+        }.thenBy { it.label.lowercase(Locale.ROOT) }.thenBy { it.key }
+        SortOption.PRICE_HIGH_LOW -> compareByDescending<SavedProductFamily> {
+            verifiedPrices(it).isNotEmpty()
+        }.thenByDescending {
+            verifiedPrices(it).maxOrNull() ?: Double.NEGATIVE_INFINITY
+        }.thenBy { it.label.lowercase(Locale.ROOT) }.thenBy { it.key }
+        SortOption.NAME_AZ -> compareBy<SavedProductFamily> { it.label.lowercase(Locale.ROOT) }.thenBy { it.key }
+        SortOption.NAME_ZA -> compareByDescending<SavedProductFamily> { it.label.lowercase(Locale.ROOT) }.thenBy { it.key }
+        SortOption.CATEGORY_AZ -> compareBy<SavedProductFamily> {
+            it.products.firstOrNull()?.category?.displayName.orEmpty().lowercase(Locale.ROOT)
+        }.thenBy { it.label.lowercase(Locale.ROOT) }.thenBy { it.key }
+        SortOption.RATING -> compareByDescending<SavedProductFamily> {
+            it.products.any { product -> product.isRatingVerified && product.rating.isFinite() }
+        }.thenByDescending {
+            it.products.filter { product -> product.isRatingVerified && product.rating.isFinite() }
+                .maxOfOrNull { product -> product.rating } ?: Double.NEGATIVE_INFINITY
+        }.thenBy { it.label.lowercase(Locale.ROOT) }.thenBy { it.key }
+    }
+}
+
 /** Families -> model edition -> storage -> separately identified colour/SKU product rows. */
-internal fun buildSavedProductFamilyBuckets(products: List<Product>): List<SavedProductFamily> =
+internal fun buildSavedProductFamilyBuckets(
+    products: List<Product>,
+    sortOption: SortOption = SortOption.BEST_ATH_DISCOUNT
+): List<SavedProductFamily> =
     products.groupBy(::savedFamilyKey)
         .map { (familyKey, familyProducts) ->
             val variants = familyProducts.groupBy(::variantKey)
@@ -255,12 +322,7 @@ internal fun buildSavedProductFamilyBuckets(products: List<Product>): List<Saved
                         val exactVariantRows = rows.groupBy { onlineProductIdentityKey(it.title) }
                             .values
                             .map(::mergeExactVariantProducts)
-                            .sortedWith(
-                                compareBy<Product> { product ->
-                                    savedIdentityParts(product).firstOrNull { it.startsWith("color:") }.orEmpty()
-                                }.thenBy { it.title.lowercase(Locale.ROOT) }
-                                    .thenBy { it.id }
-                            )
+                            .sortedWith(savedProductComparator(sortOption))
                         SavedStorageGroup(
                             label = label,
                             products = exactVariantRows
@@ -281,4 +343,4 @@ internal fun buildSavedProductFamilyBuckets(products: List<Product>): List<Saved
                 variants = variants
             )
         }
-        .sortedWith(compareBy<SavedProductFamily> { it.label.lowercase(Locale.ROOT) }.thenBy { it.key })
+        .sortedWith(savedFamilyComparator(sortOption))

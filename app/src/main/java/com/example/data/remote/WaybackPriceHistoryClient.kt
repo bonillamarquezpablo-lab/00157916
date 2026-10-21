@@ -679,7 +679,9 @@ class WaybackPriceHistoryClient(
                     lookbackDays = lookbackDays,
                     cacheKey = attempt,
                     failureCodes = setOf("CDX_INFERRED_URL_AVAILABILITY_FIRST"),
-                    onTrace = onTrace
+                    onTrace = onTrace,
+                    snapshotResultsCache = snapshotResultsCache,
+                    onVerifiedQuotes = onVerifiedQuotes
                 )
             }
             if (preferredUrlAlreadyQueried && resolvedPreferredUrl != null) {
@@ -691,7 +693,9 @@ class WaybackPriceHistoryClient(
                     lookbackDays = lookbackDays,
                     cacheKey = attempt,
                     failureCodes = setOf("CDX_DIRECT_URL_ALREADY_QUERIED"),
-                    onTrace = onTrace
+                    onTrace = onTrace,
+                    snapshotResultsCache = snapshotResultsCache,
+                    onVerifiedQuotes = onVerifiedQuotes
                 )
             }
             if (productUrlCandidate != null) {
@@ -737,7 +741,9 @@ class WaybackPriceHistoryClient(
                         failureCodes = productResult.diagnosticCodes.ifEmpty {
                             setOf("CDX_PRODUCT_PREFIX_NO_VERIFIED_PRICE")
                         },
-                        onTrace = onTrace
+                        onTrace = onTrace,
+                        snapshotResultsCache = snapshotResultsCache,
+                        onVerifiedQuotes = onVerifiedQuotes
                     )
                 }
             }
@@ -754,7 +760,9 @@ class WaybackPriceHistoryClient(
                     lookbackDays = lookbackDays,
                     cacheKey = attempt,
                     failureCodes = setOf("DOMAIN_CDX_CANDIDATES_EMPTY"),
-                    onTrace = onTrace
+                    onTrace = onTrace,
+                    snapshotResultsCache = snapshotResultsCache,
+                    onVerifiedQuotes = onVerifiedQuotes
                 )
             }
 

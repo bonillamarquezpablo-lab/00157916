@@ -68,7 +68,7 @@ class PriceHistoryChartTest {
         composeRule.onNodeWithText("Evolución del precio observado").assertIsDisplayed()
         composeRule.onNodeWithText("Wayback").performClick()
         composeRule.onNodeWithText("Histórico externo · Wayback").assertIsDisplayed()
-        composeRule.onNodeWithText("1 observación").assertIsDisplayed()
+        composeRule.onNodeWithText("Mín. del rango:", substring = true).assertIsDisplayed()
         composeRule.onNodeWithText(
             "Capturas externas de Internet Archive; no son ofertas actuales."
         ).assertIsDisplayed()

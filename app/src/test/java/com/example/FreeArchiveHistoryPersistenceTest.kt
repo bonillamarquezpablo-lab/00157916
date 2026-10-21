@@ -162,6 +162,101 @@ class FreeArchiveHistoryPersistenceTest {
     }
  
     @Test
+    fun mementoArchiveCapturePersistsAndAppearsInSavedPriceHistory() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val databaseName = "memento-history-${System.nanoTime()}.db"
+        val database = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
+            .addMigrations(
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5,
+                AppDatabase.MIGRATION_5_6,
+                AppDatabase.MIGRATION_6_7,
+                AppDatabase.MIGRATION_7_8,
+                AppDatabase.MIGRATION_8_9,
+                AppDatabase.MIGRATION_9_10,
+                AppDatabase.MIGRATION_10_11
+            )
+            .allowMainThreadQueries()
+            .build()
+        val productId = "anker-memento-restart"
+        val title = "Anker Prime 27K Power Bank"
+        val originalUrl = "https://www.pccomponentes.com/anker-prime-27k"
+        val timestampFormat = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val rawTimestamp = timestampFormat.format(Date(System.currentTimeMillis() - 60L * 24L * 60L * 60L * 1000L))
+        val archivedAt = timestampFormat.parse(rawTimestamp)!!.time
+        val snapshotUrl = "https://arquivo.pt/wayback/$rawTimestamp/$originalUrl"
+
+        try {
+            database.productDao().insert(
+                ProductEntity(
+                    id = productId,
+                    title = title,
+                    brand = "Anker",
+                    category = "HOME_APPLIANCES",
+                    currentPrice = 499.99,
+                    athMinPrice = 499.99,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "PcComponentes",
+                    athMaxPrice = 499.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "pccomponentes",
+                    storeUrl = originalUrl,
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val quote = ArchivedPriceQuote(
+                observedAt = archivedAt,
+                price = 89.99,
+                currency = "EUR",
+                productTitle = title,
+                originalUrl = originalUrl,
+                snapshotUrl = snapshotUrl,
+                targetProductId = productId
+            )
+
+            assertEquals(
+                "A Memento quote must be accepted only for the explicitly selected existing product",
+                1,
+                repository.recordArchivedPriceHistory(
+                    expectedTitle = title,
+                    originalUrl = originalUrl,
+                    storeName = "PcComponentes",
+                    quotes = listOf(quote),
+                    targetProductId = productId
+                )
+            )
+            val restored = withTimeout(10_000L) {
+                repository.allProductsStream.first { rows ->
+                    rows.any { row ->
+                        row.id == productId && row.priceHistory.any { it.isArchiveEvidence }
+                    }
+                }.first { it.id == productId }
+            }
+            assertEquals(499.99, restored.currentPrice, 0.001)
+            assertFalse("A Memento snapshot must not verify today's price", restored.isPriceVerified)
+            assertEquals(1, restored.priceHistory.count { it.isArchiveEvidence })
+            assertEquals(89.99, restored.priceHistory.single { it.isArchiveEvidence }.price, 0.001)
+            assertTrue(restored.priceHistory.single { it.isArchiveEvidence }.eventLabel.orEmpty().contains("Memento"))
+        } finally {
+            database.close()
+            context.deleteDatabase(databaseName)
+        }
+    }
+
+    @Test
     fun selectedGoogleShoppingProductCanSaveHistoryFromItsChosenRetailerOffer() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(

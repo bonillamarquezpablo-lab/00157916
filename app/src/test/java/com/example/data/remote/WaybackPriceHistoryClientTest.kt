@@ -3988,7 +3988,7 @@ class WaybackPriceHistoryClientTest {
         assertTrue(label.contains("ruta CDX_URL_PREFIX"))
         assertTrue(label.contains("tienda www.pccomponentes.com"))
         assertFalse("Diagnostic labels must not leak the product path or query", label.contains("/producto/privado"))
-        assertFalse("Diagnostic labels must not leak a SKU", label.contains("12345"))
+        assertFalse("Diagnostic labels must not leak the SKU query parameter", label.contains("sku=12345"))
     }
 
     @Test

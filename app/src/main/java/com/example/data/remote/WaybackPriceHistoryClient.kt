@@ -715,7 +715,8 @@ class WaybackPriceHistoryClient(
                         lookbackDays = lookbackDays,
                         cacheKey = attempt,
                         failureCodes = result.diagnosticCodes,
-                        onTrace = onTrace
+                        onTrace = onTrace,
+                        knownProductTitlesById = knownProductTitlesById
                     )
                 }
                 if (
@@ -743,7 +744,8 @@ class WaybackPriceHistoryClient(
         lookbackDays: Int,
         cacheKey: String,
         failureCodes: Set<String>,
-        onTrace: ((WaybackTraceEvent) -> Unit)?
+        onTrace: ((WaybackTraceEvent) -> Unit)?,
+        knownProductTitlesById: Map<String, String> = emptyMap()
     ): WaybackBackfillResult {
         val failureLabel = when {
             failureCodes.contains("CDX_DIRECT_URL_ALREADY_QUERIED") ->

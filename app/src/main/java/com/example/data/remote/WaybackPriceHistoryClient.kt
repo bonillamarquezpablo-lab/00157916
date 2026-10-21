@@ -3050,10 +3050,10 @@ class WaybackPriceHistoryClient(
             .addQueryParameter("from", from)
             .addQueryParameter("to", to)
             .addQueryParameter("collapse", "timestamp:6")
-            // The monthly collapse yields ~24 rows for the normal two-year history window.
-            // A 60-row cap preserves over four years of monthly snapshots without transferring
-            // excess rows when the archive contains unusually dense history.
-            .addQueryParameter("limit", "60")
+            // Ask CDX for the newest bounded set, not the first (oldest) rows. Negative limit
+            // returns the last N matches; 120 monthly rows cover the configured multi-year window
+            // without letting early captures crowd newer dates out of the quarterly sampler.
+            .addQueryParameter("limit", "-120")
             .build()
     }
 

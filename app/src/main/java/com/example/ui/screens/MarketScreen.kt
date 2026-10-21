@@ -45,6 +45,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -92,6 +93,14 @@ fun MarketScreen(
     var expandedFamilyKeys by remember { mutableStateOf(emptySet<String>()) }
     var expandedVariantKeys by remember { mutableStateOf(emptySet<String>()) }
     var expandedStorageKeys by remember { mutableStateOf(emptySet<String>()) }
+
+    // Keep Mercado as a drill-down, not a wall of expanded cards. Changing filters
+    // resets the selection so expansions from a previous result set cannot reappear.
+    LaunchedEffect(uiState.selectedCategory, uiState.searchQuery, uiState.selectedStoreName) {
+        expandedFamilyKeys = emptySet()
+        expandedVariantKeys = emptySet()
+        expandedStorageKeys = emptySet()
+    }
 
     // Collapse marketplace-generated aliases (for example AliExpress-239640258)
     // into one canonical display/filter option without deleting any underlying seller records.
@@ -549,7 +558,6 @@ fun MarketScreen(
                     }
                 } else {
                     val familyExpanded = family.key in expandedFamilyKeys
-                    val familyPrefix = family.key + "::"
                     Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
                         Row(
                             modifier = Modifier
@@ -558,11 +566,14 @@ fun MarketScreen(
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.50f))
                                 .clickable {
                                     if (familyExpanded) {
-                                        expandedFamilyKeys = expandedFamilyKeys - family.key
-                                        expandedVariantKeys = expandedVariantKeys.filterNot { it.startsWith(familyPrefix) }.toSet()
-                                        expandedStorageKeys = expandedStorageKeys.filterNot { it.startsWith(familyPrefix) }.toSet()
+                                        expandedFamilyKeys = emptySet()
+                                        expandedVariantKeys = emptySet()
+                                        expandedStorageKeys = emptySet()
                                     } else {
-                                        expandedFamilyKeys = expandedFamilyKeys + family.key
+                                        // Only one model family is expanded at a time.
+                                        expandedFamilyKeys = setOf(family.key)
+                                        expandedVariantKeys = emptySet()
+                                        expandedStorageKeys = emptySet()
                                     }
                                 }
                                 .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -600,15 +611,12 @@ fun MarketScreen(
                                             .background(MaterialTheme.colorScheme.surfaceContainerLow)
                                             .clickable {
                                                 if (variantExpanded) {
-                                                    expandedVariantKeys = expandedVariantKeys - variantExpansionKey
-                                                    expandedStorageKeys = expandedStorageKeys.filterNot {
-                                                        it.startsWith("$variantExpansionKey::")
-                                                    }.toSet()
+                                                    expandedVariantKeys = emptySet()
+                                                    expandedStorageKeys = emptySet()
                                                 } else {
-                                                    expandedVariantKeys = (expandedVariantKeys
-                                                        .filterNot { it.startsWith(familyPrefix) } + variantExpansionKey).toSet()
-                                                    expandedStorageKeys = expandedStorageKeys
-                                                        .filterNot { it.startsWith(familyPrefix) }.toSet()
+                                                    // Choose one edition before showing storage capacities.
+                                                    expandedVariantKeys = setOf(variantExpansionKey)
+                                                    expandedStorageKeys = emptySet()
                                                 }
                                             }
                                             .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -646,10 +654,10 @@ fun MarketScreen(
                                                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f))
                                                         .clickable {
                                                             if (storageExpanded) {
-                                                                expandedStorageKeys = expandedStorageKeys - storageExpansionKey
+                                                                expandedStorageKeys = emptySet()
                                                             } else {
-                                                                expandedStorageKeys = (expandedStorageKeys
-                                                                    .filterNot { it.startsWith("$variantExpansionKey::") } + storageExpansionKey).toSet()
+                                                                // Show one capacity's offers at a time.
+                                                                expandedStorageKeys = setOf(storageExpansionKey)
                                                             }
                                                         }
                                                         .padding(horizontal = 10.dp, vertical = 9.dp),
@@ -663,7 +671,7 @@ fun MarketScreen(
                                                         modifier = Modifier.weight(1f)
                                                     )
                                                     Text(
-                                                        text = "${storage.products.size} ficha(s)  ${if (storageExpanded) "▴" else "▾"}",
+                                                        text = "${if (storage.products.size == 1) "1 ficha" else "${storage.products.size} fichas"}  ${if (storageExpanded) "▴" else "▾"}",
                                                         fontSize = 11.sp,
                                                         color = MaterialTheme.colorScheme.primary
                                                     )

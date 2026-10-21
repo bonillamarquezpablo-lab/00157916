@@ -93,4 +93,48 @@ class SavedProductFamilyBrowserTest {
             lowToHigh.last().variants.single().storages.single().products.map { it.id }
         )
     }
+
+    @Test
+    fun priceSortOrdersVersionsAndCapacitiesInsideOneFamily() {
+        val template = SpanishMarketData.getInitialProducts().first()
+        fun product(id: String, title: String, price: Double) = template.copy(
+            id = id,
+            title = title,
+            brand = "Apple",
+            category = ProductCategory.TV_AUDIO,
+            currentPrice = price,
+            isPriceVerified = true,
+            priceObservedAt = System.currentTimeMillis(),
+            priceHistory = emptyList()
+        )
+        val rows = listOf(
+            product("iphone15-128", "Apple iPhone 15 128 GB Amarillo", 680.0),
+            product("iphone15-256", "Apple iPhone 15 256 GB Amarillo", 1_000.0),
+            product("iphone15-pro-256", "Apple iPhone 15 Pro 256 GB Negro", 1_500.0)
+        )
+
+        val highToLow = buildSavedProductFamilyBuckets(rows, SortOption.PRICE_HIGH_LOW).single()
+        assertEquals(
+            "The most expensive edition must appear first when sorting high to low",
+            listOf("Pro", "Estándar"),
+            highToLow.variants.map { it.label }
+        )
+        val standardHighToLow = highToLow.variants.single { it.label == "Estándar" }
+        assertEquals(
+            "Storage options must follow price order, not always capacity order",
+            listOf("256 GB", "128 GB"),
+            standardHighToLow.storages.map { it.label }
+        )
+
+        val lowToHigh = buildSavedProductFamilyBuckets(rows, SortOption.PRICE_LOW_HIGH).single()
+        assertEquals(
+            listOf("Estándar", "Pro"),
+            lowToHigh.variants.map { it.label }
+        )
+        val standardLowToHigh = lowToHigh.variants.single { it.label == "Estándar" }
+        assertEquals(
+            listOf("128 GB", "256 GB"),
+            standardLowToHigh.storages.map { it.label }
+        )
+    }
 }

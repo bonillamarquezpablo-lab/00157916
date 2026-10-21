@@ -271,6 +271,55 @@ private fun savedProductComparator(sortOption: SortOption): Comparator<Product> 
         .thenBy { it.id }
 }
 
+private fun savedStorageComparator(sortOption: SortOption): Comparator<SavedStorageGroup> {
+    fun prices(group: SavedStorageGroup) =
+        group.products.filter(::hasValidSortablePrice).map { it.currentPrice }
+
+    return when (sortOption) {
+        SortOption.PRICE_LOW_HIGH -> compareByDescending<SavedStorageGroup> {
+            prices(it).isNotEmpty()
+        }.thenBy {
+            prices(it).minOrNull() ?: Double.POSITIVE_INFINITY
+        }.thenBy { capacitySortValue(it.label) }
+            .thenBy { it.label.lowercase(Locale.ROOT) }
+
+        SortOption.PRICE_HIGH_LOW -> compareByDescending<SavedStorageGroup> {
+            prices(it).isNotEmpty()
+        }.thenByDescending {
+            prices(it).maxOrNull() ?: Double.NEGATIVE_INFINITY
+        }.thenBy { capacitySortValue(it.label) }
+            .thenBy { it.label.lowercase(Locale.ROOT) }
+
+        else -> compareBy<SavedStorageGroup> { capacitySortValue(it.label) }
+            .thenBy { it.label.lowercase(Locale.ROOT) }
+    }
+}
+
+private fun savedVariantComparator(sortOption: SortOption): Comparator<SavedVariantGroup> {
+    fun validProducts(group: SavedVariantGroup) =
+        group.products.filter(::hasValidSortablePrice)
+
+    return when (sortOption) {
+        SortOption.PRICE_LOW_HIGH -> compareByDescending<SavedVariantGroup> {
+            validProducts(it).isNotEmpty()
+        }.thenBy {
+            validProducts(it).minOfOrNull { product -> product.currentPrice }
+                ?: Double.POSITIVE_INFINITY
+        }.thenBy { it.label.lowercase(Locale.ROOT) }
+
+        SortOption.PRICE_HIGH_LOW -> compareByDescending<SavedVariantGroup> {
+            validProducts(it).isNotEmpty()
+        }.thenByDescending {
+            validProducts(it).maxOfOrNull { product -> product.currentPrice }
+                ?: Double.NEGATIVE_INFINITY
+        }.thenBy { it.label.lowercase(Locale.ROOT) }
+
+        else -> compareBy<SavedVariantGroup> {
+            if (it.key == "variant:base" || it.label == "Estándar") 0 else 1
+        }.thenBy { it.label.lowercase(Locale.ROOT) }
+    }
+}
+
 private fun savedFamilyComparator(sortOption: SortOption): Comparator<SavedProductFamily> {
     fun verifiedPrices(family: SavedProductFamily) =
         family.products.filter(::hasValidSortablePrice).map { it.currentPrice }
@@ -327,16 +376,9 @@ internal fun buildSavedProductFamilyBuckets(
                             label = label,
                             products = exactVariantRows
                         )
-                    }.sortedWith(
-                        compareBy<SavedStorageGroup> { capacitySortValue(it.label) }
-                            .thenBy { it.label.lowercase(Locale.ROOT) }
-                    )
+                    }.sortedWith(savedStorageComparator(sortOption))
                     SavedVariantGroup(key, variantLabel(key), storageGroups)
-                }.sortedWith(
-                    compareBy<SavedVariantGroup> {
-                        if (it.key == "variant:base" || it.label == "Estándar") 0 else 1
-                    }.thenBy { it.label.lowercase(Locale.ROOT) }
-                )
+                }.sortedWith(savedVariantComparator(sortOption))
             SavedProductFamily(
                 key = familyKey,
                 label = familyLabel(familyProducts),

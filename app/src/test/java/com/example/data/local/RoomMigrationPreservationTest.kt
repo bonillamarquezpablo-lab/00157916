@@ -96,6 +96,20 @@ class RoomMigrationPreservationTest {
             assertEquals(trackedAt, tracked.trackedAtTimestamp)
             assertEquals("objetivo guardado por el usuario", tracked.notes)
 
+            val indexNames = linkedSetOf<String>()
+            migrated.openHelper.readableDatabase.query("PRAGMA index_list('price_observations')").use { cursor ->
+                val nameColumn = cursor.getColumnIndexOrThrow("name")
+                while (cursor.moveToNext()) indexNames += cursor.getString(nameColumn)
+            }
+            assertTrue(
+                "Room 11 must have the composite product/store/date index",
+                "index_price_observations_productId_storeId_observedAt" in indexNames
+            )
+            assertTrue(
+                "Room 11 must have the product/evidence/date index",
+                "index_price_observations_productId_evidenceType_observedAt" in indexNames
+            )
+
             val observed = migrated.priceObservationDao()
                 .observeVerifiedHistory("real-product-1").first()
             assertEquals("No genuine observations may be dropped by migration", if (startVersion == 8) 3 else 1, observed.size)

@@ -291,7 +291,7 @@ class WaybackPriceHistoryClientTest {
         val baseClient = WaybackPriceHistoryClient(context)
         val canonicalUrl = baseClient.buildDirectUrlCandidates(originalUrl).last()
         val urlParts = baseClient.decomposeProductUrl(originalUrl)!!
-        val rawKey = "url-cdx-batch-v8|" +
+        val rawKey = "url-cdx-batch-v9-exact-first|" +
             urlParts.merchantDomain + "|" +
             urlParts.productIdentifiers.sorted().joinToString(",") + "|" +
             canonicalUrl + "|" + title
@@ -2032,7 +2032,7 @@ class WaybackPriceHistoryClientTest {
         assertEquals("-120", url!!.queryParameter("limit"))
         assertEquals("timestamp:6", url.queryParameter("collapse"))
         assertEquals("statuscode:200", url.queryParameterValues("filter")?.firstOrNull())
-        assertEquals("text/html", url.queryParameterValues("filter")?.getOrNull(1))
+        assertEquals("mimetype:text/html", url.queryParameterValues("filter")?.getOrNull(1))
         assertEquals("20261021", url.queryParameter("to"))
 
         val exactUrl = client.buildCdxUrl(

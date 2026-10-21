@@ -89,7 +89,7 @@ internal fun buildWaybackDiagnosticSummary(
     // no global pause was active, only a rate-limit event logged AFTER that precheck
     // belongs to this run. An older 429 row must not resurrect a stale pause banner.
     fun diagnosticSeconds(entry: WaybackDiagnosticEntry): Int? =
-        Regex("""\\[(\\d{2}):(\\d{2}):(\\d{2})]""")
+        Regex("""\[(\d{2}):(\d{2}):(\d{2})]""")
             .find(entry.detail)
             ?.destructured
             ?.let { (hour, minute, second) ->

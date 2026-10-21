@@ -456,11 +456,50 @@ class ProductRepository(
      * This is intentionally non-destructive: invalid legacy rows stay in the database for audit,
      * but cannot set current prices, minima, maxima, averages or deal badges.
      */
+    private data class ArchivedSnapshotIdentity(
+        val archiveHost: String,
+        val rawTimestamp: String,
+        val timestampMillis: Long,
+        val targetUrl: String
+    )
+
+    /**
+     * Accept only the two explicitly configured public archive formats. Parse the complete URL
+     * string because URI.rawPath drops an embedded product query string in snapshot links.
+     */
+    private fun parseArchivedSnapshotIdentity(snapshotUrl: String): ArchivedSnapshotIdentity? {
+        val uri = parseHttpUri(snapshotUrl) ?: return null
+        if (!uri.scheme.equals("https", ignoreCase = true)) return null
+        val host = uri.host?.lowercase(Locale.ROOT) ?: return null
+        val match = when (host) {
+            "web.archive.org" -> Regex("""^https://web\.archive\.org/web/(\d{14})id_/(https://.+)$""")
+                .find(snapshotUrl)
+            "arquivo.pt" -> Regex("""^https://arquivo\.pt/wayback/(\d{14})/(https://.+)$""")
+                .find(snapshotUrl)
+            else -> null
+        } ?: return null
+        val rawTimestamp = match.groupValues[1]
+        val targetUrl = match.groupValues[2]
+        val target = parseHttpUri(targetUrl) ?: return null
+        if (!target.scheme.equals("https", ignoreCase = true) ||
+            target.host.equals("web.archive.org", ignoreCase = true) ||
+            target.host.equals("arquivo.pt", ignoreCase = true) ||
+            target.host.equals("archive.org", ignoreCase = true)
+        ) return null
+        val timestamp = runCatching {
+            SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+                isLenient = false
+                timeZone = TimeZone.getTimeZone("UTC")
+            }.parse(rawTimestamp)?.time
+        }.getOrNull() ?: return null
+        return ArchivedSnapshotIdentity(host, rawTimestamp, timestamp, targetUrl)
+    }
+
     /** A malformed legacy row can carry an archive URL while still being labeled "live". */
     private fun isArchiveBackedObservation(observation: PriceObservationEntity): Boolean {
         if (observation.evidenceType.equals("archive", ignoreCase = true)) return true
         val host = parseHttpUri(observation.sourceUrl)?.host?.lowercase(Locale.ROOT)
-        return host == "web.archive.org" || host == "archive.org"
+        return host == "web.archive.org" || host == "arquivo.pt" || host == "archive.org"
     }
 
     private fun isLiveObservation(observation: PriceObservationEntity): Boolean =
@@ -489,19 +528,9 @@ class ProductRepository(
             // Derive the merchant from the archived target itself. sourcePageUrl is only
             // supplementary legacy metadata and must not redirect seller validation to a
             // different trusted domain.
-            val archiveUri = parseHttpUri(observation.sourceUrl) ?: return false
-            if (!archiveUri.host.equals("web.archive.org", ignoreCase = true) ||
-                !archiveUri.scheme.equals("https", ignoreCase = true)
-            ) return false
-            val archivedTarget = Regex("""^/web/\d{14}id_/(https://[^?]+)""")
-                .find(archiveUri.rawPath.orEmpty())
-                ?.groupValues
-                ?.getOrNull(1)
-                ?: return false
+            val snapshot = parseArchivedSnapshotIdentity(observation.sourceUrl) ?: return false
+            val archivedTarget = snapshot.targetUrl
             val archivedTargetUri = parseHttpUri(archivedTarget) ?: return false
-            if (!archivedTargetUri.scheme.equals("https", ignoreCase = true) ||
-                archivedTargetUri.host.equals("web.archive.org", ignoreCase = true)
-            ) return false
             val legacySourceUri = parseHttpUri(observation.sourcePageUrl)
             if (legacySourceUri != null &&
                 (!legacySourceUri.scheme.equals("https", ignoreCase = true) ||
@@ -521,7 +550,7 @@ class ProductRepository(
             observation.price.isFinite() &&
             observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
             parseHttpUri(observation.sourceUrl)?.scheme.equals("https", ignoreCase = true) &&
-            (!archiveBacked || parseHttpUri(observation.sourceUrl)?.host.equals("web.archive.org", ignoreCase = true)) &&
+            (!archiveBacked || parseArchivedSnapshotIdentity(observation.sourceUrl) != null) &&
             isEligibleHistoryTitle(observation.productTitle) &&
             !isPromotionalBulkListing(observation.productTitle, "") &&
             isEligibleSeller(observation.storeName, merchantUrl) &&
@@ -846,29 +875,9 @@ class ProductRepository(
         var inserted = 0
 
         for (quote in quotes.distinctBy { it.observedAt to it.price }) {
-            val snapshotUri = parseHttpUri(quote.snapshotUrl) ?: continue
-            if (!snapshotUri.scheme.equals("https", ignoreCase = true) ||
-                !snapshotUri.host.equals("web.archive.org", ignoreCase = true)
-            ) continue
-            // Extract the archived target from the original URL text rather than rawPath:
-            // URI parsing treats the target page's query string as the outer Wayback URL query,
-            // so rawPath silently drops variant parameters and rejects valid captures.
-            val snapshotTarget = Regex("""^https://web\.archive\.org/web/\d{14}id_/(https://.+)$""")
-                .find(quote.snapshotUrl)
-                ?.groupValues
-                ?.getOrNull(1)
-                ?: continue
-            if (normalizedProductPageKey(snapshotTarget) != originalUrlKey) continue
-            val snapshotTimestamp = Regex("""^/web/(\d{14})id_/""")
-                .find(snapshotUri.path.orEmpty())?.groupValues?.getOrNull(1)?.let { rawTimestamp ->
-                    runCatching {
-                        SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
-                            isLenient = false
-                            timeZone = TimeZone.getTimeZone("UTC")
-                        }.parse(rawTimestamp)?.time
-                    }.getOrNull()
-                } ?: continue
-            if (kotlin.math.abs(snapshotTimestamp - quote.observedAt) > 1_000L) continue
+            val snapshotIdentity = parseArchivedSnapshotIdentity(quote.snapshotUrl) ?: continue
+            if (normalizedProductPageKey(snapshotIdentity.targetUrl) != originalUrlKey) continue
+            if (kotlin.math.abs(snapshotIdentity.timestampMillis - quote.observedAt) > 1_000L) continue
             if (!quote.originalUrl.trimEnd('/').equals(originalUrl.trimEnd('/'), ignoreCase = true)) continue
             if (!isEuroCurrency(quote.currency) ||
                 !quote.price.isFinite() ||
@@ -889,7 +898,7 @@ class ProductRepository(
                 currency = "EUR",
                 observedAt = quote.observedAt,
                 sourceUrl = quote.snapshotUrl,
-                sourceName = "Internet Archive (Wayback Machine)",
+                sourceName = if (snapshotIdentity.archiveHost == "arquivo.pt") "Arquivo.pt (Memento)" else "Internet Archive (Wayback Machine)",
                 isVerified = true,
                 verificationNote = if (
                     quote.sourceCurrency.equals("USD", ignoreCase = true) && quote.exchangeRate != null &&
@@ -910,10 +919,11 @@ class ProductRepository(
                 },
                 productTitle = quote.productTitle,
                 storeName = merchantName,
-                sourceType = if (quote.sourceCurrency.equals("USD", ignoreCase = true) && quote.exchangeRate != null) {
-                    "Internet Archive · USD→EUR convertido"
-                } else {
-                    "Internet Archive"
+                sourceType = when {
+                    snapshotIdentity.archiveHost == "arquivo.pt" -> "Memento (Arquivo.pt)"
+                    quote.sourceCurrency.equals("USD", ignoreCase = true) && quote.exchangeRate != null ->
+                        "Internet Archive · USD→EUR convertido"
+                    else -> "Internet Archive"
                 },
                 linkType = "Archivo histórico",
                 collectedAt = now,

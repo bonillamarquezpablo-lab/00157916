@@ -3030,7 +3030,7 @@ class WaybackPriceHistoryClient(
         return host
     }
 
-    private fun buildCdxUrl(originalUrl: String, now: Long, lookbackDays: Int): HttpUrl? {
+    internal fun buildCdxUrl(originalUrl: String, now: Long, lookbackDays: Int): HttpUrl? {
         val start = (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
         val from = formatUtc(start, "yyyyMMdd")
         val to = formatUtc(now, "yyyyMMdd")

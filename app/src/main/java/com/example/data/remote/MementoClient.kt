@@ -58,7 +58,8 @@ class MementoClient(
         now: Long = System.currentTimeMillis(),
         lookbackDays: Int = WaybackPriceHistoryClient.DEFAULT_LOOKBACK_DAYS,
         maxSnapshots: Int = 4,
-        knownProductTitlesById: Map<String, String> = emptyMap()
+        knownProductTitlesById: Map<String, String> = emptyMap(),
+        onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
         val originalUri = parseHttpUri(originalUrl)
         if (originalUri == null || !originalUri.scheme.equals("https", true) ||
@@ -144,6 +145,7 @@ class MementoClient(
         var capturesChecked = 0
         var requestFailed = false
         for (capture in captures) {
+            val quoteCountBeforeCapture = quotes.size
             try {
                 http.newBuilder()
                     .callTimeout(SNAPSHOT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -221,6 +223,9 @@ class MementoClient(
             } catch (_: Exception) {
                 requestFailed = true
                 diagnostics += "MEMENTO_SNAPSHOT_NETWORK_ERROR"
+            }
+            if (quotes.size > quoteCountBeforeCapture) {
+                onVerifiedQuotes?.invoke(quotes.drop(quoteCountBeforeCapture))
             }
             if ("MEMENTO_RATE_LIMITED" in diagnostics) break
         }

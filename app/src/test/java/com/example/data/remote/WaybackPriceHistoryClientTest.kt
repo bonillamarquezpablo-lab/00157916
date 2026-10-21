@@ -3901,6 +3901,84 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun identicalWaybackCaptureUrlAndTimestampShareOneSnapshotCacheKey() {
+        val client = newClient()
+        val url = "https://www.pccomponentes.com/producto"
+        val first = WaybackPriceHistoryClient.WaybackCapture(
+            rawTimestamp = "20250101120000",
+            timestamp = 1_735_732_800_000L,
+            originalUrl = url
+        )
+        val sameCapture = first.copy()
+        val differentDate = first.copy(
+            rawTimestamp = "20250901120000",
+            timestamp = 1_756_732_800_000L
+        )
+        assertEquals(client.snapshotCacheKey(first), client.snapshotCacheKey(sameCapture))
+        assertFalse(client.snapshotCacheKey(first) == client.snapshotCacheKey(differentDate))
+    }
+
+    @Test
+    fun snapshotDnsFailureRetriesAtMostOnceAndCanRecover() = runBlocking {
+        val client = newClient()
+        var attempts = 0
+        var retryChecks = 0
+        val result = client.retrySnapshotDnsOnce(
+            request = {
+                attempts++
+                if (attempts == 1) throw java.net.UnknownHostException("temporary DNS failure")
+                "recovered"
+            },
+            beforeRetry = {
+                retryChecks++
+                true
+            }
+        )
+        assertEquals("recovered", result)
+        assertEquals(2, attempts)
+        assertEquals(1, retryChecks)
+
+        attempts = 0
+        retryChecks = 0
+        try {
+            client.retrySnapshotDnsOnce(
+                request = {
+                    attempts++
+                    throw java.net.UnknownHostException("persistent DNS failure")
+                },
+                beforeRetry = {
+                    retryChecks++
+                    true
+                }
+            )
+            throw AssertionError("Persistent DNS failure must be reported after one retry")
+        } catch (_: java.net.UnknownHostException) {
+            // Expected: one original request plus one retry, never an unbounded loop.
+        }
+        assertEquals(2, attempts)
+        assertEquals(1, retryChecks)
+    }
+
+    @Test
+    fun snapshotDnsRetryIsCancelledWhenGlobalArchiveGateBlocksIt() = runBlocking {
+        val client = newClient()
+        var attempts = 0
+        try {
+            client.retrySnapshotDnsOnce(
+                request = {
+                    attempts++
+                    throw java.net.UnknownHostException("temporary DNS failure")
+                },
+                beforeRetry = { false }
+            )
+            throw AssertionError("Retry must be stopped when the shared archive gate is closed")
+        } catch (failure: java.io.IOException) {
+            assertEquals("WAYBACK_RATE_LIMITED", failure.message)
+        }
+        assertEquals(1, attempts)
+    }
+
+    @Test
     fun classifiesWaybackNetworkFailuresWithoutLeakingExceptionText() {
         val client = newClient()
         assertEquals("CDX_URL_PREFIX_TIMEOUT", client.classifyNetworkFailure("CDX_URL_PREFIX", java.net.SocketTimeoutException("secret url")))

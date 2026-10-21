@@ -368,7 +368,8 @@ class WaybackPriceHistoryClient(
         now: Long = System.currentTimeMillis(),
         lookbackDays: Int = DEFAULT_LOOKBACK_DAYS,
         onTrace: ((WaybackTraceEvent) -> Unit)? = null,
-        knownProductTitlesById: Map<String, String> = emptyMap()
+        knownProductTitlesById: Map<String, String> = emptyMap(),
+        onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
         if (!preferences.getBoolean("enabled", true)) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("WAYBACK_DISABLED"))
@@ -410,6 +411,7 @@ class WaybackPriceHistoryClient(
                 )
             }
 
+            val snapshotResultsCache = mutableMapOf<String, SnapshotFetch>()
             val prefixCdxUrl = buildCdxUrl(directUrl, now, lookbackDays, matchType = "prefix")
                 ?: return@serializedArchiveLookup WaybackBackfillResult(
                     requestFailed = true,
@@ -430,7 +432,9 @@ class WaybackPriceHistoryClient(
                     cdxStage = "CDX_URL_EXACT",
                     snapshotTimeoutSeconds = DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS,
                     onTrace = onTrace,
-                    knownProductTitlesById = knownProductTitlesById
+                    knownProductTitlesById = knownProductTitlesById,
+                    snapshotResultsCache = snapshotResultsCache,
+                    onVerifiedQuotes = onVerifiedQuotes
                 )
             }
             if (exactResult.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) {
@@ -463,7 +467,9 @@ class WaybackPriceHistoryClient(
                 cdxStage = "CDX_URL_PREFIX",
                 snapshotTimeoutSeconds = DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS,
                 onTrace = onTrace,
-                knownProductTitlesById = knownProductTitlesById
+                knownProductTitlesById = knownProductTitlesById,
+                snapshotResultsCache = snapshotResultsCache,
+                onVerifiedQuotes = onVerifiedQuotes
             )
             val mergedQuotes = (exactResult.quotes + prefixResult.quotes)
                 .distinctBy { listOf(it.originalUrl, it.observedAt.toString(), it.price.toString(), it.currency) }
@@ -504,7 +510,8 @@ class WaybackPriceHistoryClient(
         preferredUrl: String? = null,
         preferredUrlAlreadyQueried: Boolean = false,
         onTrace: ((WaybackTraceEvent) -> Unit)? = null,
-        knownProductTitlesById: Map<String, String> = emptyMap()
+        knownProductTitlesById: Map<String, String> = emptyMap(),
+        onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
         if (!preferences.getBoolean("enabled", true)) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("WAYBACK_DISABLED"))
@@ -628,6 +635,8 @@ class WaybackPriceHistoryClient(
                 )
             }
 
+            val snapshotResultsCache = mutableMapOf<String, SnapshotFetch>()
+
             // Query CDX directly: one index response can contain multiple timestamps, avoiding
             // repeated availability calls for individual dates. Try the apex host only if the
             // www host returned a valid empty result; never keep probing after a timeout or 429.
@@ -702,6 +711,8 @@ class WaybackPriceHistoryClient(
                         cdxStage = "CDX_PRODUCT_PREFIX",
                         snapshotTimeoutSeconds = CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS,
                         onTrace = onTrace,
+                        snapshotResultsCache = snapshotResultsCache,
+                        onVerifiedQuotes = onVerifiedQuotes,
                         knownProductTitlesById = knownProductTitlesById
                     )
                     if (productResult.quotes.isNotEmpty()) {
@@ -769,6 +780,8 @@ class WaybackPriceHistoryClient(
                     cdxStage = "CDX_DOMAIN",
                     snapshotTimeoutSeconds = CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS,
                     onTrace = onTrace,
+                    snapshotResultsCache = snapshotResultsCache,
+                    onVerifiedQuotes = onVerifiedQuotes,
                     knownProductTitlesById = knownProductTitlesById
                 )
                 lastResult = result
@@ -796,6 +809,8 @@ class WaybackPriceHistoryClient(
                         cacheKey = attempt,
                         failureCodes = result.diagnosticCodes,
                         onTrace = onTrace,
+                        snapshotResultsCache = snapshotResultsCache,
+                        onVerifiedQuotes = onVerifiedQuotes,
                         knownProductTitlesById = knownProductTitlesById
                     )
                 }
@@ -825,7 +840,9 @@ class WaybackPriceHistoryClient(
         cacheKey: String,
         failureCodes: Set<String>,
         onTrace: ((WaybackTraceEvent) -> Unit)?,
-        knownProductTitlesById: Map<String, String> = emptyMap()
+        knownProductTitlesById: Map<String, String> = emptyMap(),
+        snapshotResultsCache: MutableMap<String, SnapshotFetch>? = null,
+        onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null
     ): WaybackBackfillResult {
         val failureLabel = when {
             failureCodes.contains("CDX_DIRECT_URL_ALREADY_QUERIED") ->
@@ -893,6 +910,8 @@ class WaybackPriceHistoryClient(
             stage = "DOMAIN_AVAILABILITY_FALLBACK",
             probeOlderCapture = true,
             onTrace = onTrace,
+            snapshotResultsCache = snapshotResultsCache,
+            onVerifiedQuotes = onVerifiedQuotes,
             knownProductTitlesById = knownProductTitlesById
         )
         emitWaybackTrace(
@@ -963,6 +982,8 @@ class WaybackPriceHistoryClient(
                     cdxStage = "CDX_ALTERNATE_PREFIX",
                     snapshotTimeoutSeconds = CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS,
                     onTrace = onTrace,
+                    snapshotResultsCache = snapshotResultsCache,
+                    onVerifiedQuotes = onVerifiedQuotes,
                     knownProductTitlesById = knownProductTitlesById
                 )
                 alternateResult = candidateResult
@@ -1076,6 +1097,8 @@ class WaybackPriceHistoryClient(
                     cdxStage = "CDX_DOMAIN",
                     snapshotTimeoutSeconds = CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS,
                     onTrace = onTrace,
+                    snapshotResultsCache = snapshotResultsCache,
+                    onVerifiedQuotes = onVerifiedQuotes,
                     knownProductTitlesById = knownProductTitlesById
                 )
                 domainDiscoveryResults += discovered
@@ -1355,7 +1378,9 @@ class WaybackPriceHistoryClient(
         stage: String,
         probeOlderCapture: Boolean = true,
         onTrace: ((WaybackTraceEvent) -> Unit)? = null,
-        knownProductTitlesById: Map<String, String> = emptyMap()
+        knownProductTitlesById: Map<String, String> = emptyMap(),
+        snapshotResultsCache: MutableMap<String, SnapshotFetch>? = null,
+        onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null
     ): WaybackBackfillResult {
         val urls = candidateUrls.asSequence()
             .filter(::isEligibleDirectUrl)
@@ -1608,13 +1633,15 @@ class WaybackPriceHistoryClient(
         val sampled = sampleCaptures(captures, maxSnapshots)
         val fetched = mutableListOf<SnapshotFetch>()
         for ((snapshotIndex, capture) in sampled.withIndex()) {
-            val snapshot = fetchAndVerifySnapshot(
+            val snapshot = fetchSnapshotOnce(
                 capture = capture,
                 expectedTitle = expectedTitle,
                 snapshotTimeoutSeconds = SNAPSHOT_CALL_TIMEOUT_SECONDS,
                 snapshotOrdinal = snapshotIndex + 1,
                 onTrace = onTrace,
-                knownProductTitlesById = knownProductTitlesById
+                knownProductTitlesById = knownProductTitlesById,
+                snapshotResultsCache = snapshotResultsCache,
+                onVerifiedQuotes = onVerifiedQuotes
             )
             fetched += snapshot
             if (snapshot.diagnosticCode == "WAYBACK_RATE_LIMITED") break
@@ -1730,7 +1757,7 @@ class WaybackPriceHistoryClient(
         val missingEurPrices = fetched.count { it.diagnosticCode == "ARCHIVE_EUR_PRICE_MISSING" }
         val consolidationDetail = buildString {
             append(
-                "Consolidación histórica: ${fetched.count { it.fetched }} HTML de Availability descargado(s), " +
+                "Consolidación histórica: ${fetched.count { it.fetched && !it.reused }} HTML de Availability descargado(s), " +
                     "${supplementalCdxChecked} HTML adicional(es) comprobado(s) desde CDX, " +
                     "${verifiedBeforeDedup.size} precio(s) verificado(s), ${duplicatesRemoved} duplicado(s) eliminado(s)."
             )
@@ -1775,7 +1802,7 @@ class WaybackPriceHistoryClient(
         return WaybackBackfillResult(
             quotes = quotes,
             capturesFound = maxOf(captures.size, supplementalCdxCaptures),
-            capturesChecked = fetched.count { it.fetched } + supplementalCdxChecked,
+            capturesChecked = fetched.count { it.fetched && !it.reused } + supplementalCdxChecked,
             available = successfulProbes > 0,
             requestFailed = quotes.isEmpty() && (failed || (anySnapshotFailed && successfulProbes == 0)),
             diagnosticCodes = diagnostics
@@ -1840,6 +1867,63 @@ class WaybackPriceHistoryClient(
             .build()
     }
 
+    internal fun snapshotCacheKey(capture: WaybackCapture): String =
+        capture.rawTimestamp + "|" + capture.originalUrl
+
+    private suspend fun fetchSnapshotOnce(
+        capture: WaybackCapture,
+        expectedTitle: String,
+        snapshotTimeoutSeconds: Long,
+        snapshotOrdinal: Int,
+        onTrace: ((WaybackTraceEvent) -> Unit)?,
+        knownProductTitlesById: Map<String, String>,
+        snapshotResultsCache: MutableMap<String, SnapshotFetch>?,
+        onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)?
+    ): SnapshotFetch {
+        val key = snapshotCacheKey(capture)
+        snapshotResultsCache?.get(key)?.let { cached ->
+            val step = if (snapshotOrdinal <= 1) 8 else 10
+            emitWaybackTrace(
+                onTrace, step, WaybackTraceStatus.SKIPPED,
+                "Captura ${capture.rawTimestamp} ya procesada en esta búsqueda; se reutiliza el resultado sin descargar el mismo HTML otra vez."
+            )
+            return cached.copy(reused = true)
+        }
+        val snapshot = fetchAndVerifySnapshot(
+            capture = capture,
+            expectedTitle = expectedTitle,
+            snapshotTimeoutSeconds = snapshotTimeoutSeconds,
+            snapshotOrdinal = snapshotOrdinal,
+            onTrace = onTrace,
+            knownProductTitlesById = knownProductTitlesById
+        )
+        snapshotResultsCache?.set(key, snapshot)
+        val verifiedQuotes = listOfNotNull(snapshot.quote) + snapshot.additionalQuotes
+        if (verifiedQuotes.isNotEmpty()) onVerifiedQuotes?.invoke(verifiedQuotes)
+        return snapshot
+    }
+
+    private class SnapshotRetryBlockedException(val diagnosticCode: String) :
+        IOException(diagnosticCode)
+
+    internal suspend fun <T> retrySnapshotDnsOnce(
+        request: suspend () -> T,
+        beforeRetry: suspend () -> Boolean
+    ): T {
+        var retried = false
+        while (true) {
+            try {
+                return request()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (dnsFailure: UnknownHostException) {
+                if (retried) throw dnsFailure
+                if (!beforeRetry()) throw SnapshotRetryBlockedException("WAYBACK_RATE_LIMITED")
+                retried = true
+            }
+        }
+    }
+
     private suspend fun fetchAndVerifySnapshot(
         capture: WaybackCapture,
         expectedTitle: String,
@@ -1873,7 +1957,13 @@ class WaybackPriceHistoryClient(
                 return@withPermit SnapshotFetch(false, null, gate)
             }
             try {
-                snapshotHttp.newCall(request).execute().use { response ->
+                retrySnapshotDnsOnce(
+                    request = { snapshotHttp.newCall(request).execute() },
+                    beforeRetry = {
+                        delay(SNAPSHOT_DNS_RETRY_DELAY_MS)
+                        awaitArchiveRequestTurn() == null
+                    }
+                ).use { response ->
                     val elapsed = ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(0L)
                     if (response.code == 429) {
                         activateRateLimit(response.header("Retry-After"), System.currentTimeMillis())
@@ -1955,6 +2045,14 @@ class WaybackPriceHistoryClient(
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } catch (blocked: SnapshotRetryBlockedException) {
+                emitWaybackTrace(
+                    onTrace, downloadStep, WaybackTraceStatus.SKIPPED,
+                    "Reintento DNS omitido porque la pausa global de Internet Archive está activa."
+                )
+                emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.SKIPPED, "No hubo HTML que evaluar.")
+                skipArchiveValidationTrace(onTrace, "El reintento quedó bloqueado por el control de ritmo.")
+                SnapshotFetch(false, null, blocked.diagnosticCode)
             } catch (failure: Exception) {
                 val code = classifyNetworkFailure("SNAPSHOT", failure)
                 val elapsed = ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(0L)
@@ -2872,7 +2970,9 @@ class WaybackPriceHistoryClient(
         cdxStage: String,
         snapshotTimeoutSeconds: Long = SNAPSHOT_CALL_TIMEOUT_SECONDS,
         onTrace: ((WaybackTraceEvent) -> Unit)? = null,
-        knownProductTitlesById: Map<String, String> = emptyMap()
+        knownProductTitlesById: Map<String, String> = emptyMap(),
+        snapshotResultsCache: MutableMap<String, SnapshotFetch>? = null,
+        onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null
     ): WaybackBackfillResult {
         emitWaybackTrace(onTrace, 4, WaybackTraceStatus.RUNNING,
             "$cdxStage: petición CDX preparada; URL completa omitida.")
@@ -3011,13 +3111,15 @@ class WaybackPriceHistoryClient(
         val sampled = sampleCaptures(captures, maxSnapshots)
         val fetched = mutableListOf<SnapshotFetch>()
         for ((snapshotIndex, capture) in sampled.withIndex()) {
-            val snapshot = fetchAndVerifySnapshot(
+            val snapshot = fetchSnapshotOnce(
                 capture = capture,
                 expectedTitle = expectedTitle,
                 snapshotTimeoutSeconds = snapshotTimeoutSeconds,
                 snapshotOrdinal = snapshotIndex + 1,
                 onTrace = onTrace,
-                knownProductTitlesById = knownProductTitlesById
+                knownProductTitlesById = knownProductTitlesById,
+                snapshotResultsCache = snapshotResultsCache,
+                onVerifiedQuotes = onVerifiedQuotes
             )
             fetched += snapshot
             if (snapshot.diagnosticCode == "WAYBACK_RATE_LIMITED") break
@@ -3090,7 +3192,7 @@ class WaybackPriceHistoryClient(
                 captures.isEmpty() -> WaybackTraceStatus.SKIPPED
                 else -> WaybackTraceStatus.FAILED
             },
-            "Consolidación histórica: ${fetched.count { it.fetched }} HTML descargado(s), ${verifiedQuotesBeforeDedup.size} precio(s) verificado(s), ${duplicatesRemoved} duplicado(s) eliminado(s).",
+            "Consolidación histórica: ${fetched.count { it.fetched && !it.reused }} HTML descargado(s), ${verifiedQuotesBeforeDedup.size} precio(s) verificado(s), ${duplicatesRemoved} duplicado(s) eliminado(s).",
             diagnosticStep = 18
         )
         val anySnapshotFailed = captures.isNotEmpty() && fetched.any { !it.fetched }
@@ -3111,7 +3213,7 @@ class WaybackPriceHistoryClient(
         return WaybackBackfillResult(
             quotes = quotes,
             capturesFound = captures.size,
-            capturesChecked = fetched.count { it.fetched },
+            capturesChecked = fetched.count { it.fetched && !it.reused },
             available = true,
             requestFailed = anySnapshotFailed,
             diagnosticCodes = diagnosticCodes
@@ -4718,7 +4820,8 @@ class WaybackPriceHistoryClient(
         val fetched: Boolean,
         val quote: ArchivedPriceQuote?,
         val diagnosticCode: String? = null,
-        val additionalQuotes: List<ArchivedPriceQuote> = emptyList()
+        val additionalQuotes: List<ArchivedPriceQuote> = emptyList(),
+        val reused: Boolean = false
     )
 
     internal data class WaybackCapture(
@@ -4798,6 +4901,7 @@ class WaybackPriceHistoryClient(
         private val GLOBAL_BACKFILL_MUTEX = Mutex()
         private const val MAX_CDX_BODY_BYTES = 256 * 1024
         private const val MAX_SNAPSHOT_BODY_BYTES = 2 * 1024 * 1024
+        private const val SNAPSHOT_DNS_RETRY_DELAY_MS = 250L
         const val DAY_MS = 24L * 60L * 60L * 1000L
         const val MIN_HISTORICAL_PRICE = 0.50
         const val MAX_HISTORICAL_PRICE = 10_000.0

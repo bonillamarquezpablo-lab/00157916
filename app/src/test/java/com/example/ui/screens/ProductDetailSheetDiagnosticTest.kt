@@ -24,6 +24,32 @@ class ProductDetailSheetDiagnosticTest {
     }
 
     @Test
+    fun latestNoPausePrecheckOverridesStaleHttp429CountdownOnCacheOnlyRetry() {
+        val staleStatus = "Internet Archive ha pedido una pausa temporal (HTTP 429). " +
+            "Mínimo no enviará más peticiones hasta aproximadamente las 20:05 (en unos 7 min)."
+        val rows = listOf(
+            WaybackDiagnosticEntry(
+                step = 4,
+                title = "Precontrol de pausa global y preparación de consulta",
+                status = WaybackTraceStatus.PASSED,
+                detail = "[19:51:31] Precontrol completado: no hay pausa global activa."
+            ),
+            WaybackDiagnosticEntry(
+                step = 5,
+                title = "Petición enviada al índice CDX",
+                status = WaybackTraceStatus.SKIPPED,
+                detail = "[19:51:31] No ejecutado: consulta CDX omitida por caché reciente."
+            )
+        )
+
+        val summary = buildWaybackDiagnosticSummary(staleStatus, rows)
+        assertTrue(summary.contains("no había una pausa global activa", ignoreCase = true))
+        assertTrue(summary.contains("intento anterior", ignoreCase = true))
+        assertFalse("A stale countdown must not be shown as a currently active pause",
+            summary.contains("en unos 7 min", ignoreCase = true))
+    }
+
+    @Test
     fun oldRateLimitTraceDoesNotClaimThatThePauseIsStillActiveWhenStatusShowsCache() {
         val status = "Estas consultas gratuitas ya se comprobaron recientemente. La caché evita repetir búsquedas completadas sin resultados útiles."
         val rows = listOf(

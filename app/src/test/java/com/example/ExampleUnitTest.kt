@@ -81,9 +81,22 @@ class ExampleUnitTest {
         val trackingDuplicate = first.copy(
             sourceUrl = "https://www.elcorteingles.es/electronica/redmi-note-15-pro/?gclid=click-two&utm_source=shopping"
         )
-        val groups = groupOnlineShoppingResults(listOf(first, trackingDuplicate))
+        val sameSellerDifferentPath = first.copy(
+            sourceUrl = "https://www.elcorteingles.es/moviles/xiaomi-redmi-note-15-pro-8gb-256gb-negro/"
+        )
+        val otherSeller = first.copy(
+            storeName = "Amazon España",
+            sourceUrl = "https://www.amazon.es/dp/example-redmi-note-15-pro"
+        )
+        val groups = groupOnlineShoppingResults(listOf(first, trackingDuplicate, sameSellerDifferentPath))
         assertEquals("One exact product at the same shop and price must appear once", 1, groups.size)
-        assertEquals("Tracking-only URL changes must not duplicate the same offer", 1, groups.single().offers.size)
+        assertEquals(
+            "Tracking changes and alternate same-shop product URLs must not duplicate one offer",
+            1,
+            groups.single().offers.size
+        )
+        val twoSellers = groupOnlineShoppingResults(listOf(first, sameSellerDifferentPath, otherSeller)).single()
+        assertEquals("The same price at a different seller remains a second offer", 2, twoSellers.offers.size)
 
         val titanium = first.copy(
             title = "Xiaomi Redmi Note 15 Pro 8GB/256GB Titanio",

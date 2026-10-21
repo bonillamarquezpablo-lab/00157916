@@ -4001,6 +4001,18 @@ class WaybackPriceHistoryClientTest {
         assertTrue(label.contains("tienda www.pccomponentes.com"))
         assertFalse("Diagnostic labels must not leak the product path or query", label.contains("/producto/privado"))
         assertFalse("Diagnostic labels must not leak the SKU query parameter", label.contains("sku=12345"))
+
+        val anotherRouteLabel = client.snapshotDiagnosticLabel(
+            capture = capture.copy(originalUrl = "https://www.pccomponentes.com/otro-producto?sku=67890"),
+            ordinal = 5,
+            total = 12,
+            sourceStage = "CDX_ALTERNATE_PREFIX"
+        )
+        val labelId = Regex("""id ([a-j]{8})""").find(label)!!.groupValues[1]
+        val otherLabelId = Regex("""id ([a-j]{8})""").find(anotherRouteLabel)!!.groupValues[1]
+        assertFalse("Capture IDs must distinguish two URLs even when their dates match", labelId == otherLabelId)
+        assertTrue(anotherRouteLabel.contains("ruta CDX_ALTERNATE_PREFIX"))
+        assertFalse(anotherRouteLabel.contains("67890"))
     }
 
     @Test

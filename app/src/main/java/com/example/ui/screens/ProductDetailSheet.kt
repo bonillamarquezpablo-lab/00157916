@@ -78,6 +78,24 @@ internal fun buildWaybackDiagnosticSummary(
     steps: List<WaybackDiagnosticEntry>
 ): String {
     val statusText = freeHistoryStatus.orEmpty().trim()
+    val precheck = steps.lastOrNull {
+        it.step == 4 && it.status in setOf(WaybackTraceStatus.PASSED, WaybackTraceStatus.SKIPPED)
+    }
+    val precheckConfirmsNoPause = precheck?.status == WaybackTraceStatus.PASSED &&
+        precheck.detail.contains("no hay pausa global activa", ignoreCase = true)
+    val precheckConfirmsPause = precheck?.status == WaybackTraceStatus.SKIPPED &&
+        precheck.detail.contains("pausa global", ignoreCase = true)
+    // Status text can survive a cache-only retry. Distinguish old 429 details from a rate limit
+    // recorded by the current diagnostic's own request/capture rows.
+    val currentTraceRateLimit = steps.any { entry ->
+        entry.step != 4 && (
+            entry.detail.contains("HTTP 429", ignoreCase = true) ||
+                entry.detail.contains("WAYBACK_RATE_LIMITED", ignoreCase = true) ||
+                (entry.detail.contains("pausa global", ignoreCase = true) &&
+                    (entry.detail.contains("bloqueó", ignoreCase = true) ||
+                        entry.detail.contains("activa", ignoreCase = true)))
+        )
+    }
     val hasActivePauseCountdown =
         statusText.contains("HTTP 429", ignoreCase = true) &&
             statusText.contains("hasta aproximadamente", ignoreCase = true) &&
@@ -99,25 +117,50 @@ internal fun buildWaybackDiagnosticSummary(
     }
 
     return when {
+        // If this run's current precheck says the pause is gone and this run has not seen a
+        // fresh 429, don't show a countdown copied from an earlier attempt.
+        precheckConfirmsNoPause && !currentTraceRateLimit -> {
+            val currentStatus = statusText.takeIf {
+                it.isNotBlank() && !hasActivePauseCountdown
+            } ?: "La pausa global no está activa en esta consulta."
+            if (rateLimitReported) {
+                "El precontrol de esta consulta confirma que no había una pausa global activa. " +
+                    "El HTTP 429 del resumen pertenece a un intento anterior; no significa que la pausa siga activa. " +
+                    "Estado actual: " + currentStatus
+            } else {
+                "El precontrol confirma que no hay pausa global activa. Estado actual: " + currentStatus
+            }
+        }
         hasActivePauseCountdown -> statusText
+        precheckConfirmsPause -> statusText.takeIf { it.isNotBlank() }
+            ?: "El precontrol confirmó que la pausa global está activa; no se enviaron peticiones."
+        currentTraceRateLimit -> {
+            val cause = firstFailedCapture?.let {
+                " Fallo individual registrado: " + it.title + "."
+            }.orEmpty()
+            val currentStatus = statusText.takeIf { it.isNotBlank() }
+                ?.let { " Estado actual: " + it }
+                ?: " Este informe no contiene una hora de reanudación confirmada."
+            "Se recibió HTTP 429 durante esta búsqueda, pero el estado actual no confirma que la pausa siga activa." + cause + currentStatus
+        }
         activeStep != null -> if (activeStep.isCaptureDetail) {
-            "Captura en curso: ${activeStep.title}"
+            "Captura en curso: " + activeStep.title
         } else {
-            "Fase en curso: ${activeStep.step}. ${activeStep.title}"
+            "Fase en curso: " + activeStep.step + ". " + activeStep.title
         }
         rateLimitReported -> {
             val cause = firstFailedCapture?.let {
-                " Fallo individual registrado: ${it.title}."
+                " Fallo individual registrado: " + it.title + "."
             }.orEmpty()
             val currentStatus = statusText.takeIf { it.isNotBlank() }
-                ?.let { " Estado actual: $it" }
+                ?.let { " Estado actual: " + it }
                 ?: " Este informe no contiene una hora de reanudación confirmada."
-            "Se recibió HTTP 429 durante esta búsqueda, pero el estado actual no confirma que la pausa siga activa.$cause$currentStatus"
+            "Se recibió HTTP 429 durante esta búsqueda, pero el estado actual no confirma que la pausa siga activa." + cause + currentStatus
         }
         firstFailedStep != null -> if (firstFailedStep.isCaptureDetail) {
-            "Fallo de captura: ${firstFailedStep.title}"
+            "Fallo de captura: " + firstFailedStep.title
         } else {
-            "Primer fallo detectado: paso ${firstFailedStep.step}. ${firstFailedStep.title}"
+            "Primer fallo detectado: paso " + firstFailedStep.step + ". " + firstFailedStep.title
         }
         steps.any { it.status == WaybackTraceStatus.PASSED } ->
             "No hay una fase marcada como fallida en este momento."

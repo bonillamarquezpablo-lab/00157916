@@ -1014,13 +1014,28 @@ fun groupOnlineShoppingResults(
 ): List<OnlineProductGroup> =
     results.groupBy { onlineProductIdentityKey(it.title) }
         .mapNotNull { (identityKey, offers) ->
-            val sortedOffers = offers.distinctBy {
-                listOf(
-                    normalizeOnlineSearchText(it.storeName),
-                    it.price.toString(),
-                    onlineOfferDeduplicationUrlKey(it.sourceUrl)
-                ).joinToString("|")
-            }.sortedBy { it.price }
+            val sortedOffers = offers
+                // Prefer a usable/direct purchase destination when duplicates came from more
+                // than one provider URL; never keep a Shopping redirect just because it arrived first.
+                .sortedWith(
+                    compareBy<SerpApiShoppingResult> { it.isGoogleShoppingProductLink }
+                        .thenBy { it.sourceUrl.length }
+                        .thenBy { it.sourceUrl.lowercase(Locale.ROOT) }
+                )
+                // This group already represents one exact model/edition/memory/colour identity.
+                // Same seller + same cent price at an alternate URL is duplicate evidence, not
+                // another offer card. Different sellers, prices and variants remain separate.
+                .distinctBy { offer ->
+                    val sellerKey = Store.findKnownByName(offer.storeName, offer.sourceUrl)?.id
+                        ?: normalizeOnlineSearchText(offer.storeName)
+                    val priceKey = if (offer.price.isFinite()) {
+                        String.format(Locale.ROOT, "%.2f", offer.price)
+                    } else {
+                        offer.price.toString()
+                    }
+                    "$sellerKey|$priceKey"
+                }
+                .sortedBy { it.price }
             if (sortedOffers.isEmpty()) null
             else {
                 val displayTitle = sortedOffers

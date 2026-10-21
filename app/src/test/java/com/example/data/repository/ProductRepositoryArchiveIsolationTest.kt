@@ -298,6 +298,36 @@ class ProductRepositoryArchiveIsolationTest {
                 database.priceObservationDao().observeVerifiedHistory(productId).first()
                     .count { it.sourceUrl == validSnapshotUrl }
             )
+
+            val sevenYearsAgo = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT)
+                .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                .parse("20191001000000")!!
+                .time
+            val sevenYearSnapshotUrl =
+                "https://web.archive.org/web/20191001000000id_/https://shop.example/product/anker-prime"
+            val sevenYearQuote = ArchivedPriceQuote(
+                observedAt = sevenYearsAgo,
+                price = 19.99,
+                currency = "EUR",
+                productTitle = title,
+                originalUrl = "https://shop.example/product/anker-prime",
+                snapshotUrl = sevenYearSnapshotUrl
+            )
+            assertEquals(
+                "a valid archive capture from seven years ago is within the eight-year persistence window",
+                1,
+                repository.recordArchivedPriceHistory(
+                    expectedTitle = title,
+                    originalUrl = "https://shop.example/product/anker-prime",
+                    storeName = "Tienda de prueba",
+                    quotes = listOf(sevenYearQuote)
+                )
+            )
+            assertTrue(
+                "the seven-year capture must be present in verified historical observations",
+                database.priceObservationDao().observeVerifiedHistory(productId).first()
+                    .any { it.sourceUrl == sevenYearSnapshotUrl }
+            )
         } finally {
             database.close()
         }

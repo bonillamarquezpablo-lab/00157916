@@ -107,6 +107,11 @@ internal fun mergeWaybackDiagnosticStatus(
     diagnosticStep: Int? = null,
     detail: String = ""
 ): WaybackTraceStatus = when {
+    // Capture rows (download and barrier evaluation) represent several individually labelled
+    // captures. If any one fails, keep the aggregate row red even if another capture succeeded;
+    // the per-capture detail lines show exactly which dates succeeded and which DNS/download failed.
+    diagnosticStep in 11..14 && incoming == WaybackTraceStatus.FAILED ->
+        WaybackTraceStatus.FAILED
     // Stages 6 and 7 describe recovery, not mere network reachability. A final explicit
     // no-capture result must override an earlier green sub-attempt so the UI cannot display
     // "superado" when no historical captures were recovered.
@@ -244,6 +249,9 @@ data class TrackerUiState(
 
 class PriceTrackerViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
+        // Keep all sampled snapshot labels (ordinal/date/route/host) visible across overlapping
+        // exact, prefix and merchant-domain probes. Ordinary diagnostic stages remain concise.
+        const val MAX_CAPTURE_DIAGNOSTIC_LINES = 120
         const val TRACKED_REFRESH_COOLDOWN_MS = 24L * 60L * 60L * 1000L
         const val MAX_TRACKED_REFRESH_PER_TAP = 10
         const val MAX_ARCHIVE_PAGES_PER_SEARCH = 3
@@ -402,7 +410,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 detailLine.isBlank() || redundantSkip -> retainedOldDetail
                 retainedOldDetail.isBlank() -> detailLine
                 oldDetailLines.any { it == detailLine } -> retainedOldDetail
-                else -> (oldDetailLines + detailLine).takeLast(5).joinToString("\n")
+                else -> (oldDetailLines + detailLine)
+                    .takeLast(if (step in 11..14) MAX_CAPTURE_DIAGNOSTIC_LINES else 5)
+                    .joinToString("\n")
             }
             rows[index] = old.copy(
                 status = mergedStatus,

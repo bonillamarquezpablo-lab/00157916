@@ -106,6 +106,17 @@ class ArchivedVariantPersistenceTest {
                     targetProductId = productId
                 )
             )
+            val savedObservation = database.priceObservationDao()
+                .observeVerifiedHistory(productId).first().single()
+            assertEquals(
+                "Room must keep the canonical selected product title after URL validation, not the generic HTML heading",
+                title,
+                savedObservation.productTitle
+            )
+            assertTrue(
+                "The reason for accepting a generic archived heading must be traceable",
+                savedObservation.verificationNote.orEmpty().contains("URL de captura confirmó la variante exacta")
+            )
 
             val restored = withTimeout(10_000L) {
                 repository.allProductsStream.first { rows ->

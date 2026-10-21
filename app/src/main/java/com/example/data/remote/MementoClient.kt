@@ -252,12 +252,12 @@ class MementoClient(
                 !uri.host.equals(ARCHIVE_HOST, ignoreCase = true) ||
                 uri.userInfo != null
             ) continue
-            val rawTimestamp = Regex("""^/wayback/(\d{14})/""")
+            val rawTimestamp = Regex("""^/wayback/(\d{14})(?:id_)?/""")
                 .find(uri.rawPath.orEmpty())?.groupValues?.getOrNull(1) ?: continue
             val timestamp = runCatching { formatter.parse(rawTimestamp)?.time }.getOrNull() ?: continue
             if (timestamp !in earliest..now) continue
 
-            val targetInLink = Regex("""^https://arquivo\.pt/wayback/\d{14}/(https://.+)$""")
+            val targetInLink = Regex("""^https://arquivo\.pt/wayback/(\d{14})(?:id_)?/(https://.+)$""")
                 .find(secureLink)?.groupValues?.getOrNull(1) ?: continue
             if (!sameOriginalUrl(targetInLink, originalUrl)) continue
             output += MementoCapture(rawTimestamp, timestamp, secureLink, target.toString())

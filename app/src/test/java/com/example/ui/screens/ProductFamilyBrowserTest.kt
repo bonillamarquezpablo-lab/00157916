@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import com.example.data.remote.SerpApiShoppingResult
+import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.groupOnlineShoppingResults
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -86,6 +87,18 @@ class ProductFamilyBrowserTest {
         assertEquals(0, pro.storeCount)
         assertEquals("PlayStation 5 Pro", pro.label)
         assertEquals("PlayStation 5 Pro", pro.searchQuery)
+    }
+
+    @Test
+    fun phoneColourAndCapacityRemainDistinctProductIdentities() {
+        val yellow = onlineProductIdentityKey("Apple iPhone 15 256 GB Amarillo")
+        val translatedYellow = onlineProductIdentityKey("Apple iPhone 15 256GB Yellow")
+        val black = onlineProductIdentityKey("Apple iPhone 15 256GB Negro")
+        val plus = onlineProductIdentityKey("Apple iPhone 15 Plus 256GB Amarillo")
+
+        assertEquals("Colour aliases should normalize to one product identity", yellow, translatedYellow)
+        assertTrue("Different colours are separate purchasable variants", yellow != black)
+        assertTrue("Base and Plus editions are separate variants", yellow != plus)
     }
 
     @Test

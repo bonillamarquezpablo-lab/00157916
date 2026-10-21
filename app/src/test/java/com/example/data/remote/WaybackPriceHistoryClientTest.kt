@@ -2204,6 +2204,21 @@ class WaybackPriceHistoryClientTest {
         assertTrue("The relaxed title match must be explicitly marked as URL-verified",
             quote.variantIdentityConfirmedByUrl)
 
+        val colourSpecificUrl =
+            "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo"
+        val colourSpecificQuote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "Apple iPhone 15 Plus 256GB Amarillo",
+            originalUrl = colourSpecificUrl,
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/$colourSpecificUrl",
+            observedAt = 1_735_732_800_000L
+        )
+        assertNotNull(
+            "A generic archived heading is usable when the captured URL proves both capacity and colour",
+            colourSpecificQuote
+        )
+        assertTrue(colourSpecificQuote!!.variantIdentityConfirmedByUrl)
+
         val genericUrl = "https://www.pccomponentes.com/apple-iphone-15-plus"
         val genericSnapshot = "https://web.archive.org/web/20250101120000id_/$genericUrl"
         assertNull(

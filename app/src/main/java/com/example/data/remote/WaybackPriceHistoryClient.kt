@@ -1650,6 +1650,8 @@ class WaybackPriceHistoryClient(
                 expectedTitle = expectedTitle,
                 snapshotTimeoutSeconds = SNAPSHOT_CALL_TIMEOUT_SECONDS,
                 snapshotOrdinal = snapshotIndex + 1,
+                snapshotTotal = sampled.size,
+                captureSourceStage = stage,
                 onTrace = onTrace,
                 knownProductTitlesById = knownProductTitlesById,
                 snapshotResultsCache = snapshotResultsCache,

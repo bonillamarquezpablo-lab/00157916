@@ -85,8 +85,13 @@ fun MarketScreen(
     var showSortMenu by remember { mutableStateOf(false) }
     var showStoreMenu by remember { mutableStateOf(false) }
     val verifiedProductCount = remember(products) { products.count { it.isPriceVerified } }
-    val savedFamilies = remember(products) { buildSavedProductFamilyBuckets(products) }
-    var collapsedFamilyKeys by remember { mutableStateOf(emptySet<String>()) }
+    val savedFamilies = remember(products, uiState.sortOption) {
+        buildSavedProductFamilyBuckets(products, uiState.sortOption)
+    }
+    // Repeated products stay tucked away until the user chooses a family, version, then capacity.
+    var expandedFamilyKeys by remember { mutableStateOf(emptySet<String>()) }
+    var expandedVariantKeys by remember { mutableStateOf(emptySet<String>()) }
+    var expandedStorageKeys by remember { mutableStateOf(emptySet<String>()) }
 
     // Collapse marketplace-generated aliases (for example AliExpress-239640258)
     // into one canonical display/filter option without deleting any underlying seller records.
@@ -507,7 +512,7 @@ fun MarketScreen(
             }
         }
 
-        // Product Cards
+        // Product cards are presented as a compact drill-down: family -> version -> capacity -> SKU.
         if (products.isEmpty()) {
             item {
                 Box(
@@ -543,6 +548,8 @@ fun MarketScreen(
                         )
                     }
                 } else {
+                    val familyExpanded = family.key in expandedFamilyKeys
+                    val familyPrefix = family.key + "::"
                     Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
                         Row(
                             modifier = Modifier
@@ -550,10 +557,12 @@ fun MarketScreen(
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.50f))
                                 .clickable {
-                                    collapsedFamilyKeys = if (family.key in collapsedFamilyKeys) {
-                                        collapsedFamilyKeys - family.key
+                                    if (familyExpanded) {
+                                        expandedFamilyKeys = expandedFamilyKeys - family.key
+                                        expandedVariantKeys = expandedVariantKeys.filterNot { it.startsWith(familyPrefix) }
+                                        expandedStorageKeys = expandedStorageKeys.filterNot { it.startsWith(familyPrefix) }
                                     } else {
-                                        collapsedFamilyKeys + family.key
+                                        expandedFamilyKeys = expandedFamilyKeys + family.key
                                     }
                                 }
                                 .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -573,50 +582,102 @@ fun MarketScreen(
                                 )
                             }
                             Text(
-                                text = if (family.key in collapsedFamilyKeys) "Mostrar ▾" else "Ocultar ▴",
+                                text = if (familyExpanded) "Ocultar ▴" else "Elegir versión ▾",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
-                        if (family.key !in collapsedFamilyKeys) {
+                        if (familyExpanded) {
                             family.variants.forEach { variant ->
-                                Column(modifier = Modifier.padding(start = 8.dp, top = 8.dp)) {
-                                    Text(
-                                        text = variant.label,
-                                        modifier = Modifier.padding(start = 6.dp, bottom = 4.dp),
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 14.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    variant.storages.forEach { storage ->
-                                        Column(modifier = Modifier.padding(start = 8.dp, bottom = 6.dp)) {
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(start = 4.dp, bottom = 4.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = storage.label,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                                Text(
-                                                    text = "${storage.products.size} ficha(s)",
-                                                    fontSize = 11.sp,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
+                                val variantExpansionKey = "${family.key}::${variant.key}"
+                                val variantExpanded = variantExpansionKey in expandedVariantKeys
+                                Column(modifier = Modifier.padding(start = 8.dp, top = 7.dp)) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                                            .clickable {
+                                                if (variantExpanded) {
+                                                    expandedVariantKeys = expandedVariantKeys - variantExpansionKey
+                                                    expandedStorageKeys = expandedStorageKeys.filterNot {
+                                                        it.startsWith("$variantExpansionKey::")
+                                                    }
+                                                } else {
+                                                    expandedVariantKeys = expandedVariantKeys
+                                                        .filterNot { it.startsWith(familyPrefix) } + variantExpansionKey
+                                                    expandedStorageKeys = expandedStorageKeys
+                                                        .filterNot { it.startsWith(familyPrefix) }
+                                                }
                                             }
-                                            storage.products.forEach { product ->
-                                                Box(modifier = Modifier.padding(start = 4.dp, bottom = 5.dp)) {
-                                                    ProductCard(
-                                                        product = product,
-                                                        onClick = { onProductClick(product) },
-                                                        onToggleTrack = { onToggleTrack(product) }
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = variant.label,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 14.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = if (variant.storages.size == 1) "1 capacidad disponible" else "${variant.storages.size} capacidades disponibles",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Text(
+                                            text = if (variantExpanded) "Ocultar ▴" else "Elegir capacidad ▾",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                    if (variantExpanded) {
+                                        variant.storages.forEach { storage ->
+                                            val storageExpansionKey = "$variantExpansionKey::${storage.label}"
+                                            val storageExpanded = storageExpansionKey in expandedStorageKeys
+                                            Column(modifier = Modifier.padding(start = 8.dp, top = 5.dp, bottom = 3.dp)) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(9.dp))
+                                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f))
+                                                        .clickable {
+                                                            if (storageExpanded) {
+                                                                expandedStorageKeys = expandedStorageKeys - storageExpansionKey
+                                                            } else {
+                                                                expandedStorageKeys = expandedStorageKeys
+                                                                    .filterNot { it.startsWith("$variantExpansionKey::") } + storageExpansionKey
+                                                            }
+                                                        }
+                                                        .padding(horizontal = 10.dp, vertical = 9.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        text = storage.label,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                        modifier = Modifier.weight(1f)
                                                     )
+                                                    Text(
+                                                        text = "${storage.products.size} ficha(s)  ${if (storageExpanded) "▴" else "▾"}",
+                                                        fontSize = 11.sp,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                }
+                                                if (storageExpanded) {
+                                                    storage.products.forEach { product ->
+                                                        Box(modifier = Modifier.padding(start = 4.dp, top = 5.dp, bottom = 3.dp)) {
+                                                            ProductCard(
+                                                                product = product,
+                                                                onClick = { onProductClick(product) },
+                                                                onToggleTrack = { onToggleTrack(product) }
+                                                            )
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }

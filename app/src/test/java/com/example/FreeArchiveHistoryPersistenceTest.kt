@@ -1169,4 +1169,103 @@ class FreeArchiveHistoryPersistenceTest {
         }
     }
 
+
+    @Test
+    fun archivePersistenceAcceptsOlderCapturesWithinEightYearLookupWindow() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        val productId = "anker-eight-year-history"
+        val title = "Anker Prime 27K Power Bank"
+        val originalUrl = "https://www.pccomponentes.com/anker-prime-27k"
+        val formatter = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+
+        try {
+            database.productDao().insert(
+                ProductEntity(
+                    id = productId,
+                    title = title,
+                    brand = "Anker",
+                    category = "HOME_APPLIANCES",
+                    currentPrice = 499.99,
+                    athMinPrice = 499.99,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "PcComponentes",
+                    athMaxPrice = 499.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "pccomponentes",
+                    storeUrl = originalUrl,
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+
+            fun quoteFromDaysAgo(days: Long): ArchivedPriceQuote {
+                val approximateTimestamp = System.currentTimeMillis() -
+                    days * 24L * 60L * 60L * 1000L
+                val rawTimestamp = formatter.format(Date(approximateTimestamp))
+                val exactTimestamp = formatter.parse(rawTimestamp)!!.time
+                return ArchivedPriceQuote(
+                    observedAt = exactTimestamp,
+                    price = 89.99,
+                    currency = "EUR",
+                    productTitle = title,
+                    originalUrl = originalUrl,
+                    snapshotUrl = "https://web.archive.org/web/${rawTimestamp}id_/${originalUrl}"
+                )
+            }
+
+            val sixYearsNineMonthsOld = quoteFromDaysAgo(2_500L)
+            assertEquals(
+                "A verified archive quote inside the configured 2,920-day lookup window must persist",
+                1,
+                repository.recordArchivedPriceHistory(
+                    expectedTitle = title,
+                    originalUrl = originalUrl,
+                    storeName = "PcComponentes",
+                    quotes = listOf(sixYearsNineMonthsOld),
+                    targetProductId = productId
+                )
+            )
+
+            val outsideEightYears = quoteFromDaysAgo(2_950L)
+            assertEquals(
+                "A capture older than the configured eight-year window must still be rejected",
+                0,
+                repository.recordArchivedPriceHistory(
+                    expectedTitle = title,
+                    originalUrl = originalUrl,
+                    storeName = "PcComponentes",
+                    quotes = listOf(outsideEightYears),
+                    targetProductId = productId
+                )
+            )
+
+            val restored = withTimeout(10_000L) {
+                repository.allProductsStream.first { rows ->
+                    rows.any { it.id == productId && it.priceHistory.any { point -> point.isArchiveEvidence } }
+                }.first { it.id == productId }
+            }
+            assertEquals("Only the in-window historical capture should be visible", 1,
+                restored.priceHistory.count { it.isArchiveEvidence })
+            assertEquals(sixYearsNineMonthsOld.observedAt,
+                restored.priceHistory.single { it.isArchiveEvidence }.timestamp)
+        } finally {
+            database.close()
+        }
+    }
+
 }

@@ -474,7 +474,7 @@ class ProductRepository(
         val match = when (host) {
             "web.archive.org" -> Regex("""^https://web\.archive\.org/web/(\d{14})id_/(https://.+)$""")
                 .find(snapshotUrl)
-            "arquivo.pt" -> Regex("""^https://arquivo\.pt/wayback/(\d{14})/(https://.+)$""")
+            "arquivo.pt" -> Regex("""^https://arquivo\.pt/wayback/(\d{14})(?:id_)?/(https://.+)$""")
                 .find(snapshotUrl)
             else -> null
         } ?: return null

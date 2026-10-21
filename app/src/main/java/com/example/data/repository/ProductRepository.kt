@@ -885,7 +885,10 @@ class ProductRepository(
                 quote.observedAt < earliestAllowed ||
                 quote.observedAt >= now ||
                 quote.productTitle.isBlank() ||
-                onlineProductIdentityKey(quote.productTitle) != identity ||
+                (
+                    onlineProductIdentityKey(quote.productTitle) != identity &&
+                        !quote.variantIdentityConfirmedByUrl
+                ) ||
                 !isEligibleHistoryTitle(quote.productTitle) ||
                 isPromotionalBulkListing(quote.productTitle, "") ||
                 !isPlausibleHistoryPrice(quote.productTitle, quote.price)

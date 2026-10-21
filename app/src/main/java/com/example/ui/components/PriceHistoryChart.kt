@@ -251,13 +251,14 @@ fun PriceHistoryChart(
             .padding(14.dp)
             .testTag("price_history_chart_container")
     ) {
-        // Chart Header
-        Row(
+        // Keep the title on a full-width line and put the metric chips in their own
+        // horizontally scrollable row. A single Row for both title and long metrics gave the
+        // metrics almost zero width on portrait sheets, wrapping every character vertically.
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Column {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = when (selectedSeries) {
                         HistoryEvidenceSeries.LIVE -> "Evolución del precio observado"
@@ -281,44 +282,34 @@ fun PriceHistoryChart(
             }
 
             // A single quote is shown as a count, never dressed up as a historical minimum.
-            if (filteredPoints.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
+            if (filteredPoints.isNotEmpty()) {
+                Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(
-                            (if (historySummary.minimumObservedPoint != null) Color(0xFF10B981)
-                            else MaterialTheme.colorScheme.outline).copy(alpha = 0.15f)
-                        )
-                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val observedMinimum = historySummary.minimumObservedPoint
-                    Text(
-                        text = observedMinimum?.let {
-                            "Mín. del rango: ${String.format("%.2f", it.price)} €"
-                        } ?: "${historySummary.observationCount} observación${if (historySummary.observationCount == 1) "" else "es"}",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (observedMinimum != null) Color(0xFF059669)
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                if (selectedSeries == HistoryEvidenceSeries.LIVE) {
-                    Spacer(modifier = Modifier.width(6.dp))
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                            .background(
+                                (if (historySummary.minimumObservedPoint != null) Color(0xFF10B981)
+                                else MaterialTheme.colorScheme.outline).copy(alpha = 0.15f)
+                            )
                             .padding(horizontal = 6.dp, vertical = 3.dp)
                     ) {
+                        val observedMinimum = historySummary.minimumObservedPoint
                         Text(
-                            text = "Media 90 d: ${valid90dAverage?.let { String.format("%.2f", it) + " €" } ?: "—"}",
+                            text = observedMinimum?.let {
+                                "Mín. del rango: ${String.format("%.2f", it.price)} €"
+                            } ?: "${historySummary.observationCount} observación${if (historySummary.observationCount == 1) "" else "es"}",
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            fontWeight = FontWeight.Bold,
+                            color = if (observedMinimum != null) Color(0xFF059669)
+                                else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                } else {
-                    Spacer(modifier = Modifier.width(6.dp))
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
@@ -326,7 +317,11 @@ fun PriceHistoryChart(
                             .padding(horizontal = 6.dp, vertical = 3.dp)
                     ) {
                         Text(
-                            text = "Media histórica externa: ${filteredPoints.map { it.price }.average().takeIf { filteredPoints.isNotEmpty() }?.let { String.format("%.2f", it) + " €" } ?: "—"}",
+                            text = if (selectedSeries == HistoryEvidenceSeries.LIVE) {
+                                "Media 90 d: ${valid90dAverage?.let { String.format("%.2f", it) + " €" } ?: "—"}"
+                            } else {
+                                "Media histórica externa: ${filteredPoints.map { it.price }.average().let { String.format("%.2f", it) + " €" }}"
+                            },
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -335,7 +330,6 @@ fun PriceHistoryChart(
                 }
             }
         }
-
         if (availableSeries.size > 1) {
             Row(
                 modifier = Modifier

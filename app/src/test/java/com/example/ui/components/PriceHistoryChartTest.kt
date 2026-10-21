@@ -54,7 +54,11 @@ class PriceHistoryChartTest {
         composeRule.setContent {
             MaterialTheme {
                 PriceHistoryChart(
-                    priceHistory = listOf(live),
+                    // Two live observations preserve the explicit live-first selector behavior.
+                    priceHistory = listOf(
+                        live.copy(timestamp = now - 10L * 24L * 60L * 60L * 1000L),
+                        live
+                    ),
                     avg90dPrice = 0.0,
                     archiveHistory = archives
                 )
@@ -68,6 +72,41 @@ class PriceHistoryChartTest {
         composeRule.onNodeWithText(
             "Capturas externas de Internet Archive; no son ofertas actuales."
         ).assertIsDisplayed()
+    }
+
+    @Test
+    fun archiveSeriesIsSelectedByDefaultWhenOnlyOneLivePointExists() {
+        val now = System.currentTimeMillis()
+        val live = PricePoint(
+            timestamp = now,
+            dateLabel = "hoy",
+            price = 859.93,
+            storeName = "PcComponentes",
+            sourceUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb",
+            evidenceType = "live"
+        )
+        val archived = PricePoint(
+            timestamp = now - 90L * 24L * 60L * 60L * 1000L,
+            dateLabel = "hace 90 días",
+            price = 799.99,
+            storeName = "PcComponentes",
+            sourceUrl = "https://web.archive.org/web/20260701000000id_/https://www.pccomponentes.com/apple-iphone-15-plus-256gb",
+            evidenceType = "archive"
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                PriceHistoryChart(
+                    priceHistory = listOf(live),
+                    avg90dPrice = 0.0,
+                    archiveHistory = listOf(archived)
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Histórico externo · Wayback").assertIsDisplayed()
+        composeRule.onNodeWithText("Mín. del rango:", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("price_history_chart_container").assertIsDisplayed()
     }
 
     @Test

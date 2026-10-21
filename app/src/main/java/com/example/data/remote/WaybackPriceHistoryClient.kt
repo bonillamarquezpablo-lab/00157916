@@ -87,6 +87,24 @@ internal fun shouldSkipDomainFallbackAfterSnapshotTimeout(
         !result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
 }
 
+/** Common UTC boundary for eight-calendar-year discovery, archive fallbacks and local persistence. */
+internal fun archiveHistoryWindowStartTimestampUtc(now: Long, lookbackDays: Int): Long {
+    val safeNow = now.coerceAtLeast(0L)
+    if (lookbackDays >= WaybackPriceHistoryClient.DEFAULT_LOOKBACK_DAYS) {
+        val calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT).apply {
+            timeInMillis = safeNow
+            add(Calendar.YEAR, -8)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        return calendar.timeInMillis.coerceAtLeast(0L)
+    }
+    return (safeNow - lookbackDays.coerceAtLeast(1).toLong() * WaybackPriceHistoryClient.DAY_MS)
+        .coerceAtLeast(0L)
+}
+
 enum class WaybackTraceStatus { PENDING, RUNNING, PASSED, FAILED, SKIPPED }
 
 /** Local-only event; complete URLs, headers, API keys and HTML are deliberately omitted. */
@@ -1884,26 +1902,8 @@ class WaybackPriceHistoryClient(
     internal fun snapshotCacheKey(capture: WaybackCapture): String =
         capture.rawTimestamp + "|" + capture.originalUrl
 
-    /**
-     * The eight-year window is calendar-based, not a fixed 2,920-day approximation.
-     * Start at midnight UTC on the boundary date so captures earlier on that date are not
-     * accidentally rejected by comparing against the current time-of-day eight years earlier.
-     */
-    internal fun historyWindowStartTimestamp(now: Long, lookbackDays: Int): Long {
-        val safeNow = now.coerceAtLeast(0L)
-        if (lookbackDays >= DEFAULT_LOOKBACK_DAYS) {
-            val calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT).apply {
-                timeInMillis = safeNow
-                add(Calendar.YEAR, -8)
-                set(Calendar.HOUR_OF_DAY, 0)
-                set(Calendar.MINUTE, 0)
-                set(Calendar.SECOND, 0)
-                set(Calendar.MILLISECOND, 0)
-            }
-            return calendar.timeInMillis.coerceAtLeast(0L)
-        }
-        return (safeNow - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
-    }
+    internal fun historyWindowStartTimestamp(now: Long, lookbackDays: Int): Long =
+        archiveHistoryWindowStartTimestampUtc(now, lookbackDays)
 
     /** Stable, privacy-safe identifier for one archived page fetch in the on-device trace. */
     internal fun snapshotDiagnosticLabel(
@@ -4995,7 +4995,6 @@ class WaybackPriceHistoryClient(
         // Used only by historical backfill, never by the primary shopping search.
         private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 7L
         private const val MAX_DOMAIN_INDEX_ROWS = 20
-        private const val DOMAIN_LOOKBACK_DAYS = 2920
         private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L
         const val NEGATIVE_RETRY_INTERVAL_MS = 6L * 60L * 60L * 1000L

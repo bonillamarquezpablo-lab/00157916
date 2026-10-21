@@ -269,8 +269,7 @@ class MementoClient(
     ): List<MementoCapture> {
         if (body.isBlank()) return emptyList()
         val target = parseHttpUri(originalUrl) ?: return emptyList()
-        val earliest = (now - lookbackDays.coerceAtLeast(1).toLong() * WaybackPriceHistoryClient.DAY_MS)
-            .coerceAtLeast(0L)
+        val earliest = archiveHistoryWindowStartTimestampUtc(now, lookbackDays)
         val formatter = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
             isLenient = false
             timeZone = TimeZone.getTimeZone("UTC")

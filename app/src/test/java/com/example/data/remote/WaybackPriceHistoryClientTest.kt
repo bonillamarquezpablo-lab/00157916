@@ -2148,6 +2148,18 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun defaultHistoryWindowUsesTheEightYearUtcCalendarAnniversary() {
+        val now = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }.parse("20261021163000")!!.time
+        val boundary = archiveHistoryWindowStartTimestampUtc(now, WaybackPriceHistoryClient.DEFAULT_LOOKBACK_DAYS)
+        val formatted = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }.format(java.util.Date(boundary))
+        assertEquals("20181021000000", formatted)
+    }
+
+    @Test
     fun directCdxRequestKeepsTheNewestBoundedMonthlyWindow() {
         val client = newClient()
         val now = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {

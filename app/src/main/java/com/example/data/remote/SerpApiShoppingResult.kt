@@ -828,7 +828,13 @@ fun onlineProductIdentityKey(title: String): String {
         Regex("""\b(ps5|xbox|nintendo switch|switch)\b""").containsMatchIn(productNameNormalized)
     ) setOf("slim", "digital", "disc", "disk", "oled", "series", "s", "x")
       else emptySet()
-    val variantTokens = (generalVariants + consoleVariants)
+    val isMobileProduct = Regex(
+        """\b(redmi|poco|iphone|pixel|galaxy|smartphone|phones?|telefono|telefonos|movil|moviles|mobile)\b"""
+    ).containsMatchIn(productNameNormalized)
+    // Network generation is part of the purchasable phone variant. Dropping 4G/5G caused
+    // Redmi Note 15 Pro 4G and Pro 5G listings to be merged into one misleading product group.
+    val mobileNetworkVariants = if (isMobileProduct) setOf("4g", "5g") else emptySet()
+    val variantTokens = (generalVariants + consoleVariants + mobileNetworkVariants)
         .filter { Regex("""\b""" + Regex.escape(it) + """\b""").containsMatchIn(productNameNormalized) }
         .toMutableSet()
     // Fat/original/standard are aliases for the base PS5 chassis. Give that model a
@@ -885,7 +891,15 @@ fun onlineProductIdentityKey(title: String): String {
             ?.let { "wh" + it.lowercase(Locale.ROOT) }
     } else null
 
-    val model = Regex(
+    // "Redmi Note 15/17" is a two-word model family, not a generic title token.
+    // Normalize it before the generic model-code matcher so Pro/Max and storage variants
+    // share one family key instead of splitting into unrelated families.
+    val redmiNoteModel = Regex("""\bredmi\s+note\s*(\d+[a-z0-9]*)\b""")
+        .find(normalized)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.let { "redminote$it" }
+    val model = redmiNoteModel ?: Regex(
         """\b(redmi|poco|iphone|pixel|galaxy|wh|dyson|roborock)\s*([a-z]{0,3}\d+[a-z0-9]*)\b"""
     ).find(normalized)?.let { match ->
         (match.groupValues[1] + match.groupValues[2]).replace(" ", "")

@@ -1127,6 +1127,14 @@ class WaybackPriceHistoryClientTest {
         val realStoreSearchUrl = com.example.data.model.Store.ALL_STORES
             .first { it.domain.contains("pccomponentes.com", ignoreCase = true) && it.supportsProductSearch }
             .searchUrlFor(title)!!
+        val cdxQueriedUrls = CopyOnWriteArrayList<String>()
+        val cdxSeriesBody = """
+            [
+              ["timestamp","original","statuscode","mimetype"],
+              ["20250101120000","$realStoreSearchUrl","200","text/html"],
+              ["20260901120000","$realStoreSearchUrl","200","text/html"]
+            ]
+        """.trimIndent()
         val archivedHtml = """
             <html><head>
               <script type="application/ld+json">
@@ -1142,8 +1150,23 @@ class WaybackPriceHistoryClientTest {
             when {
                 request.url.host == "web.archive.org" &&
                     request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
-                    // Reproduce the exact failure seen on the phone: domain CDX times out.
-                    throw java.net.SocketTimeoutException("simulated CDX domain timeout")
+                    val indexedUrl = request.url.queryParameter("url").orEmpty()
+                    cdxQueriedUrls += indexedUrl
+                    if (indexedUrl == realStoreSearchUrl) {
+                        // Once Availability has confirmed the real retailer URL, CDX must be
+                        // queried against that verified URL to retrieve multiple archive dates.
+                        Response.Builder()
+                            .request(request)
+                            .protocol(Protocol.HTTP_1_1)
+                            .code(200)
+                            .message("OK")
+                            .header("Content-Type", "application/json; charset=utf-8")
+                            .body(cdxSeriesBody.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                            .build()
+                    } else {
+                        // The guessed/direct product URL still reproduces the failure on-device.
+                        throw java.net.SocketTimeoutException("simulated CDX product URL timeout")
+                    }
                 }
                 request.url.host == "archive.org" &&
                     request.url.encodedPath == "/wayback/available" -> {
@@ -1197,7 +1220,7 @@ class WaybackPriceHistoryClientTest {
         }.build()
 
         try {
-            val result = withTimeout(20_000L) {
+            val result = withTimeout(45_000L) {
                 WaybackPriceHistoryClient(context, http).fetchHistoryByMerchantDomain(
                     domain = "pccomponentes.com",
                     expectedTitle = title,
@@ -1222,7 +1245,18 @@ class WaybackPriceHistoryClientTest {
                 availabilityUrls.last()
             )
             assertTrue("The verified archived EUR price should be recovered after a 3.5-second HTML response", result.quotes.isNotEmpty())
-            assertTrue("Every accepted result must retain the verified EUR price", result.quotes.isNotEmpty() && result.quotes.all { kotlin.math.abs(it.price - 79.99) < 0.001 })
+            assertTrue("Every accepted result must retain the verified EUR price", result.quotes.all { kotlin.math.abs(it.price - 79.99) < 0.001 })
+            assertTrue(
+                "The verified Availability URL must be queried through CDX to recover more than one date",
+                cdxQueriedUrls.contains(realStoreSearchUrl) &&
+                    result.quotes.map { it.observedAt }.distinct().size >= 2
+            )
+            assertTrue(
+                "Diagnostic steps 5–6 must record the CDX series request instead of remaining unexecuted",
+                traceEvents.any { it.step == 4 && it.status == WaybackTraceStatus.PASSED &&
+                    it.detail.contains("CDX_AVAILABILITY_SERIES") } &&
+                    traceEvents.any { it.step == 5 && it.detail.contains("CDX_AVAILABILITY_SERIES") }
+            )
             assertTrue(requests.any { it.startsWith("web.archive.org/web/") })
             assertTrue(
                 "Step 8 must be marked blocked/skipped when CDX failed upstream; step 6 keeps the actual timeout",

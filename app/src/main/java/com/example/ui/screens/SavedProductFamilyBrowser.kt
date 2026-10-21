@@ -204,9 +204,19 @@ private fun variantLabel(key: String): String {
     val raw = key.removePrefix("variant:")
     if (raw == "base" || raw.isBlank()) return "Estándar"
     val tokens = raw.split('+').distinct()
-    // onlineProductIdentityKey sorts tokens for a stable identity. Render edition first and
-    // network generation last so the UI reads "Pro 4G"/"Pro 5G", not "4G Pro".
-    val labels = tokens.filterNot { it.equals("4g", true) || it.equals("5g", true) }.map { token ->
+    // onlineProductIdentityKey sorts tokens for a stable identity. Render edition in natural
+    // product-name order (for example, "Pro Max") and network generation at the end.
+    val editionOrder = listOf(
+        "standard", "original", "fat", "estandar", "plus", "pro", "max", "ultra", "fe",
+        "lite", "mini", "fold", "flip", "classic", "edge", "slim", "digital", "disc",
+        "disk", "oled", "series", "s", "x"
+    )
+    val labels = tokens
+        .filterNot { it.equals("4g", true) || it.equals("5g", true) }
+        .sortedWith(compareBy<String> { token ->
+            editionOrder.indexOf(token.lowercase(Locale.ROOT)).let { if (it < 0) Int.MAX_VALUE else it }
+        }.thenBy { it })
+        .map { token ->
         when (token.lowercase(Locale.ROOT)) {
             "standard", "original", "fat", "estandar" -> "Estándar"
             "plus" -> "Plus"

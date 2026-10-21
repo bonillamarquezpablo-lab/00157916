@@ -371,7 +371,7 @@ class WaybackPriceHistoryClient(
             )
         val directCandidates = buildDirectUrlCandidates(originalUrl)
         val directUrl = directCandidates.lastOrNull() ?: decomposedUrl.canonicalUrl
-        val attempt = attemptKey("url-cdx-batch-v8|${decomposedUrl.merchantDomain}|${decomposedUrl.productIdentifiers.sorted().joinToString(",")}|$directUrl|$expectedTitle")
+        val attempt = attemptKey("url-cdx-batch-v9-exact-first|${decomposedUrl.merchantDomain}|${decomposedUrl.productIdentifiers.sorted().joinToString(",")}|$directUrl|$expectedTitle")
         serializedArchiveLookup {
             if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
                 return@serializedArchiveLookup WaybackBackfillResult(
@@ -395,14 +395,42 @@ class WaybackPriceHistoryClient(
                 )
             }
 
-            // One URL-prefix CDX request returns multiple timestamps at once; two distant captures feed the chart.
-            val cdxUrl = buildCdxUrl(directUrl, now, lookbackDays)
+            val prefixCdxUrl = buildCdxUrl(directUrl, now, lookbackDays, matchType = "prefix")
                 ?: return@serializedArchiveLookup WaybackBackfillResult(
                     requestFailed = true,
                     diagnosticCodes = setOf("DIRECT_URL_INVALID")
                 )
-            queryCdxAndFetchPrices(
-                cdxUrl = cdxUrl,
+            val exactCdxUrl = buildCdxUrl(directUrl, now, lookbackDays, matchType = "exact")
+            val exactResult = if (exactCdxUrl == null) {
+                WaybackBackfillResult(diagnosticCodes = setOf("CDX_EXACT_URL_NOT_BUILT"))
+            } else {
+                queryCdxAndFetchPrices(
+                    cdxUrl = exactCdxUrl,
+                    expectedTitle = expectedTitle,
+                    cacheKey = attemptKey("url-cdx-exact-v1|$directUrl|$expectedTitle"),
+                    now = now,
+                    lookbackDays = lookbackDays,
+                    maxSnapshots = MAX_DIRECT_SNAPSHOTS_PER_URL,
+                    cdxTimeoutSeconds = EXACT_CDX_TIMEOUT_SECONDS,
+                    cdxStage = "CDX_URL_EXACT",
+                    snapshotTimeoutSeconds = DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS,
+                    onTrace = onTrace,
+                    knownProductTitlesById = knownProductTitlesById
+                )
+            }
+            if (exactResult.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) {
+                rememberAttempt(attempt, now, hasQuotes = false, failed = true, rateLimited = true)
+                return@serializedArchiveLookup exactResult
+            }
+            // If exact URL already yields a usable series, avoid the more expensive prefix scan.
+            if (exactResult.quotes.size >= 2) {
+                rememberAttempt(attempt, now, hasQuotes = true, failed = false)
+                return@serializedArchiveLookup exactResult.copy(diagnosticCodes = emptySet())
+            }
+
+            // Prefix matching is a fallback for alternate slashes, locale paths and canonical URL variants.
+            val prefixResult = queryCdxAndFetchPrices(
+                cdxUrl = prefixCdxUrl,
                 expectedTitle = expectedTitle,
                 cacheKey = attempt,
                 now = now,
@@ -414,6 +442,29 @@ class WaybackPriceHistoryClient(
                 onTrace = onTrace,
                 knownProductTitlesById = knownProductTitlesById
             )
+            val mergedQuotes = (exactResult.quotes + prefixResult.quotes)
+                .distinctBy { listOf(it.originalUrl, it.observedAt.toString(), it.price.toString(), it.currency) }
+                .sortedBy { it.observedAt }
+            val merged = prefixResult.copy(
+                quotes = mergedQuotes,
+                capturesFound = maxOf(exactResult.capturesFound, prefixResult.capturesFound),
+                capturesChecked = exactResult.capturesChecked + prefixResult.capturesChecked,
+                available = exactResult.available || prefixResult.available,
+                requestFailed = mergedQuotes.isEmpty() && (exactResult.requestFailed || prefixResult.requestFailed),
+                diagnosticCodes = if (mergedQuotes.isNotEmpty()) {
+                    emptySet()
+                } else {
+                    exactResult.diagnosticCodes + prefixResult.diagnosticCodes
+                }
+            )
+            rememberAttempt(
+                attempt,
+                now,
+                hasQuotes = merged.quotes.isNotEmpty(),
+                failed = merged.requestFailed,
+                rateLimited = merged.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
+            )
+            merged
         }
     }
 
@@ -529,7 +580,7 @@ class WaybackPriceHistoryClient(
             .sorted()
             .joinToString(",")
         val attempt = attemptKey(
-            "domain-cdx-batch-v8|$normalizedDomain|$expectedTitle|$preferredUrlIdentity|$preferredUrlIdentifiers"
+            "domain-cdx-batch-v9-url-discovery|$normalizedDomain|$expectedTitle|$preferredUrlIdentity|$preferredUrlIdentifiers"
         )
         serializedArchiveLookup {
             if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
@@ -837,7 +888,7 @@ class WaybackPriceHistoryClient(
                     "Availability no encontró un precio verificable; se comprueba una URL alternativa mediante CDX antes de cerrar la búsqueda."
                 )
                 val alternateCacheKey = attemptKey(
-                    "domain-alternate-product-prefix-v4|$normalizedDomain|$expectedTitle|$alternateUrl"
+                    "domain-alternate-product-prefix-v5|$normalizedDomain|$expectedTitle|$alternateUrl"
                 )
                 val candidateResult = queryCdxAndFetchPrices(
                     cdxUrl = alternateCdxUrl,
@@ -911,13 +962,11 @@ class WaybackPriceHistoryClient(
         } == true
         if (alternateTransientFailure && !priorRateLimited) {
             emitWaybackTrace(
-                onTrace, 6, WaybackTraceStatus.SKIPPED,
-                "Se detiene la búsqueda amplia del dominio tras un fallo temporal de CDX; no se repiten consultas al mismo archivo."
+                onTrace, 6, WaybackTraceStatus.RUNNING,
+                "Fallaron las consultas de URL; se hará una búsqueda acotada por host para descubrir una URL archivada distinta, con presupuesto reducido y sin repetir la misma ruta."
             )
         }
-        if (!priorRateLimited && !alternateTransientFailure &&
-            activeRateLimitUntil(System.currentTimeMillis()) == null
-        ) {
+        if (!priorRateLimited && activeRateLimitUntil(System.currentTimeMillis()) == null) {
             val domainQueries = buildDomainCdxHostUrls(
                 domain = normalizedDomain,
                 expectedTitle = expectedTitle,
@@ -940,7 +989,7 @@ class WaybackPriceHistoryClient(
                     now = now,
                     lookbackDays = lookbackDays,
                     maxSnapshots = MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP,
-                    cdxTimeoutSeconds = DOMAIN_CDX_TIMEOUT_SECONDS,
+                    cdxTimeoutSeconds = if (alternateTransientFailure) CDX_FALLBACK_TIMEOUT_SECONDS else DOMAIN_CDX_TIMEOUT_SECONDS,
                     cdxStage = "CDX_DOMAIN",
                     snapshotTimeoutSeconds = CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS,
                     onTrace = onTrace,
@@ -3038,7 +3087,12 @@ class WaybackPriceHistoryClient(
         return host
     }
 
-    internal fun buildCdxUrl(originalUrl: String, now: Long, lookbackDays: Int): HttpUrl? {
+    internal fun buildCdxUrl(
+        originalUrl: String,
+        now: Long,
+        lookbackDays: Int,
+        matchType: String = "prefix"
+    ): HttpUrl? {
         val start = (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
         val from = formatUtc(start, "yyyyMMdd")
         val to = formatUtc(now, "yyyyMMdd")
@@ -3050,7 +3104,7 @@ class WaybackPriceHistoryClient(
             // Prefix matching handles archived canonical variants such as a trailing slash,
             // locale folder or child variant URL. The HTML product-title + EUR-price verifier is
             // still mandatory, so a neighbouring product cannot be accepted by URL similarity.
-            .addQueryParameter("matchType", "prefix")
+            .addQueryParameter("matchType", matchType)
             .addQueryParameter("output", "json")
             .addQueryParameter("fl", "timestamp,original,statuscode,mimetype")
             .addQueryParameter("filter", "statuscode:200")
@@ -3908,6 +3962,12 @@ class WaybackPriceHistoryClient(
         // Trim/model suffixes (Pro, Ultra, Max, etc.) are meaningful for phones and scooters.
         // Require the same explicit trim markers on both titles to avoid cross-variant prices.
         if (productModelVariantTokens(e) != productModelVariantTokens(a)) return false
+        val strictStoragePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+        val expectedStorageIdentity = strictStoragePattern.findAll(e)
+            .map { it.value.replace(Regex("""\s+"""), "") }.toSet()
+        val archivedStorageIdentity = strictStoragePattern.findAll(a)
+            .map { it.value.replace(Regex("""\s+"""), "") }.toSet()
+        if (expectedStorageIdentity != archivedStorageIdentity) return false
 
         // Xiaomi archive titles frequently omit a colour suffix or translate "Gris" to
         // "Grey/Gray/Grigio". Treat the exact Mi model as the identity anchor, while refusing
@@ -4344,17 +4404,17 @@ class WaybackPriceHistoryClient(
         private const val CDX_RETRY_DELAY_MS = 500L
         private const val CDX_RETRY_JITTER_MS = 350L
         private val RETRYABLE_CDX_HTTP_CODES = setOf(500, 502, 503, 504)
-        // Historical backfill only: allow two additional seconds for a slow direct CDX response.
-        // No retry is added; the bounded Availability fallback and per-candidate cap remain in force.
-        private const val DIRECT_CDX_TIMEOUT_SECONDS = 15L
+        // Keep direct prefix matching bounded; an exact URL query is attempted first to avoid
+        // paying this cost when the exact archived address already provides the required series.
+        private const val EXACT_CDX_TIMEOUT_SECONDS = 4L
+        private const val DIRECT_CDX_TIMEOUT_SECONDS = 7L
         // This last-resort host scan only runs if no product URL can be built. Keep it
         // short enough to leave time for the two bounded Availability probes.
-        private const val DOMAIN_CDX_TIMEOUT_SECONDS = 8L
+        private const val DOMAIN_CDX_TIMEOUT_SECONDS = 5L
         // Product-specific CDX lookup is narrower than scanning every URL on a retailer host.
-        // Give the public index up to 7 seconds on slower responses; no retry is added here,
-        // and the bounded Availability fallback remains in place if CDX does not answer.
-        private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 15L
-        private const val ALTERNATE_PRODUCT_CDX_TIMEOUT_SECONDS = 10L
+        // A short host-index fallback can discover changed product slugs after path lookups fail.
+        private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 7L
+        private const val ALTERNATE_PRODUCT_CDX_TIMEOUT_SECONDS = 5L
         private const val MAX_DOMAIN_PRODUCT_URL_CANDIDATES = 2
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 12
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 8

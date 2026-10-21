@@ -98,6 +98,26 @@ class WaybackPriceHistoryClientTest {
                 "No coincide la identidad del producto."
             )
         )
+        assertEquals(
+            "A later capture DNS failure must make the aggregate second-capture row red",
+            WaybackTraceStatus.FAILED,
+            mergeWaybackDiagnosticStatus(
+                WaybackTraceStatus.PASSED,
+                WaybackTraceStatus.FAILED,
+                13,
+                "captura 4 de 8 · fecha 20250901123456 · ruta CDX_URL_PREFIX · tienda www.pccomponentes.com · SNAPSHOT_DNS"
+            )
+        )
+        assertEquals(
+            "A later successful capture must not hide an earlier failed capture in the same row",
+            WaybackTraceStatus.FAILED,
+            mergeWaybackDiagnosticStatus(
+                WaybackTraceStatus.FAILED,
+                WaybackTraceStatus.PASSED,
+                13,
+                "captura 3 de 8 · HTML recibido"
+            )
+        )
         assertTrue(
             "A CDX-only skip message must disappear once Availability downloads that capture",
             isSupersededWaybackSkipDetail(
@@ -3916,6 +3936,30 @@ class WaybackPriceHistoryClientTest {
         )
         assertEquals(client.snapshotCacheKey(first), client.snapshotCacheKey(sameCapture))
         assertFalse(client.snapshotCacheKey(first) == client.snapshotCacheKey(differentDate))
+    }
+
+    @Test
+    fun snapshotDiagnosticLabelDistinguishesEveryCaptureDateRouteAndStoreHost() {
+        val client = newClient()
+        val capture = WaybackPriceHistoryClient.WaybackCapture(
+            rawTimestamp = "20250901123456",
+            timestamp = 1_756_716_896_000L,
+            originalUrl = "https://www.pccomponentes.com/producto/privado?sku=12345"
+        )
+
+        val label = client.snapshotDiagnosticLabel(
+            capture = capture,
+            ordinal = 4,
+            total = 12,
+            sourceStage = "CDX_URL_PREFIX"
+        )
+
+        assertTrue(label.contains("captura 4 de 12"))
+        assertTrue(label.contains("fecha 20250901123456"))
+        assertTrue(label.contains("ruta CDX_URL_PREFIX"))
+        assertTrue(label.contains("tienda www.pccomponentes.com"))
+        assertFalse("Diagnostic labels must not leak the product path or query", label.contains("/producto/privado"))
+        assertFalse("Diagnostic labels must not leak a SKU", label.contains("12345"))
     }
 
     @Test

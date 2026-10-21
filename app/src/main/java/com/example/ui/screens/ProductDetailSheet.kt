@@ -338,14 +338,14 @@ fun ProductDetailSheet(
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
-                    Row(
+                    // Stack current and historical metrics vertically. Side-by-side weighted
+                    // columns still collapse under narrow bottom-sheet/tablet constraints and
+                    // wrap labels one character per line, making the card appear broken.
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        // Current price: share the available width with the historical metric.
-                        // Without weight, this column can consume the full Row and collapse the
-                        // right-hand metric into a one-character-wide vertical strip on tablets.
-                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
                             Text(
                                 text = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT) "Precio actual verificado" else "Precio guardado · pendiente de revalidación",
                                 fontSize = 11.sp,
@@ -402,7 +402,7 @@ fun ProductDetailSheet(
                         // Archive/Google-insight lows are shown as observed evidence, never as an
                         // all-time guarantee or as an input to the live-price deal verdict.
                         Column(
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxWidth(),
                             horizontalAlignment = Alignment.Start
                         ) {
                             if (observedMinimumPoint != null) {

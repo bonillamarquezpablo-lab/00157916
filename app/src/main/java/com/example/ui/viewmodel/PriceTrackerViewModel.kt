@@ -381,6 +381,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             val oldDetailLines = when {
                 status == WaybackTraceStatus.PASSED || status == WaybackTraceStatus.FAILED ->
                     old.detail.lines().filterNot(::isSupersededWaybackSkipDetail)
+                // Multiple archive routes share one 20-stage UI. If an earlier route failed to
+                // download HTML, a later route can emit a generic "CDX supplied no capture" skip
+                // for the same identity stage. Do not retain that contradictory stale skip beside
+                // the real timeout; it makes the report imply the index was empty.
+                status == WaybackTraceStatus.SKIPPED &&
+                    old.status == WaybackTraceStatus.SKIPPED ->
+                    old.detail.lines().filterNot(::isSupersededWaybackSkipDetail)
                 status in setOf(WaybackTraceStatus.SKIPPED, WaybackTraceStatus.FAILED) &&
                     old.status == WaybackTraceStatus.RUNNING ->
                     old.detail.lines().filterNot { line ->

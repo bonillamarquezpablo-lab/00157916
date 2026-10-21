@@ -1895,7 +1895,13 @@ class WaybackPriceHistoryClient(
                             skipArchiveValidationTrace(onTrace, "El cuerpo HTML estaba vacío o superaba el límite seguro.")
                             SnapshotFetch(false, null, "SNAPSHOT_BODY_EMPTY_OR_LIMIT")
                         } else {
-                            emitWaybackTrace(onTrace, downloadStep, WaybackTraceStatus.PASSED, "HTTP ${response.code}; HTML recibido (${html.length} caracteres, contenido no registrado).", elapsed)
+                            val redirectCount = generateSequence(response.priorResponse) { it.priorResponse }.count()
+                            val finalHost = response.request.url.host
+                            emitWaybackTrace(
+                                onTrace, downloadStep, WaybackTraceStatus.PASSED,
+                                "HTTP ${response.code}; HTML recibido (${html.length} caracteres); host final ${finalHost}; redirecciones ${redirectCount}; captura ${capture.rawTimestamp}. URL completa y contenido omitidos.",
+                                elapsed
+                            )
                             val barrier = detectArchivedHtmlBarrier(html)
                             if (barrier != null) {
                                 emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.FAILED, "La captura parece bloqueada: $barrier.")
@@ -1952,7 +1958,14 @@ class WaybackPriceHistoryClient(
             } catch (failure: Exception) {
                 val code = classifyNetworkFailure("SNAPSHOT", failure)
                 val elapsed = ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(0L)
-                emitWaybackTrace(onTrace, downloadStep, WaybackTraceStatus.FAILED, "Descarga fallida: $code.", elapsed)
+                val originalHost = runCatching { URI(capture.originalUrl).host }.getOrNull()
+                    ?.lowercase(Locale.ROOT) ?: "host-desconocido"
+                val budgetSeconds = snapshotTimeoutSeconds.coerceAtLeast(1L)
+                emitWaybackTrace(
+                    onTrace, downloadStep, WaybackTraceStatus.FAILED,
+                    "Descarga fallida: $code; presupuesto ${budgetSeconds}s; destino de archivo web.archive.org; host original ${originalHost}; captura ${capture.rawTimestamp}. No se recibió una respuesta HTML; URL completa omitida.",
+                    elapsed
+                )
                 emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.FAILED, "No fue posible evaluar el HTML.")
                 skipArchiveValidationTrace(onTrace, "La descarga terminó con error de red.")
                 SnapshotFetch(false, null, code)

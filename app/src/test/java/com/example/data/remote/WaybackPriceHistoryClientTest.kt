@@ -3674,6 +3674,15 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun supersededCdxSkipIsRecognizedAsStaleAfterSnapshotFailure() {
+        assertTrue(
+            isSupersededWaybackSkipDetail(
+                "[14:22:26] No se pudo comprobar la identidad: CDX no proporcionó ninguna captura para descargar."
+            )
+        )
+    }
+
+    @Test
     fun additionalDiagnosticPhasesCanBeMappedWithoutChangingInternalTransportPhase() {
         val candidateUrls = WaybackTraceEvent(
             step = 7,

@@ -67,6 +67,17 @@ class WaybackPriceHistoryClientTest {
                 "Las respuestas llegaron, pero no encontraron capturas utilizables; no hay histórico que validar."
             )
         )
+
+        assertEquals(
+            "Availability being reachable is not a recovered history when all probes return no captures",
+            WaybackTraceStatus.FAILED,
+            mergeWaybackDiagnosticStatus(
+                WaybackTraceStatus.PASSED,
+                WaybackTraceStatus.FAILED,
+                7,
+                "Availability respondió correctamente en 5 URL(s), pero no encontró capturas. 0 intento(s) fallido(s)."
+            )
+        )
         assertEquals(
             "A final no-capture fallback summary must also override an earlier green step 7",
             WaybackTraceStatus.FAILED,

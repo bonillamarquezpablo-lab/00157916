@@ -2125,6 +2125,29 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun eightYearWindowUsesCalendarAnniversaryAndIncludesBoundaryDayFromMidnightUtc() {
+        val client = newClient()
+        val now = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }.parse("20261021163000")!!.time
+
+        val start = client.historyWindowStartTimestamp(
+            now = now,
+            lookbackDays = WaybackPriceHistoryClient.DEFAULT_LOOKBACK_DAYS
+        )
+        val utc = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
+            timeInMillis = start
+        }
+        assertEquals(2018, utc.get(java.util.Calendar.YEAR))
+        assertEquals(java.util.Calendar.OCTOBER, utc.get(java.util.Calendar.MONTH))
+        assertEquals(21, utc.get(java.util.Calendar.DAY_OF_MONTH))
+        assertEquals(0, utc.get(java.util.Calendar.HOUR_OF_DAY))
+        assertEquals(0, utc.get(java.util.Calendar.MINUTE))
+        assertEquals(0, utc.get(java.util.Calendar.SECOND))
+        assertEquals(0, utc.get(java.util.Calendar.MILLISECOND))
+    }
+
+    @Test
     fun directCdxRequestKeepsTheNewestBoundedMonthlyWindow() {
         val client = newClient()
         val now = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {
@@ -2143,6 +2166,11 @@ class WaybackPriceHistoryClientTest {
         assertEquals("statuscode:200", url.queryParameterValues("filter")?.firstOrNull())
         assertEquals("mimetype:text/html", url.queryParameterValues("filter")?.getOrNull(1))
         assertEquals("20261021", url.queryParameter("to"))
+        assertEquals(
+            "The CDX query must include the whole UTC boundary date eight calendar years ago",
+            "20181021",
+            url.queryParameter("from")
+        )
 
         val exactUrl = client.buildCdxUrl(
             originalUrl = "https://shop.example/products/anker-prime",
@@ -3955,6 +3983,7 @@ class WaybackPriceHistoryClientTest {
         )
 
         assertTrue(label.contains("captura 4 de 12"))
+        assertTrue(label.contains(Regex("""id [a-f0-9]{8}""").find(label)?.value.orEmpty()))
         assertTrue(label.contains("fecha 20250901123456"))
         assertTrue(label.contains("ruta CDX_URL_PREFIX"))
         assertTrue(label.contains("tienda www.pccomponentes.com"))

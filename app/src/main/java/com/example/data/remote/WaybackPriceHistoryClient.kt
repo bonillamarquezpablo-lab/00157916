@@ -3619,8 +3619,7 @@ class WaybackPriceHistoryClient(
             if (currency !in allowedCurrencies || price !in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE) continue
             val matches = knownProductTitlesById.entries.mapNotNull { (productId, savedTitle) ->
                 if (productId.isBlank() || savedTitle.isBlank() ||
-                    isMatchingTitleForArchivedUrl(primaryExpectedTitle, savedTitle, originalUrl) ||
-                    hasExplicitProductVariantConflict(savedTitle, archivedTitle)
+                    isMatchingTitleForArchivedUrl(primaryExpectedTitle, savedTitle, originalUrl)
                 ) return@mapNotNull null
 
                 val offerUrls = jsonLdProductUrlsForOffer(
@@ -3672,6 +3671,13 @@ class WaybackPriceHistoryClient(
                     !hasExplicitVariantConflictInProductUrl(savedTitle, offerUrl) &&
                         matchesVariantDetailsConfirmedByUrl(savedTitle, archivedTitle, offerUrl)
                 }
+                // hasExplicitProductVariantConflict also flags a title that omits capacity.
+                // That is not proof of a mismatch when this exact JSON-LD offer has a URL that
+                // independently verifies the missing SKU details. Explicit model/edition/
+                // colour/capacity conflicts still fail matchesVariantDetailsConfirmedByUrl.
+                if (hasExplicitProductVariantConflict(savedTitle, archivedTitle) &&
+                    !offerUrlConfirmsVariant
+                ) return@mapNotNull null
                 if (!pageConfirmsVariant && !offerUrlConfirmsVariant) return@mapNotNull null
                 Triple(productId, savedTitle, offerUrlConfirmsVariant)
             }

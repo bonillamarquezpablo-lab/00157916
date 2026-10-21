@@ -1634,8 +1634,11 @@ class WaybackPriceHistoryClient(
             if (quotes.isEmpty() && fetched.any { it.fetched }) add("NO_VERIFIED_EUR_PRICE")
             else if (quotes.isEmpty() && isEmpty()) add("${stage}_NO_VERIFIED_PRICE")
         }
-        val verifiedBeforeDedup = fetched.flatMap { snapshot -> listOfNotNull(snapshot.quote) + snapshot.additionalQuotes }.sortedBy { it.observedAt }
-        val duplicatesRemoved = verifiedBeforeDedup.size - quotes.size
+        val verifiedBeforeDedup = (
+            fetched.flatMap { snapshot -> listOfNotNull(snapshot.quote) + snapshot.additionalQuotes } +
+                supplementalCdxQuotes
+            ).sortedBy { it.observedAt }
+        val duplicatesRemoved = (verifiedBeforeDedup.size - quotes.size).coerceAtLeast(0)
         val identityMismatches = fetched.count { it.diagnosticCode == "ARCHIVE_PRODUCT_TITLE_MISMATCH" }
         val missingEurPrices = fetched.count { it.diagnosticCode == "ARCHIVE_EUR_PRICE_MISSING" }
         val consolidationDetail = buildString {

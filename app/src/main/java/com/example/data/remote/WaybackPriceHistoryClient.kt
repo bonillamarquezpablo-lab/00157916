@@ -900,8 +900,12 @@ class WaybackPriceHistoryClient(
         if (!fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") &&
             activeRateLimitUntil(System.currentTimeMillis()) == null
         ) {
-            val alternateUrl = buildAvailabilityCandidateUrls(normalizedDomain, expectedTitle)
-                .firstOrNull { it != preferredUrl && isEligibleDirectUrl(it) }
+            val availabilityConfirmedUrl = fallback.quotes
+                .firstOrNull { it.originalUrl != preferredUrl && isEligibleDirectUrl(it.originalUrl) }
+                ?.originalUrl
+            val alternateUrl = availabilityConfirmedUrl
+                ?: buildAvailabilityCandidateUrls(normalizedDomain, expectedTitle)
+                    .firstOrNull { it != preferredUrl && isEligibleDirectUrl(it) }
             val alternateCdxUrl = alternateUrl?.let { buildCdxUrl(it, now, lookbackDays) }
             if (alternateUrl != null && alternateCdxUrl != null) {
                 emitWaybackTrace(
@@ -2560,12 +2564,12 @@ class WaybackPriceHistoryClient(
                 canonicalSamsungUrls.drop(3) +
                 guessedProductUrls.filterNot { it in canonicalSet }
         } else {
-            // Search pages often archive generic headings without a product-scoped price. Try
-            // several product-shaped routes first; keep the store's real search URL as a bounded
-            // fallback instead of spending one of the first two alternate probes on it.
-            guessedProductUrls.take(3) +
+            // Keep two product-specific guesses first, then try the store's real search URL
+            // as the third candidate. This fits the bounded timeout fallback without spending
+            // every probe on guessed slugs and still validates the exact product + EUR price.
+            guessedProductUrls.take(2) +
                 listOfNotNull(storeSearchUrl) +
-                guessedProductUrls.drop(3)
+                guessedProductUrls.drop(2)
         }
         // Try the exact Apple SKU configurator on each known host before any family/marketing
         // page. www and apex can have different archive coverage; using only the first host meant

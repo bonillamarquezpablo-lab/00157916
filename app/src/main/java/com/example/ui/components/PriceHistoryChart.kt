@@ -382,6 +382,94 @@ fun PriceHistoryChart(
 
         Spacer(modifier = Modifier.height(12.dp))
 
+        // Tap inspection panel
+        if (selectedPoint != null) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .clip(RoundedCornerShape(8.dp)),
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                Row(
+                    modifier = Modifier.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = formatChartPrice(selectedPoint.price) + " €",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = if (historySummary.minimumObservedPoint?.let { selectedPoint.price <= it.price + 0.005 } == true) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
+                            )
+                            if (historySummary.minimumObservedPoint?.let { selectedPoint.price <= it.price + 0.005 } == true) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "★ MÍNIMO DEL RANGO",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFF059669)
+                                )
+                            }
+                        }
+                        Text(
+                            text = "${selectedPoint.dateLabel} en ${selectedPoint.storeName}",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    if (selectedPoint.eventLabel != null) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer)
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = selectedPoint.eventLabel,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    modifier = Modifier.size(12.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = if (filteredPoints.isEmpty()) {
+                        "No hay observaciones para este rango."
+                    } else {
+                        "Toca sobre el gráfico para ver el precio exacto en cada fecha"
+                    },
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         // Canvas Chart
         Box(
             modifier = Modifier
@@ -585,90 +673,6 @@ fun PriceHistoryChart(
             }
         }
 
-        // Tap inspection panel
-        if (selectedPoint != null) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp)
-                    .clip(RoundedCornerShape(8.dp)),
-                color = MaterialTheme.colorScheme.surface
-            ) {
-                Row(
-                    modifier = Modifier.padding(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = formatChartPrice(selectedPoint.price) + " €",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                color = if (historySummary.minimumObservedPoint?.let { selectedPoint.price <= it.price + 0.005 } == true) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
-                            )
-                            if (historySummary.minimumObservedPoint?.let { selectedPoint.price <= it.price + 0.005 } == true) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "★ MÍNIMO DEL RANGO",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = Color(0xFF059669)
-                                )
-                            }
-                        }
-                        Text(
-                            text = "${selectedPoint.dateLabel} en ${selectedPoint.storeName}",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
 
-                    if (selectedPoint.eventLabel != null) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(MaterialTheme.colorScheme.primaryContainer)
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = selectedPoint.eventLabel,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
-                    }
-                }
-            }
-        } else {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                    modifier = Modifier.size(12.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = if (filteredPoints.isEmpty()) {
-                        "No hay observaciones para este rango."
-                    } else {
-                        "Toca sobre el gráfico para ver el precio exacto en cada fecha"
-                    },
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
     }
 }

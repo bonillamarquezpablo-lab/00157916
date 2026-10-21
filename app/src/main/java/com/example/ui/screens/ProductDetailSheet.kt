@@ -342,8 +342,10 @@ fun ProductDetailSheet(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        // Current price
-                        Column {
+                        // Current price: share the available width with the historical metric.
+                        // Without weight, this column can consume the full Row and collapse the
+                        // right-hand metric into a one-character-wide vertical strip on tablets.
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                             Text(
                                 text = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT) "Precio actual verificado" else "Precio guardado · pendiente de revalidación",
                                 fontSize = 11.sp,
@@ -399,7 +401,10 @@ fun ProductDetailSheet(
                         // A historical minimum requires at least two distinct dated observations.
                         // Archive/Google-insight lows are shown as observed evidence, never as an
                         // all-time guarantee or as an input to the live-price deal verdict.
-                        Column(horizontalAlignment = Alignment.End) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            horizontalAlignment = Alignment.Start
+                        ) {
                             if (observedMinimumPoint != null) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Box(

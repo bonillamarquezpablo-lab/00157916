@@ -219,6 +219,7 @@ class MementoClient(
         // be interpreted as the outer request's query/fragment, but retain URL path separators.
         val safeTarget = originalUrl
             .replace("?", "%3F")
+            .replace("&", "%26")
             .replace("#", "%23")
             .replace(" ", "%20")
         return "https://$ARCHIVE_HOST/wayback/timemap/link/$safeTarget"
@@ -264,7 +265,7 @@ class MementoClient(
         return output.distinctBy { it.rawTimestamp to it.snapshotUrl }.sortedBy { it.timestamp }
     }
 
-    private fun sampleQuarterlyCaptures(
+    internal fun sampleQuarterlyCaptures(
         captures: List<MementoCapture>,
         maxSnapshots: Int
     ): List<MementoCapture> {

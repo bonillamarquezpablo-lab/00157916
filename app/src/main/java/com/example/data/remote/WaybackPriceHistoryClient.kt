@@ -1922,7 +1922,11 @@ class WaybackPriceHistoryClient(
         val captureId = MessageDigest.getInstance("SHA-256")
             .digest((capture.rawTimestamp + "|" + capture.originalUrl).toByteArray(Charsets.UTF_8))
             .take(4)
-            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+            .joinToString("") { byte ->
+                "%02x".format(byte.toInt() and 0xff).map { ch ->
+                    if (ch in '0'..'9') ('a'.code + (ch - '0')).toChar() else ch
+                }.joinToString("")
+            }
         return "captura ${ordinal.coerceAtLeast(1)} de ${total.coerceAtLeast(1)} · id $captureId · fecha ${safeTimestamp.ifBlank { "desconocida" }} · ruta $safeStage · tienda $safeHost"
     }
 
@@ -3605,7 +3609,7 @@ class WaybackPriceHistoryClient(
             .addQueryParameter("filter", "statuscode:200")
             .addQueryParameter("filter", "mimetype:text/html")
             .addQueryParameter("filter", "original:$urlPattern")
-            .addQueryParameter("from", formatUtc((now - DOMAIN_LOOKBACK_DAYS.toLong() * DAY_MS).coerceAtLeast(start), "yyyyMMdd"))
+            .addQueryParameter("from", from)
             .addQueryParameter("to", to)
             // A small result window can be exhausted by unrelated captures before a
             // matching product URL appears. The portable token filter stays bounded; return

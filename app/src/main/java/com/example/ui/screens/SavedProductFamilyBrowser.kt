@@ -71,7 +71,7 @@ private val SAVED_COLOUR_PATTERN = Regex(
     """(?i)\b(negro|negra|negros|negras|black|nero|blanco|blanca|white|bianco|azul|blue|bleu|navy|celeste|verde|green|mint|amarillo|amarilla|yellow|giallo|rojo|roja|red|rosso|rosa|pink|rose|morado|morada|purple|violet|violeta|gris|gray|grey|silver|plata|plateado|graphite|naranja|orange|dorado|dorada|gold|oro|marron|brown|cafe|beige|arena|sand|lavender|cream|starlight|ultramarine|teal)\b"""
 )
 private val SAVED_VARIANT_PATTERN = Regex(
-    """(?i)\b(pro\s*max|max|plus|pro|ultra|fe|lite|mini|fold|flip|classic|edge|slim|fat|standard|estandar|digital|disc|disk|oled|series|edition|original)\b"""
+    """(?i)\b(pro\s*max|max|plus|pro|ultra|fe|lite|mini|fold|flip|classic|edge|slim|fat|standard|estandar|digital|disc|disk|oled|series|edition|original|4g|5g)\b"""
 )
 
 private fun isRealRetailerDestination(rawUrl: String): Boolean {
@@ -203,7 +203,10 @@ private fun variantKey(product: Product): String =
 private fun variantLabel(key: String): String {
     val raw = key.removePrefix("variant:")
     if (raw == "base" || raw.isBlank()) return "Estándar"
-    val labels = raw.split('+').map { token ->
+    val tokens = raw.split('+').distinct()
+    // onlineProductIdentityKey sorts tokens for a stable identity. Render edition first and
+    // network generation last so the UI reads "Pro 4G"/"Pro 5G", not "4G Pro".
+    val labels = tokens.filterNot { it.equals("4g", true) || it.equals("5g", true) }.map { token ->
         when (token.lowercase(Locale.ROOT)) {
             "standard", "original", "fat", "estandar" -> "Estándar"
             "plus" -> "Plus"
@@ -226,8 +229,10 @@ private fun variantLabel(key: String): String {
             "classic" -> "Classic"
             else -> token.replaceFirstChar { it.uppercase(Locale.ROOT) }
         }
-    }.distinct()
-    return labels.joinToString(" ")
+    }
+    val network = tokens.filter { it.equals("4g", true) || it.equals("5g", true) }
+        .map { it.uppercase(Locale.ROOT) }
+    return (labels + network).joinToString(" ")
 }
 
 private fun familyLabel(products: List<Product>): String =

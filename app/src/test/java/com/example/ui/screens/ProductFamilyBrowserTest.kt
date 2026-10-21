@@ -108,6 +108,8 @@ class ProductFamilyBrowserTest {
         val note10 = onlineProductIdentityKey("Xiaomi Redmi Note 10 Pro 5G 8GB/256GB")
         val pro4g = onlineProductIdentityKey("Xiaomi Redmi Note 15 Pro 4G 12GB + 512GB")
         val pro5g = onlineProductIdentityKey("Xiaomi Redmi Note 15 Pro 5G 8GB/256GB")
+        val compactPro = onlineProductIdentityKey("Xiaomi Redmi Note 15Pro 8GB/256GB")
+        val compactProMax = onlineProductIdentityKey("XIAOMI Redmi Note 15Pro Max 12GB/512GB")
 
         fun modelFamily(key: String) = key.split('|').take(2)
 
@@ -120,6 +122,17 @@ class ProductFamilyBrowserTest {
             "Redmi Note 10 and Redmi Note 17 must remain distinct models",
             modelFamily(note10) != modelFamily(proMax5g)
         )
+        assertEquals(
+            "A compact retailer title such as Redmi Note 15Pro must share the same family as the spaced edition",
+            modelFamily(pro4g),
+            modelFamily(compactPro)
+        )
+        assertEquals(
+            "Compact Pro Max names must also share the model family",
+            modelFamily(pro4g),
+            modelFamily(compactProMax)
+        )
+        assertTrue("Pro and Pro Max remain separate exact variants", compactPro != compactProMax)
         assertTrue(
             "The 4G and 5G editions must not collapse into one exact product identity",
             pro4g != pro5g

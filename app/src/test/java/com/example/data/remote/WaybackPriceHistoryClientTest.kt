@@ -1391,7 +1391,11 @@ class WaybackPriceHistoryClientTest {
         val title = "Anker Prime timeout must retry " + System.currentTimeMillis()
         val preferredUrl = "https://shop.example/products/anker-prime-timeout-cache.html"
         val client = WaybackPriceHistoryClient(context)
-        val rawKey = "domain-cdx-batch-v8|shop.example|" + title + "|" + preferredUrl + "|"
+        val decomposedPreferredUrl = client.decomposeProductUrl(preferredUrl)
+        val preferredUrlIdentity = decomposedPreferredUrl?.canonicalUrl ?: preferredUrl
+        val preferredUrlIdentifiers = decomposedPreferredUrl?.productIdentifiers
+            .orEmpty().sorted().joinToString(",")
+        val rawKey = "domain-cdx-batch-v9-url-discovery|shop.example|$title|$preferredUrlIdentity|$preferredUrlIdentifiers"
         val digest = java.security.MessageDigest.getInstance("SHA-256")
             .digest(rawKey.toByteArray(Charsets.UTF_8))
         val attemptKey = "attempt_" + digest.take(16).joinToString("") {
@@ -1485,7 +1489,12 @@ class WaybackPriceHistoryClientTest {
 
         val title = "Anker partial availability failure " + System.currentTimeMillis()
         val preferredUrl = "https://shop.example/products/anker-partial-timeout.html"
-        val rawKey = "domain-cdx-batch-v8|shop.example|" + title + "|" + preferredUrl + "|"
+        val client = WaybackPriceHistoryClient(context)
+        val decomposedPreferredUrl = client.decomposeProductUrl(preferredUrl)
+        val preferredUrlIdentity = decomposedPreferredUrl?.canonicalUrl ?: preferredUrl
+        val preferredUrlIdentifiers = decomposedPreferredUrl?.productIdentifiers
+            .orEmpty().sorted().joinToString(",")
+        val rawKey = "domain-cdx-batch-v9-url-discovery|shop.example|$title|$preferredUrlIdentity|$preferredUrlIdentifiers"
         val digest = java.security.MessageDigest.getInstance("SHA-256")
             .digest(rawKey.toByteArray(Charsets.UTF_8))
         val attemptKey = "attempt_" + digest.take(16).joinToString("") {

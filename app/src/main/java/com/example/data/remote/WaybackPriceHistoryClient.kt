@@ -4094,11 +4094,31 @@ class WaybackPriceHistoryClient(
         return output.toString(charset.name())
     }
 
-    private fun sampleCaptures(captures: List<WaybackCapture>, max: Int): List<WaybackCapture> {
-        if (captures.size <= max) return captures
-        if (max <= 1) return listOf(captures.first())
+    /**
+     * Select a representative capture per UTC quarter before applying the download cap.
+     * CDX already returns a bounded, monthly-collapsed index; choosing by quarter prevents
+     * dense recent months from crowding older periods out of the chart. Every returned item is
+     * still independently checked for product identity and price after its HTML is downloaded.
+     */
+    internal fun sampleCaptures(captures: List<WaybackCapture>, max: Int): List<WaybackCapture> {
+        if (max <= 0 || captures.isEmpty()) return emptyList()
+        val chronological = captures
+            .distinctBy { it.rawTimestamp to it.originalUrl }
+            .sortedBy { it.timestamp }
+        val quarterly = chronological
+            .groupBy { capture ->
+                val utc = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"), Locale.ROOT)
+                utc.timeInMillis = capture.timestamp
+                utc.get(java.util.Calendar.YEAR) * 4 + utc.get(java.util.Calendar.MONTH) / 3
+            }
+            .toSortedMap()
+            .values
+            .map { quarterCaptures -> quarterCaptures[quarterCaptures.size / 2] }
+
+        if (quarterly.size <= max) return quarterly
+        if (max == 1) return listOf(quarterly.last())
         return (0 until max).map { index ->
-            captures[(index.toDouble() * (captures.size - 1) / (max - 1)).toInt()]
+            quarterly[(index.toDouble() * (quarterly.size - 1) / (max - 1)).toInt()]
         }.distinctBy { it.rawTimestamp to it.originalUrl }
     }
 

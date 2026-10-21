@@ -39,6 +39,12 @@ class ProductDetailSheetDiagnosticTest {
                 title = "Petición enviada al índice CDX",
                 status = WaybackTraceStatus.SKIPPED,
                 detail = "[19:51:31] No ejecutado: consulta CDX omitida por caché reciente."
+            ),
+            WaybackDiagnosticEntry(
+                step = 7,
+                title = "Fallback CDX alternativo / Availability API",
+                status = WaybackTraceStatus.FAILED,
+                detail = "[19:50:44] WAYBACK_RATE_LIMITED: HTTP 429 de un intento anterior."
             )
         )
 

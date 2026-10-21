@@ -114,6 +114,10 @@ internal fun mergeWaybackDiagnosticStatus(
             detail.contains("no encontraron capturas utilizables", ignoreCase = true) ||
             detail.contains("no hay histórico que validar", ignoreCase = true) ||
             detail.contains("no encontró capturas utilizables", ignoreCase = true) ||
+            detail.contains("no encontró capturas", ignoreCase = true) ||
+            detail.contains("no se encontraron capturas", ignoreCase = true) ||
+            detail.contains("sin capturas", ignoreCase = true) ||
+            detail.contains("no devolvió capturas", ignoreCase = true) ||
             detail.contains("no encontró capturas y alguna consulta falló", ignoreCase = true) ||
             detail.contains("no se recuperaron capturas históricas utilizables", ignoreCase = true)
         ) -> WaybackTraceStatus.FAILED

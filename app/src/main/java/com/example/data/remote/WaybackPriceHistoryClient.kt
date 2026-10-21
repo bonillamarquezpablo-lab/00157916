@@ -3588,7 +3588,7 @@ class WaybackPriceHistoryClient(
                     val name = value.optString("name").takeIf { it.isNotBlank() && it != "null" }
                     if (name != null && normalizeTitle(name) == wantedName &&
                         jsonLdTypeNames(value).any { it in productTypes } &&
-                        matchingOffer(value.opt("offers")
+                        matchingOffer(value.opt("offers"))
                     ) {
                         resolveCandidate(value.optString("url"))
                     }

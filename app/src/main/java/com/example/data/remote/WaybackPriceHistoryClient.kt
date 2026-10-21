@@ -3501,6 +3501,107 @@ class WaybackPriceHistoryClient(
      * matches exactly one different product already saved in Room. Page-level metadata is
      * intentionally excluded because it can describe only the primary SKU.
      */
+    /**
+     * Returns product/offer URLs attached to a matching structured JSON-LD offer. Family pages
+     * may contain several variants; the page URL alone cannot verify a secondary offer's storage.
+     * The returned URLs are still checked against the requested SKU before they can validate it.
+     */
+    private fun jsonLdProductUrlsForOffer(
+        document: Document,
+        productTitle: String,
+        expectedPrice: Double,
+        expectedCurrency: String,
+        pageUrl: String
+    ): List<String> {
+        if (productTitle.isBlank() || expectedPrice <= 0.0) return emptyList()
+        val roots = document.select("script").asSequence()
+            .filter { script ->
+                script.attr("type").substringBefore(';').trim()
+                    .equals("application/ld+json", ignoreCase = true)
+            }
+            .mapNotNull { script ->
+                val payload = script.data().ifBlank { script.html() }
+                    .trim()
+                    .removePrefix("<!--").removeSuffix("-->").trim()
+                try { JSONTokener(payload).nextValue() } catch (_: Exception) { null }
+            }
+            .toList()
+        val wantedName = normalizeTitle(productTitle)
+        val wantedCurrency = expectedCurrency.uppercase(Locale.ROOT)
+        val urls = linkedSetOf<String>()
+
+        fun resolveCandidate(raw: String?) {
+            if (raw.isNullOrBlank() || raw == "null") return
+            val resolved = runCatching { URI(pageUrl).resolve(raw).toString() }.getOrNull() ?: return
+            val uri = runCatching { URI(resolved) }.getOrNull() ?: return
+            if (!uri.scheme.equals("https", ignoreCase = true) ||
+                uri.host.isNullOrBlank() ||
+                uri.host.equals("web.archive.org", ignoreCase = true) ||
+                uri.host.equals("archive.org", ignoreCase = true) ||
+                uri.host.equals("arquivo.pt", ignoreCase = true) ||
+                !isEligibleDirectUrl(resolved)
+            ) return
+            urls += resolved
+        }
+
+        fun matchingOffer(offers: Any?): Boolean {
+            var matched = false
+            fun visit(value: Any?) {
+                when (value) {
+                    is JSONObject -> {
+                        val priceValue = listOf(
+                            value.opt("price"),
+                            value.optJSONObject("priceSpecification")?.opt("price")
+                        ).firstNotNullOfOrNull { raw ->
+                            when (raw) {
+                                is Number -> raw.toDouble().takeIf { it.isFinite() && it > 0.0 }
+                                else -> raw?.toString()?.let(::parsePositivePrice)
+                            }
+                        }
+                        val currency = listOf(
+                            value.optString("priceCurrency"),
+                            value.optJSONObject("priceSpecification")?.optString("priceCurrency").orEmpty()
+                        ).firstOrNull { it.isNotBlank() && it != "null" }.orEmpty()
+                            .uppercase(Locale.ROOT)
+                        if (priceValue != null &&
+                            kotlin.math.abs(priceValue - expectedPrice) < 0.011 &&
+                            currency == wantedCurrency
+                        ) {
+                            matched = true
+                            resolveCandidate(value.optString("url"))
+                            value.optJSONObject("itemOffered")?.optString("url")?.let(::resolveCandidate)
+                        }
+                        val keys = value.keys()
+                        while (keys.hasNext()) visit(value.opt(keys.next()))
+                    }
+                    is JSONArray -> for (index in 0 until value.length()) visit(value.opt(index))
+                }
+            }
+            visit(offers)
+            return matched
+        }
+
+        fun visitProducts(value: Any?) {
+            when (value) {
+                is JSONObject -> {
+                    val productTypes = setOf("product", "productgroup", "individualproduct", "productmodel")
+                    val name = value.optString("name").takeIf { it.isNotBlank() && it != "null" }
+                    if (name != null && normalizeTitle(name) == wantedName &&
+                        jsonLdTypeNames(value).any { it in productTypes } &&
+                        matchingOffer(value.opt("offers")
+                    ) {
+                        resolveCandidate(value.optString("url"))
+                    }
+                    val keys = value.keys()
+                    while (keys.hasNext()) visitProducts(value.opt(keys.next()))
+                }
+                is JSONArray -> for (index in 0 until value.length()) visitProducts(value.opt(index))
+            }
+        }
+        roots.forEach(::visitProducts)
+        return urls.toList()
+    }
+
     internal fun parseArchivedPricesForKnownProducts(
         document: Document,
         primaryExpectedTitle: String,
@@ -3516,16 +3617,31 @@ class WaybackPriceHistoryClient(
         for ((archivedTitle, price, rawCurrency) in extractJsonLdProductOffers(document)) {
             val currency = rawCurrency.uppercase(Locale.ROOT)
             if (currency !in allowedCurrencies || price !in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE) continue
-            val matches = knownProductTitlesById.entries.filter { (productId, savedTitle) ->
-                productId.isNotBlank() &&
-                    savedTitle.isNotBlank() &&
-                    !isMatchingTitleForArchivedUrl(primaryExpectedTitle, savedTitle, originalUrl) &&
-                    !hasExplicitProductVariantConflict(savedTitle, archivedTitle) &&
+            val matches = knownProductTitlesById.entries.mapNotNull { (productId, savedTitle) ->
+                if (productId.isBlank() || savedTitle.isBlank() ||
+                    isMatchingTitleForArchivedUrl(primaryExpectedTitle, savedTitle, originalUrl) ||
+                    hasExplicitProductVariantConflict(savedTitle, archivedTitle)
+                ) return@mapNotNull null
+
+                val pageConfirmsVariant =
                     isMatchingTitleForArchivedUrl(savedTitle, archivedTitle, originalUrl)
+                val offerUrlConfirmsVariant = !pageConfirmsVariant &&
+                    jsonLdProductUrlsForOffer(
+                        document = document,
+                        productTitle = archivedTitle,
+                        expectedPrice = price,
+                        expectedCurrency = currency,
+                        pageUrl = originalUrl
+                    ).any { offerUrl ->
+                        !hasExplicitVariantConflictInProductUrl(savedTitle, offerUrl) &&
+                            matchesVariantDetailsConfirmedByUrl(savedTitle, archivedTitle, offerUrl)
+                    }
+                if (!pageConfirmsVariant && !offerUrlConfirmsVariant) return@mapNotNull null
+                Triple(productId, savedTitle, offerUrlConfirmsVariant)
             }
             // Duplicate retailer listings or similarly named variants are ambiguous: do not guess.
             if (matches.size != 1) continue
-            val (productId, canonicalTitle) = matches.single()
+            val (productId, canonicalTitle, offerUrlConfirmed) = matches.single()
             output += ArchivedPriceQuote(
                 observedAt = observedAt,
                 price = price,
@@ -3535,7 +3651,8 @@ class WaybackPriceHistoryClient(
                 snapshotUrl = snapshotUrl,
                 sourceCurrency = currency,
                 sourcePrice = price,
-                targetProductId = productId
+                targetProductId = productId,
+                variantIdentityConfirmedByUrl = offerUrlConfirmed
             )
             if (output.size >= 8) break
         }

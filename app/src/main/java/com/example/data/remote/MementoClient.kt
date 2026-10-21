@@ -32,6 +32,26 @@ class MementoClient(
         .followRedirects(true)
         .build()
 ) {
+    private val preferences = context.applicationContext.getSharedPreferences(
+        "minimo_memento_history", Context.MODE_PRIVATE
+    )
+
+    private fun requestGate(wallClockMillis: Long): Set<String>? = synchronized(preferences) {
+        val cooldownUntil = preferences.getLong(KEY_COOLDOWN_UNTIL, 0L)
+        if (wallClockMillis < cooldownUntil) return@synchronized setOf("MEMENTO_COOLDOWN_ACTIVE")
+        val lastRequest = preferences.getLong(KEY_LAST_REQUEST, 0L)
+        if (wallClockMillis - lastRequest < MIN_REQUEST_INTERVAL_MS) {
+            return@synchronized setOf("MEMENTO_LOCAL_THROTTLE")
+        }
+        preferences.edit().putLong(KEY_LAST_REQUEST, wallClockMillis).commit()
+        null
+    }
+
+    private fun activateRateLimit(wallClockMillis: Long) {
+        synchronized(preferences) {
+            preferences.edit().putLong(KEY_COOLDOWN_UNTIL, wallClockMillis + RATE_LIMIT_COOLDOWN_MS).commit()
+        }
+    }
     suspend fun fetchHistory(
         originalUrl: String,
         expectedTitle: String,
@@ -48,6 +68,15 @@ class MementoClient(
             return@withContext WaybackBackfillResult(
                 requestFailed = true,
                 diagnosticCodes = setOf("MEMENTO_INVALID_TARGET")
+            )
+        }
+
+        val gateDiagnostics = requestGate(System.currentTimeMillis())
+        if (gateDiagnostics != null) {
+            return@withContext WaybackBackfillResult(
+                skippedRecently = true,
+                requestFailed = false,
+                diagnosticCodes = gateDiagnostics
             )
         }
 
@@ -72,6 +101,7 @@ class MementoClient(
                 ).execute().use { response ->
                     when {
                         response.code == 429 -> {
+                            activateRateLimit(System.currentTimeMillis())
                             diagnostics += "MEMENTO_RATE_LIMITED"
                             null
                         }
@@ -129,6 +159,7 @@ class MementoClient(
                         when {
                             response.code == 429 -> {
                                 requestFailed = true
+                                activateRateLimit(System.currentTimeMillis())
                                 diagnostics += "MEMENTO_RATE_LIMITED"
                             }
                             !response.isSuccessful -> {
@@ -343,6 +374,10 @@ class MementoClient(
     private companion object {
         const val ARCHIVE_HOST = "arquivo.pt"
         const val TIMEMAP_TIMEOUT_SECONDS = 5L
+        const val MIN_REQUEST_INTERVAL_MS = 2_000L
+        const val RATE_LIMIT_COOLDOWN_MS = 15L * 60L * 1000L
+        const val KEY_LAST_REQUEST = "last_memento_request"
+        const val KEY_COOLDOWN_UNTIL = "memento_cooldown_until"
         const val SNAPSHOT_TIMEOUT_SECONDS = 4L
         const val MAX_TIMEMAP_BYTES = 512 * 1024
         const val MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024

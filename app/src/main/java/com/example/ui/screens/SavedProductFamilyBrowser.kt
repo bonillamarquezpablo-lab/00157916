@@ -2,6 +2,8 @@ package com.example.ui.screens
 
 import com.example.data.model.Product
 import com.example.data.remote.onlineProductIdentityKey
+import com.example.data.model.StoreOffer
+import java.net.URI
 import java.text.Normalizer
 import java.util.Locale
 
@@ -70,6 +72,105 @@ private val SAVED_COLOUR_PATTERN = Regex(
 private val SAVED_VARIANT_PATTERN = Regex(
     """(?i)\b(pro\s*max|max|plus|pro|ultra|fe|lite|mini|fold|flip|classic|edge|slim|fat|standard|estandar|digital|disc|disk|oled|series|edition|original)\b"""
 )
+
+private fun isRealRetailerDestination(rawUrl: String): Boolean {
+    val uri = runCatching { URI(rawUrl) }.getOrNull() ?: return false
+    val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.") ?: return false
+    if (!uri.scheme.equals("https", true)) return false
+    val excluded = setOf("google.com", "google.es", "bing.com", "web.archive.org", "archive.org", "arquivo.pt")
+    return host !in excluded &&
+        !host.endsWith(".google.com") &&
+        !host.endsWith(".google.es") &&
+        !host.endsWith(".bing.com")
+}
+
+/**
+ * Historical imports can leave duplicate Room rows for the same exact SKU because the product
+ * was first seen at one shop and later at another. Merge those rows only for display. The DB
+ * entries remain untouched; their validated price points and retailer offers are combined into
+ * one product card, while distinct edition/capacity/colour keys remain separate.
+ */
+private fun mergeExactVariantProducts(rows: List<Product>): Product {
+    if (rows.size == 1) return rows.single()
+
+    val validPriceRows = rows.filter { it.isPriceVerified && it.currentPrice.isFinite() && it.currentPrice > 0.0 }
+    val chosenCurrent = validPriceRows.filter { it.isPriceFresh }
+        .minByOrNull { it.currentPrice }
+        ?: validPriceRows.maxByOrNull { it.priceObservedAt ?: 0L }
+    val representative = chosenCurrent ?: rows.maxByOrNull {
+        it.savedHistoricalPriceObservedAt ?: it.priceObservedAt ?: 0L
+    } ?: rows.first()
+    val displayTitle = rows.maxWithOrNull(
+        compareBy<Product> {
+            val parts = savedIdentityParts(it)
+            (if (parts.any { part -> part.startsWith("memory:") }) 4 else 0) +
+                (if (parts.any { part -> part.startsWith("color:") }) 2 else 0) +
+                (if (parts.any { part -> part.startsWith("variant:") }) 1 else 0)
+        }.thenBy { it.title.length }
+    )?.title ?: representative.title
+
+    val synthesizedCurrentOffers = validPriceRows.filter { isRealRetailerDestination(it.storeUrl) }.map { row ->
+        StoreOffer(
+            store = row.currentStore,
+            price = row.currentPrice,
+            inStock = false,
+            shippingInfo = "Stock por confirmar",
+            url = row.storeUrl,
+            linkType = "directo"
+        )
+    }
+    val offers = (rows.flatMap { it.offers } + synthesizedCurrentOffers)
+        .filter { it.price.isFinite() && it.price > 0.0 }
+        .distinctBy {
+            listOf(
+                it.store.id.trim().lowercase(Locale.ROOT),
+                it.price.toString(),
+                it.url.trim().lowercase(Locale.ROOT)
+            ).joinToString("|")
+        }
+        .sortedBy { it.price }
+
+    val history = rows.flatMap { it.priceHistory }
+        .distinctBy {
+            listOf(
+                it.timestamp.toString(),
+                it.price.toString(),
+                it.storeName.trim().lowercase(Locale.ROOT),
+                it.evidenceType.lowercase(Locale.ROOT),
+                it.sourceUrl.trim().lowercase(Locale.ROOT)
+            ).joinToString("|")
+        }
+        .sortedBy { it.timestamp }
+
+    val lastSavedArchive = rows.filter {
+        it.savedHistoricalPrice?.let { price -> price.isFinite() && price > 0.0 } == true &&
+            it.savedHistoricalPriceObservedAt?.let { timestamp -> timestamp > 0L } == true
+    }.maxByOrNull { it.savedHistoricalPriceObservedAt ?: 0L }
+
+    return representative.copy(
+        title = displayTitle,
+        offers = offers,
+        priceHistory = history,
+        isTracked = rows.any { it.isTracked },
+        alertTargetPrice = rows.firstOrNull { it.isTracked && it.alertTargetPrice != null }?.alertTargetPrice
+            ?: representative.alertTargetPrice,
+        savedHistoricalPrice = if (representative.isPriceVerified) {
+            representative.savedHistoricalPrice
+        } else {
+            lastSavedArchive?.savedHistoricalPrice ?: representative.savedHistoricalPrice
+        },
+        savedHistoricalPriceObservedAt = if (representative.isPriceVerified) {
+            representative.savedHistoricalPriceObservedAt
+        } else {
+            lastSavedArchive?.savedHistoricalPriceObservedAt ?: representative.savedHistoricalPriceObservedAt
+        },
+        savedHistoricalPriceSource = if (representative.isPriceVerified) {
+            representative.savedHistoricalPriceSource
+        } else {
+            lastSavedArchive?.savedHistoricalPriceSource ?: representative.savedHistoricalPriceSource
+        }
+    )
+}
 
 private fun capacityLabel(title: String, identityParts: List<String>): String {
     val matches = SAVED_CAPACITY_PATTERN.findAll(title).toList()
@@ -149,15 +250,18 @@ internal fun buildSavedProductFamilyBuckets(products: List<Product>): List<Saved
                     val storageGroups = variantProducts.groupBy { product ->
                         capacityLabel(product.title, savedIdentityParts(product))
                     }.map { (label, rows) ->
-                        SavedStorageGroup(
-                            label = label,
-                            products = rows.sortedWith(
+                        val exactVariantRows = rows.groupBy { onlineProductIdentityKey(it.title) }
+                            .values
+                            .map(::mergeExactVariantProducts)
+                            .sortedWith(
                                 compareBy<Product> { product ->
                                     savedIdentityParts(product).firstOrNull { it.startsWith("color:") }.orEmpty()
-                                }.thenBy { it.currentStore.name.lowercase(Locale.ROOT) }
-                                    .thenBy { it.title.lowercase(Locale.ROOT) }
+                                }.thenBy { it.title.lowercase(Locale.ROOT) }
                                     .thenBy { it.id }
                             )
+                        SavedStorageGroup(
+                            label = label,
+                            products = exactVariantRows
                         )
                     }.sortedWith(
                         compareBy<SavedStorageGroup> { capacitySortValue(it.label) }

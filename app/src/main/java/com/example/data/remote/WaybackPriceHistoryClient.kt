@@ -1545,14 +1545,91 @@ class WaybackPriceHistoryClient(
             )
         }
 
-        val quotes = fetched.flatMap { snapshot -> listOfNotNull(snapshot.quote) + snapshot.additionalQuotes }
+        val availabilityQuotes = fetched
+            .flatMap { snapshot -> listOfNotNull(snapshot.quote) + snapshot.additionalQuotes }
             .sortedBy { it.observedAt }
-            // Multiple candidate URLs can point to the same archived price at the same timestamp.
-            // Keep a single history point; otherwise one Availability snapshot returned for two
-            // URL variants is incorrectly persisted twice.
-            .distinctBy { listOf(it.targetProductId.orEmpty(), it.productTitle, it.observedAt.toString(), it.price.toString(), it.currency.uppercase(Locale.ROOT)) }
+            // Preserve distinct merchant URLs as distinct observations. Room and the graph can
+            // deduplicate by product/date later, but dropping a second seller here lost evidence
+            // before it ever reached persistence.
+            .distinctBy {
+                listOf(
+                    it.targetProductId.orEmpty(), it.productTitle, it.originalUrl,
+                    it.observedAt.toString(), it.price.toString(), it.currency.uppercase(Locale.ROOT)
+                )
+            }
+
+        // Availability returns only the closest capture for a queried URL/date. Once one of
+        // those snapshots has proved the selected product and price, use its verified original
+        // retailer URL to ask CDX for the time series in one index request. This is the missing
+        // bridge between "one price recovered by Availability" and "a multi-date historical
+        // series". It also means the CDX request (and its actual response/failure) is visible in
+        // diagnostic steps 5–6 instead of those steps staying "not executed" for Google-only
+        // saved products. Never run this discovery from an unverified candidate URL.
+        val verifiedSeriesUrl = fetched
+            .mapNotNull { it.quote }
+            .firstOrNull { quote ->
+                quote.originalUrl.isNotBlank() && isEligibleDirectUrl(quote.originalUrl)
+            }?.originalUrl
+        val supplementalCdxQuotes = mutableListOf<ArchivedPriceQuote>()
+        val supplementalCdxDiagnostics = linkedSetOf<String>()
+        var supplementalCdxCaptures = 0
+        var supplementalCdxChecked = 0
+        if (verifiedSeriesUrl != null && !probeDiagnostics.contains("WAYBACK_RATE_LIMITED")) {
+            val seriesCacheKey = attemptKey(
+                "availability-verified-url-cdx-series-v1|$verifiedSeriesUrl|$expectedTitle|$lookbackDays"
+            )
+            if (!wasAttemptedRecently(seriesCacheKey, now)) {
+                val seriesCdxUrl = buildCdxUrl(
+                    originalUrl = verifiedSeriesUrl,
+                    now = now,
+                    lookbackDays = lookbackDays,
+                    matchType = "prefix"
+                )
+                if (seriesCdxUrl != null) {
+                    emitWaybackTrace(
+                        onTrace, 4, WaybackTraceStatus.RUNNING,
+                        "Availability confirmó una captura; se consulta CDX sobre la URL verificada para recuperar otras fechas."
+                    )
+                    val seriesResult = queryCdxAndFetchPrices(
+                        cdxUrl = seriesCdxUrl,
+                        expectedTitle = expectedTitle,
+                        cacheKey = seriesCacheKey,
+                        now = now,
+                        lookbackDays = lookbackDays,
+                        maxSnapshots = maxSnapshots.coerceAtMost(8).coerceAtLeast(2),
+                        cdxTimeoutSeconds = DIRECT_CDX_TIMEOUT_SECONDS,
+                        cdxStage = "CDX_AVAILABILITY_SERIES",
+                        snapshotTimeoutSeconds = SNAPSHOT_CALL_TIMEOUT_SECONDS,
+                        onTrace = onTrace,
+                        knownProductTitlesById = knownProductTitlesById
+                    )
+                    supplementalCdxQuotes += seriesResult.quotes
+                    supplementalCdxDiagnostics += seriesResult.diagnosticCodes
+                    supplementalCdxCaptures = seriesResult.capturesFound
+                    supplementalCdxChecked = seriesResult.capturesChecked
+                }
+            } else {
+                emitWaybackTrace(
+                    onTrace, 4, WaybackTraceStatus.SKIPPED,
+                    "La serie CDX de la URL verificada ya se consultó recientemente; se evita repetir tráfico."
+                )
+            }
+        }
+
+        val quotes = (availabilityQuotes + supplementalCdxQuotes)
+            .sortedBy { it.observedAt }
+            // Keep one row per product/store URL/date/price. A CDX time series supplements the
+            // Availability point instead of replacing it, while duplicate copies of the same
+            // capture still collapse deterministically.
+            .distinctBy {
+                listOf(
+                    it.targetProductId.orEmpty(), it.productTitle, it.originalUrl,
+                    it.observedAt.toString(), it.price.toString(), it.currency.uppercase(Locale.ROOT)
+                )
+            }
         val diagnostics = linkedSetOf<String>().apply {
             addAll(probeDiagnostics)
+            addAll(supplementalCdxDiagnostics)
             fetched.mapNotNullTo(this) { it.diagnosticCode }
             if (quotes.isEmpty() && fetched.any { it.fetched }) add("NO_VERIFIED_EUR_PRICE")
             else if (quotes.isEmpty() && isEmpty()) add("${stage}_NO_VERIFIED_PRICE")
@@ -1563,7 +1640,8 @@ class WaybackPriceHistoryClient(
         val missingEurPrices = fetched.count { it.diagnosticCode == "ARCHIVE_EUR_PRICE_MISSING" }
         val consolidationDetail = buildString {
             append(
-                "Consolidación histórica por Availability: ${fetched.count { it.fetched }} HTML descargado(s), " +
+                "Consolidación histórica: ${fetched.count { it.fetched }} HTML de Availability descargado(s), " +
+                    "${supplementalCdxChecked} HTML adicional(es) comprobado(s) desde CDX, " +
                     "${verifiedBeforeDedup.size} precio(s) verificado(s), ${duplicatesRemoved} duplicado(s) eliminado(s)."
             )
             if (quotes.isEmpty()) {
@@ -1606,10 +1684,10 @@ class WaybackPriceHistoryClient(
         )
         return WaybackBackfillResult(
             quotes = quotes,
-            capturesFound = captures.size,
-            capturesChecked = fetched.count { it.fetched },
+            capturesFound = maxOf(captures.size, supplementalCdxCaptures),
+            capturesChecked = fetched.count { it.fetched } + supplementalCdxChecked,
             available = successfulProbes > 0,
-            requestFailed = failed || (quotes.isEmpty() && anySnapshotFailed && successfulProbes == 0),
+            requestFailed = quotes.isEmpty() && (failed || (anySnapshotFailed && successfulProbes == 0)),
             diagnosticCodes = diagnostics
         )
     }

@@ -448,9 +448,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState
     ) { allProducts, state ->
         allProducts
-            // Keep demo catalogue rows out of Mercado. Genuine price observations and user-followed
-            // products remain visible; an unverified followed item still clearly shows no price.
-            .filter { product -> product.isPriceVerified || product.isTracked }
+            // Keep demo catalogue rows out of Mercado. Products with verified saved history
+            // remain visible even if their latest live quote needs revalidation; otherwise a
+            // stale cached current-price flag can make the entire saved history appear deleted
+            // after reopening the app. Historical points never imply a verified current price.
+            .filter { product ->
+                product.isPriceVerified || product.isTracked || product.priceHistory.isNotEmpty()
+            }
             .filter { product ->
                 // Category filter
                 (state.selectedCategory == ProductCategory.ALL || product.category == state.selectedCategory)

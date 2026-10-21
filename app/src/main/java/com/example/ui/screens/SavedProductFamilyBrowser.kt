@@ -116,7 +116,7 @@ private fun mergeExactVariantProducts(rows: List<Product>): Product {
             store = row.currentStore,
             price = row.currentPrice,
             inStock = false,
-            shippingInfo = "Stock por confirmar",
+            shippingInfo = "Consultar envío",
             url = row.storeUrl,
             linkType = "directo"
         )

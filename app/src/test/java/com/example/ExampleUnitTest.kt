@@ -44,10 +44,20 @@ class ExampleUnitTest {
             )
         )
 
-        assertEquals("Models, variants and accessory kits must not be merged together, but shoe sizes should be ignored", 6, groups.size)
-        val redmi17 = groups.single { it.identityKey == "xiaomi|redmi17|memory:4gb+256gb" }
-        assertEquals(2, redmi17.offers.size)
-        assertEquals(179.99, redmi17.minPrice, 0.001)
+        assertEquals(
+            "Model editions, colours and accessories remain distinct; shoe sizes are ignored",
+            7,
+            groups.size
+        )
+        val redmi17Colours = groups.filter {
+            it.identityKey.startsWith("xiaomi|redmi17|") &&
+                it.identityKey.contains("memory:4gb+256gb")
+        }
+        assertEquals("Black and blue are separate SKU cards", 2, redmi17Colours.size)
+        assertTrue(redmi17Colours.any { it.identityKey.contains("color:black") })
+        assertTrue(redmi17Colours.any { it.identityKey.contains("color:blue") })
+        assertTrue(redmi17Colours.all { it.offers.size == 1 })
+        assertEquals(179.99, redmi17Colours.minOf { it.minPrice }, 0.001)
         assertTrue(groups.any { it.identityKey.contains("redmia5") })
         assertTrue(groups.any { it.identityKey.contains("accessory:funda") })
         assertTrue(groups.any { it.identityKey.contains("variant:fe") })

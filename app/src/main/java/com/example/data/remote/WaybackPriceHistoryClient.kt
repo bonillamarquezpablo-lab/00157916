@@ -1638,7 +1638,11 @@ class WaybackPriceHistoryClient(
             )
         }
 
-        val sampled = sampleCaptures(captures, maxSnapshots)
+        val sampled = sampleUnprocessedCaptures(
+            captures = captures,
+            max = maxSnapshots,
+            processedCaptureKeys = snapshotResultsCache?.keys.orEmpty()
+        )
         val fetched = mutableListOf<SnapshotFetch>()
         for ((snapshotIndex, capture) in sampled.withIndex()) {
             val snapshot = fetchSnapshotOnce(
@@ -1914,6 +1918,24 @@ class WaybackPriceHistoryClient(
     private class SnapshotRetryBlockedException(val diagnosticCode: String) :
         IOException(diagnosticCode)
 
+    internal fun isDnsResolutionFailure(failure: Throwable): Boolean {
+        val seen = mutableSetOf<Throwable>()
+        var current: Throwable? = failure
+        while (current != null && seen.add(current)) {
+            if (current is UnknownHostException) return true
+            val message = current.message.orEmpty().lowercase(Locale.ROOT)
+            if (
+                message.contains("unable to resolve host") ||
+                message.contains("failed to resolve") ||
+                message.contains("no address associated with hostname") ||
+                message.contains("nodename nor servname provided") ||
+                message.contains("temporary failure in name resolution")
+            ) return true
+            current = current.cause
+        }
+        return false
+    }
+
     internal suspend fun <T> retrySnapshotDnsOnce(
         request: suspend () -> T,
         beforeRetry: suspend () -> Boolean
@@ -1924,8 +1946,9 @@ class WaybackPriceHistoryClient(
                 return request()
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (dnsFailure: UnknownHostException) {
-                if (retried) throw dnsFailure
+            } catch (failure: Exception) {
+                if (!isDnsResolutionFailure(failure)) throw failure
+                if (retried) throw failure
                 if (!beforeRetry()) throw SnapshotRetryBlockedException("WAYBACK_RATE_LIMITED")
                 retried = true
             }
@@ -4750,10 +4773,10 @@ class WaybackPriceHistoryClient(
     }
 
     /** Read bounded response bodies so unexpectedly large archived pages cannot spike app memory. */
-    internal fun classifyNetworkFailure(stage: String, failure: Exception): String = when (failure) {
-        is SocketTimeoutException, is InterruptedIOException -> "${stage}_TIMEOUT"
-        is UnknownHostException -> "${stage}_DNS"
-        is IOException -> "${stage}_NETWORK"
+    internal fun classifyNetworkFailure(stage: String, failure: Exception): String = when {
+        failure is SocketTimeoutException || failure is InterruptedIOException -> "${stage}_TIMEOUT"
+        isDnsResolutionFailure(failure) -> "${stage}_DNS"
+        failure is IOException -> "${stage}_NETWORK"
         else -> "${stage}_UNEXPECTED_ERROR"
     }
 
@@ -4805,6 +4828,24 @@ class WaybackPriceHistoryClient(
         return (0 until max).map { index ->
             quarterly[(index.toDouble() * (quarterly.size - 1) / (max - 1)).toInt()]
         }.distinctBy { it.rawTimestamp to it.originalUrl }
+    }
+
+    /**
+     * When exact-URL and prefix CDX results overlap, sample captures that have not already been
+     * processed first. If every capture is already cached, return the cached set so callers can
+     * reuse its results instead of turning a cache hit into a false empty-history result.
+     */
+    internal fun sampleUnprocessedCaptures(
+        captures: List<WaybackCapture>,
+        max: Int,
+        processedCaptureKeys: Set<String>
+    ): List<WaybackCapture> {
+        if (max <= 0 || captures.isEmpty()) return emptyList()
+        val unique = captures.distinctBy { it.rawTimestamp to it.originalUrl }
+        val unprocessed = unique.filterNot { capture ->
+            snapshotCacheKey(capture) in processedCaptureKeys
+        }
+        return sampleCaptures(unprocessed.ifEmpty { unique }, max)
     }
 
     private fun attemptKey(url: String): String {

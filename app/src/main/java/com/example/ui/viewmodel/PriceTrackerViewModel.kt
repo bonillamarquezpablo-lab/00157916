@@ -110,7 +110,8 @@ internal fun mergeWaybackDiagnosticStatus(
     // Capture rows (download and barrier evaluation) represent several individually labelled
     // captures. If any one fails, keep the aggregate row red even if another capture succeeded;
     // the per-capture detail lines show exactly which dates succeeded and which DNS/download failed.
-    diagnosticStep in 11..14 && incoming == WaybackTraceStatus.FAILED ->
+    diagnosticStep in 11..14 &&
+        (current == WaybackTraceStatus.FAILED || incoming == WaybackTraceStatus.FAILED) ->
         WaybackTraceStatus.FAILED
     // Stages 6 and 7 describe recovery, not mere network reachability. A final explicit
     // no-capture result must override an earlier green sub-attempt so the UI cannot display

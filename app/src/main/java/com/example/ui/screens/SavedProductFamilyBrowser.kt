@@ -109,7 +109,9 @@ private fun mergeExactVariantProducts(rows: List<Product>): Product {
         }.thenBy { it.title.length }
     )?.title ?: representative.title
 
-    val synthesizedCurrentOffers = validPriceRows.filter { isRealRetailerDestination(it.storeUrl) }.map { row ->
+    val synthesizedCurrentOffers = validPriceRows.filter {
+        it.isPriceFresh && isRealRetailerDestination(it.storeUrl)
+    }.map { row ->
         StoreOffer(
             store = row.currentStore,
             price = row.currentPrice,

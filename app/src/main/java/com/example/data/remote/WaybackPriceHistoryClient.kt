@@ -1462,7 +1462,7 @@ class WaybackPriceHistoryClient(
         }
         val allAvailabilityCaptures = probes.mapNotNull { it.capture }
             .distinctBy { it.rawTimestamp to it.originalUrl }
-        val windowStart = (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
+        val windowStart = historyWindowStartTimestamp(now, lookbackDays)
         val captures = allAvailabilityCaptures
             .filter { it.timestamp in windowStart..now }
             .sortedBy { it.timestamp }
@@ -1882,6 +1882,27 @@ class WaybackPriceHistoryClient(
     internal fun snapshotCacheKey(capture: WaybackCapture): String =
         capture.rawTimestamp + "|" + capture.originalUrl
 
+    /**
+     * The eight-year window is calendar-based, not a fixed 2,920-day approximation.
+     * Start at midnight UTC on the boundary date so captures earlier on that date are not
+     * accidentally rejected by comparing against the current time-of-day eight years earlier.
+     */
+    internal fun historyWindowStartTimestamp(now: Long, lookbackDays: Int): Long {
+        val safeNow = now.coerceAtLeast(0L)
+        if (lookbackDays >= DEFAULT_LOOKBACK_DAYS) {
+            val calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT).apply {
+                timeInMillis = safeNow
+                add(Calendar.YEAR, -8)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            return calendar.timeInMillis.coerceAtLeast(0L)
+        }
+        return (safeNow - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
+    }
+
     /** Stable, privacy-safe identifier for one archived page fetch in the on-device trace. */
     internal fun snapshotDiagnosticLabel(
         capture: WaybackCapture,
@@ -1896,7 +1917,11 @@ class WaybackPriceHistoryClient(
             ?.takeIf { host -> Regex("""^[a-z0-9.-]+$""").matches(host) }
             ?: "host-desconocido"
         val safeTimestamp = capture.rawTimestamp.filter(Char::isDigit).take(14)
-        return "captura ${ordinal.coerceAtLeast(1)} de ${total.coerceAtLeast(1)} · fecha ${safeTimestamp.ifBlank { "desconocida" }} · ruta $safeStage · tienda $safeHost"
+        val captureId = MessageDigest.getInstance("SHA-256")
+            .digest((capture.rawTimestamp + "|" + capture.originalUrl).toByteArray(Charsets.UTF_8))
+            .take(4)
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        return "captura ${ordinal.coerceAtLeast(1)} de ${total.coerceAtLeast(1)} · id $captureId · fecha ${safeTimestamp.ifBlank { "desconocida" }} · ruta $safeStage · tienda $safeHost"
     }
 
     private suspend fun fetchSnapshotOnce(
@@ -2122,10 +2147,12 @@ class WaybackPriceHistoryClient(
                 val elapsed = ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(0L)
                 val originalHost = runCatching { URI(capture.originalUrl).host }.getOrNull()
                     ?.lowercase(Locale.ROOT) ?: "host-desconocido"
+                val rootCause = generateSequence(failure as Throwable?) { it.cause }.lastOrNull()
+                val rootCauseType = rootCause?.javaClass?.simpleName?.take(60) ?: "desconocida"
                 val budgetSeconds = snapshotTimeoutSeconds.coerceAtLeast(1L)
                 emitWaybackTrace(
                     captureTrace, downloadStep, WaybackTraceStatus.FAILED,
-                    "Descarga fallida: $code; intentos de red ${snapshotRequestAttempts}; presupuesto ${budgetSeconds}s; destino de archivo web.archive.org; host original ${originalHost}; captura ${capture.rawTimestamp}; ruta ${captureSourceStage}. No se recibió una respuesta HTML; URL completa omitida.",
+                    "Descarga fallida: $code; causa raíz $rootCauseType; intentos de red $snapshotRequestAttempts; presupuesto ${budgetSeconds}s; destino de archivo web.archive.org; host original $originalHost; captura ${capture.rawTimestamp}; ruta $captureSourceStage. No se recibió una respuesta HTML; URL completa omitida.",
                     elapsed
                 )
                 emitWaybackTrace(captureTrace, evaluateStep, WaybackTraceStatus.FAILED, "No fue posible evaluar el HTML.")
@@ -3454,7 +3481,7 @@ class WaybackPriceHistoryClient(
         lookbackDays: Int,
         matchType: String = "prefix"
     ): HttpUrl? {
-        val start = (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
+        val start = historyWindowStartTimestamp(now, lookbackDays)
         val from = formatUtc(start, "yyyyMMdd")
         val to = formatUtc(now, "yyyyMMdd")
         return HttpUrl.Builder()

@@ -189,6 +189,48 @@ class OnlineSearchScreenTest {
     }
 
     @Test
+    fun sameSellerSamePriceDuplicatesCollapseButDifferentPhoneColoursStaySeparate() {
+        val rows = listOf(
+            SerpApiShoppingResult(
+                title = "Xiaomi Redmi Note 15 Pro 8GB/256GB Negro",
+                price = 319.90,
+                storeName = "El Corte Inglés",
+                sourceUrl = "https://shop.example.test/redmi-note-15-pro-black",
+                observedAt = 123L
+            ),
+            SerpApiShoppingResult(
+                title = "Xiaomi Redmi Note 15 Pro 8GB/256GB Negro",
+                price = 319.90,
+                storeName = "El Corte Inglés",
+                sourceUrl = "https://shop.example.test/redmi-note-15-pro-black?utm_source=shopping",
+                observedAt = 123L
+            ),
+            SerpApiShoppingResult(
+                title = "Xiaomi Redmi Note 15 Pro 8GB/256GB Titanio",
+                price = 319.90,
+                storeName = "El Corte Inglés",
+                sourceUrl = "https://shop.example.test/redmi-note-15-pro-titanium",
+                observedAt = 123L
+            )
+        )
+
+        val groups = buildOnlineSearchDisplayGroups(
+            results = rows,
+            query = "Xiaomi Redmi Note 15 Pro 8GB 256GB",
+            showSecondHand = false,
+            amazonOnly = false
+        )
+
+        assertEquals("Black and titanium are separate product variants", 2, groups.size)
+        assertEquals(
+            "The repeated URL/listing for the same seller, price and colour is one offer",
+            listOf(1, 1),
+            groups.map { it.group.offers.size }.sorted()
+        )
+        assertEquals(2, groups.map { it.group.identityKey }.distinct().size)
+    }
+
+    @Test
     fun secondHandOffersJoinTheSamePriceOrderWhenEnabled() {
         // Model-first searches still contain an explicit diameter + PCD and must share one price order.
         val query = "RIAL Milano 14\" 5x100"

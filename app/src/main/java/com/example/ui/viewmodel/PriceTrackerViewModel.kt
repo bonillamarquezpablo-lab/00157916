@@ -8,6 +8,7 @@ import com.example.data.local.AppDatabase
 import com.example.data.remote.OnlineSearchCache
 import com.example.data.remote.formatOnlineSnapshotAge
 import com.example.data.remote.OnlineSearchQuotaGuard
+import com.example.data.remote.MementoClient
 import com.example.data.remote.WaybackPriceHistoryClient
 import com.example.data.remote.diagnosticIndexForWaybackTrace
 import com.example.data.remote.summarizeCdxStep5Events
@@ -247,6 +248,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         // Domain recovery may include paced Availability probes and up to eight dated snapshots.
         // This is separate from live shopping search and still bounded per retailer.
         const val MAX_ARCHIVE_DOMAIN_FALLBACK_MS = 90_000L
+        // Memento is a separate archive provider and gets one short fallback window per manual lookup.
+        const val MAX_ARCHIVE_MEMENTO_FALLBACK_MS = 25_000L
     }
 
     private val database = AppDatabase.getInstance(application)
@@ -263,6 +266,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     private val onlineSearchCache = OnlineSearchCache(application)
     private val onlineSearchQuotaGuard = OnlineSearchQuotaGuard(application)
     private val waybackPriceHistoryClient = WaybackPriceHistoryClient(application)
+    private val mementoClient = MementoClient(application)
     private val onlineDiscardedCache = mutableMapOf<String, List<RejectedOnlineOffer>>()
     private var lastDisplayedSearchIdentity: String? = null
 
@@ -1945,6 +1949,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 var foundCount = 0
                 var capturesFoundCount = 0
                 var selectedProductRefreshed = false
+                var mementoAttempted = false
                 var successfulLookupsCount = 0
                 var requestFailedCount = 0
                 var skippedCount = 0
@@ -2080,6 +2085,64 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             }
                         }
                     }
+                    // Independent archive fallback: Wayback can be empty or rate-limited while
+                    // Arquivo.pt still has snapshots. Run Memento at most once, only for a verified
+                    // direct retailer URL, and reuse the exact same product-identity parser/guards.
+                    if (!mementoAttempted &&
+                        candidate.directUrl != null &&
+                        attempts.none { it.quotes.isNotEmpty() } &&
+                        attempts.none { it.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") }
+                    ) {
+                        mementoAttempted = true
+                        if (diagnosticProductId != null) {
+                            reportWaybackDiagnostic(
+                                diagnosticProductId, 7, WaybackTraceStatus.RUNNING,
+                                "Wayback no proporcionó un precio verificable; se prueba una fuente de archivo independiente (Memento) una sola vez."
+                            )
+                        }
+                        val mementoResult = withTimeoutOrNull(MAX_ARCHIVE_MEMENTO_FALLBACK_MS) {
+                            mementoClient.fetchHistory(
+                                originalUrl = candidate.directUrl,
+                                expectedTitle = candidate.title,
+                                knownProductTitlesById = knownProductTitlesById,
+                                maxSnapshots = 4
+                            )
+                        }
+                        if (mementoResult == null) {
+                            diagnosticCodes.add("MEMENTO_LOOKUP_TIMEOUT")
+                            if (diagnosticProductId != null) {
+                                reportWaybackDiagnostic(
+                                    diagnosticProductId, 7, WaybackTraceStatus.FAILED,
+                                    "La alternativa Memento superó su límite de 25 segundos; las capturas no se han dado por válidas."
+                                )
+                            }
+                        } else {
+                            attempts += mementoResult
+                            diagnosticCodes.addAll(mementoResult.diagnosticCodes)
+                            if (diagnosticProductId != null) {
+                                val mementoStatus = when {
+                                    mementoResult.quotes.isNotEmpty() -> WaybackTraceStatus.PASSED
+                                    mementoResult.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") -> WaybackTraceStatus.SKIPPED
+                                    mementoResult.capturesFound == 0 && !mementoResult.requestFailed -> WaybackTraceStatus.FAILED
+                                    else -> WaybackTraceStatus.FAILED
+                                }
+                                reportWaybackDiagnostic(
+                                    diagnosticProductId, 7, mementoStatus,
+                                    when {
+                                        mementoResult.quotes.isNotEmpty() ->
+                                            "Memento recuperó ${mementoResult.quotes.size} precio(s) archivado(s) que aún deben guardarse en su ficha exacta."
+                                        mementoResult.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") ->
+                                            "Arquivo.pt pidió limitar las consultas; Mínimo detuvo el respaldo Memento."
+                                        mementoResult.capturesFound == 0 && !mementoResult.requestFailed ->
+                                            "Memento respondió correctamente, pero no encontró capturas para esta URL."
+                                        else ->
+                                            "Memento no pudo recuperar un precio verificable: ${mementoResult.diagnosticCodes.joinToString(", ").take(180)}."
+                                    }
+                                )
+                            }
+                        }
+                    }
+
                     if (candidateTimedOut && attempts.isEmpty()) {
                         timedOutCount++
                         diagnosticCodes.add("CANDIDATE_TIMEOUT")

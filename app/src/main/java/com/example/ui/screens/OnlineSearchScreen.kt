@@ -24,6 +24,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -79,8 +80,34 @@ import java.util.Locale
 
 internal data class OnlineSearchDisplayGroup(
     val group: OnlineProductGroup,
-    val stableKey: String
+    val stableKey: String,
+    val familyKey: String = onlineSearchFamilyKey(group.identityKey),
+    val familyLabel: String = onlineSearchFamilyLabel(group.title)
 )
+
+/**
+ * Family key intentionally drops edition, network and memory qualifiers while preserving the
+ * actual model code. Exact offer identity remains unchanged, so Pro/Max/4G/5G and storage variants
+ * stay separate cards under one visible family.
+ */
+internal fun onlineSearchFamilyKey(identityKey: String): String {
+    val parts = identityKey.split('|').filter { it.isNotBlank() }
+    val core = parts.filterNot {
+        it.startsWith("variant:") || it.startsWith("memory:") ||
+            it.startsWith("color:") || it.startsWith("specs:")
+    }
+    return core.joinToString("|").ifBlank { identityKey }
+}
+
+internal fun onlineSearchFamilyLabel(title: String): String =
+    title.replace(
+        Regex("""(?i)\b\d{1,2}\s*(?:gb)?\s*[+/]\s*\d{2,4}\s*gb\b|\b\d+(?:[.,]\d+)?\s*(?:GB|TB)\b"""),
+        " "
+    ).replace(
+        Regex("""(?i)\b(pro\s*max|pro|max|plus|ultra|lite|mini|fe|4g|5g|black|white|blue|green|red|grey|gray|negro|negra|blanco|blanca|azul|verde|rojo|roja|gris)\b"""),
+        " "
+    ).replace(Regex("""\s+"""), " ").trim().trim('-', '/', '|', ',')
+        .ifBlank { title }
 
 /**
  * Apply view-only filters to the already loaded snapshot. Split groups by condition so used
@@ -148,9 +175,21 @@ internal fun buildOnlineSearchDisplayGroups(
     }.thenBy { it.group.minPrice }
         .thenBy { it.group.title.lowercase(Locale.ROOT) }
         .thenBy { it.stableKey }
-    // Wheel fitment searches preserve price order; other searches put the closest model/variant first.
-    val sortedMain = mainDisplayGroups.sortedWith(if (isWheelFitmentSearch) priceOrder else relevanceOrder)
-    val sortedAccessories = accessoryDisplayGroups.sortedWith(if (isWheelFitmentSearch) priceOrder else relevanceOrder)
+    fun groupFamilies(rows: List<OnlineSearchDisplayGroup>, comparator: Comparator<OnlineSearchDisplayGroup>): List<OnlineSearchDisplayGroup> {
+        return rows.groupBy { it.familyKey }.values
+            .map { family -> family.sortedWith(comparator) }
+            .sortedWith { left, right ->
+                val a = left.first()
+                val b = right.first()
+                comparator.compare(a, b).takeIf { it != 0 }
+                    ?: a.familyLabel.compareTo(b.familyLabel, ignoreCase = true)
+            }
+            .flatten()
+    }
+    // Keep each exact purchasable variant as its own card, but cluster sibling variants under
+    // one family in the results list instead of scattering Redmi Note/other model variants.
+    val sortedMain = groupFamilies(mainDisplayGroups, if (isWheelFitmentSearch) priceOrder else relevanceOrder)
+    val sortedAccessories = groupFamilies(accessoryDisplayGroups, if (isWheelFitmentSearch) priceOrder else relevanceOrder)
     // For wheel-fitment searches, used wheels and new wheels are comparable offers: show them
     // together in one price order when the opt-in filter is enabled. Keep accessory prioritization
     // for other product searches so unrelated low-cost accessories do not outrank the main product.
@@ -689,18 +728,49 @@ fun OnlineSearchScreen(
                         )
                     }
                 }
-                items(groupsToShow, key = { it.stableKey }) { displayGroup ->
+                itemsIndexed(groupsToShow, key = { _, item -> item.stableKey }) { index, displayGroup ->
                     val group = displayGroup.group
-                    ShoppingResultCard(
-                        group = group,
-                        onOpenProduct = if (group.offers.all { it.isFitmentUnverified || it.isCategoryUnverified }) {
-                            null
-                        } else {
-                            { onOpenProduct(group.identityKey) }
-                        },
-                        onOpenOffer = ::openOffer,
-                        onOpenBestOffer = { openOffer(group.bestPurchaseOffer) }
-                    )
+                    val previousFamily = groupsToShow.getOrNull(index - 1)?.familyKey
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (previousFamily != displayGroup.familyKey) {
+                            val familySize = groupsToShow.count { it.familyKey == displayGroup.familyKey }
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text(displayGroup.familyLabel, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            if (familySize == 1) "1 versión o configuración" else "$familySize versiones o configuraciones",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Text(
+                                        "Familia",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                        ShoppingResultCard(
+                            group = group,
+                            onOpenProduct = if (group.offers.all { it.isFitmentUnverified || it.isCategoryUnverified }) {
+                                null
+                            } else {
+                                { onOpenProduct(group.identityKey) }
+                            },
+                            onOpenOffer = ::openOffer,
+                            onOpenBestOffer = { openOffer(group.bestPurchaseOffer) }
+                        )
+                    }
                 }
             }
             item {

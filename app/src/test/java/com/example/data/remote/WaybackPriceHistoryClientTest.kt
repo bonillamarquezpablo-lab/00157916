@@ -1918,10 +1918,18 @@ class WaybackPriceHistoryClientTest {
                     val originalUrl = request.url.queryParameter("url")
                         ?: throw AssertionError("Availability request has no product URL")
                     availabilityUrls += originalUrl
-                    val snapshotUrl = "https://web.archive.org/web/20250101120000id_/$originalUrl"
+                    // The quarterly sampler deliberately keeps only one capture per quarter.
+                    // Use two independent quarters so the cookie-wall capture and the later valid
+                    // capture both survive sampling and the parser is tested for real.
+                    val snapshotTimestamp = if (availabilityUrls.size == 1) {
+                        "20250101120000"
+                    } else {
+                        "20250401120000"
+                    }
+                    val snapshotUrl = "https://web.archive.org/web/${snapshotTimestamp}id_/$originalUrl"
                     val body = """
                         {"archived_snapshots":{"closest":{
-                          "available":true,"timestamp":"20250101120000","url":"$snapshotUrl"
+                          "available":true,"timestamp":"$snapshotTimestamp","url":"$snapshotUrl"
                         }}}
                     """.trimIndent()
                     Response.Builder()

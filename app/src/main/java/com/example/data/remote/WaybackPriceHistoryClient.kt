@@ -4089,10 +4089,11 @@ class WaybackPriceHistoryClient(
 
         val urlColour = productColourFamily(urlTitle)
         val missingColour = expectedColour != null && archivedColour == null
-        val archivedHasUnknownToRequestColour = expectedColour == null && archivedColour != null
+        // Do not attach a colour-specific archived offer to a saved product whose colour is
+        // unknown. The selected product must request the colour that the URL proves.
+        if (expectedColour == null && archivedColour != null) return false
         if (missingColour && urlColour != expectedColour) return false
-        if (archivedHasUnknownToRequestColour && urlColour != archivedColour) return false
-        if (!missingStorage && !missingColour && !archivedHasUnknownToRequestColour) return false
+        if (!missingStorage && !missingColour) return false
 
         fun coreIdentity(value: String): String =
             onlineProductIdentityKey(canonicalizeArchiveTitle(value)).split('|')

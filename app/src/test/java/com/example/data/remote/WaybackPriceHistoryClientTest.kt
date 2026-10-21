@@ -669,6 +669,56 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun exactAppleSkuUrlAllowsGenericTitleButRejectsExplicitSiblingVariant() {
+        val client = newClient()
+        val expected = "Apple iPhone 15 256 GB Amarillo"
+        val exactSkuUrl =
+            "https://www.apple.com/es/shop/buy-iphone/iphone-15/pantalla-de-6,1%E2%80%B3-256gb-amarillo"
+        val snapshotUrl = "https://web.archive.org/web/20240101000000/$exactSkuUrl"
+        val genericTitleHtml = """
+            <html><head><title>iPhone 15</title>
+              <script type="application/ld+json">
+                {"@type":"Product","name":"iPhone 15",
+                 "offers":{"@type":"Offer","price":"699.00","priceCurrency":"EUR"}}
+              </script>
+            </head><body><h1>iPhone 15</h1></body></html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = genericTitleHtml,
+            expectedTitle = expected,
+            originalUrl = exactSkuUrl,
+            snapshotUrl = snapshotUrl,
+            observedAt = 1704067200000L
+        )
+        assertNotNull(
+            "An exact Apple SKU URL may verify a generic page title when the title omits colour and storage",
+            quote
+        )
+        assertEquals(699.0, quote!!.price, 0.001)
+        assertEquals("EUR", quote.currency)
+
+        val siblingVariantHtml = """
+            <html><head><title>iPhone 15 Plus 256 GB Amarillo</title>
+              <script type="application/ld+json">
+                {"@type":"Product","name":"iPhone 15 Plus 256 GB Amarillo",
+                 "offers":{"@type":"Offer","price":"799.00","priceCurrency":"EUR"}}
+              </script>
+            </head><body><h1>iPhone 15 Plus 256 GB Amarillo</h1></body></html>
+        """.trimIndent()
+        assertNull(
+            "The exact base-model URL must never accept an explicit iPhone 15 Plus offer",
+            client.parseArchivedPrice(
+                html = siblingVariantHtml,
+                expectedTitle = expected,
+                originalUrl = exactSkuUrl,
+                snapshotUrl = snapshotUrl,
+                observedAt = 1704067200000L
+            )
+        )
+    }
+
+    @Test
     fun explicitlyWrongVariantUrlIsDeferredButFamilyUrlRemainsEligible() {
         val client = newClient()
         val expected = "Apple iPhone 15 256 GB Amarillo"

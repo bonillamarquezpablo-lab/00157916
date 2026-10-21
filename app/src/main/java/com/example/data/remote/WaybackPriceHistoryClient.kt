@@ -1882,11 +1882,30 @@ class WaybackPriceHistoryClient(
     internal fun snapshotCacheKey(capture: WaybackCapture): String =
         capture.rawTimestamp + "|" + capture.originalUrl
 
+    /** Stable, privacy-safe identifier for one archived page fetch in the on-device trace. */
+    internal fun snapshotDiagnosticLabel(
+        capture: WaybackCapture,
+        ordinal: Int,
+        total: Int,
+        sourceStage: String
+    ): String {
+        val safeStage = sourceStage.filter { it.isLetterOrDigit() || it == '_' || it == '-' }
+            .take(40).ifBlank { "CDX" }
+        val safeHost = runCatching { URI(capture.originalUrl).host }.getOrNull()
+            ?.lowercase(Locale.ROOT)
+            ?.takeIf { host -> Regex("""^[a-z0-9.-]+$""").matches(host) }
+            ?: "host-desconocido"
+        val safeTimestamp = capture.rawTimestamp.filter(Char::isDigit).take(14)
+        return "captura ${ordinal.coerceAtLeast(1)} de ${total.coerceAtLeast(1)} · fecha ${safeTimestamp.ifBlank { "desconocida" }} · ruta $safeStage · tienda $safeHost"
+    }
+
     private suspend fun fetchSnapshotOnce(
         capture: WaybackCapture,
         expectedTitle: String,
         snapshotTimeoutSeconds: Long,
         snapshotOrdinal: Int,
+        snapshotTotal: Int,
+        captureSourceStage: String,
         onTrace: ((WaybackTraceEvent) -> Unit)?,
         knownProductTitlesById: Map<String, String>,
         snapshotResultsCache: MutableMap<String, SnapshotFetch>?,
@@ -1897,7 +1916,7 @@ class WaybackPriceHistoryClient(
             val step = if (snapshotOrdinal <= 1) 8 else 10
             emitWaybackTrace(
                 onTrace, step, WaybackTraceStatus.SKIPPED,
-                "Captura ${capture.rawTimestamp} ya procesada en esta búsqueda; se reutiliza el resultado sin descargar el mismo HTML otra vez."
+                "${snapshotDiagnosticLabel(capture, snapshotOrdinal, snapshotTotal, captureSourceStage)} ya procesada en esta búsqueda; se reutiliza el resultado sin descargar el mismo HTML otra vez."
             )
             return cached.copy(reused = true)
         }
@@ -1906,6 +1925,8 @@ class WaybackPriceHistoryClient(
             expectedTitle = expectedTitle,
             snapshotTimeoutSeconds = snapshotTimeoutSeconds,
             snapshotOrdinal = snapshotOrdinal,
+            snapshotTotal = snapshotTotal,
+            captureSourceStage = captureSourceStage,
             onTrace = onTrace,
             knownProductTitlesById = knownProductTitlesById
         )
@@ -1960,36 +1981,48 @@ class WaybackPriceHistoryClient(
         expectedTitle: String,
         snapshotTimeoutSeconds: Long,
         snapshotOrdinal: Int = 1,
+        snapshotTotal: Int = 1,
+        captureSourceStage: String = "CDX",
         onTrace: ((WaybackTraceEvent) -> Unit)? = null,
         knownProductTitlesById: Map<String, String> = emptyMap()
     ): SnapshotFetch {
+        val captureLabel = snapshotDiagnosticLabel(capture, snapshotOrdinal, snapshotTotal, captureSourceStage)
+        val captureTrace: ((WaybackTraceEvent) -> Unit)? = onTrace?.let { downstream ->
+            { event: WaybackTraceEvent ->
+                downstream(event.copy(detail = "$captureLabel · ${event.detail}"))
+            }
+        }
         val downloadStep = if (snapshotOrdinal <= 1) 8 else 10
         val evaluateStep = if (snapshotOrdinal <= 1) 9 else 11
-        val snapshotLabel = if (snapshotOrdinal <= 1) "captura 1" else "captura 2"
-        emitWaybackTrace(onTrace, downloadStep, WaybackTraceStatus.RUNNING,
+        val snapshotLabel = "captura $snapshotOrdinal de ${snapshotTotal.coerceAtLeast(1)}"
+        emitWaybackTrace(captureTrace, downloadStep, WaybackTraceStatus.RUNNING,
             "Descarga HTML de la $snapshotLabel iniciada; URL completa omitida.")
         val snapshotUrl = buildSnapshotUrl(capture)
         if (snapshotUrl == null) {
-            emitWaybackTrace(onTrace, downloadStep, WaybackTraceStatus.FAILED, "No se pudo construir la URL archivada.")
-            emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.SKIPPED, "No se descargó HTML para evaluar.")
-            skipArchiveValidationTrace(onTrace, "La URL del snapshot no era válida.")
+            emitWaybackTrace(captureTrace, downloadStep, WaybackTraceStatus.FAILED, "No se pudo construir la URL archivada.")
+            emitWaybackTrace(captureTrace, evaluateStep, WaybackTraceStatus.SKIPPED, "No se descargó HTML para evaluar.")
+            skipArchiveValidationTrace(captureTrace, "La URL del snapshot no era válida.")
             return SnapshotFetch(false, null, "SNAPSHOT_URL_INVALID")
         }
         val request = Request.Builder().url(snapshotUrl).header("User-Agent", USER_AGENT).get().build()
         val snapshotHttp = buildSnapshotHttpClient(snapshotTimeoutSeconds)
         val startedAt = System.nanoTime()
+        var snapshotRequestAttempts = 0
 
         return availabilitySemaphore.withPermit {
             val gate = awaitArchiveRequestTurn()
             if (gate != null) {
-                emitWaybackTrace(onTrace, downloadStep, WaybackTraceStatus.FAILED, "Descarga bloqueada por control de ritmo: $gate.")
-                emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.SKIPPED, "No hubo HTML que evaluar.")
-                skipArchiveValidationTrace(onTrace, "La descarga quedó bloqueada antes de recibir HTML.")
+                emitWaybackTrace(captureTrace, downloadStep, WaybackTraceStatus.FAILED, "Descarga bloqueada por control de ritmo: $gate.")
+                emitWaybackTrace(captureTrace, evaluateStep, WaybackTraceStatus.SKIPPED, "No hubo HTML que evaluar.")
+                skipArchiveValidationTrace(captureTrace, "La descarga quedó bloqueada antes de recibir HTML.")
                 return@withPermit SnapshotFetch(false, null, gate)
             }
             try {
                 retrySnapshotDnsOnce(
-                    request = { snapshotHttp.newCall(request).execute() },
+                    request = {
+                        snapshotRequestAttempts++
+                        snapshotHttp.newCall(request).execute()
+                    },
                     beforeRetry = {
                         delay(SNAPSHOT_DNS_RETRY_DELAY_MS)
                         awaitArchiveRequestTurn() == null
@@ -1998,38 +2031,38 @@ class WaybackPriceHistoryClient(
                     val elapsed = ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(0L)
                     if (response.code == 429) {
                         activateRateLimit(response.header("Retry-After"), System.currentTimeMillis())
-                        emitWaybackTrace(onTrace, downloadStep, WaybackTraceStatus.FAILED, "HTTP 429: Internet Archive pidió frenar las consultas.", elapsed)
-                        emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.FAILED, "El servidor limitó la descarga; no se pudo analizar el HTML.")
-                        skipArchiveValidationTrace(onTrace, "HTTP 429; validación cancelada para respetar el límite.")
+                        emitWaybackTrace(captureTrace, downloadStep, WaybackTraceStatus.FAILED, "HTTP 429: Internet Archive pidió frenar las consultas.", elapsed)
+                        emitWaybackTrace(captureTrace, evaluateStep, WaybackTraceStatus.FAILED, "El servidor limitó la descarga; no se pudo analizar el HTML.")
+                        skipArchiveValidationTrace(captureTrace, "HTTP 429; validación cancelada para respetar el límite.")
                         SnapshotFetch(false, null, "WAYBACK_RATE_LIMITED")
                     } else if (!response.isSuccessful) {
                         val code = "SNAPSHOT_HTTP_${response.code}"
-                        emitWaybackTrace(onTrace, downloadStep, WaybackTraceStatus.FAILED, "La descarga respondió $code.", elapsed)
-                        emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.FAILED, "No se recibió una página HTML utilizable.")
-                        skipArchiveValidationTrace(onTrace, "La descarga devolvió un código HTTP no satisfactorio.")
+                        emitWaybackTrace(captureTrace, downloadStep, WaybackTraceStatus.FAILED, "La descarga respondió $code.", elapsed)
+                        emitWaybackTrace(captureTrace, evaluateStep, WaybackTraceStatus.FAILED, "No se recibió una página HTML utilizable.")
+                        skipArchiveValidationTrace(captureTrace, "La descarga devolvió un código HTTP no satisfactorio.")
                         SnapshotFetch(false, null, code)
                     } else {
                         val html = readBodyLimited(response.body, MAX_SNAPSHOT_BODY_BYTES)
                         if (html == null) {
-                            emitWaybackTrace(onTrace, downloadStep, WaybackTraceStatus.FAILED, "HTTP ${response.code}; contenido vacío o por encima del límite permitido.", elapsed)
-                            emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.FAILED, "No se pudo evaluar el HTML descargado.")
-                            skipArchiveValidationTrace(onTrace, "El cuerpo HTML estaba vacío o superaba el límite seguro.")
+                            emitWaybackTrace(captureTrace, downloadStep, WaybackTraceStatus.FAILED, "HTTP ${response.code}; contenido vacío o por encima del límite permitido.", elapsed)
+                            emitWaybackTrace(captureTrace, evaluateStep, WaybackTraceStatus.FAILED, "No se pudo evaluar el HTML descargado.")
+                            skipArchiveValidationTrace(captureTrace, "El cuerpo HTML estaba vacío o superaba el límite seguro.")
                             SnapshotFetch(false, null, "SNAPSHOT_BODY_EMPTY_OR_LIMIT")
                         } else {
                             val redirectCount = generateSequence(response.priorResponse) { it.priorResponse }.count()
                             val finalHost = response.request.url.host
                             emitWaybackTrace(
-                                onTrace, downloadStep, WaybackTraceStatus.PASSED,
+                                captureTrace, downloadStep, WaybackTraceStatus.PASSED,
                                 "HTTP ${response.code}; HTML recibido (${html.length} caracteres); host final ${finalHost}; redirecciones ${redirectCount}; captura ${capture.rawTimestamp}. URL completa y contenido omitidos.",
                                 elapsed
                             )
                             val barrier = detectArchivedHtmlBarrier(html)
                             if (barrier != null) {
-                                emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.FAILED, "La captura parece bloqueada: $barrier.")
-                                skipArchiveValidationTrace(onTrace, "Se detectó una barrera; no se intentó validar título ni precio.")
+                                emitWaybackTrace(captureTrace, evaluateStep, WaybackTraceStatus.FAILED, "La captura parece bloqueada: $barrier.")
+                                skipArchiveValidationTrace(captureTrace, "Se detectó una barrera; no se intentó validar título ni precio.")
                                 SnapshotFetch(true, null, barrier)
                             } else {
-                                emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.PASSED, "HTML recibido y sin marcadores comunes de cookies, CAPTCHA o bloqueo.")
+                                emitWaybackTrace(captureTrace, evaluateStep, WaybackTraceStatus.PASSED, "HTML recibido y sin marcadores comunes de cookies, CAPTCHA o bloqueo.")
                                 val document = Jsoup.parse(html)
                                 val sourceQuote = parseArchivedPrice(
                                     document = document,
@@ -2040,10 +2073,10 @@ class WaybackPriceHistoryClient(
                                     acceptedCurrencies = setOf("EUR", "USD")
                                 )
                                 val quote = when (sourceQuote?.currency?.uppercase(Locale.ROOT)) {
-                                    "USD" -> sourceQuote?.let { convertUsdQuoteToEurAtCaptureDate(it, onTrace) }
+                                    "USD" -> sourceQuote?.let { convertUsdQuoteToEurAtCaptureDate(it, captureTrace) }
                                     else -> sourceQuote
                                 }
-                                reportArchiveFieldTrace(onTrace, document, expectedTitle, capture.originalUrl, quote, sourceQuote)
+                                reportArchiveFieldTrace(captureTrace, document, expectedTitle, capture.originalUrl, quote, sourceQuote)
                                 val secondarySourceQuotes = parseArchivedPricesForKnownProducts(
                                     document = document,
                                     primaryExpectedTitle = expectedTitle,
@@ -2055,7 +2088,7 @@ class WaybackPriceHistoryClient(
                                 )
                                 val secondaryQuotes = secondarySourceQuotes.mapNotNull { secondary ->
                                     when (secondary.currency.uppercase(Locale.ROOT)) {
-                                        "USD" -> convertUsdQuoteToEurAtCaptureDate(secondary, onTrace)
+                                        "USD" -> convertUsdQuoteToEurAtCaptureDate(secondary, captureTrace)
                                         "EUR" -> secondary
                                         else -> null
                                     }
@@ -2078,11 +2111,11 @@ class WaybackPriceHistoryClient(
                 throw cancelled
             } catch (blocked: SnapshotRetryBlockedException) {
                 emitWaybackTrace(
-                    onTrace, downloadStep, WaybackTraceStatus.SKIPPED,
+                    captureTrace, downloadStep, WaybackTraceStatus.SKIPPED,
                     "Reintento DNS omitido porque la pausa global de Internet Archive está activa."
                 )
-                emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.SKIPPED, "No hubo HTML que evaluar.")
-                skipArchiveValidationTrace(onTrace, "El reintento quedó bloqueado por el control de ritmo.")
+                emitWaybackTrace(captureTrace, evaluateStep, WaybackTraceStatus.SKIPPED, "No hubo HTML que evaluar.")
+                skipArchiveValidationTrace(captureTrace, "El reintento quedó bloqueado por el control de ritmo.")
                 SnapshotFetch(false, null, blocked.diagnosticCode)
             } catch (failure: Exception) {
                 val code = classifyNetworkFailure("SNAPSHOT", failure)
@@ -2091,12 +2124,12 @@ class WaybackPriceHistoryClient(
                     ?.lowercase(Locale.ROOT) ?: "host-desconocido"
                 val budgetSeconds = snapshotTimeoutSeconds.coerceAtLeast(1L)
                 emitWaybackTrace(
-                    onTrace, downloadStep, WaybackTraceStatus.FAILED,
-                    "Descarga fallida: $code; presupuesto ${budgetSeconds}s; destino de archivo web.archive.org; host original ${originalHost}; captura ${capture.rawTimestamp}. No se recibió una respuesta HTML; URL completa omitida.",
+                    captureTrace, downloadStep, WaybackTraceStatus.FAILED,
+                    "Descarga fallida: $code; intentos de red ${snapshotRequestAttempts}; presupuesto ${budgetSeconds}s; destino de archivo web.archive.org; host original ${originalHost}; captura ${capture.rawTimestamp}; ruta ${captureSourceStage}. No se recibió una respuesta HTML; URL completa omitida.",
                     elapsed
                 )
-                emitWaybackTrace(onTrace, evaluateStep, WaybackTraceStatus.FAILED, "No fue posible evaluar el HTML.")
-                skipArchiveValidationTrace(onTrace, "La descarga terminó con error de red.")
+                emitWaybackTrace(captureTrace, evaluateStep, WaybackTraceStatus.FAILED, "No fue posible evaluar el HTML.")
+                skipArchiveValidationTrace(captureTrace, "La descarga terminó con error de red.")
                 SnapshotFetch(false, null, code)
             }
         }
@@ -3147,6 +3180,8 @@ class WaybackPriceHistoryClient(
                 expectedTitle = expectedTitle,
                 snapshotTimeoutSeconds = snapshotTimeoutSeconds,
                 snapshotOrdinal = snapshotIndex + 1,
+                snapshotTotal = sampled.size,
+                captureSourceStage = cdxStage,
                 onTrace = onTrace,
                 knownProductTitlesById = knownProductTitlesById,
                 snapshotResultsCache = snapshotResultsCache,

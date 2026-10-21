@@ -139,7 +139,7 @@ private fun mergeExactVariantProducts(rows: List<Product>): Product {
                 it.price.toString(),
                 it.storeName.trim().lowercase(Locale.ROOT),
                 it.evidenceType.lowercase(Locale.ROOT),
-                it.sourceUrl.trim().lowercase(Locale.ROOT)
+                it.sourceUrl.orEmpty().trim().lowercase(Locale.ROOT)
             ).joinToString("|")
         }
         .sortedBy { it.timestamp }

@@ -2154,6 +2154,82 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun secondaryOfferUsesItsOwnSkuUrlWhenFamilyPageTitleOmitsCapacity() {
+        val client = newClient()
+        val html = """
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@graph":[
+                  {"@type":"Product","name":"Apple iPhone 15 256GB Amarillo",
+                   "url":"https://www.apple.com/es/shop/buy-iphone/iphone-15/pantalla-de-6,1%22-256gb-amarillo",
+                   "offers":{"@type":"Offer","price":"899.99","priceCurrency":"EUR"}},
+                  {"@type":"Product","name":"Apple iPhone 15 Plus",
+                   "url":"https://www.pccomponentes.com/apple-iphone-15-plus-256gb",
+                   "offers":{"@type":"Offer","price":"799.99","priceCurrency":"EUR"}}
+                ]
+              }
+              </script>
+            </head></html>
+        """.trimIndent()
+        val originalUrl =
+            "https://www.apple.com/es/shop/buy-iphone/iphone-15/pantalla-de-6,1%22-256gb-amarillo"
+        val snapshotUrl = "https://web.archive.org/web/20260901000000id_/$originalUrl"
+
+        val quotes = client.parseArchivedPricesForKnownProducts(
+            document = Jsoup.parse(html),
+            primaryExpectedTitle = "Apple iPhone 15 256GB Amarillo",
+            knownProductTitlesById = mapOf(
+                "base-yellow-256" to "Apple iPhone 15 256GB Amarillo",
+                "plus-unknown" to "Apple iPhone 15 Plus",
+                "plus-256" to "Apple iPhone 15 Plus 256GB"
+            ),
+            originalUrl = originalUrl,
+            snapshotUrl = snapshotUrl,
+            observedAt = 1_788_200_000_000L
+        )
+
+        assertEquals("The offer URL should route the generic heading only to the matching capacity", 1, quotes.size)
+        assertEquals("plus-256", quotes.single().targetProductId)
+        assertEquals("Apple iPhone 15 Plus 256GB", quotes.single().productTitle)
+        assertEquals(799.99, quotes.single().price, 0.001)
+        assertTrue(quotes.single().variantIdentityConfirmedByUrl)
+    }
+
+    @Test
+    fun secondaryOfferUrlCannotAssign256GbPriceTo128GbOrUnknownCapacityRows() {
+        val client = newClient()
+        val html = """
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@type":"Product",
+                "name":"Apple iPhone 15 Plus",
+                "url":"https://www.pccomponentes.com/apple-iphone-15-plus-128gb",
+                "offers":{"@type":"Offer","price":"699.99","priceCurrency":"EUR"}
+              }
+              </script>
+            </head></html>
+        """.trimIndent()
+        val originalUrl =
+            "https://www.apple.com/es/shop/buy-iphone/iphone-15/pantalla-de-6,1%22-256gb-amarillo"
+        val quotes = client.parseArchivedPricesForKnownProducts(
+            document = Jsoup.parse(html),
+            primaryExpectedTitle = "Apple iPhone 15 256GB Amarillo",
+            knownProductTitlesById = mapOf(
+                "plus-unknown" to "Apple iPhone 15 Plus",
+                "plus-256" to "Apple iPhone 15 Plus 256GB"
+            ),
+            originalUrl = originalUrl,
+            snapshotUrl = "https://web.archive.org/web/20260901000000id_/$originalUrl",
+            observedAt = 1_788_200_000_000L
+        )
+        assertTrue("A 128 GB URL must not populate a 256 GB or unspecified-capacity product", quotes.isEmpty())
+    }
+
+    @Test
     fun acceptsVerifiedEurJsonLdPriceWhenProductTitleMatches() {
         val client = newClient()
         val html = """

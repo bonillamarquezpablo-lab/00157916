@@ -46,6 +46,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -175,6 +176,40 @@ fun OnlineSearchScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    // Prevent rapid duplicate taps before the ViewModel publishes its busy state.
+    val searchTapLocked = remember { androidx.compose.runtime.mutableStateOf(false) }
+    LaunchedEffect(
+        state.onlineSearchQuery,
+        state.onlineSearchProvider,
+        state.isOnlineSearching,
+        state.isRefreshingPrices,
+        state.onlineSearchStatus
+    ) {
+        searchTapLocked.value = false
+    }
+    fun startSearch(action: () -> Unit) {
+        if (state.isOnlineSearching || state.isRefreshingPrices || searchTapLocked.value ||
+            state.onlineSearchQuery.trim().length < 2
+        ) return
+        searchTapLocked.value = true
+        action()
+    }
+    val canStartSearch = !state.isOnlineSearching &&
+        !state.isRefreshingPrices &&
+        !searchTapLocked.value &&
+        state.onlineSearchQuery.trim().length >= 2
+    val conciseSearchStatus = when {
+        state.isOnlineSearching -> "Buscando precios…"
+        state.isRefreshingPrices -> "Actualizando precios…"
+        state.onlineSearchResults.isNotEmpty() -> "${state.onlineSearchResults.size} ofertas encontradas"
+        state.onlineSearchStatus != null -> "Búsqueda finalizada · consulta el estado inferior"
+        else -> "Preparado para buscar"
+    }
+    val conciseStatusColor = when {
+        state.isOnlineSearching || state.isRefreshingPrices -> MaterialTheme.colorScheme.primary
+        state.onlineSearchResults.isNotEmpty() -> MaterialTheme.colorScheme.secondary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
     val showAccessoryResults = remember(state.onlineSearchQuery, state.onlineSearchProvider) {
         androidx.compose.runtime.mutableStateOf(false)
     }
@@ -328,12 +363,12 @@ fun OnlineSearchScreen(
                         shape = RoundedCornerShape(12.dp),
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { onSearch() })
+                        keyboardActions = KeyboardActions(onSearch = { startSearch(onSearch) })
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
-                            onClick = onSearch,
-                            enabled = !state.isOnlineSearching && !state.isRefreshingPrices && state.onlineSearchQuery.trim().length >= 2,
+                            onClick = { startSearch(onSearch) },
+                            enabled = canStartSearch,
                             modifier = Modifier.weight(1f)
                         ) {
                             if (state.isOnlineSearching && state.onlineSearchProvider == OnlineSearchProvider.GOOGLE_SHOPPING) {
@@ -346,8 +381,8 @@ fun OnlineSearchScreen(
                             Text("Buscar ofertas", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         OutlinedButton(
-                            onClick = onAmazonSearch,
-                            enabled = !state.isOnlineSearching && !state.isRefreshingPrices && state.onlineSearchQuery.trim().length >= 2,
+                            onClick = { startSearch(onAmazonSearch) },
+                            enabled = canStartSearch,
                             modifier = Modifier.weight(1f)
                         ) {
                             if (state.isOnlineSearching && state.onlineSearchProvider == OnlineSearchProvider.AMAZON) {
@@ -360,12 +395,30 @@ fun OnlineSearchScreen(
                             Text("Amazon.es", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 1.dp, bottom = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(RoundedCornerShape(50.dp))
+                                .background(conciseStatusColor)
+                        )
+                        Text(
+                            conciseSearchStatus,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = conciseStatusColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (state.onlineSearchResults.isNotEmpty()) {
                             TextButton(
-                                onClick = onForceRefresh,
-                                enabled = !state.isOnlineSearching && !state.isRefreshingPrices &&
-                                    state.onlineSearchQuery.trim().length >= 2,
+                                onClick = { startSearch(onForceRefresh) },
+                                enabled = canStartSearch,
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -392,7 +445,7 @@ fun OnlineSearchScreen(
                     TextButton(
                         onClick = { openAmazonSearch(context, state.onlineSearchQuery) },
                         modifier = Modifier.align(Alignment.End),
-                        enabled = !state.isOnlineSearching && !state.isRefreshingPrices
+                        enabled = !state.isOnlineSearching && !state.isRefreshingPrices && !searchTapLocked.value
                     ) {
                         Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(Modifier.width(4.dp))
@@ -607,12 +660,15 @@ fun OnlineSearchScreen(
                             )
                             Button(
                                 onClick = {
-                                    selectedStoreKey.value = null
-                                    onAmazonOnlyChange(false)
-                                    onQueryChange(selectedBucket.searchQuery)
-                                    onSearch()
+                                    startSearch {
+                                        selectedStoreKey.value = null
+                                        onAmazonOnlyChange(false)
+                                        onQueryChange(selectedBucket.searchQuery)
+                                        onSearch()
+                                    }
                                 },
-                                enabled = !state.isOnlineSearching && !state.isRefreshingPrices
+                                enabled = !state.isOnlineSearching && !state.isRefreshingPrices &&
+                                    !searchTapLocked.value && state.onlineSearchQuery.trim().length >= 2
                             ) {
                                 Text("Buscar esta versión · puede consumir cuota")
                             }
@@ -712,10 +768,10 @@ private fun ShoppingResultCard(
         modifier = Modifier.fillMaxWidth().then(
             if (onOpenProduct == null) Modifier else Modifier.clickable(onClick = onOpenProduct)
         ),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             if (group.offers.all { it.isSecondHand } ||
                 group.offers.all { it.isAccessoryOffer } || fitmentUnverified ||
                 categoryUnverified || wheelSetCount != null

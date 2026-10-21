@@ -16,7 +16,10 @@ import androidx.room.PrimaryKey
     tableName = "price_observations",
     indices = [
         Index(value = ["productId", "observedAt"]),
-        Index(value = ["storeId", "observedAt"])
+        Index(value = ["storeId", "observedAt"]),
+        // Speed up the history graph and same-day de-duplication across evidence sources.
+        Index(value = ["productId", "storeId", "observedAt"]),
+        Index(value = ["productId", "evidenceType", "observedAt"])
     ]
 )
 data class PriceObservationEntity(

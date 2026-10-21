@@ -2005,6 +2005,47 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun cdxSamplerKeepsOneRepresentativePerQuarterAndHonorsDownloadCap() {
+        val client = newClient()
+        val formatter = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {
+            isLenient = false
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }
+        val rawDates = listOf(
+            "20240115000000", "20240215000000",
+            "20240415000000", "20240515000000",
+            "20240715000000", "20240815000000",
+            "20241015000000", "20241115000000",
+            "20250115000000", "20250215000000",
+            "20250415000000", "20250515000000",
+            "20250715000000", "20250815000000",
+            "20251015000000", "20251115000000"
+        )
+        val captures = rawDates.map { raw ->
+            WaybackPriceHistoryClient.WaybackCapture(
+                rawTimestamp = raw,
+                timestamp = formatter.parse(raw)!!.time,
+                originalUrl = "https://shop.example/product/item"
+            )
+        }
+
+        val fullQuarterSeries = client.sampleCaptures(captures, max = 16)
+        assertEquals("Two years of monthly CDX rows should yield one point for each of 8 quarters", 8, fullQuarterSeries.size)
+        val quarters = fullQuarterSeries.map { capture ->
+            val calendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
+                timeInMillis = capture.timestamp
+            }
+            calendar.get(java.util.Calendar.YEAR) * 4 + calendar.get(java.util.Calendar.MONTH) / 3
+        }
+        assertEquals("Sampling must not return two captures from the same quarter", quarters.size, quarters.distinct().size)
+
+        val boundedSeries = client.sampleCaptures(captures, max = 4)
+        assertEquals("The HTTP/download budget remains a hard upper bound", 4, boundedSeries.size)
+        assertEquals("The oldest selected period should remain represented", fullQuarterSeries.first(), boundedSeries.first())
+        assertEquals("The newest selected period should remain represented", fullQuarterSeries.last(), boundedSeries.last())
+    }
+
+    @Test
     fun domainDiscoveryChoosesDistinctProductUrlsBeforeExactHistoryQueries() {
         val client = newClient()
         val body = """

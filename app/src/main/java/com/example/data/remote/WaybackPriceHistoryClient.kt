@@ -1666,14 +1666,14 @@ class WaybackPriceHistoryClient(
                                     "USD" -> sourceQuote?.let { convertUsdQuoteToEurAtCaptureDate(it, onTrace) }
                                     else -> sourceQuote
                                 }
-                                reportArchiveFieldTrace(onTrace, document, expectedTitle, originalUrl, quote, sourceQuote)
+                                reportArchiveFieldTrace(onTrace, document, expectedTitle, capture.originalUrl, quote, sourceQuote)
                                 SnapshotFetch(
                                     fetched = true,
                                     quote = quote,
                                     diagnosticCode = when {
                                         quote != null -> null
                                         sourceQuote?.currency?.equals("USD", ignoreCase = true) == true -> "ARCHIVE_USD_FX_UNAVAILABLE"
-                                        else -> diagnoseArchivedPrice(document, expectedTitle, originalUrl)
+                                        else -> diagnoseArchivedPrice(document, expectedTitle, capture.originalUrl)
                                     }
                                 )
                             }

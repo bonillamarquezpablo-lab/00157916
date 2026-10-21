@@ -3919,6 +3919,36 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun prefixCaptureSamplingPrefersUnprocessedDatesAndReusesCacheWhenAllOverlap() {
+        val client = newClient()
+        val first = WaybackPriceHistoryClient.WaybackCapture(
+            rawTimestamp = "20250101120000",
+            timestamp = 1_735_732_800_000L,
+            originalUrl = "https://www.pccomponentes.com/producto"
+        )
+        val second = first.copy(
+            rawTimestamp = "20250901120000",
+            timestamp = 1_756_732_800_000L
+        )
+        val third = first.copy(
+            rawTimestamp = "20260101120000",
+            timestamp = 1_767_254_400_000L
+        )
+        val processed = setOf(client.snapshotCacheKey(first), client.snapshotCacheKey(second))
+
+        assertEquals(
+            "A prefix result must spend its download budget on new captures first",
+            listOf(third),
+            client.sampleUnprocessedCaptures(listOf(first, second, third), 3, processed)
+        )
+        assertEquals(
+            "If every capture is cached, return cached captures so their results can be reused",
+            listOf(first, second),
+            client.sampleUnprocessedCaptures(listOf(first, second), 3, processed)
+        )
+    }
+
+    @Test
     fun snapshotDnsFailureRetriesAtMostOnceAndCanRecover() = runBlocking {
         val client = newClient()
         var attempts = 0
@@ -3957,6 +3987,26 @@ class WaybackPriceHistoryClientTest {
         }
         assertEquals(2, attempts)
         assertEquals(1, retryChecks)
+
+        attempts = 0
+        retryChecks = 0
+        val wrappedResult = client.retrySnapshotDnsOnce(
+            request = {
+                attempts++
+                if (attempts == 1) throw java.io.IOException(
+                    "connection setup failed",
+                    java.net.UnknownHostException("wrapped temporary DNS failure")
+                )
+                "recovered wrapped DNS"
+            },
+            beforeRetry = {
+                retryChecks++
+                true
+            }
+        )
+        assertEquals("recovered wrapped DNS", wrappedResult)
+        assertEquals("Wrapped DNS failures must receive the same single bounded retry", 2, attempts)
+        assertEquals(1, retryChecks)
     }
 
     @Test
@@ -3985,6 +4035,17 @@ class WaybackPriceHistoryClientTest {
         assertEquals("CDX_DOMAIN_TIMEOUT", client.classifyNetworkFailure("CDX_DOMAIN", java.io.InterruptedIOException("timeout")))
         assertEquals("SNAPSHOT_TIMEOUT", client.classifyNetworkFailure("SNAPSHOT", java.io.InterruptedIOException("timeout")))
         assertEquals("CDX_URL_PREFIX_DNS", client.classifyNetworkFailure("CDX_URL_PREFIX", java.net.UnknownHostException("private host")))
+        assertEquals(
+            "SNAPSHOT_DNS",
+            client.classifyNetworkFailure(
+                "SNAPSHOT",
+                java.io.IOException("connection failed", java.net.UnknownHostException("private host"))
+            )
+        )
+        assertEquals(
+            "SNAPSHOT_DNS",
+            client.classifyNetworkFailure("SNAPSHOT", java.io.IOException("Unable to resolve host \"web.archive.org\""))
+        )
         assertEquals("CDX_DOMAIN_NETWORK", client.classifyNetworkFailure("CDX_DOMAIN", java.io.IOException("private host")))
         assertEquals("CDX_DOMAIN_UNEXPECTED_ERROR", client.classifyNetworkFailure("CDX_DOMAIN", IllegalStateException("private data")))
     }

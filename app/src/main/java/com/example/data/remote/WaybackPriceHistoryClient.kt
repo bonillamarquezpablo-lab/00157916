@@ -51,7 +51,13 @@ data class ArchivedPriceQuote(
     val exchangeRateDate: String? = null,
     val conversionSource: String? = null,
     /** Set only when structured metadata uniquely matches a distinct, already-saved product. */
-    val targetProductId: String? = null
+    val targetProductId: String? = null,
+    /**
+     * True only when the archived title omits a variant detail that the exact archived URL
+     * explicitly identifies (for example, capacity in a product slug). It never overrides a
+     * conflicting model, edition, colour, or capacity.
+     */
+    val variantIdentityConfirmedByUrl: Boolean = false
 )
 
 data class WaybackBackfillResult(
@@ -3408,7 +3414,10 @@ class WaybackPriceHistoryClient(
                 originalUrl = originalUrl,
                 snapshotUrl = snapshotUrl,
                 sourceCurrency = matching.third.uppercase(Locale.ROOT),
-                sourcePrice = matching.second
+                sourcePrice = matching.second,
+                variantIdentityConfirmedByUrl = matchesVariantDetailsConfirmedByUrl(
+                    expectedTitle, matching.first, originalUrl
+                )
             )
         }
 
@@ -3426,7 +3435,10 @@ class WaybackPriceHistoryClient(
             originalUrl = originalUrl,
             snapshotUrl = snapshotUrl,
             sourceCurrency = visibleCurrency,
-            sourcePrice = visiblePrice
+            sourcePrice = visiblePrice,
+            variantIdentityConfirmedByUrl = matchesVariantDetailsConfirmedByUrl(
+                expectedTitle, matchingPageTitle, originalUrl
+            )
         )
     }
 
@@ -3835,6 +3847,7 @@ class WaybackPriceHistoryClient(
         originalUrl: String
     ): Boolean {
         if (isMatchingProductTitle(expectedTitle, archivedTitle)) return true
+        if (matchesVariantDetailsConfirmedByUrl(expectedTitle, archivedTitle, originalUrl)) return true
 
         val expected = normalizeTitle(expectedTitle)
         val archived = normalizeTitle(archivedTitle)
@@ -3890,9 +3903,7 @@ class WaybackPriceHistoryClient(
         // Missing colour in an archived title is unknown, not a contradiction. Only an
         // explicitly different archived colour rejects the candidate; storage and model checks
         // below remain strict so a generic page cannot lend a price to another SKU.
-        if (expectedColourFamily != null && archivedColourFamily != null &&
-            expectedColourFamily != archivedColourFamily
-        ) return false
+        if (expectedColourFamily != archivedColourFamily) return false
 
         // Trim/model suffixes (Pro, Ultra, Max, etc.) are meaningful for phones and scooters.
         // Require the same explicit trim markers on both titles to avoid cross-variant prices.
@@ -3955,7 +3966,7 @@ class WaybackPriceHistoryClient(
             .map { it.value.replace(Regex("""\s+"""), "") }.toSet()
         val archivedStorage = storageToken.findAll(canonicalArchived)
             .map { it.value.replace(Regex("""\s+"""), "") }.toSet()
-        if (!archivedStorage.containsAll(expectedStorage)) return false
+        if (expectedStorage != archivedStorage) return false
         if (!sameIdentity && !archivedVariants.containsAll(expectedVariants)) return false
         if (sameIdentity) return true
 
@@ -3966,6 +3977,75 @@ class WaybackPriceHistoryClient(
         return overlap.size >= minOf(2, expectedTokens.size) &&
             overlap.size.toDouble() / expectedTokens.size >= 0.72
     }
+    /**
+     * Allows a page heading to omit capacity/colour only when the archived original URL
+     * explicitly names every missing detail. The model and edition must still match exactly.
+     * This supports retailer pages whose visible heading is generic but whose URL targets a SKU.
+     */
+    private fun matchesVariantDetailsConfirmedByUrl(
+        expectedTitle: String,
+        archivedTitle: String,
+        originalUrl: String
+    ): Boolean {
+        val expected = normalizeTitle(expectedTitle)
+        val archived = normalizeTitle(archivedTitle)
+        if (expected.isBlank() || archived.isBlank()) return false
+        if (productConditionKey(expected) != productConditionKey(archived)) return false
+        if (productModelVariantTokens(expected) != productModelVariantTokens(archived)) return false
+
+        val expectedColour = productColourFamily(expected)
+        val archivedColour = productColourFamily(archived)
+        if (expectedColour != null && archivedColour != null && expectedColour != archivedColour) return false
+
+        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+        val expectedStorage = storagePattern.findAll(expected)
+            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
+        val archivedStorage = storagePattern.findAll(archived)
+            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
+
+        // An archived page that explicitly names an unrequested capacity is a different SKU.
+        if (archivedStorage.any { it !in expectedStorage }) return false
+        val missingStorage = expectedStorage.any { it !in archivedStorage }
+
+        val uri = runCatching { URI(originalUrl) }.getOrNull() ?: return false
+        val pathText = decodePathUrlComponent(uri.rawPath.orEmpty())
+        val identityQueryKeys = setOf(
+            "sku", "skuid", "sku_id", "variant", "variantid", "variant_id", "variation",
+            "variationid", "variation_id", "productid", "product_id", "offerid", "offer_id",
+            "pid", "itemid", "item_id", "asin", "mpn", "gtin", "ean", "model", "modelid",
+            "color", "colour", "colorid", "colourid", "storage", "capacity", "size",
+            "configuration", "config", "option", "optionid"
+        )
+        val queryIdentityText = uri.rawQuery.orEmpty().split('&').mapNotNull { parameter ->
+            val rawKey = parameter.substringBefore('=')
+            val rawValue = parameter.substringAfter('=', "")
+            val key = decodeQueryUrlComponent(rawKey).lowercase(Locale.ROOT)
+            if (key !in identityQueryKeys) null else decodeQueryUrlComponent(rawValue).takeIf { it.isNotBlank() }
+        }.joinToString(" ")
+        val urlTitle = normalizeTitle(pathText + " " + queryIdentityText)
+        val urlStorage = storagePattern.findAll(urlTitle)
+            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
+        if (missingStorage && !urlStorage.containsAll(expectedStorage)) return false
+
+        val urlColour = productColourFamily(urlTitle)
+        val missingColour = expectedColour != null && archivedColour == null
+        val archivedHasUnknownToRequestColour = expectedColour == null && archivedColour != null
+        if (missingColour && urlColour != expectedColour) return false
+        if (archivedHasUnknownToRequestColour && urlColour != archivedColour) return false
+        if (!missingStorage && !missingColour && !archivedHasUnknownToRequestColour) return false
+
+        fun coreIdentity(value: String): String =
+            onlineProductIdentityKey(canonicalizeArchiveTitle(value)).split('|')
+                .filterNot {
+                    it.startsWith("memory:") ||
+                        it.startsWith("color:") ||
+                        it.startsWith("specs:")
+                }
+                .joinToString("|")
+
+        return coreIdentity(expected) == coreIdentity(archived)
+    }
+
     private fun hasExplicitProductVariantConflict(expected: String, archived: String): Boolean {
         val e = canonicalizeArchiveTitle(normalizeTitle(expected))
         val a = canonicalizeArchiveTitle(normalizeTitle(archived))

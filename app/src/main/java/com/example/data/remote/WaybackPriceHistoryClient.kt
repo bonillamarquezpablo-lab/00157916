@@ -831,14 +831,14 @@ class WaybackPriceHistoryClient(
             return WaybackBackfillResult(requestFailed = true, diagnosticCodes = failureCodes)
         }
 
-        // Limit extra probes after a retryable HTTP 5xx. A timeout still gets the established
-        // five-URL fallback because the request did not return a server response.
-        val transientCdxServerFailure = failureCodes.any { code ->
-            code.contains("_HTTP_") &&
+        // Keep the fallback to three URLs after either a transient CDX timeout or HTTP 5xx.
+        // The direct offer URL is always ranked first; a later manual retry can resume discovery.
+        val transientCdxFailure = failureCodes.any { code ->
+            code.endsWith("_TIMEOUT") ||
                 code.substringAfterLast('_').toIntOrNull()
                     ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true
         }
-        val availabilityProbeLimit = if (transientCdxServerFailure) {
+        val availabilityProbeLimit = if (transientCdxFailure) {
             minOf(MAX_DOMAIN_AVAILABILITY_PROBE_CANDIDATES, 3)
         } else {
             MAX_DOMAIN_AVAILABILITY_PROBE_CANDIDATES

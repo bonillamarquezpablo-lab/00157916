@@ -2023,6 +2023,15 @@ class WaybackPriceHistoryClientTest {
         assertEquals("statuscode:200", url.queryParameterValues("filter")?.firstOrNull())
         assertEquals("text/html", url.queryParameterValues("filter")?.getOrNull(1))
         assertEquals("20261021", url.queryParameter("to"))
+
+        val exactUrl = client.buildCdxUrl(
+            originalUrl = "https://shop.example/products/anker-prime",
+            now = now,
+            lookbackDays = 2_920,
+            matchType = "exact"
+        )
+        assertEquals("exact", exactUrl?.queryParameter("matchType"))
+        assertEquals("prefix", url.queryParameter("matchType"))
     }
 
     @Test
@@ -2162,6 +2171,71 @@ class WaybackPriceHistoryClientTest {
         assertEquals("Anker Prime 27K Power Bank", quote.productTitle)
         assertEquals(1_672_574_400_000L, quote.observedAt)
         assertTrue(quote.snapshotUrl.contains("web.archive.org"))
+    }
+
+    @Test
+    fun acceptsGenericArchivedHeadingOnlyWhenUrlConfirmsTheMissingStorage() {
+        val client = newClient()
+        val html = """
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@type":"Product",
+                "name":"Apple iPhone 15 Plus",
+                "offers":{"@type":"Offer","price":"799.99","priceCurrency":"EUR"}
+              }
+              </script>
+            </head></html>
+        """.trimIndent()
+        val originalUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb"
+        val snapshotUrl =
+            "https://web.archive.org/web/20250101120000id_/$originalUrl"
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "Apple iPhone 15 Plus 256GB",
+            originalUrl = originalUrl,
+            snapshotUrl = snapshotUrl,
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("A generic heading is acceptable when the archived URL proves the exact capacity", quote)
+        assertEquals(799.99, quote!!.price, 0.001)
+        assertTrue("The relaxed title match must be explicitly marked as URL-verified",
+            quote.variantIdentityConfirmedByUrl)
+
+        val genericUrl = "https://www.pccomponentes.com/apple-iphone-15-plus"
+        val genericSnapshot = "https://web.archive.org/web/20250101120000id_/$genericUrl"
+        assertNull(
+            "A generic page URL must not lend a price to a specific capacity",
+            client.parseArchivedPrice(
+                html = html,
+                expectedTitle = "Apple iPhone 15 Plus 256GB",
+                originalUrl = genericUrl,
+                snapshotUrl = genericSnapshot,
+                observedAt = 1_735_732_800_000L
+            )
+        )
+        assertNull(
+            "A generic colour heading requires the URL to prove the requested colour as well",
+            client.parseArchivedPrice(
+                html = html,
+                expectedTitle = "Apple iPhone 15 Plus 256GB Amarillo",
+                originalUrl = originalUrl,
+                snapshotUrl = snapshotUrl,
+                observedAt = 1_735_732_800_000L
+            )
+        )
+        assertNull(
+            "A Plus page must never match the base iPhone 15",
+            client.parseArchivedPrice(
+                html = html,
+                expectedTitle = "Apple iPhone 15 256GB",
+                originalUrl = originalUrl,
+                snapshotUrl = snapshotUrl,
+                observedAt = 1_735_732_800_000L
+            )
+        )
     }
 
     @Test

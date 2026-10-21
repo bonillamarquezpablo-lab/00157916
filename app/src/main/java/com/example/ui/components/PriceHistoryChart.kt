@@ -230,10 +230,11 @@ fun PriceHistoryChart(
     val selectedPoint = remember(selectedPointIndex, filteredPoints) {
         when {
             selectedPointIndex in filteredPoints.indices -> filteredPoints[selectedPointIndex]
-            // A lone archived capture is still useful evidence. Show its exact value/date
-            // without forcing the user to discover a tiny, otherwise context-free dot.
-            filteredPoints.size == 1 -> filteredPoints.single()
-            else -> null
+            // The most recent real observation is the useful default selection for a series.
+            // This makes a restored history visibly useful immediately after opening the sheet,
+            // instead of showing only dots until the user happens to tap the canvas. A later tap
+            // still selects the exact point requested by the user.
+            else -> filteredPoints.lastOrNull()
         }
     }
     // Follow the app's current theme accent (amber in Mínimo) instead of a fixed emerald line.

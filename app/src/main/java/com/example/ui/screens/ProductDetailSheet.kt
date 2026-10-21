@@ -68,6 +68,63 @@ import com.example.ui.components.PriceHistoryChart
 import com.example.ui.components.ProductImageView
 import com.example.ui.components.StoreComparisonView
 
+/**
+ * Summarizes the current Wayback diagnostic without presenting an old HTTP 429 event as an
+ * indefinitely active pause. An active cooldown is explicit only when the current UI status
+ * includes its computed retry clock and remaining minutes.
+ */
+internal fun buildWaybackDiagnosticSummary(
+    freeHistoryStatus: String?,
+    steps: List<WaybackDiagnosticEntry>
+): String {
+    val statusText = freeHistoryStatus.orEmpty().trim()
+    val hasActivePauseCountdown =
+        statusText.contains("HTTP 429", ignoreCase = true) &&
+            statusText.contains("hasta aproximadamente", ignoreCase = true) &&
+            Regex("""(?i)\\ben unos \\d+\\s+min\\b""").containsMatchIn(statusText)
+    val activeStep = steps.firstOrNull {
+        it.isCaptureDetail && it.status == WaybackTraceStatus.RUNNING
+    } ?: steps.firstOrNull { it.status == WaybackTraceStatus.RUNNING }
+    val rateLimitReported = statusText.contains("HTTP 429", ignoreCase = true) ||
+        steps.any { entry ->
+            entry.detail.contains("HTTP 429", ignoreCase = true) ||
+                entry.detail.contains("WAYBACK_RATE_LIMITED", ignoreCase = true) ||
+                entry.detail.contains("pausa global", ignoreCase = true)
+        }
+    val firstFailedCapture = steps.firstOrNull {
+        it.isCaptureDetail && it.status == WaybackTraceStatus.FAILED
+    }
+    val firstFailedStep = firstFailedCapture ?: steps.firstOrNull {
+        it.status == WaybackTraceStatus.FAILED
+    }
+
+    return when {
+        hasActivePauseCountdown -> statusText
+        activeStep != null -> if (activeStep.isCaptureDetail) {
+            "Captura en curso: ${activeStep.title}"
+        } else {
+            "Fase en curso: ${activeStep.step}. ${activeStep.title}"
+        }
+        rateLimitReported -> {
+            val cause = firstFailedCapture?.let {
+                " Fallo individual registrado: ${it.title}."
+            }.orEmpty()
+            val currentStatus = statusText.takeIf { it.isNotBlank() }
+                ?.let { " Estado actual: $it" }
+                ?: " Este informe no contiene una hora de reanudación confirmada."
+            "Se recibió HTTP 429 durante esta búsqueda, pero el estado actual no confirma que la pausa siga activa.$cause$currentStatus"
+        }
+        firstFailedStep != null -> if (firstFailedStep.isCaptureDetail) {
+            "Fallo de captura: ${firstFailedStep.title}"
+        } else {
+            "Primer fallo detectado: paso ${firstFailedStep.step}. ${firstFailedStep.title}"
+        }
+        steps.any { it.status == WaybackTraceStatus.PASSED } ->
+            "No hay una fase marcada como fallida en este momento."
+        else -> "Esperando resultado del diagnóstico."
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProductDetailSheet(
@@ -641,40 +698,10 @@ fun ProductDetailSheet(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp
                             )
-                            val activeDiagnosticStep = waybackDiagnosticSteps.firstOrNull {
-                                it.isCaptureDetail && it.status == WaybackTraceStatus.RUNNING
-                            } ?: waybackDiagnosticSteps.firstOrNull {
-                                it.status == WaybackTraceStatus.RUNNING
-                            }
-                            val rateLimitReported =
-                                freeHistoryStatus.orEmpty().contains("HTTP 429", ignoreCase = true) ||
-                                    waybackDiagnosticSteps.any { entry ->
-                                        entry.detail.contains("HTTP 429", ignoreCase = true) ||
-                                            entry.detail.contains("WAYBACK_RATE_LIMITED", ignoreCase = true) ||
-                                            entry.detail.contains("pausa global", ignoreCase = true)
-                                    }
-                            val firstFailedCaptureStep = waybackDiagnosticSteps.firstOrNull {
-                                it.isCaptureDetail && it.status == WaybackTraceStatus.FAILED
-                            }
-                            val firstFailedDiagnosticStep = firstFailedCaptureStep
-                                ?: waybackDiagnosticSteps.firstOrNull {
-                                    it.status == WaybackTraceStatus.FAILED
-                                }
-                            val diagnosisSummary = when {
-                                activeDiagnosticStep != null ->
-                                    if (activeDiagnosticStep.isCaptureDetail) "Captura en curso: ${activeDiagnosticStep.title}"
-                                    else "Fase en curso: ${activeDiagnosticStep.step}. ${activeDiagnosticStep.title}"
-                                rateLimitReported && firstFailedCaptureStep != null ->
-                                    "Pausa HTTP 429 activa. Fallo individual antes de la pausa: ${firstFailedCaptureStep.title}"
-                                rateLimitReported ->
-                                    "Pausa temporal de Internet Archive (HTTP 429). Mínimo ha detenido las consultas; no implica que falten capturas."
-                                firstFailedDiagnosticStep != null ->
-                                    if (firstFailedDiagnosticStep.isCaptureDetail) "Fallo de captura: ${firstFailedDiagnosticStep.title}"
-                                    else "Primer fallo detectado: paso ${firstFailedDiagnosticStep.step}. ${firstFailedDiagnosticStep.title}"
-                                waybackDiagnosticSteps.any { it.status == WaybackTraceStatus.PASSED } ->
-                                    "No hay una fase marcada como fallida en este momento."
-                                else -> "Esperando resultado del diagnóstico."
-                            }
+                            val diagnosisSummary = buildWaybackDiagnosticSummary(
+                                freeHistoryStatus = freeHistoryStatus,
+                                steps = waybackDiagnosticSteps
+                            )
                             Text(
                                 diagnosisSummary,
                                 fontSize = 11.sp,

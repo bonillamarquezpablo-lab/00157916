@@ -69,6 +69,33 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun duplicateOfferWithTrackingOnlyUrlDifferencesCollapsesButDifferentColoursStaySeparate() {
+        val title = "Xiaomi Redmi Note 15 Pro 8GB/256GB Negro"
+        val first = SerpApiShoppingResult(
+            title = title,
+            price = 319.90,
+            storeName = "El Corte Inglés",
+            sourceUrl = "https://www.elcorteingles.es/electronica/redmi-note-15-pro/?utm_source=google&gclid=click-one",
+            observedAt = 1_800_000_000_000L
+        )
+        val trackingDuplicate = first.copy(
+            sourceUrl = "https://www.elcorteingles.es/electronica/redmi-note-15-pro/?gclid=click-two&utm_source=shopping"
+        )
+        val groups = groupOnlineShoppingResults(listOf(first, trackingDuplicate))
+        assertEquals("One exact product at the same shop and price must appear once", 1, groups.size)
+        assertEquals("Tracking-only URL changes must not duplicate the same offer", 1, groups.single().offers.size)
+
+        val titanium = first.copy(
+            title = "Xiaomi Redmi Note 15 Pro 8GB/256GB Titanio",
+            sourceUrl = "https://www.elcorteingles.es/electronica/redmi-note-15-pro-titanio/",
+        )
+        val colourGroups = groupOnlineShoppingResults(listOf(first, titanium))
+        assertEquals("Different colours are distinct SKUs even if shop and price match", 2, colourGroups.size)
+        assertTrue(colourGroups.any { it.identityKey.contains("color:black") })
+        assertTrue(colourGroups.any { it.identityKey.contains("color:titanium") })
+    }
+
+    @Test
     fun compactRedmiNoteEditionTitlesShareFamilyButKeepVariantsAndStorageDistinct() {
         val compact = onlineProductIdentityKey("Xiaomi Redmi Note 15Pro 8GB/256GB")
         val spacedSameVariant = onlineProductIdentityKey("XIAOMI Redmi Note 15 Pro 8GB/256GB")

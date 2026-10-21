@@ -1,0 +1,43 @@
+package com.example.ui.screens
+
+import com.example.data.remote.WaybackTraceStatus
+import com.example.ui.viewmodel.WaybackDiagnosticEntry
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ProductDetailSheetDiagnosticTest {
+    @Test
+    fun activeRateLimitDiagnosisShowsTheRetryClockAndRemainingMinutes() {
+        val status = "Internet Archive ha pedido una pausa temporal (HTTP 429). Mínimo no enviará más peticiones hasta aproximadamente las 20:05 (en unos 7 min). No se consume cuota de SerpApi."
+        val rows = listOf(
+            WaybackDiagnosticEntry(
+                step = 8,
+                title = "Descarga de captura",
+                status = WaybackTraceStatus.FAILED,
+                detail = "HTTP 429: Internet Archive pidió frenar las consultas."
+            )
+        )
+
+        assertEquals(status, buildWaybackDiagnosticSummary(status, rows))
+    }
+
+    @Test
+    fun oldRateLimitTraceDoesNotClaimThatThePauseIsStillActiveWhenStatusShowsCache() {
+        val status = "Estas consultas gratuitas ya se comprobaron recientemente. La caché evita repetir búsquedas completadas sin resultados útiles."
+        val rows = listOf(
+            WaybackDiagnosticEntry(
+                step = 8,
+                title = "Descarga de captura",
+                status = WaybackTraceStatus.FAILED,
+                detail = "HTTP 429: Internet Archive pidió frenar las consultas."
+            )
+        )
+
+        val summary = buildWaybackDiagnosticSummary(status, rows)
+        assertTrue(summary.contains("no confirma que la pausa siga activa", ignoreCase = true))
+        assertTrue(summary.contains(status))
+        assertFalse(summary.startsWith("Pausa temporal de Internet Archive", ignoreCase = true))
+    }
+}

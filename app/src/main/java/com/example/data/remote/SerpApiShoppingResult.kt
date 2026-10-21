@@ -960,6 +960,54 @@ fun onlineProductIdentityKey(title: String): String {
     return wheelSetSuffix?.let { "$identity|$it" } ?: identity
 }
 
+/**
+ * Canonical URL identity used only for duplicate-offer detection. It removes common tracking
+ * parameters and ignores harmless query ordering and trailing slashes, while preserving functional
+ * parameters, SKU values, path case and the actual offer URL shown to the user.
+ */
+internal fun onlineOfferDeduplicationUrlKey(rawUrl: String): String {
+    val raw = rawUrl.trim()
+    if (raw.isBlank()) return ""
+    val parsed = runCatching { URI(raw).normalize() }.getOrNull() ?: return raw
+    val scheme = parsed.scheme?.lowercase(Locale.ROOT) ?: return raw
+    val host = parsed.host?.lowercase(Locale.ROOT) ?: return raw
+    if (scheme != "http" && scheme != "https") return raw
+    val port = when {
+        scheme == "https" && parsed.port == 443 -> ""
+        scheme == "http" && parsed.port == 80 -> ""
+        parsed.port >= 0 -> ":${parsed.port}"
+        else -> ""
+    }
+    val path = (parsed.rawPath.orEmpty().ifBlank { "/" }).let {
+        if (it.length > 1) it.trimEnd('/') else it
+    }
+    val trackingNames = setOf(
+        "gclid", "dclid", "fbclid", "msclkid", "gclsrc", "gad_source",
+        "gad_campaignid", "irclickid", "gbraid", "wbraid", "yclid", "srsltid",
+        "ref", "referrer", "campaignid", "affiliate_id"
+    )
+    fun decodeComponent(value: String): String = runCatching {
+        URLDecoder.decode(value.replace("+", "%2B"), "UTF-8")
+    }.getOrDefault(value)
+    val queryParts = parsed.rawQuery.orEmpty()
+        .split('&')
+        .filter { it.isNotBlank() }
+        .filterNot { part ->
+            val name = decodeComponent(part.substringBefore('=')).lowercase(Locale.ROOT)
+            name.startsWith("utm_") || name in trackingNames
+        }
+        .sortedWith(
+            compareBy<String> { decodeComponent(it.substringBefore('=')).lowercase(Locale.ROOT) }
+                .thenBy { decodeComponent(it.substringAfter('=', "")) }
+                .thenBy { it }
+        )
+    val query = queryParts.takeIf { it.isNotEmpty() }?.joinToString("&")
+    return buildString {
+        append(scheme).append("://").append(host).append(port).append(path)
+        if (query != null) append('?').append(query)
+    }
+}
+
 /** Groups repeated seller listings into one product card, retaining all separate offers. */
 fun groupOnlineShoppingResults(
     results: List<SerpApiShoppingResult>
@@ -967,7 +1015,11 @@ fun groupOnlineShoppingResults(
     results.groupBy { onlineProductIdentityKey(it.title) }
         .mapNotNull { (identityKey, offers) ->
             val sortedOffers = offers.distinctBy {
-                "${it.storeName.trim().lowercase(Locale.ROOT)}|${it.price}|${it.sourceUrl.lowercase(Locale.ROOT)}"
+                listOf(
+                    normalizeOnlineSearchText(it.storeName),
+                    it.price.toString(),
+                    onlineOfferDeduplicationUrlKey(it.sourceUrl)
+                ).joinToString("|")
             }.sortedBy { it.price }
             if (sortedOffers.isEmpty()) null
             else {

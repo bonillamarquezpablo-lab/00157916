@@ -330,7 +330,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     private fun waybackRateLimitNotice(now: Long = System.currentTimeMillis()): String {
         val until = waybackPriceHistoryClient.activeRateLimitUntil(now)
-            ?: return "Internet Archive ha limitado temporalmente las consultas (HTTP 429). Espera unos minutos antes de volver a intentarlo. No se ha gastado cuota de SerpApi."
+            ?: return "Internet Archive devolvió HTTP 429, pero la pausa local ya ha vencido. Mínimo no repetirá automáticamente la consulta; si la caché lo permite, puedes volver a pulsar «Buscar histórico gratis». No se ha gastado cuota de SerpApi."
         val remainingMinutes = ((until - now + 59_999L) / 60_000L).coerceAtLeast(1L)
         val retryAt = SimpleDateFormat("HH:mm", Locale("es", "ES")).format(Date(until))
         return "Internet Archive ha pedido una pausa temporal (HTTP 429). Mínimo no enviará más peticiones hasta aproximadamente las ${retryAt} (en unos ${remainingMinutes} min). Vuelve a pulsar «Buscar histórico gratis» entonces. No se consume cuota de SerpApi."
@@ -2517,6 +2517,15 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
 
                 val notice = when {
+                    waybackPriceHistoryClient.activeRateLimitUntil() != null ->
+                        waybackRateLimitNotice() + when {
+                            savedCount > 0 ->
+                                " Se conservaron $savedCount punto(s) de precio verificado(s) antes de la pausa."
+                            foundCount > 0 ->
+                                " Se verificaron $foundCount punto(s), pero la pausa impide completar el resto del histórico."
+                            else ->
+                                " Esto no significa que no existan capturas."
+                        }
                     skippedCount == candidates.size && diagnosticCodes.contains("CACHE_SKIPPED_AFTER_FAILURE") ->
                         "Internet Archive no respondió en el intento anterior. Mínimo evita repetir enseguida una consulta que agotó el tiempo; vuelve a probar dentro de unos minutos. Esto no significa que no existan capturas."
                     skippedCount == candidates.size ->

@@ -1809,7 +1809,7 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun inferredMerchantUrlUsesAvailabilityBeforeSlowProductPrefixCdx() = runBlocking {
+    fun inferredMerchantUrlUsesAvailabilityFirstThenCdxForMultipleHistoricalDates() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
         preferences.edit()
@@ -1870,8 +1870,27 @@ class WaybackPriceHistoryClientTest {
                         .build()
                 }
                 request.url.host == "web.archive.org" &&
-                    request.url.encodedPath.startsWith("/cdx/search/cdx") ->
-                    throw AssertionError("A guessed product URL must not spend a slow CDX request before Availability")
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    // Availability only supplies the closest snapshot. After one verified point,
+                    // CDX must be queried to recover a dated series instead of returning early.
+                    val indexedUrl = request.url.queryParameter("url")
+                        ?: throw AssertionError("CDX request has no product URL")
+                    val body = """
+                        [
+                          ["timestamp","original","statuscode","mimetype"],
+                          ["20250101120000","$indexedUrl","200","text/html"],
+                          ["20261001120000","$indexedUrl","200","text/html"]
+                        ]
+                    """.trimIndent()
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(body.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
                 else -> throw AssertionError("Unexpected Wayback request: $hostAndPath")
             }
         }.build()
@@ -1887,10 +1906,12 @@ class WaybackPriceHistoryClientTest {
             assertTrue("The inferred seller URL must be checked through Availability", availabilityUrls.isNotEmpty())
             assertEquals("The first archive network call must be Availability, not CDX",
                 "archive.org/wayback/available", requests.first())
-            assertFalse("A verified Availability quote should avoid the fallback CDX timeout",
+            assertTrue("A single Availability quote must trigger CDX discovery for other dates",
                 requests.any { it == "web.archive.org/cdx/search/cdx" })
-            assertEquals(79.99, result.quotes.single().price, 0.001)
-            assertEquals("EUR", result.quotes.single().currency)
+            assertTrue("CDX must add distinct historical dates to the Availability observation",
+                result.quotes.map { it.observedAt }.distinct().size >= 2)
+            assertTrue(result.quotes.all { kotlin.math.abs(it.price - 79.99) < 0.001 })
+            assertTrue(result.quotes.all { it.currency == "EUR" })
         } finally {
             preferences.edit()
                 .remove("wayback_rate_limit_until")

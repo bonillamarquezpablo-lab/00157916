@@ -1156,9 +1156,9 @@ class WaybackPriceHistoryClientTest {
                 availabilityUrls.size
             )
             assertEquals(
-                "The real retailer search URL should be tried only after the saved offer URL and three product-shaped guesses",
+                "The real retailer search URL should be the final fallback after product-shaped guesses",
                 realStoreSearchUrl,
-                availabilityUrls[4]
+                availabilityUrls.last()
             )
             assertTrue("The verified archived EUR price should be recovered after a 3.5-second HTML response", result.quotes.isNotEmpty())
             assertTrue("Every accepted result must retain the verified EUR price", result.quotes.isNotEmpty() && result.quotes.all { kotlin.math.abs(it.price - 79.99) < 0.001 })

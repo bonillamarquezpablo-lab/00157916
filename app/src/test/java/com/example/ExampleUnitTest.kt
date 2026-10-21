@@ -69,6 +69,29 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun compactRedmiNoteEditionTitlesShareFamilyButKeepVariantsAndStorageDistinct() {
+        val compact = onlineProductIdentityKey("Xiaomi Redmi Note 15Pro 8GB/256GB")
+        val spaced = onlineProductIdentityKey("XIAOMI Redmi Note 15 Pro 12GB/512GB 5G")
+        val max = onlineProductIdentityKey("Xiaomi Redmi Note 15 Pro Max 12GB/512GB")
+
+        fun familyKey(key: String) = key.split('|').filterNot {
+            it.startsWith("variant:") || it.startsWith("memory:") ||
+                it.startsWith("color:") || it.startsWith("specs:")
+        }.joinToString("|")
+
+        assertEquals("Compact and spaced edition names must resolve to the same Redmi Note family",
+            familyKey(compact), familyKey(spaced))
+        assertEquals("Pro Max must stay under the same model family",
+            familyKey(compact), familyKey(max))
+        assertTrue("Pro and Pro Max must remain separate variants",
+            compact != max)
+        assertTrue("Different storage capacities must remain separate exact identities",
+            compact != spaced)
+        assertTrue(compact.startsWith("xiaomi|redminote15|"))
+        assertTrue(spaced.startsWith("xiaomi|redminote15|"))
+    }
+
+    @Test
     fun powerBankCapacityAndChargerWattageStayDistinctWhileColourVariantsMerge() {
         fun result(title: String, price: Double, store: String) = SerpApiShoppingResult(
             title = title,

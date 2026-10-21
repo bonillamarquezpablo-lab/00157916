@@ -2341,11 +2341,15 @@ class WaybackPriceHistoryClient(
                 listOfNotNull(storeSearchUrl) +
                 guessedProductUrls.drop(3)
         }
-        // Try the exact Apple SKU configurator before the generic family/marketing pages.
-        val appleVariantUrl = if (normalizedDomain == "apple.com") {
-            hosts.firstNotNullOfOrNull { host -> buildAppleIphone15VariantUrl(host, expectedTitle) }
-        } else null
-        return (listOfNotNull(appleVariantUrl) + orderedCandidates)
+        // Try the exact Apple SKU configurator on each known host before any family/marketing
+        // page. www and apex can have different archive coverage; using only the first host meant
+        // a missing SKU capture could push the search onto a broad page whose JSON-LD lists Plus
+        // offers, causing step 15 to reject every price despite a potentially archived exact SKU.
+        // The identity validator remains strict: this only changes candidate discovery/order.
+        val appleVariantUrls = if (normalizedDomain == "apple.com") {
+            hosts.mapNotNull { host -> buildAppleIphone15VariantUrl(host, expectedTitle) }
+        } else emptyList()
+        return (appleVariantUrls + orderedCandidates)
             .distinct()
             .take(MAX_AVAILABILITY_URL_CANDIDATES)
     }

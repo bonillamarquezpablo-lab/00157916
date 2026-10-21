@@ -1566,14 +1566,13 @@ class ProductRepository(
         // handled separately for display below, so they cannot change the low/average/deal claims.
         // Properly provenance-labelled archive and Google insight rows retain their independent path.
         val sortedHistory = verifiedObservations.filter { observation ->
-            val eligibleDate = isArchiveBackedObservation(observation) ||
-                observation.evidenceType.equals("google_insights", ignoreCase = true) ||
-                observation.observedAt >= HISTORY_START_TIMESTAMP
-            eligibleDate &&
-                // Use the canonical product name for price plausibility. This avoids compiling
-                // and running the category regexes twice per Room observation and prevents a
-                // generic legacy seller title from legitimizing a mismatched extreme price.
-                isEligibleObservationForHistory(observation, canonicalProductTitle = this.title)
+            // HISTORY_START_TIMESTAMP is a guard for accepting new legacy live imports, not a
+            // retention policy for rows that are already verified and stored in Room. Reapplying
+            // that fixed cutoff every time the app starts made older saved observations vanish
+            // from the visible minimum/graph even though the database still contained them.
+            // Existing rows still have to pass the complete source, seller, title, currency,
+            // date and plausible-price checks below; no synthetic history is introduced.
+            isEligibleObservationForHistory(observation, canonicalProductTitle = this.title)
         }.sortedBy { it.observedAt }
         // Only current search observations establish the live price. Historical-provider points
         // remain visible on the chart but can never replace the current quote.
@@ -1632,8 +1631,10 @@ class ProductRepository(
         val latestObservation = latestBatch.minByOrNull { it.price }
         val minObservation = liveSnapshotHistory.minByOrNull { it.price }
         val maxObservation = liveSnapshotHistory.maxByOrNull { it.price }
-        // Require both the explicit product flag and a provider-backed observation.
-        val priceIsVerified = isPriceVerified && latestObservation != null
+        // Room price observations are the source of truth. The product flag is a cached
+        // summary that can be stale after restart/migration; a current price is verified only
+        // when a saved live observation passes every source/identity/price check above.
+        val priceIsVerified = latestObservation != null
         val effectiveHistory = if (priceIsVerified) liveSnapshotHistory else emptyList()
         val effectiveStore = if (priceIsVerified) {
             observationStore(latestObservation!!, stores)

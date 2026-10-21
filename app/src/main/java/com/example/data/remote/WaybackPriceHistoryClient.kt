@@ -866,8 +866,17 @@ class WaybackPriceHistoryClient(
                     "La red respondió, pero no se recuperaron capturas históricas utilizables; no hay precio que verificar."
             }
         )
-        if (fallback.quotes.isNotEmpty()) {
+        // Availability usually returns only the closest capture for each URL. A single
+        // verified quote is useful evidence, but it is not a time series; do not return early
+        // before the CDX fallback has a chance to discover older dated captures.
+        if (fallback.quotes.size >= 2) {
             return fallback.copy(diagnosticCodes = emptySet())
+        }
+        if (fallback.quotes.size == 1) {
+            emitWaybackTrace(
+                onTrace, 6, WaybackTraceStatus.RUNNING,
+                "Availability encontró una sola fecha verificable; se continúa con CDX para buscar capturas históricas de otras fechas."
+            )
         }
 
         // Availability may answer correctly but miss a capture on the guessed URL. Once the
@@ -906,12 +915,22 @@ class WaybackPriceHistoryClient(
                 alternateResult = candidateResult
                 when {
                     candidateResult.quotes.isNotEmpty() -> {
+                        val mergedQuotes = (fallback.quotes + candidateResult.quotes)
+                            .distinctBy { listOf(it.originalUrl, it.observedAt.toString(), it.price.toString(), it.currency) }
+                            .sortedBy { it.observedAt }
                         rememberAttempt(cacheKey, now, hasQuotes = true, failed = false)
                         emitWaybackTrace(
                             onTrace, 6, WaybackTraceStatus.PASSED,
-                            "La URL alternativa encontró ${candidateResult.quotes.size} precio(s) histórico(s) verificado(s)."
+                            "La URL alternativa encontró ${candidateResult.quotes.size} precio(s) histórico(s) verificado(s); se combinaron con las fechas válidas de Availability."
                         )
-                        return candidateResult.copy(diagnosticCodes = emptySet())
+                        return candidateResult.copy(
+                            quotes = mergedQuotes,
+                            capturesFound = maxOf(fallback.capturesFound, candidateResult.capturesFound),
+                            capturesChecked = fallback.capturesChecked + candidateResult.capturesChecked,
+                            available = fallback.available || candidateResult.available,
+                            requestFailed = false,
+                            diagnosticCodes = emptySet()
+                        )
                     }
                     candidateResult.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") -> {
                         emitWaybackTrace(
@@ -1004,12 +1023,22 @@ class WaybackPriceHistoryClient(
                 domainDiscoveryResults += discovered
                 when {
                     discovered.quotes.isNotEmpty() -> {
+                        val mergedQuotes = (fallback.quotes + listOfNotNull(alternateResult).flatMap { it.quotes } + discovered.quotes)
+                            .distinctBy { listOf(it.originalUrl, it.observedAt.toString(), it.price.toString(), it.currency) }
+                            .sortedBy { it.observedAt }
                         rememberAttempt(cacheKey, now, hasQuotes = true, failed = false)
                         emitWaybackTrace(
                             onTrace, 6, WaybackTraceStatus.PASSED,
-                            "El índice del dominio encontró ${discovered.quotes.size} precio(s) histórico(s) verificado(s)."
+                            "El índice del dominio encontró ${discovered.quotes.size} precio(s) histórico(s) verificado(s); se conservaron las observaciones de las otras rutas."
                         )
-                        return discovered.copy(diagnosticCodes = emptySet())
+                        return discovered.copy(
+                            quotes = mergedQuotes,
+                            capturesFound = fallback.capturesFound + discovered.capturesFound,
+                            capturesChecked = fallback.capturesChecked + discovered.capturesChecked,
+                            available = fallback.available || discovered.available,
+                            requestFailed = false,
+                            diagnosticCodes = emptySet()
+                        )
                     }
                     discovered.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") -> {
                         emitWaybackTrace(
@@ -1070,8 +1099,8 @@ class WaybackPriceHistoryClient(
         rememberAttempt(
             cacheKey,
             now,
-            hasQuotes = false,
-            failed = combined.requestFailed,
+            hasQuotes = combined.quotes.isNotEmpty(),
+            failed = combined.requestFailed && combined.quotes.isEmpty(),
             rateLimited = combined.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
         )
         // Preserve the distinction between a valid empty response and a transport failure. The

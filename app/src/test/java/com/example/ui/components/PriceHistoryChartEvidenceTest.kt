@@ -48,6 +48,26 @@ class PriceHistoryChartEvidenceTest {
     }
 
     @Test
+    fun multipleSavedLiveObservationsShowLatestExactPriceAndDateImmediately() {
+        val now = System.currentTimeMillis()
+        composeRule.setContent {
+            MaterialTheme {
+                PriceHistoryChart(
+                    priceHistory = listOf(
+                        point(now - 2L * 24L * 60L * 60L * 1000L, 59.99, "Tienda anterior", "live"),
+                        point(now - 1L * 24L * 60L * 60L * 1000L, 49.99, "Tienda reciente", "live")
+                    ),
+                    avg90dPrice = 0.0
+                )
+            }
+        }
+
+        // A real point and its exact value/date should be visible without a first tap.
+        composeRule.onNodeWithText("49.99 €").assertIsDisplayed()
+        composeRule.onNodeWithText("01/01/2026 en Tienda de prueba").assertIsDisplayed()
+    }
+
+    @Test
     fun externalHistoricalSeriesIsSelectableAndDoesNotShowLiveAverage() {
         composeRule.setContent {
             MaterialTheme {

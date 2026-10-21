@@ -3178,7 +3178,7 @@ class WaybackPriceHistoryClient(
             diagnosticStep = 9
         )
 
-        val windowStart = (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
+        val windowStart = historyWindowStartTimestamp(now, lookbackDays)
         val captures = indexCaptures.filter { it.timestamp in windowStart..now }
         val outsideWindowCount = indexCaptures.size - captures.size
         emitWaybackTrace(
@@ -3583,7 +3583,7 @@ class WaybackPriceHistoryClient(
         } else emptyList()
         val urlAlternatives = (modelAlternatives + modelFamilyAlternatives + textAlternatives).distinct()
         if (urlAlternatives.isEmpty()) return null
-        val start = (now - lookbackDays.coerceAtLeast(1).toLong() * DAY_MS).coerceAtLeast(0L)
+        val start = historyWindowStartTimestamp(now, lookbackDays)
         val from = formatUtc(start, "yyyyMMdd")
         val to = formatUtc(now, "yyyyMMdd")
         val urlPattern = "(?i).*(?:" + urlAlternatives.joinToString("|") + ").*"

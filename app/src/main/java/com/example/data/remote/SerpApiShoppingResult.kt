@@ -759,6 +759,7 @@ internal fun onlineProductColorFamily(title: String): String? {
         "pink" to listOf("pink", "rosa", "rose"),
         "purple" to listOf("purple", "morado", "morada", "violet", "violeta", "lavender"),
         "grey" to listOf("grey", "gray", "gris", "silver", "plata", "plateado", "graphite", "space grey"),
+        "titanium" to listOf("titanium", "titanio"),
         "orange" to listOf("orange", "naranja"),
         "gold" to listOf("gold", "dorado", "dorada", "oro"),
         "brown" to listOf("brown", "marron", "cafe"),
@@ -814,9 +815,12 @@ fun onlineProductIdentityKey(title: String): String {
         .trim()
         .replace(Regex("""\s+"""), " ")
         .replace(Regex("""\bplaystation\s*5\b"""), "ps5")
-    val productNameNormalized = rawNormalized
+    val productNameBase = rawNormalized
         .substringBefore(" compatible con ")
         .substringBefore(" compatible para ")
+    val productNameNormalized = Regex(
+        """(?i)(\bredmi\s+note\s*\d+)(pro\s*max|pro|plus|ultra|fe|lite|mini|4g|5g)\b"""
+    ).replace(productNameBase, "$1 $2")
     val memorySpecs = Regex("""\b\d+\s?(?:gb|tb)\b""")
         .findAll(productNameNormalized)
         .map { it.value.replace(" ", "") }

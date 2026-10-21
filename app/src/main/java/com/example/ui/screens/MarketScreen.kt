@@ -587,7 +587,9 @@ fun MarketScreen(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "${family.productCount} fichas · ${family.variants.size} versiones · ${family.storeCount} tiendas",
+                                    text = "${family.productCount} fichas · " +
+                                        (if (family.variants.size == 1) "1 versión" else "${family.variants.size} versiones") +
+                                        " · ${family.storeCount} tiendas",
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -630,13 +632,19 @@ fun MarketScreen(
                                                 color = MaterialTheme.colorScheme.onSurface
                                             )
                                             Text(
-                                                text = if (variant.storages.size == 1) "1 capacidad disponible" else "${variant.storages.size} capacidades disponibles",
+                                                text = if (family.products.any { it.category == ProductCategory.SMARTPHONES }) {
+                                                    if (variant.storages.size == 1) "1 configuración de memoria" else "${variant.storages.size} configuraciones de memoria"
+                                                } else {
+                                                    if (variant.storages.size == 1) "1 capacidad disponible" else "${variant.storages.size} capacidades disponibles"
+                                                },
                                                 fontSize = 11.sp,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
                                         Text(
-                                            text = if (variantExpanded) "Ocultar ▴" else "Elegir capacidad ▾",
+                                            text = if (variantExpanded) "Ocultar ▴" else if (
+                                                family.products.any { it.category == ProductCategory.SMARTPHONES }
+                                            ) "Elegir configuración ▾" else "Elegir capacidad ▾",
                                             fontSize = 11.sp,
                                             color = MaterialTheme.colorScheme.primary,
                                             fontWeight = FontWeight.SemiBold

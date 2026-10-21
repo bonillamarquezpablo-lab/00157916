@@ -154,6 +154,8 @@ class SavedProductFamilyBrowserTest {
             product("redmi15-pro5g-256-a", "Xiaomi Redmi Note 15 Pro 5G 8GB/256GB Titanio"),
             // A second row for the same exact variant must be displayed as one product card.
             product("redmi15-pro5g-256-b", "Xiaomi Redmi Note 15 Pro 5G 8GB/256GB Titanio"),
+            product("redmi15-pro5g-6gb-256", "Xiaomi Redmi Note 15 Pro 5G 6GB/256GB Titanio"),
+            product("redmi15-pro5g-black-256", "Xiaomi Redmi Note 15 Pro 5G 8GB/256GB Negro"),
             product("redmi15-pro4g-512", "Xiaomi Redmi Note 15 Pro 4G 12GB + 512GB Titanio"),
             product("redmi10-pro5g", "Xiaomi Redmi Note 10 Pro 5G 8GB/256GB")
         )
@@ -172,20 +174,32 @@ class SavedProductFamilyBrowserTest {
         )
         assertEquals(
             "The duplicate exact Pro 5G listing must collapse without merging its 4G sibling",
-            3,
+            5,
             note15.productCount
         )
         assertEquals(
-            setOf("128 GB"),
+            setOf("6 GB RAM · 128 GB"),
             note15.variants.single { it.label == "Estándar" }.storages.map { it.label }.toSet()
         )
         assertEquals(
-            setOf("256 GB"),
+            setOf("6 GB RAM · 256 GB", "8 GB RAM · 256 GB"),
             note15.variants.single { it.label == "Pro 5G" }.storages.map { it.label }.toSet()
         )
         assertEquals(
-            setOf("512 GB"),
+            setOf("12 GB RAM · 512 GB"),
             note15.variants.single { it.label == "Pro 4G" }.storages.map { it.label }.toSet()
+        )
+        assertEquals(
+            "Different RAM sizes remain separate",
+            1,
+            note15.variants.single { it.label == "Pro 5G" }.storages
+                .single { it.label == "6 GB RAM · 256 GB" }.products.size
+        )
+        assertEquals(
+            "Different colours remain separate under the same RAM/storage",
+            2,
+            note15.variants.single { it.label == "Pro 5G" }.storages
+                .single { it.label == "8 GB RAM · 256 GB" }.products.size
         )
         assertEquals("Xiaomi Redmi Note 10", families.single { it.label == "Xiaomi Redmi Note 10" }.label)
     }

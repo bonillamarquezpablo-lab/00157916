@@ -71,6 +71,8 @@ class ExampleUnitTest {
     @Test
     fun compactRedmiNoteEditionTitlesShareFamilyButKeepVariantsAndStorageDistinct() {
         val compact = onlineProductIdentityKey("Xiaomi Redmi Note 15Pro 8GB/256GB")
+        val spacedSameVariant = onlineProductIdentityKey("XIAOMI Redmi Note 15 Pro 8GB/256GB")
+        val baseSameMemory = onlineProductIdentityKey("Xiaomi Redmi Note 15 8GB/256GB")
         val spaced = onlineProductIdentityKey("XIAOMI Redmi Note 15 Pro 12GB/512GB 5G")
         val max = onlineProductIdentityKey("Xiaomi Redmi Note 15 Pro Max 12GB/512GB")
 
@@ -81,6 +83,9 @@ class ExampleUnitTest {
 
         assertEquals("Compact and spaced edition names must resolve to the same Redmi Note family",
             familyKey(compact), familyKey(spaced))
+        assertEquals("Compact and spaced titles of the same variant/configuration share exact identity",
+            compact, spacedSameVariant)
+        assertTrue("Compact Pro remains distinct from the base edition", compact != baseSameMemory)
         assertEquals("Pro Max must stay under the same model family",
             familyKey(compact), familyKey(max))
         assertTrue("Pro and Pro Max must remain separate variants",

@@ -99,15 +99,20 @@ internal fun onlineSearchFamilyKey(identityKey: String): String {
     return core.joinToString("|").ifBlank { identityKey }
 }
 
-internal fun onlineSearchFamilyLabel(title: String): String =
-    title.replace(
+internal fun onlineSearchFamilyLabel(title: String): String {
+    val spacedTitle = title.replace(
+        Regex("""(?i)(\bredmi\s+note\s*\d+)(pro\s*max|pro|plus|ultra|fe|lite|mini|4g|5g)\b"""),
+        "$1 $2"
+    )
+    return spacedTitle.replace(
         Regex("""(?i)\b\d{1,2}\s*(?:gb)?\s*[+/]\s*\d{2,4}\s*gb\b|\b\d+(?:[.,]\d+)?\s*(?:GB|TB)\b"""),
         " "
     ).replace(
-        Regex("""(?i)\b(pro\s*max|pro|max|plus|ultra|lite|mini|fe|4g|5g|black|white|blue|green|red|grey|gray|negro|negra|blanco|blanca|azul|verde|rojo|roja|gris)\b"""),
+        Regex("""(?i)\b(pro\s*max|pro|max|plus|ultra|lite|mini|fe|4g|5g|black|white|blue|green|red|grey|gray|negro|negra|blanco|blanca|azul|verde|rojo|roja|gris|titanio|titanium|silver|plata|plateado|gold|oro|dorado|amarillo|yellow|rosa|pink|purple|morado|naranja|orange|beige|brown|marron)\b"""),
         " "
     ).replace(Regex("""\s+"""), " ").trim().trim('-', '/', '|', ',')
         .ifBlank { title }
+}
 
 /**
  * Apply view-only filters to the already loaded snapshot. Split groups by condition so used

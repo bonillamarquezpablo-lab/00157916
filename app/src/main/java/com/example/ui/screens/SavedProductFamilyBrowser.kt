@@ -68,7 +68,10 @@ private val SAVED_CAPACITY_PATTERN = Regex(
     """(?i)\b(\d+(?:[.,]\d+)?)\s*(TB|GB)\b(?!\s*(?:RAM|memoria))"""
 )
 private val SAVED_COLOUR_PATTERN = Regex(
-    """(?i)\b(negro|negra|negros|negras|black|nero|blanco|blanca|white|bianco|azul|blue|bleu|navy|celeste|verde|green|mint|amarillo|amarilla|yellow|giallo|rojo|roja|red|rosso|rosa|pink|rose|morado|morada|purple|violet|violeta|gris|gray|grey|silver|plata|plateado|graphite|naranja|orange|dorado|dorada|gold|oro|marron|brown|cafe|beige|arena|sand|lavender|cream|starlight|ultramarine|teal)\b"""
+    """(?i)\b(negro|negra|negros|negras|black|nero|blanco|blanca|white|bianco|azul|blue|bleu|navy|celeste|verde|green|mint|amarillo|amarilla|yellow|giallo|rojo|roja|red|rosso|rosa|pink|rose|morado|morada|purple|violet|violeta|gris|gray|grey|silver|plata|plateado|graphite|titanio|titanium|naranja|orange|dorado|dorada|gold|oro|marron|brown|cafe|beige|arena|sand|lavender|cream|starlight|ultramarine|teal)\b"""
+)
+private val SAVED_RAM_STORAGE_PATTERN = Regex(
+    """(?i)\b(\d{1,2})\s*GB\s*(?:[/+]\s*|\s+)(\d{2,4})\s*GB\b"""
 )
 private val SAVED_VARIANT_PATTERN = Regex(
     """(?i)\b(pro\s*max|max|plus|pro|ultra|fe|lite|mini|fold|flip|classic|edge|slim|fat|standard|estandar|digital|disc|disk|oled|series|edition|original|4g|5g)\b"""
@@ -176,6 +179,12 @@ private fun mergeExactVariantProducts(rows: List<Product>): Product {
 }
 
 private fun capacityLabel(title: String, identityParts: List<String>): String {
+    val ramStorage = SAVED_RAM_STORAGE_PATTERN.find(title)
+    if (ramStorage != null) {
+        val ram = ramStorage.groupValues[1].toIntOrNull() ?: return "Capacidad no indicada"
+        val storage = ramStorage.groupValues[2].toIntOrNull() ?: return "Capacidad no indicada"
+        return "$ram GB RAM · $storage GB"
+    }
     val matches = SAVED_CAPACITY_PATTERN.findAll(title).toList()
     val match = matches.lastOrNull()
     if (match != null) {
@@ -190,15 +199,37 @@ private fun capacityLabel(title: String, identityParts: List<String>): String {
 
 private fun capacitySortValue(label: String): Double {
     if (label == "Capacidad no indicada") return Double.POSITIVE_INFINITY
-    val found = Regex("""(?i)(\d+(?:[.,]\d+)?)\s*(TB|GB)""").find(label)
+    val found = Regex("""(?i)(\d+(?:[.,]\d+)?)\s*(TB|GB)""")
+        .findAll(label).lastOrNull()
         ?: return Double.POSITIVE_INFINITY
     val amount = found.groupValues[1].replace(',', '.').toDoubleOrNull()
         ?: return Double.POSITIVE_INFINITY
     return if (found.groupValues[2].equals("TB", true)) amount * 1024.0 else amount
 }
 
-private fun variantKey(product: Product): String =
-    savedIdentityParts(product).firstOrNull { it.startsWith("variant:") } ?: "variant:base"
+private fun variantKey(product: Product): String {
+    val savedTokens = savedIdentityParts(product)
+        .firstOrNull { it.startsWith("variant:") }
+        ?.removePrefix("variant:")
+        ?.split('+')
+        .orEmpty()
+        .filter { it.isNotBlank() && it != "base" }
+    val title = normalizeFamilyTitle(product.title).replace(
+        Regex("""\b(redmi note\s*\d+)(pro\s*max|pro|plus|ultra|fe|lite|mini|4g|5g)\b"""),
+        "$1 $2"
+    )
+    val isMobile = Regex(
+        """\b(redmi|poco|iphone|pixel|galaxy|smartphone|movil|moviles|telefono|telefonos)\b"""
+    ).containsMatchIn(title)
+    val titleTokens = Regex(
+        """\b(pro|max|plus|ultra|fe|lite|mini|fold|flip|classic|edge|slim|digital|disc|disk|oled|series|standard|estandar|original|4g|5g)\b"""
+    ).findAll(title).map { it.value }.filter { isMobile || (it != "4g" && it != "5g") }.toList()
+    val consoleTokens = if (Regex("""\b(ps5|xbox|nintendo switch|switch)\b""").containsMatchIn(title)) {
+        Regex("""\b(s|x)\b""").findAll(title).map { it.value }.toList()
+    } else emptyList()
+    val tokens = (savedTokens + titleTokens + consoleTokens).distinct().sorted()
+    return if (tokens.isEmpty()) "variant:base" else "variant:" + tokens.joinToString("+")
+}
 
 private fun variantLabel(key: String): String {
     val raw = key.removePrefix("variant:")
@@ -247,7 +278,10 @@ private fun variantLabel(key: String): String {
 
 private fun familyLabel(products: List<Product>): String =
     products.map { product ->
-        product.title
+        product.title.replace(
+            Regex("""(?i)(\bredmi\s+note\s*\d+)(pro\s*max|pro|plus|ultra|fe|lite|mini|4g|5g)\b"""),
+            "$1 $2"
+        )
             .replace(SAVED_CAPACITY_PATTERN, " ")
             .replace(SAVED_COLOUR_PATTERN, " ")
             .replace(SAVED_VARIANT_PATTERN, " ")

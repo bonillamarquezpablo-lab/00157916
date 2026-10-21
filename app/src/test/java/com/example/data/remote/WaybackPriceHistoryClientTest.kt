@@ -2073,6 +2073,46 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun multiOfferParserRoutesOnlyUnambiguousSecondarySavedProduct() {
+        val client = newClient()
+        val html = """
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@graph":[
+                  {"@type":"Product","name":"Anker Prime 27K Power Bank",
+                   "offers":{"@type":"Offer","price":"89.99","priceCurrency":"EUR"}},
+                  {"@type":"Product","name":"Anker 737 Power Bank 24K",
+                   "offers":{"@type":"Offer","price":"69.99","priceCurrency":"EUR"}}
+                ]
+              }
+              </script>
+            </head></html>
+        """.trimIndent()
+        val originalUrl = "https://www.pccomponentes.com/anker-power-bank-family"
+        val snapshotUrl = "https://web.archive.org/web/20260901000000id_/$originalUrl"
+        val document = Jsoup.parse(html)
+        val quotes = client.parseArchivedPricesForKnownProducts(
+            document = document,
+            primaryExpectedTitle = "Anker Prime 27K Power Bank",
+            knownProductTitlesById = mapOf(
+                "product-prime" to "Anker Prime 27K Power Bank",
+                "product-737" to "Anker 737 Power Bank 24K"
+            ),
+            originalUrl = originalUrl,
+            snapshotUrl = snapshotUrl,
+            observedAt = 1_788_200_000_000L
+        )
+
+        assertEquals("The primary item must not be duplicated as a secondary variant", 1, quotes.size)
+        assertEquals("product-737", quotes.single().targetProductId)
+        assertEquals("Anker 737 Power Bank 24K", quotes.single().productTitle)
+        assertEquals(69.99, quotes.single().price, 0.001)
+        assertEquals("EUR", quotes.single().currency)
+    }
+
+    @Test
     fun acceptsVerifiedEurJsonLdPriceWhenProductTitleMatches() {
         val client = newClient()
         val html = """

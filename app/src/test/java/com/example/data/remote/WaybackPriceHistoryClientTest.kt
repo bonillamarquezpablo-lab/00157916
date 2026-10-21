@@ -1241,8 +1241,8 @@ class WaybackPriceHistoryClientTest {
             )
             assertEquals("The exact saved retailer URL must be the first Availability candidate", preferredUrl, availabilityUrls.first())
             assertEquals(
-                "Fallback should try up to five bounded URLs before giving up",
-                5,
+                "Transient CDX timeouts must keep Availability fallback bounded to three URLs",
+                3,
                 availabilityUrls.size
             )
             assertEquals(

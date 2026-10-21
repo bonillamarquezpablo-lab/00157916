@@ -2865,7 +2865,7 @@ class WaybackPriceHistoryClientTest {
         assertEquals("host", url!!.queryParameter("matchType"))
         assertEquals("20", url.queryParameter("limit"))
         assertNull("Host discovery avoids slow collapse processing", url.queryParameter("collapse"))
-        assertEquals("20190117", url.queryParameter("from"))
+        assertEquals("20190115", url.queryParameter("from"))
         assertTrue(url.queryParameterValues("filter").orEmpty().any { raw ->
             val filter = raw.orEmpty()
             filter.startsWith("original:") && filter.contains("academie") && filter.contains("scientifique")
@@ -4198,7 +4198,7 @@ class WaybackPriceHistoryClientTest {
         assertTrue(url.queryParameterValues("filter").orEmpty().any { it == "statuscode:200" })
         assertTrue(url.queryParameterValues("filter").orEmpty().any { it == "mimetype:text/html" })
         assertTrue(url.queryParameterValues("filter").orEmpty().any { it.orEmpty().startsWith("original:") })
-        assertEquals("20190117", url.queryParameter("from"))
+        assertEquals("20190115", url.queryParameter("from"))
         assertEquals("20270115", url.queryParameter("to"))
     }
 

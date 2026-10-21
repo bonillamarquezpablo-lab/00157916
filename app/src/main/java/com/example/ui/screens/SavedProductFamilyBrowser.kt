@@ -249,7 +249,7 @@ private fun hasValidSortablePrice(product: Product): Boolean =
 
 private fun savedProductComparator(sortOption: SortOption): Comparator<Product> = when (sortOption) {
     SortOption.BEST_ATH_DISCOUNT -> compareByDescending<Product> { hasValidSortablePrice(it) }
-        .thenByDescending { if (hasValidSortablePrice(it)) it.realSavingsPercent else Double.NEGATIVE_INFINITY }
+        .thenByDescending { if (hasValidSortablePrice(it)) it.realSavingsPercent else Int.MIN_VALUE }
         .thenBy { it.title.lowercase(Locale.ROOT) }
         .thenBy { it.id }
     SortOption.PRICE_LOW_HIGH -> compareByDescending<Product> { hasValidSortablePrice(it) }
@@ -281,7 +281,7 @@ private fun savedFamilyComparator(sortOption: SortOption): Comparator<SavedProdu
         SortOption.BEST_ATH_DISCOUNT -> compareByDescending<SavedProductFamily> {
             verifiedRows(it).isNotEmpty()
         }.thenByDescending {
-            verifiedRows(it).maxOfOrNull { product -> product.realSavingsPercent } ?: Double.NEGATIVE_INFINITY
+            verifiedRows(it).maxOfOrNull { product -> product.realSavingsPercent } ?: Int.MIN_VALUE
         }.thenBy { it.label.lowercase(Locale.ROOT) }.thenBy { it.key }
         SortOption.PRICE_LOW_HIGH -> compareByDescending<SavedProductFamily> {
             verifiedPrices(it).isNotEmpty()

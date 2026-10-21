@@ -72,7 +72,7 @@ class PriceHistoryChartEvidenceTest {
         composeRule.setContent {
             MaterialTheme {
                 PriceHistoryChart(
-                    priceHistory = listOf(point(1_800_000_000_000L, 499.99, "Google Shopping", "live")),
+                    priceHistory = listOf(point(System.currentTimeMillis(), 499.99, "Google Shopping", "live")),
                     avg90dPrice = 450.0,
                     archiveHistory = listOf(
                         point(1_700_000_000_000L, 399.99, "Internet Archive", "archive")
@@ -84,8 +84,10 @@ class PriceHistoryChartEvidenceTest {
             }
         }
 
+        // With a single live observation, recovered external history is the useful default view.
+        composeRule.onNodeWithText("Histórico externo · Wayback").assertIsDisplayed()
+        composeRule.onNodeWithText("Mínimo").performClick()
         composeRule.onNodeWithText("Evolución del precio observado").assertIsDisplayed()
-        composeRule.onNodeWithText("Wayback").assertIsDisplayed()
 
         composeRule.onNodeWithText("Wayback").performClick()
         composeRule.onNodeWithText("Histórico externo · Wayback").assertIsDisplayed()

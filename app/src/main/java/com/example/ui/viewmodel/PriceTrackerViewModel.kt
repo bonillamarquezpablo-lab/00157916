@@ -2274,16 +2274,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                     products.any { product ->
                                         (targetProductId?.let { product.id == it }
                                             ?: (onlineProductIdentityKey(product.title) == targetIdentity)) &&
-                                            product.priceHistory.any {
-                                                it.eventLabel.orEmpty().startsWith("Internet Archive", ignoreCase = true)
-                                            }
+                                            product.priceHistory.any { it.isArchiveEvidence }
                                     }
                                 }.first { product ->
                                     (targetProductId?.let { product.id == it }
                                         ?: (onlineProductIdentityKey(product.title) == targetIdentity)) &&
-                                        product.priceHistory.any {
-                                            it.eventLabel.orEmpty().startsWith("Internet Archive", ignoreCase = true)
-                                        }
+                                        product.priceHistory.any { it.isArchiveEvidence }
                                 }
                             }
                         }.getOrNull()

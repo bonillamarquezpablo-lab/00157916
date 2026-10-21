@@ -1951,6 +1951,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 var timedOutCount = 0
                 val diagnosticCodes = linkedSetOf<String>()
                 val archiveDates = mutableListOf<Long>()
+                // Use persisted catalogue titles to harvest other structured offers from the same
+                // archived HTML. Ambiguous duplicate listings are rejected by the parser.
+                val knownProductTitlesById = withTimeoutOrNull(4_000L) {
+                    repository.allProductsStream.first().associate { it.id to it.title }
+                }.orEmpty()
                 for (candidate in candidates) {
                     // Bound each candidate's direct + merchant-domain lookup so slow public
                     // archive responses cannot leave the detail sheet spinning indefinitely.
@@ -1964,7 +1969,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             waybackPriceHistoryClient.fetchHistory(
                                 originalUrl = candidate.directUrl,
                                 expectedTitle = candidate.title,
-                                onTrace = traceCallback
+                                onTrace = traceCallback,
+                                knownProductTitlesById = knownProductTitlesById
                             )
                         }
                         if (direct == null) {
@@ -1996,7 +2002,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 // The direct URL's prefix-CDX lookup ran just above. Avoid
                                 // repeating the same request before the Availability fallback.
                                 preferredUrlAlreadyQueried = candidate.directUrl != null,
-                                onTrace = traceCallback
+                                onTrace = traceCallback,
+                                knownProductTitlesById = knownProductTitlesById
                             )
                         }
                         if (domainResult == null) {
@@ -2101,7 +2108,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             .forEach(diagnosticCodes::add)
                     }
                     val quotes = attempts.flatMap { it.quotes }
-                        .distinctBy { Triple(it.originalUrl, it.observedAt, it.price) }
+                        .distinctBy {
+                            listOf(
+                                it.targetProductId.orEmpty(), it.productTitle, it.originalUrl,
+                                it.observedAt.toString(), it.price.toString(), it.currency.uppercase(Locale.ROOT)
+                            )
+                        }
                     checkedCount += attempts.sumOf { it.capturesChecked }
                     foundCount += quotes.size
                     capturesFoundCount += attempts.sumOf { it.capturesFound }
@@ -2115,18 +2127,41 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             "Preparando ${quotes.size} observación(es) de precio ya verificadas para guardar localmente."
                         )
                     }
+                    val hasPrimaryProductQuote = quotes.any {
+                        it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId
+                    }
                     for ((archiveUrl, urlQuotes) in quotes.groupBy { it.originalUrl }) {
-                        val newlySaved = repository.recordArchivedPriceHistory(
-                            expectedTitle = candidate.title,
-                            originalUrl = archiveUrl,
-                            storeName = candidate.storeName,
-                            quotes = urlQuotes,
-                            targetProductId = targetProductId
-                        )
-                        savedCount += newlySaved
+                        val primaryQuotes = urlQuotes.filter {
+                            it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId
+                        }
+                        if (primaryQuotes.isNotEmpty()) {
+                            savedCount += repository.recordArchivedPriceHistory(
+                                expectedTitle = candidate.title,
+                                originalUrl = archiveUrl,
+                                storeName = candidate.storeName,
+                                quotes = primaryQuotes.map { it.copy(targetProductId = null) },
+                                targetProductId = targetProductId
+                            )
+                        }
+
+                        // A secondary offer is routed only to its unique, pre-existing Room row.
+                        // It cannot overwrite the selected product or create a new product record.
+                        val secondaryQuotes = urlQuotes.filter {
+                            !it.targetProductId.isNullOrBlank() && it.targetProductId != targetProductId
+                        }
+                        for ((secondaryProductId, variantQuotes) in secondaryQuotes.groupBy { it.targetProductId!! }) {
+                            val canonicalTitle = variantQuotes.first().productTitle
+                            savedCount += repository.recordArchivedPriceHistory(
+                                expectedTitle = canonicalTitle,
+                                originalUrl = archiveUrl,
+                                storeName = candidate.storeName,
+                                quotes = variantQuotes.map { it.copy(targetProductId = null) },
+                                targetProductId = secondaryProductId
+                            )
+                        }
                     }
 
-                    if (quotes.isNotEmpty()) {
+                    if (hasPrimaryProductQuote) {
                         val targetIdentity = onlineProductIdentityKey(candidate.title)
                         val refreshedProduct = runCatching {
                             withTimeout(10_000L) {

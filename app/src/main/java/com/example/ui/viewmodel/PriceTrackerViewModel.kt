@@ -448,12 +448,15 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState
     ) { allProducts, state ->
         allProducts
-            // Keep demo catalogue rows out of Mercado. Products with verified saved history
-            // remain visible even if their latest live quote needs revalidation; otherwise a
-            // stale cached current-price flag can make the entire saved history appear deleted
-            // after reopening the app. Historical points never imply a verified current price.
+            // Keep demo catalogue rows out of Mercado. A product with saved, validated
+            // history remains discoverable when the current quote needs revalidation; otherwise
+            // a persisted historical minimum can look deleted merely because it is not a current
+            // verified price. Historical points never imply that today's price is verified.
             .filter { product ->
-                product.isPriceVerified || product.isTracked || product.priceHistory.isNotEmpty()
+                product.isPriceVerified ||
+                    product.isTracked ||
+                    product.priceHistory.isNotEmpty() ||
+                    product.savedHistoricalPrice != null
             }
             .filter { product ->
                 // Category filter

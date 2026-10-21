@@ -177,7 +177,7 @@ class MementoClient(
                                     diagnostics += "MEMENTO_SNAPSHOT_BODY_EMPTY_OR_LIMIT"
                                 } else {
                                     val primarySource = priceParser.parseArchivedPrice(
-                                        html = html,
+                                        document = org.jsoup.Jsoup.parse(html),
                                         expectedTitle = expectedTitle,
                                         originalUrl = originalUrl,
                                         snapshotUrl = capture.snapshotUrl,

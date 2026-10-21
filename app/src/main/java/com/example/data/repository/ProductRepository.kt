@@ -13,6 +13,7 @@ import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.StoreOffer
 import com.example.data.remote.ArchivedPriceQuote
+import com.example.data.remote.WaybackPriceHistoryClient
 import com.example.data.remote.SerpApiQuote
 import com.example.data.remote.SerpApiPriceInsight
 import com.example.data.remote.SerpApiShoppingResult
@@ -867,7 +868,15 @@ class ProductRepository(
         ) return 0
 
         val now = System.currentTimeMillis()
-        val earliestAllowed = now - (1605L * 24L * 60L * 60L * 1000L)
+        // Keep the persistence horizon aligned with CDX/Memento discovery. A shorter
+        // repository-only cutoff silently discarded valid captures from the earlier half
+        // of the requested eight-year history after the downloader had already verified them.
+        val archiveLookbackMs =
+            WaybackPriceHistoryClient.DEFAULT_LOOKBACK_DAYS.toLong() *
+                WaybackPriceHistoryClient.DAY_MS
+        // One-day tolerance avoids rejecting a capture at the exact window boundary because
+        // the download and the final database write happen a few seconds apart.
+        val earliestAllowed = now - archiveLookbackMs - WaybackPriceHistoryClient.DAY_MS
         if (!isEligibleHistoryTitle(expectedTitle) ||
             isPromotionalBulkListing(expectedTitle, "") ||
             !isEligibleSeller(merchantName, originalUrl)

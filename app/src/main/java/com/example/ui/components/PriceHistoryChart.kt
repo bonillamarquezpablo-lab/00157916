@@ -228,9 +228,13 @@ fun PriceHistoryChart(
     }
 
     val selectedPoint = remember(selectedPointIndex, filteredPoints) {
-        if (selectedPointIndex in filteredPoints.indices) {
-            filteredPoints[selectedPointIndex]
-        } else null
+        when {
+            selectedPointIndex in filteredPoints.indices -> filteredPoints[selectedPointIndex]
+            // A lone archived capture is still useful evidence. Show its exact value/date
+            // without forcing the user to discover a tiny, otherwise context-free dot.
+            filteredPoints.size == 1 -> filteredPoints.single()
+            else -> null
+        }
     }
     // Follow the app's current theme accent (amber in Mínimo) instead of a fixed emerald line.
     val chartAccent = MaterialTheme.colorScheme.primary
@@ -484,11 +488,37 @@ fun PriceHistoryChart(
                     style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
                 )
 
+                // One observation cannot form a line. Draw a subtle date guide and a clear
+                // focus halo instead, so a real historical point is visible without implying
+                // a fabricated price trend between dates.
+                if (filteredPoints.size == 1) {
+                    val onlyPoint = coords.single()
+                    drawLine(
+                        color = chartAccent.copy(alpha = 0.35f),
+                        start = Offset(
+                            onlyPoint.x,
+                            (onlyPoint.y + 12.dp.toPx()).coerceAtMost(baselineY)
+                        ),
+                        end = Offset(onlyPoint.x, baselineY),
+                        strokeWidth = 1.25.dp.toPx(),
+                        pathEffect = PathEffect.dashPathEffect(
+                            floatArrayOf(4.dp.toPx(), 4.dp.toPx()),
+                            0f
+                        )
+                    )
+                    drawCircle(
+                        color = chartAccent.copy(alpha = 0.18f),
+                        radius = 11.dp.toPx(),
+                        center = onlyPoint
+                    )
+                }
+
                 // Draw node points
                 coords.forEachIndexed { index, coord ->
                     val pt = filteredPoints[index]
                     val isAth = historySummary.minimumObservedPoint?.let { pt.price <= it.price + 0.005 } == true
-                    val isSelected = index == selectedPointIndex
+                    val isSelected = index == selectedPointIndex ||
+                        (filteredPoints.size == 1 && selectedPointIndex < 0)
 
                     when {
                         isSelected && isAth -> {

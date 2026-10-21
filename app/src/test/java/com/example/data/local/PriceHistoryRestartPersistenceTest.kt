@@ -124,7 +124,11 @@ class PriceHistoryRestartPersistenceTest {
             )
             val restored = withTimeout(10_000L) {
                 reopenedRepository.allProductsStream.first { products ->
-                    products.any { it.id == productId && it.priceHistory.size >= 2 }
+                    products.any {
+                        it.id == productId &&
+                            it.priceHistory.size >= 2 &&
+                            it.isPriceVerified
+                    }
                 }.first { it.id == productId }
             }
 

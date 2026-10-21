@@ -81,7 +81,7 @@ internal fun buildWaybackDiagnosticSummary(
     val hasActivePauseCountdown =
         statusText.contains("HTTP 429", ignoreCase = true) &&
             statusText.contains("hasta aproximadamente", ignoreCase = true) &&
-            Regex("""(?i)\\ben unos \\d+\\s+min\\b""").containsMatchIn(statusText)
+            Regex("""(?i)\ben unos \d+\s+min\b""").containsMatchIn(statusText)
     val activeStep = steps.firstOrNull {
         it.isCaptureDetail && it.status == WaybackTraceStatus.RUNNING
     } ?: steps.firstOrNull { it.status == WaybackTraceStatus.RUNNING }

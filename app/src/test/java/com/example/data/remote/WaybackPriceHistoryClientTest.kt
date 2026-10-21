@@ -2005,6 +2005,27 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun directCdxRequestKeepsTheNewestBoundedMonthlyWindow() {
+        val client = newClient()
+        val now = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }.parse("20261021000000")!!.time
+
+        val url = client.buildCdxUrl(
+            originalUrl = "https://shop.example/products/anker-prime",
+            now = now,
+            lookbackDays = 2_920
+        )
+
+        assertNotNull(url)
+        assertEquals("-120", url!!.queryParameter("limit"))
+        assertEquals("timestamp:6", url.queryParameter("collapse"))
+        assertEquals("200", url.queryParameterValues("filter")?.firstOrNull())
+        assertEquals("text/html", url.queryParameterValues("filter")?.getOrNull(1))
+        assertEquals("20261021", url.queryParameter("to"))
+    }
+
+    @Test
     fun cdxSamplerKeepsOneRepresentativePerQuarterAndHonorsDownloadCap() {
         val client = newClient()
         val formatter = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {

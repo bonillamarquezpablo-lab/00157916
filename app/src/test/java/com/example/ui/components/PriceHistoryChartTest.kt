@@ -71,6 +71,32 @@ class PriceHistoryChartTest {
     }
 
     @Test
+    fun oneSavedArchiveObservationIsShownAsItsOwnSeriesWhenNoLiveHistoryExists() {
+        val archivedPoint = PricePoint(
+            timestamp = System.currentTimeMillis() - 90L * 24L * 60L * 60L * 1000L,
+            dateLabel = "hace 90 días",
+            price = 799.99,
+            storeName = "PcComponentes",
+            sourceUrl = "https://web.archive.org/web/20260701000000id_/https://www.pccomponentes.com/apple-iphone-15-plus-256gb",
+            evidenceType = "archive"
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                PriceHistoryChart(
+                    priceHistory = emptyList(),
+                    avg90dPrice = 0.0,
+                    archiveHistory = listOf(archivedPoint)
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Histórico externo · Wayback").assertIsDisplayed()
+        composeRule.onNodeWithText("Mín. del rango:", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("price_history_chart_container").assertIsDisplayed()
+    }
+
+    @Test
     fun emptyHistoryShowsHelpfulEmptyStateWithoutArchiveSelector() {
         composeRule.setContent {
             MaterialTheme {

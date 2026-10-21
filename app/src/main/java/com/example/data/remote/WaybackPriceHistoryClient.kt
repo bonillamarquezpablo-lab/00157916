@@ -831,12 +831,14 @@ class WaybackPriceHistoryClient(
             return WaybackBackfillResult(requestFailed = true, diagnosticCodes = failureCodes)
         }
 
-        val transientCdxFailure = failureCodes.any { code ->
-            code.endsWith("_TIMEOUT") ||
+        // Limit extra probes after a retryable HTTP 5xx. A timeout still gets the established
+        // five-URL fallback because the request did not return a server response.
+        val transientCdxServerFailure = failureCodes.any { code ->
+            code.contains("_HTTP_") &&
                 code.substringAfterLast('_').toIntOrNull()
                     ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true
         }
-        val availabilityProbeLimit = if (transientCdxFailure) {
+        val availabilityProbeLimit = if (transientCdxServerFailure) {
             minOf(MAX_DOMAIN_AVAILABILITY_PROBE_CANDIDATES, 3)
         } else {
             MAX_DOMAIN_AVAILABILITY_PROBE_CANDIDATES
@@ -999,7 +1001,12 @@ class WaybackPriceHistoryClient(
                 "La consulta CDX alternativa agotó el tiempo; se omite el barrido del dominio para no repetir la misma caída del servicio."
             )
         }
+        // A valid empty product-prefix response is already a negative result for the narrow
+        // product path. After checking bounded Availability and one alternate prefix, do not
+        // escalate it into an expensive host-wide scan; keep recovery targeted and predictable.
+        val skipBroadDomainDiscovery = failureCodes.contains("CDX_NO_CAPTURES")
         if (fallback.quotes.isEmpty() && !priorRateLimited && !alternateTransientFailure &&
+            !skipBroadDomainDiscovery &&
             activeRateLimitUntil(System.currentTimeMillis()) == null
         ) {
             val domainQueries = buildDomainCdxHostUrls(

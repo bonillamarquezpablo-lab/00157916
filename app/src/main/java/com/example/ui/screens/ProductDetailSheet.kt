@@ -615,7 +615,7 @@ fun ProductDetailSheet(
                 ) {
                     Text(
                         if (showWaybackDiagnostics) "Ocultar diagnóstico Wayback"
-                        else "Ver diagnóstico Wayback · ${waybackDiagnosticSteps.size} pasos"
+                        else "Ver diagnóstico Wayback · ${waybackDiagnosticSteps.count { !it.isCaptureDetail }} fases + ${waybackDiagnosticSteps.count { it.isCaptureDetail }} capturas"
                     )
                 }
                 if (showWaybackDiagnostics || isSearchingFreeHistory) {
@@ -642,6 +642,8 @@ fun ProductDetailSheet(
                                 fontSize = 13.sp
                             )
                             val activeDiagnosticStep = waybackDiagnosticSteps.firstOrNull {
+                                it.isCaptureDetail && it.status == WaybackTraceStatus.RUNNING
+                            } ?: waybackDiagnosticSteps.firstOrNull {
                                 it.status == WaybackTraceStatus.RUNNING
                             }
                             val rateLimitReported =
@@ -651,16 +653,24 @@ fun ProductDetailSheet(
                                             entry.detail.contains("WAYBACK_RATE_LIMITED", ignoreCase = true) ||
                                             entry.detail.contains("pausa global", ignoreCase = true)
                                     }
-                            val firstFailedDiagnosticStep = waybackDiagnosticSteps.firstOrNull {
-                                it.status == WaybackTraceStatus.FAILED
+                            val firstFailedCaptureStep = waybackDiagnosticSteps.firstOrNull {
+                                it.isCaptureDetail && it.status == WaybackTraceStatus.FAILED
                             }
+                            val firstFailedDiagnosticStep = firstFailedCaptureStep
+                                ?: waybackDiagnosticSteps.firstOrNull {
+                                    it.status == WaybackTraceStatus.FAILED
+                                }
                             val diagnosisSummary = when {
                                 activeDiagnosticStep != null ->
-                                    "Fase en curso: ${activeDiagnosticStep.step}. ${activeDiagnosticStep.title}"
+                                    if (activeDiagnosticStep.isCaptureDetail) "Captura en curso: ${activeDiagnosticStep.title}"
+                                    else "Fase en curso: ${activeDiagnosticStep.step}. ${activeDiagnosticStep.title}"
+                                rateLimitReported && firstFailedCaptureStep != null ->
+                                    "Pausa HTTP 429 activa. Fallo individual antes de la pausa: ${firstFailedCaptureStep.title}"
                                 rateLimitReported ->
                                     "Pausa temporal de Internet Archive (HTTP 429). Mínimo ha detenido las consultas; no implica que falten capturas."
                                 firstFailedDiagnosticStep != null ->
-                                    "Primer fallo detectado: paso ${firstFailedDiagnosticStep.step}. ${firstFailedDiagnosticStep.title}"
+                                    if (firstFailedDiagnosticStep.isCaptureDetail) "Fallo de captura: ${firstFailedDiagnosticStep.title}"
+                                    else "Primer fallo detectado: paso ${firstFailedDiagnosticStep.step}. ${firstFailedDiagnosticStep.title}"
                                 waybackDiagnosticSteps.any { it.status == WaybackTraceStatus.PASSED } ->
                                     "No hay una fase marcada como fallida en este momento."
                                 else -> "Esperando resultado del diagnóstico."
@@ -672,7 +682,7 @@ fun ProductDetailSheet(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                "20 fases, sin consultas adicionales: el informe registra límites, CDX, capturas, HTML, validación y guardado. Se ocultan URLs completas, parámetros y contenido HTML.",
+                                "20 fases generales más registros por captura: fecha, ruta, tienda, causa de red y duración. Sin consultas extra; URL completas, parámetros y HTML se ocultan.",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -703,7 +713,7 @@ fun ProductDetailSheet(
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Text(
-                                            "${entry.step}. ${entry.title}",
+                                            if (entry.isCaptureDetail) entry.title else "${entry.step}. ${entry.title}",
                                             modifier = Modifier.weight(1f),
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold

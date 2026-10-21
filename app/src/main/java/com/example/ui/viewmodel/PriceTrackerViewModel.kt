@@ -93,7 +93,9 @@ data class WaybackDiagnosticEntry(
     val title: String,
     val status: WaybackTraceStatus = WaybackTraceStatus.PENDING,
     val detail: String = "",
-    val durationMs: Long? = null
+    val durationMs: Long? = null,
+    val isCaptureDetail: Boolean = false,
+    val captureKey: String? = null
 )
 
 /**
@@ -178,10 +180,10 @@ private val WAYBACK_DIAGNOSTIC_TITLES = listOf(
     "Extracción de capturas (índice CDX o Availability)",
     "Normalización y deduplicación de URL candidatas",
     "Validación de fechas y período histórico",
-    "Descarga del HTML de la captura 1",
-    "Evaluación de barreras del HTML 1",
-    "Descarga del HTML de la captura 2",
-    "Evaluación de barreras del HTML 2",
+    "Descarga HTML de capturas (resumen)",
+    "Evaluación HTML de capturas (resumen)",
+    "Descarga HTML de rutas/capturas adicionales (resumen)",
+    "Evaluación HTML de rutas/capturas adicionales (resumen)",
     "Verificación del título e identidad del producto",
     "Extracción del precio",
     "Validación de importe, EUR y cambio histórico",
@@ -253,6 +255,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         // Keep all sampled snapshot labels (ordinal/date/route/host) visible across overlapping
         // exact, prefix and merchant-domain probes. Ordinary diagnostic stages remain concise.
         const val MAX_CAPTURE_DIAGNOSTIC_LINES = 120
+        const val MAX_CAPTURE_DIAGNOSTIC_ROWS = 80
         const val TRACKED_REFRESH_COOLDOWN_MS = 24L * 60L * 60L * 1000L
         const val MAX_TRACKED_REFRESH_PER_TAP = 10
         const val MAX_ARCHIVE_PAGES_PER_SEARCH = 3
@@ -424,7 +427,47 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    private fun recordCaptureWaybackDiagnostic(productId: String, event: WaybackTraceEvent) {
+        val step = diagnosticIndexForWaybackTrace(event)
+        if (step !in 11..14) return
+        val captureLabel = Regex(
+            """^captura \d+ de \d+ · id [a-j]{8} · fecha \d{14} · ruta [A-Za-z0-9_-]+ · tienda [A-Za-z0-9.-]+"""
+        ).find(event.detail)?.value ?: return
+        val phase = if (step == 11 || step == 13) "Descarga HTML" else "Evaluación HTML"
+        val key = "$captureLabel|$step"
+        val eventText = event.detail.removePrefix(captureLabel).trim().removePrefix("·").trim()
+        val time = SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(Date())
+        val detailLine = "[$time] " + eventText +
+            (event.durationMs?.let { " · ${it} ms" } ?: "")
+        _uiState.update { state ->
+            if (state.waybackDiagnosticProductId != productId) return@update state
+            val rows = state.waybackDiagnosticSteps.toMutableList()
+            val index = rows.indexOfFirst { it.isCaptureDetail && it.captureKey == key }
+            val previous = rows.getOrNull(index)
+            val nextStatus = previous?.let {
+                mergeWaybackDiagnosticStatus(it.status, event.status, step, event.detail)
+            } ?: event.status
+            val previousLines = previous?.detail?.lines().orEmpty()
+            val combined = if (detailLine in previousLines) previousLines.joinToString("\n")
+                else (previousLines + detailLine).takeLast(5).joinToString("\n")
+            val row = WaybackDiagnosticEntry(
+                step = 0,
+                title = "$captureLabel · $phase",
+                status = nextStatus,
+                detail = combined,
+                durationMs = event.durationMs ?: previous?.durationMs,
+                isCaptureDetail = true,
+                captureKey = key
+            )
+            if (index >= 0) rows[index] = row else rows += row
+            val fixedRows = rows.filterNot { it.isCaptureDetail }
+            val captureRows = rows.filter { it.isCaptureDetail }.takeLast(MAX_CAPTURE_DIAGNOSTIC_ROWS)
+            state.copy(waybackDiagnosticSteps = fixedRows + captureRows)
+        }
+    }
+
     private fun recordWaybackTrace(productId: String, event: WaybackTraceEvent) {
+        recordCaptureWaybackDiagnostic(productId, event)
         reportWaybackDiagnostic(
             productId,
             diagnosticIndexForWaybackTrace(event),
@@ -441,7 +484,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     ) {
         val initial = _uiState.value
         if (initial.waybackDiagnosticProductId != productId || initial.waybackDiagnosticSteps.isEmpty()) return
-        for (row in initial.waybackDiagnosticSteps) {
+        for (row in initial.waybackDiagnosticSteps.filterNot { it.isCaptureDetail }) {
             if (row.step == 20) continue
             when (row.status) {
                 WaybackTraceStatus.PENDING ->
@@ -456,6 +499,22 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     )
                 else -> Unit
             }
+        }
+        val finishedAt = SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(Date())
+        _uiState.update { state ->
+            if (state.waybackDiagnosticProductId != productId) return@update state
+            state.copy(waybackDiagnosticSteps = state.waybackDiagnosticSteps.map { row ->
+                if (row.isCaptureDetail &&
+                    row.status in setOf(WaybackTraceStatus.PENDING, WaybackTraceStatus.RUNNING)
+                ) {
+                    row.copy(
+                        status = WaybackTraceStatus.FAILED,
+                        detail = (row.detail.lines() +
+                            "[$finishedAt] La operación terminó antes de completar esta captura.")
+                            .takeLast(5).joinToString("\n")
+                    )
+                } else row
+            })
         }
         reportWaybackDiagnostic(productId, 20, finalStatus, finalDetail)
     }

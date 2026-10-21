@@ -999,7 +999,7 @@ class WaybackPriceHistoryClient(
                 "La consulta CDX alternativa agotó el tiempo; se omite el barrido del dominio para no repetir la misma caída del servicio."
             )
         }
-        if (!priorRateLimited && !alternateTransientFailure &&
+        if (fallback.quotes.isEmpty() && !priorRateLimited && !alternateTransientFailure &&
             activeRateLimitUntil(System.currentTimeMillis()) == null
         ) {
             val domainQueries = buildDomainCdxHostUrls(

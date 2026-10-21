@@ -145,6 +145,50 @@ class OnlineSearchScreenTest {
     }
 
     @Test
+    fun redmiNoteStorageAndEditionVariantsStaySeparateButShareOneFamily() {
+        val rows = listOf(
+            SerpApiShoppingResult(
+                title = "Xiaomi Redmi Note 17 6GB 256GB",
+                price = 222.0,
+                storeName = "Tienda estándar",
+                sourceUrl = "https://shop.example.test/redmi-note-17",
+                observedAt = 123L
+            ),
+            SerpApiShoppingResult(
+                title = "Xiaomi Redmi Note 17 Pro Max 5G 8GB/256GB",
+                price = 449.0,
+                storeName = "Tienda Pro Max",
+                sourceUrl = "https://shop.example.test/redmi-note-17-pro-max",
+                observedAt = 123L
+            ),
+            SerpApiShoppingResult(
+                title = "Xiaomi Redmi Note 17 5G 8GB/256GB",
+                price = 299.0,
+                storeName = "Tienda 5G",
+                sourceUrl = "https://shop.example.test/redmi-note-17-5g",
+                observedAt = 123L
+            )
+        )
+
+        val groups = buildOnlineSearchDisplayGroups(
+            results = rows,
+            query = "Xiaomi Redmi Note 17",
+            showSecondHand = false,
+            amazonOnly = false
+        )
+
+        assertEquals("Every purchasable edition/storage variant remains its own price card", 3, groups.size)
+        assertEquals("Variants of the same model must be adjacent in the results", 1, groups.map { it.familyKey }.distinct().size)
+        assertEquals("Xiaomi Redmi Note 17", groups.first().familyLabel)
+        assertTrue(groups.all { it.familyLabel == "Xiaomi Redmi Note 17" })
+        assertEquals(
+            "Different edition and storage variants must not be merged into a single price identity",
+            3,
+            groups.map { it.group.identityKey }.distinct().size
+        )
+    }
+
+    @Test
     fun secondHandOffersJoinTheSamePriceOrderWhenEnabled() {
         // Model-first searches still contain an explicit diameter + PCD and must share one price order.
         val query = "RIAL Milano 14\" 5x100"

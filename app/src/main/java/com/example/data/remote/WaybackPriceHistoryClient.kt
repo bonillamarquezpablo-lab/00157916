@@ -49,7 +49,9 @@ data class ArchivedPriceQuote(
     val exchangeRate: Double? = null,
     /** Effective historical rate date (never later than the snapshot date). */
     val exchangeRateDate: String? = null,
-    val conversionSource: String? = null
+    val conversionSource: String? = null,
+    /** Set only when structured metadata uniquely matches a distinct, already-saved product. */
+    val targetProductId: String? = null
 )
 
 data class WaybackBackfillResult(
@@ -344,7 +346,8 @@ class WaybackPriceHistoryClient(
         expectedTitle: String,
         now: Long = System.currentTimeMillis(),
         lookbackDays: Int = DEFAULT_LOOKBACK_DAYS,
-        onTrace: ((WaybackTraceEvent) -> Unit)? = null
+        onTrace: ((WaybackTraceEvent) -> Unit)? = null,
+        knownProductTitlesById: Map<String, String> = emptyMap()
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
         if (!preferences.getBoolean("enabled", true)) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("WAYBACK_DISABLED"))
@@ -402,7 +405,8 @@ class WaybackPriceHistoryClient(
                 cdxTimeoutSeconds = DIRECT_CDX_TIMEOUT_SECONDS,
                 cdxStage = "CDX_URL_PREFIX",
                 snapshotTimeoutSeconds = DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS,
-                onTrace = onTrace
+                onTrace = onTrace,
+                knownProductTitlesById = knownProductTitlesById
             )
         }
     }
@@ -419,7 +423,8 @@ class WaybackPriceHistoryClient(
         lookbackDays: Int = DEFAULT_LOOKBACK_DAYS,
         preferredUrl: String? = null,
         preferredUrlAlreadyQueried: Boolean = false,
-        onTrace: ((WaybackTraceEvent) -> Unit)? = null
+        onTrace: ((WaybackTraceEvent) -> Unit)? = null,
+        knownProductTitlesById: Map<String, String> = emptyMap()
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
         if (!preferences.getBoolean("enabled", true)) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("WAYBACK_DISABLED"))
@@ -616,7 +621,8 @@ class WaybackPriceHistoryClient(
                         cdxTimeoutSeconds = DOMAIN_EXACT_CDX_TIMEOUT_SECONDS,
                         cdxStage = "CDX_PRODUCT_PREFIX",
                         snapshotTimeoutSeconds = CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS,
-                        onTrace = onTrace
+                        onTrace = onTrace,
+                        knownProductTitlesById = knownProductTitlesById
                     )
                     if (productResult.quotes.isNotEmpty()) {
                         rememberAttempt(attempt, now, hasQuotes = true, failed = false)
@@ -682,7 +688,8 @@ class WaybackPriceHistoryClient(
                     cdxTimeoutSeconds = CDX_FALLBACK_TIMEOUT_SECONDS,
                     cdxStage = "CDX_DOMAIN",
                     snapshotTimeoutSeconds = CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS,
-                    onTrace = onTrace
+                    onTrace = onTrace,
+                    knownProductTitlesById = knownProductTitlesById
                 )
                 lastResult = result
                 if (result.quotes.isNotEmpty()) {
@@ -777,7 +784,8 @@ class WaybackPriceHistoryClient(
             maxCandidates = MAX_DOMAIN_AVAILABILITY_PROBE_CANDIDATES,
             stage = "DOMAIN_AVAILABILITY_FALLBACK",
             probeOlderCapture = true,
-            onTrace = onTrace
+            onTrace = onTrace,
+            knownProductTitlesById = knownProductTitlesById
         )
         emitWaybackTrace(
             onTrace, 6,
@@ -833,7 +841,8 @@ class WaybackPriceHistoryClient(
                     cdxTimeoutSeconds = ALTERNATE_PRODUCT_CDX_TIMEOUT_SECONDS,
                     cdxStage = "CDX_ALTERNATE_PREFIX",
                     snapshotTimeoutSeconds = CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS,
-                    onTrace = onTrace
+                    onTrace = onTrace,
+                    knownProductTitlesById = knownProductTitlesById
                 )
                 alternateResult = candidateResult
                 when {
@@ -926,7 +935,8 @@ class WaybackPriceHistoryClient(
                     cdxTimeoutSeconds = DOMAIN_CDX_TIMEOUT_SECONDS,
                     cdxStage = "CDX_DOMAIN",
                     snapshotTimeoutSeconds = CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS,
-                    onTrace = onTrace
+                    onTrace = onTrace,
+                    knownProductTitlesById = knownProductTitlesById
                 )
                 domainDiscoveryResults += discovered
                 when {
@@ -1194,7 +1204,8 @@ class WaybackPriceHistoryClient(
         maxCandidates: Int,
         stage: String,
         probeOlderCapture: Boolean = true,
-        onTrace: ((WaybackTraceEvent) -> Unit)? = null
+        onTrace: ((WaybackTraceEvent) -> Unit)? = null,
+        knownProductTitlesById: Map<String, String> = emptyMap()
     ): WaybackBackfillResult {
         val urls = candidateUrls.asSequence()
             .filter(::isEligibleDirectUrl)
@@ -1452,7 +1463,8 @@ class WaybackPriceHistoryClient(
                 expectedTitle = expectedTitle,
                 snapshotTimeoutSeconds = SNAPSHOT_CALL_TIMEOUT_SECONDS,
                 snapshotOrdinal = snapshotIndex + 1,
-                onTrace = onTrace
+                onTrace = onTrace,
+                knownProductTitlesById = knownProductTitlesById
             )
             fetched += snapshot
             if (snapshot.diagnosticCode == "WAYBACK_RATE_LIMITED") break
@@ -1470,19 +1482,19 @@ class WaybackPriceHistoryClient(
             )
         }
 
-        val quotes = fetched.mapNotNull { it.quote }
+        val quotes = fetched.flatMap { snapshot -> listOfNotNull(snapshot.quote) + snapshot.additionalQuotes }
             .sortedBy { it.observedAt }
             // Multiple candidate URLs can point to the same archived price at the same timestamp.
             // Keep a single history point; otherwise one Availability snapshot returned for two
             // URL variants is incorrectly persisted twice.
-            .distinctBy { Triple(it.observedAt, it.price, it.currency.uppercase(Locale.ROOT)) }
+            .distinctBy { listOf(it.targetProductId.orEmpty(), it.productTitle, it.observedAt.toString(), it.price.toString(), it.currency.uppercase(Locale.ROOT)) }
         val diagnostics = linkedSetOf<String>().apply {
             addAll(probeDiagnostics)
             fetched.mapNotNullTo(this) { it.diagnosticCode }
             if (quotes.isEmpty() && fetched.any { it.fetched }) add("NO_VERIFIED_EUR_PRICE")
             else if (quotes.isEmpty() && isEmpty()) add("${stage}_NO_VERIFIED_PRICE")
         }
-        val verifiedBeforeDedup = fetched.mapNotNull { it.quote }.sortedBy { it.observedAt }
+        val verifiedBeforeDedup = fetched.flatMap { snapshot -> listOfNotNull(snapshot.quote) + snapshot.additionalQuotes }.sortedBy { it.observedAt }
         val duplicatesRemoved = verifiedBeforeDedup.size - quotes.size
         val identityMismatches = fetched.count { it.diagnosticCode == "ARCHIVE_PRODUCT_TITLE_MISMATCH" }
         val missingEurPrices = fetched.count { it.diagnosticCode == "ARCHIVE_EUR_PRICE_MISSING" }
@@ -1593,7 +1605,8 @@ class WaybackPriceHistoryClient(
         expectedTitle: String,
         snapshotTimeoutSeconds: Long,
         snapshotOrdinal: Int = 1,
-        onTrace: ((WaybackTraceEvent) -> Unit)? = null
+        onTrace: ((WaybackTraceEvent) -> Unit)? = null,
+        knownProductTitlesById: Map<String, String> = emptyMap()
     ): SnapshotFetch {
         val downloadStep = if (snapshotOrdinal <= 1) 8 else 10
         val evaluateStep = if (snapshotOrdinal <= 1) 9 else 11
@@ -1667,9 +1680,26 @@ class WaybackPriceHistoryClient(
                                     else -> sourceQuote
                                 }
                                 reportArchiveFieldTrace(onTrace, document, expectedTitle, capture.originalUrl, quote, sourceQuote)
+                                val secondarySourceQuotes = parseArchivedPricesForKnownProducts(
+                                    document = document,
+                                    primaryExpectedTitle = expectedTitle,
+                                    knownProductTitlesById = knownProductTitlesById,
+                                    originalUrl = capture.originalUrl,
+                                    snapshotUrl = snapshotUrl,
+                                    observedAt = capture.timestamp,
+                                    acceptedCurrencies = setOf("EUR", "USD")
+                                )
+                                val secondaryQuotes = secondarySourceQuotes.mapNotNull { secondary ->
+                                    when (secondary.currency.uppercase(Locale.ROOT)) {
+                                        "USD" -> convertUsdQuoteToEurAtCaptureDate(secondary, onTrace)
+                                        "EUR" -> secondary
+                                        else -> null
+                                    }
+                                }
                                 SnapshotFetch(
                                     fetched = true,
                                     quote = quote,
+                                    additionalQuotes = secondaryQuotes,
                                     diagnosticCode = when {
                                         quote != null -> null
                                         sourceQuote?.currency?.equals("USD", ignoreCase = true) == true -> "ARCHIVE_USD_FX_UNAVAILABLE"
@@ -2591,7 +2621,8 @@ class WaybackPriceHistoryClient(
         cdxTimeoutSeconds: Long,
         cdxStage: String,
         snapshotTimeoutSeconds: Long = SNAPSHOT_CALL_TIMEOUT_SECONDS,
-        onTrace: ((WaybackTraceEvent) -> Unit)? = null
+        onTrace: ((WaybackTraceEvent) -> Unit)? = null,
+        knownProductTitlesById: Map<String, String> = emptyMap()
     ): WaybackBackfillResult {
         emitWaybackTrace(onTrace, 4, WaybackTraceStatus.RUNNING,
             "$cdxStage: petición CDX preparada; URL completa omitida.")
@@ -2735,7 +2766,8 @@ class WaybackPriceHistoryClient(
                 expectedTitle = expectedTitle,
                 snapshotTimeoutSeconds = snapshotTimeoutSeconds,
                 snapshotOrdinal = snapshotIndex + 1,
-                onTrace = onTrace
+                onTrace = onTrace,
+                knownProductTitlesById = knownProductTitlesById
             )
             fetched += snapshot
             if (snapshot.diagnosticCode == "WAYBACK_RATE_LIMITED") break
@@ -2799,7 +2831,7 @@ class WaybackPriceHistoryClient(
             // Multiple candidate URLs can point to the same archived price at the same timestamp.
             // Keep a single history point; otherwise one Availability snapshot returned for two
             // URL variants is incorrectly persisted twice.
-            .distinctBy { Triple(it.observedAt, it.price, it.currency.uppercase(Locale.ROOT)) }
+            .distinctBy { listOf(it.targetProductId.orEmpty(), it.productTitle, it.observedAt.toString(), it.price.toString(), it.currency.uppercase(Locale.ROOT)) }
         val duplicatesRemoved = verifiedQuotesBeforeDedup.size - quotes.size
         emitWaybackTrace(
             onTrace, 14,
@@ -3394,6 +3426,54 @@ class WaybackPriceHistoryClient(
             sourceCurrency = visibleCurrency,
             sourcePrice = visiblePrice
         )
+    }
+
+    /**
+     * Extract additional offers from structured Product/Offer records, and only when a record
+     * matches exactly one different product already saved in Room. Page-level metadata is
+     * intentionally excluded because it can describe only the primary SKU.
+     */
+    internal fun parseArchivedPricesForKnownProducts(
+        document: Document,
+        primaryExpectedTitle: String,
+        knownProductTitlesById: Map<String, String>,
+        originalUrl: String,
+        snapshotUrl: String,
+        observedAt: Long,
+        acceptedCurrencies: Set<String> = setOf("EUR", "USD")
+    ): List<ArchivedPriceQuote> {
+        if (primaryExpectedTitle.isBlank() || observedAt <= 0L || knownProductTitlesById.isEmpty()) return emptyList()
+        val allowedCurrencies = acceptedCurrencies.map { it.uppercase(Locale.ROOT) }.toSet()
+        val output = mutableListOf<ArchivedPriceQuote>()
+        for ((archivedTitle, price, rawCurrency) in extractJsonLdProductOffers(document)) {
+            val currency = rawCurrency.uppercase(Locale.ROOT)
+            if (currency !in allowedCurrencies || price !in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE) continue
+            val matches = knownProductTitlesById.entries.filter { (productId, savedTitle) ->
+                productId.isNotBlank() &&
+                    savedTitle.isNotBlank() &&
+                    !isMatchingTitleForArchivedUrl(primaryExpectedTitle, savedTitle, originalUrl) &&
+                    !hasExplicitProductVariantConflict(savedTitle, archivedTitle) &&
+                    isMatchingTitleForArchivedUrl(savedTitle, archivedTitle, originalUrl)
+            }
+            // Duplicate retailer listings or similarly named variants are ambiguous: do not guess.
+            if (matches.size != 1) continue
+            val (productId, canonicalTitle) = matches.single()
+            output += ArchivedPriceQuote(
+                observedAt = observedAt,
+                price = price,
+                currency = currency,
+                productTitle = canonicalTitle,
+                originalUrl = originalUrl,
+                snapshotUrl = snapshotUrl,
+                sourceCurrency = currency,
+                sourcePrice = price,
+                targetProductId = productId
+            )
+            if (output.size >= 8) break
+        }
+        return output.distinctBy {
+            listOf(it.targetProductId.orEmpty(), it.observedAt.toString(), it.price.toString(), it.currency)
+        }
     }
 
     private fun extractJsonLdProductOffers(document: Document): List<Triple<String, Double, String>> {
@@ -4142,7 +4222,8 @@ class WaybackPriceHistoryClient(
     private data class SnapshotFetch(
         val fetched: Boolean,
         val quote: ArchivedPriceQuote?,
-        val diagnosticCode: String? = null
+        val diagnosticCode: String? = null,
+        val additionalQuotes: List<ArchivedPriceQuote> = emptyList()
     )
 
     internal data class WaybackCapture(

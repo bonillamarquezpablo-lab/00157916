@@ -961,12 +961,18 @@ class WaybackPriceHistoryClient(
             }
         } == true
         if (alternateTransientFailure && !priorRateLimited) {
+            // The alternate product-prefix query already failed at transport level. Broad host
+            // scans hit the same CDX service and routinely time out too, so stop here instead
+            // of turning one timeout into three sequential requests. A later manual retry can
+            // try again after the transient failure cache expires.
             emitWaybackTrace(
-                onTrace, 6, WaybackTraceStatus.RUNNING,
-                "Fallaron las consultas de URL; se hará una búsqueda acotada por host para descubrir una URL archivada distinta, con presupuesto reducido y sin repetir la misma ruta."
+                onTrace, 6, WaybackTraceStatus.FAILED,
+                "La consulta CDX alternativa agotó el tiempo; se omite el barrido del dominio para no repetir la misma caída del servicio."
             )
         }
-        if (!priorRateLimited && activeRateLimitUntil(System.currentTimeMillis()) == null) {
+        if (!priorRateLimited && !alternateTransientFailure &&
+            activeRateLimitUntil(System.currentTimeMillis()) == null
+        ) {
             val domainQueries = buildDomainCdxHostUrls(
                 domain = normalizedDomain,
                 expectedTitle = expectedTitle,

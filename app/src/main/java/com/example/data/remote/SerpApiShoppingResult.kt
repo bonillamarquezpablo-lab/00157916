@@ -894,7 +894,9 @@ fun onlineProductIdentityKey(title: String): String {
     // "Redmi Note 15/17" is a two-word model family, not a generic title token.
     // Normalize it before the generic model-code matcher so Pro/Max and storage variants
     // share one family key instead of splitting into unrelated families.
-    val redmiNoteModel = Regex("""\bredmi\s+note\s*(\d+[a-z0-9]*)\b""")
+    val redmiNoteModel = Regex(
+        """\bredmi\s+note\s*(\d+)(?=(?:\s|pro\b|max\b|plus\b|ultra\b|fe\b|lite\b|mini\b|4g\b|5g\b|[a-z]\d+\b|$))"""
+    )
         .find(normalized)
         ?.groupValues
         ?.getOrNull(1)

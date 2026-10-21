@@ -826,17 +826,31 @@ class WaybackPriceHistoryClient(
             generatedUrls = buildAvailabilityCandidateUrls(normalizedDomain, expectedTitle),
             expectedTitle = expectedTitle
         ).take(MAX_AVAILABILITY_URL_CANDIDATES)
-        if (candidateUrls.isEmpty()) {
-            rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
-            return WaybackBackfillResult(requestFailed = true, diagnosticCodes = failureCodes)
-        }
 
         // Keep the fallback to three URLs after either a transient CDX timeout or HTTP 5xx.
-        // The direct offer URL is always ranked first; a later manual retry can resume discovery.
+        // Preserve the normal candidate order for future/manual discovery, but promote the known
+        // retailer search URL into the third slot for this short fallback. This avoids spending
+        // all three probes on guessed slugs while keeping product-specific candidates first.
         val transientCdxFailure = failureCodes.any { code ->
             code.endsWith("_TIMEOUT") ||
                 code.substringAfterLast('_').toIntOrNull()
                     ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true
+        }
+        val retailerSearchUrl = Store.ALL_STORES.firstOrNull { store ->
+            normalizeMerchantDomain(store.domain) == normalizedDomain && store.supportsProductSearch
+        }?.searchUrlFor(expectedTitle)?.takeIf(::isEligibleDirectUrl)
+        val fallbackCandidateUrls = if (
+            transientCdxFailure && retailerSearchUrl != null && retailerSearchUrl in candidateUrls
+        ) {
+            val nonSearchCandidates = candidateUrls.filterNot { it == retailerSearchUrl }
+            (nonSearchCandidates.take(2) + retailerSearchUrl + nonSearchCandidates.drop(2))
+        } else {
+            candidateUrls
+        }
+
+        if (fallbackCandidateUrls.isEmpty()) {
+            rememberAttempt(cacheKey, now, hasQuotes = false, failed = true)
+            return WaybackBackfillResult(requestFailed = true, diagnosticCodes = failureCodes)
         }
         val availabilityProbeLimit = if (transientCdxFailure) {
             minOf(MAX_DOMAIN_AVAILABILITY_PROBE_CANDIDATES, 3)
@@ -844,7 +858,7 @@ class WaybackPriceHistoryClient(
             MAX_DOMAIN_AVAILABILITY_PROBE_CANDIDATES
         }
         val fallback = queryAvailabilityAndFetchPrices(
-            candidateUrls = candidateUrls,
+            candidateUrls = fallbackCandidateUrls,
             expectedTitle = expectedTitle,
             cacheKey = cacheKey,
             now = now,
@@ -2564,12 +2578,12 @@ class WaybackPriceHistoryClient(
                 canonicalSamsungUrls.drop(3) +
                 guessedProductUrls.filterNot { it in canonicalSet }
         } else {
-            // Keep two product-specific guesses first, then try the store's real search URL
-            // as the third candidate. This fits the bounded timeout fallback without spending
-            // every probe on guessed slugs and still validates the exact product + EUR price.
-            guessedProductUrls.take(1) +
+            // Keep three product-specific guesses ahead of the search URL in the normal
+            // candidate list. The transient-error fallback promotes the search URL separately,
+            // without weakening this broader discovery order.
+            guessedProductUrls.take(3) +
                 listOfNotNull(storeSearchUrl) +
-                guessedProductUrls.drop(1)
+                guessedProductUrls.drop(3)
         }
         // Try the exact Apple SKU configurator on each known host before any family/marketing
         // page. www and apex can have different archive coverage; using only the first host meant

@@ -3623,19 +3623,55 @@ class WaybackPriceHistoryClient(
                     hasExplicitProductVariantConflict(savedTitle, archivedTitle)
                 ) return@mapNotNull null
 
+                val offerUrls = jsonLdProductUrlsForOffer(
+                    document = document,
+                    productTitle = archivedTitle,
+                    expectedPrice = price,
+                    expectedCurrency = currency,
+                    pageUrl = originalUrl
+                )
+                // A structured product URL is stronger evidence than a family-page URL. If it
+                // explicitly names storage or colour that the saved row does not identify, do
+                // not attach the price to that broader/ambiguous row.
+                val urlExplicitlyContradictsSavedSku = offerUrls.any { offerUrl ->
+                    val uri = runCatching { URI(offerUrl) }.getOrNull()
+                    val urlIdentityText = normalizeTitle(
+                        decodePathUrlComponent(uri?.rawPath.orEmpty()) + " " +
+                            uri?.rawQuery.orEmpty().split('&').mapNotNull { parameter ->
+                                val key = decodeQueryUrlComponent(parameter.substringBefore('='))
+                                    .lowercase(Locale.ROOT)
+                                val value = decodeQueryUrlComponent(parameter.substringAfter('=', ""))
+                                if (key in setOf(
+                                        "sku", "skuid", "variant", "variantid", "variant_id",
+                                        "capacity", "storage", "color", "colour", "model", "gtin", "ean"
+                                    )
+                                ) value else null
+                            }.joinToString(" ")
+                    )
+                    val expectedStorage = Regex("""\b\d+\s*(?:gb|tb)\b""")
+                        .findAll(normalizeTitle(savedTitle))
+                        .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }
+                        .toSet()
+                    val urlStorage = Regex("""\b\d+\s*(?:gb|tb)\b""")
+                        .findAll(urlIdentityText)
+                        .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }
+                        .toSet()
+                    val expectedColour = productColourFamily(savedTitle)
+                    val urlColour = productColourFamily(urlIdentityText)
+                    hasExplicitVariantConflictInProductUrl(savedTitle, offerUrl) ||
+                        (urlStorage.isNotEmpty() &&
+                            (expectedStorage.isEmpty() || urlStorage.any { it !in expectedStorage })) ||
+                        (urlColour != null &&
+                            (expectedColour == null || expectedColour != urlColour))
+                }
+                if (urlExplicitlyContradictsSavedSku) return@mapNotNull null
+
                 val pageConfirmsVariant =
                     isMatchingTitleForArchivedUrl(savedTitle, archivedTitle, originalUrl)
-                val offerUrlConfirmsVariant = !pageConfirmsVariant &&
-                    jsonLdProductUrlsForOffer(
-                        document = document,
-                        productTitle = archivedTitle,
-                        expectedPrice = price,
-                        expectedCurrency = currency,
-                        pageUrl = originalUrl
-                    ).any { offerUrl ->
-                        !hasExplicitVariantConflictInProductUrl(savedTitle, offerUrl) &&
-                            matchesVariantDetailsConfirmedByUrl(savedTitle, archivedTitle, offerUrl)
-                    }
+                val offerUrlConfirmsVariant = offerUrls.any { offerUrl ->
+                    !hasExplicitVariantConflictInProductUrl(savedTitle, offerUrl) &&
+                        matchesVariantDetailsConfirmedByUrl(savedTitle, archivedTitle, offerUrl)
+                }
                 if (!pageConfirmsVariant && !offerUrlConfirmsVariant) return@mapNotNull null
                 Triple(productId, savedTitle, offerUrlConfirmsVariant)
             }

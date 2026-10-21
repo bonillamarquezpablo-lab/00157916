@@ -2037,6 +2037,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     val toPersist = uniqueQuotes.filter {
                         archiveQuoteIdentity(candidate, it) !in processedArchiveQuoteKeys
                     }
+                    var persistenceCompleted = true
                     try {
                         for ((archiveUrl, urlQuotes) in toPersist.groupBy { it.originalUrl }) {
                             val primaryQuotes = urlQuotes.filter {
@@ -2064,10 +2065,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 )
                             }
                         }
-                        processedArchiveQuoteKeys.addAll(toPersist.map { archiveQuoteIdentity(candidate, it) })
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (_: Exception) {
+                        persistenceCompleted = false
                         diagnosticCodes.add("ARCHIVE_INCREMENTAL_SAVE_FAILED")
                         if (diagnosticProductId != null) {
                             reportWaybackDiagnostic(
@@ -2075,6 +2076,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 "No se pudo guardar una observación histórica durante la descarga; se conservará para el intento final si la operación continúa."
                             )
                         }
+                    }
+                    // Never mark a quote as processed after a failed write: the final pass must
+                    // be allowed to retry persistence for a verified quote retained in memory.
+                    if (persistenceCompleted) {
+                        processedArchiveQuoteKeys.addAll(toPersist.map { archiveQuoteIdentity(candidate, it) })
                     }
                     val hasPrimaryProductQuote = uniqueQuotes.any {
                         it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId
@@ -2117,7 +2123,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     // the whole domain. A failing CDX domain fallback must never consume the
                     // entire per-store budget or starve the next candidate.
                     val attempts = mutableListOf<com.example.data.remote.WaybackBackfillResult>()
+                    // Keep verified quotes outside the cancellable network call. If its local
+                    // timeout fires after one capture succeeded, the final persistence pass still
+                    // receives those quotes instead of treating the entire candidate as empty.
+                    val candidateQuotesObserved = linkedMapOf<String, ArchivedPriceQuote>()
                     val persistQuotesAsTheyArrive: suspend (List<ArchivedPriceQuote>) -> Unit = { batch ->
+                        for (quote in batch) {
+                            candidateQuotesObserved.putIfAbsent(archiveQuoteIdentity(candidate, quote), quote)
+                        }
                         persistCandidateQuotes(candidate, batch)
                     }
                     var candidateTimedOut = false
@@ -2134,6 +2147,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         if (direct == null) {
                             candidateTimedOut = true
                             diagnosticCodes.add("CDX_URL_PREFIX_CANDIDATE_TIMEOUT")
+                            if (candidateQuotesObserved.isNotEmpty()) {
+                                attempts += com.example.data.remote.WaybackBackfillResult(
+                                    quotes = candidateQuotesObserved.values.toList(),
+                                    capturesFound = candidateQuotesObserved.values.map { it.observedAt }.distinct().size,
+                                    requestFailed = true,
+                                    diagnosticCodes = setOf("CANDIDATE_TIMEOUT_PARTIAL_QUOTES")
+                                )
+                            }
                         } else {
                             attempts += direct
                         }

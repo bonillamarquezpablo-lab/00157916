@@ -1378,11 +1378,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             )
             reportWaybackDiagnostic(
                 product.id, 3, WaybackTraceStatus.SKIPPED,
-                "Pausa global de Internet Archive activa; no se envió otra petición."
+                "Pausa global de Internet Archive activa. ${status}"
             )
             reportWaybackDiagnostic(
                 product.id, 4, WaybackTraceStatus.SKIPPED,
-                "La pausa global bloqueó la petición antes de consultar CDX o Availability."
+                "La pausa global bloqueó la petición antes de consultar CDX o Availability. ${status}"
             )
             finishWaybackDiagnostic(
                 product.id, WaybackTraceStatus.SKIPPED,

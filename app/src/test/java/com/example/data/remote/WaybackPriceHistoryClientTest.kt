@@ -3983,7 +3983,7 @@ class WaybackPriceHistoryClientTest {
         )
 
         assertTrue(label.contains("captura 4 de 12"))
-        assertTrue(Regex("""id [a-f0-9]{8}""").containsMatchIn(label))
+        assertTrue(Regex("""id [a-j]{8}""").containsMatchIn(label))
         assertTrue(label.contains("fecha 20250901123456"))
         assertTrue(label.contains("ruta CDX_URL_PREFIX"))
         assertTrue(label.contains("tienda www.pccomponentes.com"))

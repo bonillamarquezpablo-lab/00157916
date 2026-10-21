@@ -2567,9 +2567,9 @@ class WaybackPriceHistoryClient(
             // Keep two product-specific guesses first, then try the store's real search URL
             // as the third candidate. This fits the bounded timeout fallback without spending
             // every probe on guessed slugs and still validates the exact product + EUR price.
-            guessedProductUrls.take(2) +
+            guessedProductUrls.take(1) +
                 listOfNotNull(storeSearchUrl) +
-                guessedProductUrls.drop(2)
+                guessedProductUrls.drop(1)
         }
         // Try the exact Apple SKU configurator on each known host before any family/marketing
         // page. www and apex can have different archive coverage; using only the first host meant

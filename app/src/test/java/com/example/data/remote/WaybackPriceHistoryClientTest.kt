@@ -2020,7 +2020,7 @@ class WaybackPriceHistoryClientTest {
         assertNotNull(url)
         assertEquals("-120", url!!.queryParameter("limit"))
         assertEquals("timestamp:6", url.queryParameter("collapse"))
-        assertEquals("200", url.queryParameterValues("filter")?.firstOrNull())
+        assertEquals("statuscode:200", url.queryParameterValues("filter")?.firstOrNull())
         assertEquals("text/html", url.queryParameterValues("filter")?.getOrNull(1))
         assertEquals("20261021", url.queryParameter("to"))
     }

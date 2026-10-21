@@ -51,7 +51,8 @@ class ExampleUnitTest {
         )
         val redmi17Colours = groups.filter {
             it.identityKey.startsWith("xiaomi|redmi17|") &&
-                it.identityKey.contains("memory:4gb+256gb")
+                it.identityKey.contains("memory:4gb+256gb") &&
+                !it.identityKey.contains("accessory:")
         }
         assertEquals("Black and blue are separate SKU cards", 2, redmi17Colours.size)
         assertTrue(redmi17Colours.any { it.identityKey.contains("color:black") })

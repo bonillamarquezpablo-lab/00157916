@@ -4905,45 +4905,53 @@ class WaybackPriceHistoryClient(
         if (productConditionKey(expected) != productConditionKey(archived)) return false
         if (productModelVariantTokens(expected) != productModelVariantTokens(archived)) return false
 
-        val expectedColour = productColourFamily(expected)
-        val archivedColour = productColourFamily(archived)
-        if (expectedColour != null && archivedColour != null && expectedColour != archivedColour) return false
-
-        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
-        val expectedStorage = storagePattern.findAll(expected)
-            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
-        val archivedStorage = storagePattern.findAll(archived)
-            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
-
-        // An archived page that explicitly names an unrequested capacity is a different SKU.
-        if (archivedStorage.any { it !in expectedStorage }) return false
-        val missingStorage = expectedStorage.any { it !in archivedStorage }
-
         val uri = runCatching { URI(originalUrl) }.getOrNull() ?: return false
         val pathText = decodePathUrlComponent(uri.rawPath.orEmpty())
         val identityQueryKeys = setOf(
             "sku", "skuid", "sku_id", "variant", "variantid", "variant_id", "variation",
             "variationid", "variation_id", "productid", "product_id", "offerid", "offer_id",
             "pid", "itemid", "item_id", "asin", "mpn", "gtin", "ean", "model", "modelid",
-            "color", "colour", "colorid", "colourid", "storage", "capacity", "size",
-            "configuration", "config", "option", "optionid"
+            "color", "colour", "colorid", "colourid", "storage", "capacity", "size", "memory",
+            "ram", "rom", "configuration", "config", "option", "optionid"
         )
         val queryIdentityText = uri.rawQuery.orEmpty().split('&').mapNotNull { parameter ->
             val rawKey = parameter.substringBefore('=')
             val rawValue = parameter.substringAfter('=', "")
             val key = decodeQueryUrlComponent(rawKey).lowercase(Locale.ROOT)
-            if (key !in identityQueryKeys) null else decodeQueryUrlComponent(rawValue).takeIf { it.isNotBlank() }
+            if (key !in identityQueryKeys) null
+            else decodeQueryUrlComponent(rawValue).takeIf { it.isNotBlank() }
         }.joinToString(" ")
         val urlTitle = normalizeTitle(pathText + " " + queryIdentityText)
+
+        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+        val titleStorage = storagePattern.findAll(expected)
+            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
         val urlStorage = storagePattern.findAll(urlTitle)
             .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
-        if (missingStorage && !urlStorage.containsAll(expectedStorage)) return false
+        // A title and its own product URL must not disagree about storage.
+        if (titleStorage.isNotEmpty() && urlStorage.isNotEmpty() &&
+            titleStorage.intersect(urlStorage).isEmpty()
+        ) return false
+        val expectedStorage = titleStorage.ifEmpty { urlStorage }
+        val archivedStorage = storagePattern.findAll(archived)
+            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
 
+        // An archived page that explicitly names an unrequested capacity is a different SKU.
+        if (archivedStorage.any { it !in expectedStorage }) return false
+        val missingStorage = expectedStorage.any { it !in archivedStorage }
+        if (missingStorage && (expectedStorage.isEmpty() || !urlStorage.containsAll(expectedStorage))) {
+            return false
+        }
+
+        val titleColour = productColourFamily(expected)
         val urlColour = productColourFamily(urlTitle)
-        val missingColour = expectedColour != null && archivedColour == null
-        // Do not attach a colour-specific archived offer to a saved product whose colour is
-        // unknown. The selected product must request the colour that the URL proves.
+        if (titleColour != null && urlColour != null && titleColour != urlColour) return false
+        val expectedColour = titleColour ?: urlColour
+        val archivedColour = productColourFamily(archived)
+        if (expectedColour != null && archivedColour != null && expectedColour != archivedColour) return false
+        // A colour-bearing archived offer cannot be assigned to a target with no verified colour.
         if (expectedColour == null && archivedColour != null) return false
+        val missingColour = expectedColour != null && archivedColour == null
         if (missingColour && urlColour != expectedColour) return false
         if (!missingStorage && !missingColour) return false
 

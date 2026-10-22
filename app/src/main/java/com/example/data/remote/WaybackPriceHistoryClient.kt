@@ -387,7 +387,8 @@ class WaybackPriceHistoryClient(
         lookbackDays: Int = DEFAULT_LOOKBACK_DAYS,
         onTrace: ((WaybackTraceEvent) -> Unit)? = null,
         knownProductTitlesById: Map<String, String> = emptyMap(),
-        onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null
+        onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null,
+        forceRefresh: Boolean = false
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
         if (!preferences.getBoolean("enabled", true)) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("WAYBACK_DISABLED"))
@@ -413,7 +414,7 @@ class WaybackPriceHistoryClient(
                     diagnosticCodes = setOf("WAYBACK_RATE_LIMITED")
                 )
             }
-            if (wasAttemptedRecently(attempt, System.currentTimeMillis())) {
+            if (!forceRefresh && wasAttemptedRecently(attempt, System.currentTimeMillis())) {
                 val previousAttemptFailed = preferences.getBoolean("${attempt}_failed", false)
                 emitCachedLookupSkippedTrace(
                     onTrace,

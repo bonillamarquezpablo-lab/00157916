@@ -2376,6 +2376,41 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun siblingOfferWithoutItsOwnUrlIsRejectedWhenCaptureUrlNamesPrimaryVariant() {
+        val client = newClient()
+        val html = """
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@type":"Product",
+                "name":"Apple iPhone 15 Plus 128GB Amarillo Libre",
+                "offers":{"@type":"Offer","price":"699.99","priceCurrency":"EUR"}
+              }
+              </script>
+            </head></html>
+        """.trimIndent()
+        val primaryUrl =
+            "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo-libre"
+
+        val quotes = client.parseArchivedPricesForKnownProducts(
+            document = Jsoup.parse(html),
+            primaryExpectedTitle = "Apple iPhone 15 Plus 256GB Amarillo Libre",
+            knownProductTitlesById = mapOf(
+                "saved-iphone-128" to "Apple iPhone 15 Plus 128GB Amarillo Libre"
+            ),
+            originalUrl = primaryUrl,
+            snapshotUrl = "https://web.archive.org/web/20260901000000id_/$primaryUrl",
+            observedAt = 1_788_200_000_000L
+        )
+
+        assertTrue(
+            "A sibling offer with no product URL must not borrow identity from the primary 256 GB capture URL",
+            quotes.isEmpty()
+        )
+    }
+
+    @Test
     fun secondaryOfferUrlCannotAssign256GbPriceTo128GbOrUnknownCapacityRows() {
         val client = newClient()
         val html = """

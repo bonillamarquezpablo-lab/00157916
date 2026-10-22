@@ -3250,16 +3250,6 @@ class WaybackPriceHistoryClient(
             )
             fetched += snapshot
             if (snapshot.diagnosticCode == "WAYBACK_RATE_LIMITED") break
-            if (snapshot.quote != null) {
-                if (snapshotIndex < sampled.lastIndex) {
-                    emitWaybackTrace(
-                        onTrace, 10, WaybackTraceStatus.SKIPPED,
-                        "Se obtuvo un precio válido del producto buscado; se cancelan las descargas de capturas restantes para evitar esperas redundantes.",
-                        diagnosticStep = 13
-                    )
-                }
-                break
-            }
         }
         when {
             sampled.isEmpty() -> {

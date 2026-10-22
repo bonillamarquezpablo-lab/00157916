@@ -4159,7 +4159,7 @@ class WaybackPriceHistoryClient(
         }
     }
 
-    private fun extractJsonLdProductOffers(document: Document): List<Triple<String, Double, String>> {
+    internal fun extractJsonLdProductOffers(document: Document): List<Triple<String, Double, String>> {
         val roots = document.select("script").asSequence()
             .filter { script ->
                 script.attr("type").substringBefore(';').trim()

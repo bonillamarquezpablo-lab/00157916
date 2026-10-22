@@ -117,6 +117,14 @@ internal fun buildWaybackDiagnosticSummary(
         statusText.contains("HTTP 429", ignoreCase = true) &&
             statusText.contains("hasta aproximadamente", ignoreCase = true) &&
             Regex("""(?i)\ben unos \d+\s+min\b""").containsMatchIn(statusText)
+    val statusRepeatsStaleRateLimit = statusText.contains("HTTP 429", ignoreCase = true) ||
+        statusText.contains("pausa temporal", ignoreCase = true) ||
+        statusText.contains("internet archive pidió frenar", ignoreCase = true)
+    val currentRunSkippedByCache = steps.any { entry ->
+        entry.step == 5 &&
+            entry.status == WaybackTraceStatus.SKIPPED &&
+            entry.detail.contains("caché reciente", ignoreCase = true)
+    }
     val activeStep = steps.firstOrNull {
         it.isCaptureDetail && it.status == WaybackTraceStatus.RUNNING
     } ?: steps.firstOrNull { it.status == WaybackTraceStatus.RUNNING }
@@ -138,8 +146,12 @@ internal fun buildWaybackDiagnosticSummary(
         // fresh 429, don't show a countdown copied from an earlier attempt.
         precheckConfirmsNoPause && !currentTraceRateLimit -> {
             val currentStatus = statusText.takeIf {
-                it.isNotBlank() && !hasActivePauseCountdown
-            } ?: "La pausa global no está activa en esta consulta."
+                it.isNotBlank() && !hasActivePauseCountdown && !statusRepeatsStaleRateLimit
+            } ?: if (currentRunSkippedByCache) {
+                "La pausa global no está activa; esta consulta se omitió por caché reciente, no por un bloqueo vigente de Internet Archive."
+            } else {
+                "La pausa global no está activa en esta consulta."
+            }
             if (rateLimitReported) {
                 "El precontrol de esta consulta confirma que no había una pausa global activa. " +
                     "El HTTP 429 del resumen pertenece a un intento anterior; no significa que la pausa siga activa. " +

@@ -2794,25 +2794,49 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 appendArchiveNotice(query, provider, noticeWithDiagnostics, targetProductId)
                 if (diagnosticProductId != null) {
                     when {
-                        savedCount > 0 && stagedDiscoveryObservationsCount.get() > 0 -> finishWaybackDiagnostic(
+                        savedCount > 0 && crossSavedVariantObservationCount > 0 &&
+                            stagedDiscoveryObservationsCount.get() > 0 -> finishWaybackDiagnostic(
                             diagnosticProductId, WaybackTraceStatus.PASSED,
-                            "$savedCount precio(s) histórico(s) guardado(s) en el catálogo y ${stagedDiscoveryObservationsCount.get()} observación(es) secundarias en Radar."
+                            "$savedCount punto(s) histórico(s) del producto seleccionado, " +
+                                "$crossSavedVariantObservationCount punto(s) de variantes relacionadas y " +
+                                "${stagedDiscoveryObservationsCount.get()} observación(es) nueva(s) en Radar."
+                        )
+                        savedCount > 0 && crossSavedVariantObservationCount > 0 -> finishWaybackDiagnostic(
+                            diagnosticProductId, WaybackTraceStatus.PASSED,
+                            "$savedCount punto(s) histórico(s) del producto seleccionado y " +
+                                "$crossSavedVariantObservationCount punto(s) en variantes relacionadas."
                         )
                         savedCount > 0 -> finishWaybackDiagnostic(
                             diagnosticProductId, WaybackTraceStatus.PASSED,
-                            "$savedCount precio(s) histórico(s) guardado(s) en la base de datos local."
+                            "$savedCount precio(s) histórico(s) guardado(s) para el producto seleccionado."
+                        )
+                        crossSavedVariantObservationCount > 0 &&
+                            stagedDiscoveryObservationsCount.get() > 0 -> finishWaybackDiagnostic(
+                            diagnosticProductId, WaybackTraceStatus.PASSED,
+                            "No se añadieron puntos nuevos al producto seleccionado. Se guardaron " +
+                                "$crossSavedVariantObservationCount punto(s) en variantes relacionadas y " +
+                                "${stagedDiscoveryObservationsCount.get()} observación(es) nueva(s) en Radar."
+                        )
+                        crossSavedVariantObservationCount > 0 -> finishWaybackDiagnostic(
+                            diagnosticProductId, WaybackTraceStatus.PASSED,
+                            "Solo se guardó historial de variantes relacionadas: " +
+                                "$crossSavedVariantObservationCount punto(s). No se añadió historial nuevo al producto seleccionado."
                         )
                         stagedDiscoveryObservationsCount.get() > 0 -> finishWaybackDiagnostic(
                             diagnosticProductId, WaybackTraceStatus.PASSED,
                             "${stagedDiscoveryObservationsCount.get()} observación(es) de productos nuevos guardadas en el Radar; no se han añadido a Mercado automáticamente."
                         )
-                        foundCount > 0 && selectedProductRefreshed -> finishWaybackDiagnostic(
+                        foundPrimaryCount > 0 && selectedProductRefreshed -> finishWaybackDiagnostic(
                             diagnosticProductId, WaybackTraceStatus.PASSED,
-                            "Se recuperaron precios, pero ya estaban guardados; la ficha se refrescó con el historial existente."
+                            "Se verificó el historial del producto seleccionado, pero sus registros diarios ya existían; la ficha se refrescó."
                         )
-                        foundCount > 0 -> finishWaybackDiagnostic(
+                        foundPrimaryCount > 0 -> finishWaybackDiagnostic(
                             diagnosticProductId, WaybackTraceStatus.FAILED,
-                            "Se extrajeron precios, pero no se confirmó el guardado o la actualización de la ficha."
+                            "Se extrajeron precios del producto seleccionado, pero no se confirmó el guardado o la actualización de la ficha."
+                        )
+                        foundSecondaryCount > 0 -> finishWaybackDiagnostic(
+                            diagnosticProductId, WaybackTraceStatus.PASSED,
+                            "Solo se verificaron capturas de variantes relacionadas; no se añadió historial al producto seleccionado porque esos registros ya existían."
                         )
                         skippedCount == candidates.size -> finishWaybackDiagnostic(
                             diagnosticProductId, WaybackTraceStatus.SKIPPED,

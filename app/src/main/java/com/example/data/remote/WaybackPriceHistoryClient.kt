@@ -3812,6 +3812,11 @@ class WaybackPriceHistoryClient(
         if (expectedTitle.isBlank() || observedAt <= 0L) return null
         val jsonLdCandidates = extractJsonLdProductOffers(document)
         val pageTitles = extractArchivedPageTitles(document)
+        // Keep product-level structured facts next to their title. Offer prices remain separate,
+        // so a generic heading can use JSON-LD/microdata identity evidence without mixing sibling
+        // models or borrowing another variant's price.
+        val structuredIdentityEvidence = extractArchivedProductIdentityEvidence(document)
+        val metaIdentityEvidence = extractArchivedMetaIdentityEvidence(document)
 
         val metaPrice = listOf(
             "product:price:amount", "og:price:amount", "price", "product:price"
@@ -3825,8 +3830,27 @@ class WaybackPriceHistoryClient(
         }?.uppercase(Locale.ROOT)
 
         val allowedCurrencies = acceptedCurrencies.map { it.uppercase(Locale.ROOT) }.toSet()
-        fun matchesArchivedTitle(title: String): Boolean =
-            isMatchingTitleForArchivedUrl(expectedTitle, title, originalUrl)
+        fun matchesArchivedTitle(title: String): Boolean {
+            val evidence = structuredIdentityEvidence.filter {
+                normalizeTitle(it.name) == normalizeTitle(title)
+            } + listOf(metaIdentityEvidence).filter { it.hasIdentityFacts() }.map { it.copy(name = title) }
+
+            // If a page explicitly states a different capacity or colour for this product title,
+            // reject the title even if a broad heading would otherwise fuzzy-match.
+            if (evidence.any { !isArchivedIdentityCompatible(expectedTitle, originalUrl, it) }) {
+                return false
+            }
+            if (isMatchingTitleForArchivedUrl(expectedTitle, title, originalUrl)) return true
+
+            // Recover incomplete/templated titles using only structured attributes tied to that
+            // same Product record or page metadata. Never append opaque SKU identifiers as words.
+            return evidence.any { identity ->
+                val enriched = buildArchivedIdentityTitle(expectedTitle, originalUrl, identity)
+                (enriched.isNotBlank() &&
+                    isMatchingTitleForArchivedUrl(expectedTitle, enriched, originalUrl)) ||
+                    hasExactStructuredIdentityIdentifier(expectedTitle, originalUrl, identity)
+            }
+        }
 
         fun isValidCandidate(candidate: Triple<String, Double, String>): Boolean =
             candidate.third.uppercase(Locale.ROOT) in allowedCurrencies &&
@@ -4111,6 +4135,281 @@ class WaybackPriceHistoryClient(
         return output.distinctBy {
             listOf(it.targetProductId.orEmpty(), it.observedAt.toString(), it.price.toString(), it.currency)
         }
+    }
+
+
+    private data class ArchivedProductIdentityEvidence(
+        val name: String = "",
+        val brand: String? = null,
+        val model: String? = null,
+        val color: String? = null,
+        val capacity: String? = null,
+        val sku: String? = null,
+        val mpn: String? = null,
+        val gtin: String? = null,
+        val variantProperties: Map<String, String> = emptyMap()
+    ) {
+        fun hasIdentityFacts(): Boolean = listOf(
+            brand, model, color, capacity, sku, mpn, gtin
+        ).any { !it.isNullOrBlank() } || variantProperties.isNotEmpty()
+    }
+
+    /**
+     * Generic identity recovery for Product/ProductGroup JSON-LD. It inspects schema property
+     * names rather than retailer/manufacturer names, so the same path works across product classes.
+     * Descriptions, breadcrumbs and opaque SKUs are never treated as product names.
+     */
+    private fun extractArchivedProductIdentityEvidence(
+        document: Document
+    ): List<ArchivedProductIdentityEvidence> {
+        val roots = document.select("script").asSequence()
+            .filter { script ->
+                script.attr("type").substringBefore(';').trim()
+                    .equals("application/ld+json", ignoreCase = true)
+            }
+            .mapNotNull { script ->
+                val payload = script.data().ifBlank { script.html() }
+                    .trim().removePrefix("<!--").removeSuffix("-->").trim()
+                try { JSONTokener(payload).nextValue() } catch (_: Exception) { null }
+            }
+            .toList()
+        val output = mutableListOf<ArchivedProductIdentityEvidence>()
+
+        fun stringValue(value: Any?): String? = when (value) {
+            is String -> value.trim().takeIf { it.isNotBlank() && it != "null" }
+            is Number -> value.toString()
+            is JSONObject -> sequenceOf("name", "value", "model", "identifier")
+                .mapNotNull { key -> stringValue(value.opt(key)) }.firstOrNull()
+            is JSONArray -> (0 until value.length()).mapNotNull { stringValue(value.opt(it)) }
+                .distinct().joinToString(" ").takeIf { it.isNotBlank() }
+            else -> null
+        }
+
+        fun propertyValues(value: Any?): Map<String, String> {
+            val found = linkedMapOf<String, String>()
+            fun visit(node: Any?) {
+                when (node) {
+                    is JSONObject -> {
+                        val key = stringValue(node.opt("name")) ?: stringValue(node.opt("propertyID"))
+                        val raw = node.opt("value") ?: node.opt("valueReference") ?: node.opt("description")
+                        val contents = stringValue(raw)
+                        if (!key.isNullOrBlank() && !contents.isNullOrBlank()) found[key] = contents
+                        val keys = node.keys()
+                        while (keys.hasNext()) {
+                            val childKey = keys.next()
+                            if (childKey !in setOf("value", "valueReference", "description")) visit(node.opt(childKey))
+                        }
+                    }
+                    is JSONArray -> for (i in 0 until node.length()) visit(node.opt(i))
+                }
+            }
+            visit(value)
+            return found
+        }
+
+        fun visit(node: Any?) {
+            when (node) {
+                is JSONObject -> {
+                    val types = jsonLdTypeNames(node)
+                    if (types.any { it in setOf("product", "productgroup", "individualproduct", "productmodel") }) {
+                        val name = stringValue(node.opt("name"))
+                        if (!name.isNullOrBlank()) {
+                            val properties = propertyValues(node.opt("additionalProperty"))
+                            val brand = stringValue(node.opt("brand"))
+                            val color = stringValue(node.opt("color"))
+                                ?: properties.entries.firstOrNull {
+                                    Regex("""(?i)colour|color""").containsMatchIn(it.key)
+                                }?.value
+                            val capacity = sequenceOf(
+                                stringValue(node.opt("capacity")),
+                                stringValue(node.opt("size")).takeIf {
+                                    !it.isNullOrBlank() && Regex("""(?i)\b\d+\s*(?:gb|tb)\b""").containsMatchIn(it)
+                                },
+                                properties.entries.filter {
+                                    Regex("""(?i)storage|capacity|memory|ram|rom|ssd|hard.?drive|almacenamiento|memoria""")
+                                        .containsMatchIn(it.key)
+                                }.joinToString(" ") { it.value }.takeIf { it.isNotBlank() }
+                            ).filterNotNull().joinToString(" ").takeIf { it.isNotBlank() }
+                            output += ArchivedProductIdentityEvidence(
+                                name = name,
+                                brand = brand,
+                                model = stringValue(node.opt("model")),
+                                color = color,
+                                capacity = capacity,
+                                sku = stringValue(node.opt("sku")),
+                                mpn = stringValue(node.opt("mpn")),
+                                gtin = sequenceOf("gtin", "gtin8", "gtin12", "gtin13", "gtin14")
+                                    .mapNotNull { stringValue(node.opt(it)) }.firstOrNull(),
+                                variantProperties = properties.filterKeys {
+                                    Regex("""(?i)model|edition|configuration|colour|color|storage|capacity|memory|ram|rom|ssd""")
+                                        .containsMatchIn(it)
+                                }
+                            )
+                        }
+                    }
+                    val keys = node.keys()
+                    while (keys.hasNext()) visit(node.opt(keys.next()))
+                }
+                is JSONArray -> for (i in 0 until node.length()) visit(node.opt(i))
+            }
+        }
+        roots.forEach(::visit)
+        return output.distinct()
+    }
+
+    /** Generic meta/microdata fallback for pages without a useful Product JSON-LD block. */
+    private fun extractArchivedMetaIdentityEvidence(
+        document: Document
+    ): ArchivedProductIdentityEvidence {
+        fun read(vararg keys: String): String? = keys.firstNotNullOfOrNull { key ->
+            readMeta(document, setOf(key)) ?: readItemPropValue(document, key)
+        }
+        // Keep data-* signals from one element together. Pulling colour from one product card
+        // and capacity from a neighbouring card could fabricate a variant that never existed.
+        val dataAttributeNames = linkedMapOf(
+            "model" to listOf("data-model", "data-model-number", "data-product-model", "data-device-model"),
+            "color" to listOf("data-color", "data-colour", "data-product-color"),
+            "storage" to listOf("data-storage", "data-capacity", "data-memory", "data-product-storage", "data-product-capacity"),
+            "sku" to listOf("data-sku", "data-product-sku", "data-variant-id", "data-product-id"),
+            "mpn" to listOf("data-mpn", "data-product-mpn"),
+            "gtin" to listOf("data-gtin", "data-ean", "data-product-gtin"),
+            "brand" to listOf("data-brand", "data-product-brand")
+        )
+        val dataValues = document.getAllElements().asSequence().mapNotNull { element ->
+            val fields = linkedMapOf<String, String>()
+            dataAttributeNames.forEach { (field, attributes) ->
+                attributes.firstNotNullOfOrNull { attribute ->
+                    element.attr(attribute).takeIf { element.hasAttr(attribute) && it.isNotBlank() }
+                }?.let { fields[field] = it }
+            }
+            fields.takeIf { it.isNotEmpty() }
+        }.maxByOrNull { it.size }.orEmpty()
+
+        val properties = linkedMapOf<String, String>()
+        listOf(
+            "model" to (read("product:model", "model", "modelnumber", "model_number") ?: dataValues["model"]),
+            "color" to (read("product:color", "color", "colour") ?: dataValues["color"]),
+            "storage" to (read("product:storage", "storage", "capacity", "memory", "ram", "rom") ?: dataValues["storage"]),
+            "sku" to (read("product:sku", "sku", "product:retailer_item_id", "retailer_item_id") ?: dataValues["sku"]),
+            "mpn" to (read("mpn", "product:mpn") ?: dataValues["mpn"]),
+            "gtin" to (read("gtin", "gtin8", "gtin12", "gtin13", "gtin14", "ean", "product:gtin")
+                ?: dataValues["gtin"]),
+            "brand" to (read("product:brand", "brand") ?: dataValues["brand"])
+        ).forEach { (key, value) -> if (!value.isNullOrBlank()) properties[key] = value }
+        return ArchivedProductIdentityEvidence(
+            brand = properties["brand"],
+            model = properties["model"],
+            color = properties["color"],
+            capacity = properties["storage"],
+            sku = properties["sku"],
+            mpn = properties["mpn"],
+            gtin = properties["gtin"],
+            variantProperties = properties
+        )
+    }
+
+    private fun archivedUrlIdentityText(originalUrl: String): String {
+        val uri = runCatching { URI(originalUrl) }.getOrNull() ?: return ""
+        val identityKeys = setOf(
+            "sku", "skuid", "sku_id", "variant", "variantid", "variant_id", "variation",
+            "variationid", "variation_id", "productid", "product_id", "model", "modelid",
+            "mpn", "gtin", "ean", "asin", "color", "colour", "storage", "capacity",
+            "memory", "ram", "rom", "size", "configuration", "config", "option", "optionid"
+        )
+        val queryValues = uri.rawQuery.orEmpty().split('&').mapNotNull { part ->
+            val key = decodeQueryUrlComponent(part.substringBefore('=')).lowercase(Locale.ROOT)
+            if (key !in identityKeys) null
+            else decodeQueryUrlComponent(part.substringAfter('=', "")).takeIf { it.isNotBlank() }
+        }
+        return decodePathUrlComponent(uri.rawPath.orEmpty()) + " " + queryValues.joinToString(" ")
+    }
+
+    private fun archivedStorageTokens(value: String): Set<String> =
+        Regex("""(?i)\b\d+\s*(?:gb|tb)\b""").findAll(normalizeTitle(value))
+            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
+
+    private fun isArchivedIdentityCompatible(
+        expectedTitle: String,
+        originalUrl: String,
+        identity: ArchivedProductIdentityEvidence
+    ): Boolean {
+        val target = normalizeTitle(expectedTitle + " " + archivedUrlIdentityText(originalUrl))
+        val expectedStorage = archivedStorageTokens(target)
+        val evidenceStorage = archivedStorageTokens(
+            listOf(identity.capacity.orEmpty(), identity.variantProperties.entries.filter {
+                Regex("""(?i)storage|capacity|memory|ram|rom|ssd|almacenamiento|memoria""")
+                    .containsMatchIn(it.key)
+            }.joinToString(" ") { it.value }).joinToString(" ")
+        )
+        // Explicit capacity is authoritative. Never infer it from screen size or battery capacity.
+        if (evidenceStorage.isNotEmpty() &&
+            (expectedStorage.isEmpty() || expectedStorage != evidenceStorage)
+        ) return false
+
+        val targetColor = productColourFamily(target)
+        val evidenceColor = productColourFamily(normalizeTitle(identity.color.orEmpty()))
+        if (evidenceColor != null && (targetColor == null || targetColor != evidenceColor)) return false
+
+        // If the selected name/URL contains a manufacturer model code, structured "model" must agree.
+        val model = identity.model?.takeIf { it.isNotBlank() }
+        if (model != null) {
+            val codePattern = Regex("""(?i)\b[a-z]{1,8}[- ]?\d[a-z0-9-]{2,}\b""")
+            val targetCodes = codePattern.findAll(target).map {
+                normalizeTitle(it.value).replace(Regex("""[^a-z0-9]"""), "")
+            }.filter { !it.contains("gb") && !it.contains("tb") }.toSet()
+            val modelCodes = codePattern.findAll(model).map {
+                normalizeTitle(it.value).replace(Regex("""[^a-z0-9]"""), "")
+            }.filter { !it.contains("gb") && !it.contains("tb") }.toSet()
+            if (targetCodes.isNotEmpty() && modelCodes.isNotEmpty() &&
+                targetCodes.intersect(modelCodes).isEmpty()
+            ) return false
+        }
+        return true
+    }
+
+    private fun hasExactStructuredIdentityIdentifier(
+        expectedTitle: String,
+        originalUrl: String,
+        identity: ArchivedProductIdentityEvidence
+    ): Boolean {
+        val target = normalizeTitle(expectedTitle + " " + archivedUrlIdentityText(originalUrl))
+            .replace(Regex("""[^a-z0-9]"""), "")
+        val identifiers = listOf(identity.model, identity.sku, identity.mpn, identity.gtin)
+            .filterNotNull().filter { it.isNotBlank() }
+            .map { normalizeTitle(it).replace(Regex("""[^a-z0-9]"""), "") }
+            .filter { it.length >= 5 }
+        // Manufacturer model codes and catalogue identifiers are strong evidence only when the
+        // selected title or its product URL contains the exact same value. Capacity/colour
+        // conflicts have already been rejected above.
+        return identifiers.any { identifier -> target.contains(identifier) }
+    }
+
+    private fun buildArchivedIdentityTitle(
+        expectedTitle: String,
+        originalUrl: String,
+        identity: ArchivedProductIdentityEvidence
+    ): String {
+        val target = normalizeTitle(expectedTitle + " " + archivedUrlIdentityText(originalUrl))
+        val values = mutableListOf(identity.name)
+        identity.brand?.takeIf { it.isNotBlank() }?.let(values::add)
+        identity.color?.takeIf { it.isNotBlank() }?.let(values::add)
+        identity.capacity?.takeIf { it.isNotBlank() }?.let(values::add)
+        val model = identity.model?.takeIf { it.isNotBlank() }
+        if (model != null && normalizeTitle(model).replace(Regex("""[^a-z0-9]"""), "")
+                .let { it.length >= 4 && target.replace(Regex("""[^a-z0-9]"""), "").contains(it) }
+        ) values += model
+        listOf(identity.sku, identity.mpn, identity.gtin).filterNotNull().forEach { identifier ->
+            val compact = normalizeTitle(identifier).replace(Regex("""[^a-z0-9]"""), "")
+            if (compact.length >= 5 && target.replace(Regex("""[^a-z0-9]"""), "").contains(compact)) {
+                values += identifier
+            }
+        }
+        identity.variantProperties.forEach { (key, value) ->
+            if (Regex("""(?i)edition|configuration|colour|color|storage|capacity|memory|ram|rom|ssd""")
+                    .containsMatchIn(key) && value.isNotBlank()
+            ) values += value
+        }
+        return values.distinct().joinToString(" ")
     }
 
     private fun extractJsonLdProductOffers(document: Document): List<Triple<String, Double, String>> {
@@ -4472,20 +4771,32 @@ class WaybackPriceHistoryClient(
         if (isMatchingProductTitle(expectedTitle, archivedTitle)) return true
         if (matchesVariantDetailsConfirmedByUrl(expectedTitle, archivedTitle, originalUrl)) return true
 
+        // Archived Apple purchase pages often expose a generic title ("iPhone 16") although
+        // their exact URL contains the selected model, capacity and colour. Accept the omission
+        // only when every SKU detail is verified by Apple's Spanish configurator route.
         val expected = normalizeTitle(expectedTitle)
         val archived = normalizeTitle(archivedTitle)
-        if (!Regex("""\biphone\s+15\b""").containsMatchIn(expected) ||
-            !Regex("""\biphone\s+15\b""").containsMatchIn(archived)
-        ) return false
+        val expectedModel = Regex("""\biphone\s+(\d{1,2})\b""")
+            .find(expected)?.groupValues?.getOrNull(1) ?: return false
+        val archivedModel = Regex("""\biphone\s+(\d{1,2})\b""")
+            .find(archived)?.groupValues?.getOrNull(1) ?: return false
+        if (expectedModel != archivedModel) return false
 
-        val expectedVariants = productModelVariantTokens(expected)
-        if (expectedVariants.any { it != "plus" }) return false
         val uri = runCatching { URI(originalUrl) }.getOrNull() ?: return false
         val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.")
         if (host != "apple.com") return false
 
+        val expectedVariants = productModelVariantTokens(expected)
+        // Keep this narrow fallback limited to base and Plus models; other models need
+        // their own independently verified route formats.
+        if (expectedVariants.any { it != "plus" }) return false
+        val variantSuffix = if ("plus" in expectedVariants) "-plus" else ""
+        val routePrefix = "/es/shop/buy-iphone/iphone-" + expectedModel + variantSuffix + "/"
+        val path = uri.path.orEmpty().lowercase(Locale.ROOT)
+        if (!path.contains(routePrefix)) return false
+
         val capacity = Regex("""\b(128|256|512)\s*gb\b""")
-            .find(expected)?.groupValues?.get(1) ?: return false
+            .find(expected)?.groupValues?.getOrNull(1) ?: return false
         val colourSlug = when (productColourFamily(expected)) {
             "black" -> "negro"
             "blue" -> "azul"
@@ -4495,21 +4806,21 @@ class WaybackPriceHistoryClient(
             else -> return false
         }
         val display = if ("plus" in expectedVariants) "6,7" else "6,1"
-        val expectedPath = "/es/shop/buy-iphone/iphone-15/pantalla-de-$display″-${capacity}gb-$colourSlug"
-        if (!uri.path.orEmpty().lowercase(Locale.ROOT).contains(expectedPath)) return false
+        val expectedSkuPath = "pantalla-de-" + display + "″-" + capacity + "gb-" + colourSlug
+        if (!path.contains(expectedSkuPath)) return false
 
-        // Missing variant labels on Apple's page title are acceptable because the exact route
-        // has been verified. An explicit mismatch is not.
+        // Missing labels are acceptable only when the exact URL verifies the SKU.
+        // Explicitly conflicting sibling models, colours or capacities remain rejected.
         val archivedVariants = productModelVariantTokens(archived)
         if (archivedVariants.any { it !in expectedVariants }) return false
         val archivedColour = productColourFamily(archived)
         val expectedColour = productColourFamily(expected)
         if (archivedColour != null && archivedColour != expectedColour) return false
-
         val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
         val archivedStorage = storagePattern.findAll(archived)
-            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
-        if (archivedStorage.isNotEmpty() && "${capacity}gb" !in archivedStorage) return false
+            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }
+            .toSet()
+        if (archivedStorage.isNotEmpty() && capacity + "gb" !in archivedStorage) return false
         return true
     }
 
@@ -4622,45 +4933,53 @@ class WaybackPriceHistoryClient(
         if (productConditionKey(expected) != productConditionKey(archived)) return false
         if (productModelVariantTokens(expected) != productModelVariantTokens(archived)) return false
 
-        val expectedColour = productColourFamily(expected)
-        val archivedColour = productColourFamily(archived)
-        if (expectedColour != null && archivedColour != null && expectedColour != archivedColour) return false
-
-        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
-        val expectedStorage = storagePattern.findAll(expected)
-            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
-        val archivedStorage = storagePattern.findAll(archived)
-            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
-
-        // An archived page that explicitly names an unrequested capacity is a different SKU.
-        if (archivedStorage.any { it !in expectedStorage }) return false
-        val missingStorage = expectedStorage.any { it !in archivedStorage }
-
         val uri = runCatching { URI(originalUrl) }.getOrNull() ?: return false
         val pathText = decodePathUrlComponent(uri.rawPath.orEmpty())
         val identityQueryKeys = setOf(
             "sku", "skuid", "sku_id", "variant", "variantid", "variant_id", "variation",
             "variationid", "variation_id", "productid", "product_id", "offerid", "offer_id",
             "pid", "itemid", "item_id", "asin", "mpn", "gtin", "ean", "model", "modelid",
-            "color", "colour", "colorid", "colourid", "storage", "capacity", "size",
-            "configuration", "config", "option", "optionid"
+            "color", "colour", "colorid", "colourid", "storage", "capacity", "size", "memory",
+            "ram", "rom", "configuration", "config", "option", "optionid"
         )
         val queryIdentityText = uri.rawQuery.orEmpty().split('&').mapNotNull { parameter ->
             val rawKey = parameter.substringBefore('=')
             val rawValue = parameter.substringAfter('=', "")
             val key = decodeQueryUrlComponent(rawKey).lowercase(Locale.ROOT)
-            if (key !in identityQueryKeys) null else decodeQueryUrlComponent(rawValue).takeIf { it.isNotBlank() }
+            if (key !in identityQueryKeys) null
+            else decodeQueryUrlComponent(rawValue).takeIf { it.isNotBlank() }
         }.joinToString(" ")
         val urlTitle = normalizeTitle(pathText + " " + queryIdentityText)
+
+        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+        val titleStorage = storagePattern.findAll(expected)
+            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
         val urlStorage = storagePattern.findAll(urlTitle)
             .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
-        if (missingStorage && !urlStorage.containsAll(expectedStorage)) return false
+        // A title and its own product URL must not disagree about storage.
+        if (titleStorage.isNotEmpty() && urlStorage.isNotEmpty() &&
+            titleStorage.intersect(urlStorage).isEmpty()
+        ) return false
+        val expectedStorage = titleStorage.ifEmpty { urlStorage }
+        val archivedStorage = storagePattern.findAll(archived)
+            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
 
+        // An archived page that explicitly names an unrequested capacity is a different SKU.
+        if (archivedStorage.any { it !in expectedStorage }) return false
+        val missingStorage = expectedStorage.any { it !in archivedStorage }
+        if (missingStorage && (expectedStorage.isEmpty() || !urlStorage.containsAll(expectedStorage))) {
+            return false
+        }
+
+        val titleColour = productColourFamily(expected)
         val urlColour = productColourFamily(urlTitle)
-        val missingColour = expectedColour != null && archivedColour == null
-        // Do not attach a colour-specific archived offer to a saved product whose colour is
-        // unknown. The selected product must request the colour that the URL proves.
+        if (titleColour != null && urlColour != null && titleColour != urlColour) return false
+        val expectedColour = titleColour ?: urlColour
+        val archivedColour = productColourFamily(archived)
+        if (expectedColour != null && archivedColour != null && expectedColour != archivedColour) return false
+        // A colour-bearing archived offer cannot be assigned to a target with no verified colour.
         if (expectedColour == null && archivedColour != null) return false
+        val missingColour = expectedColour != null && archivedColour == null
         if (missingColour && urlColour != expectedColour) return false
         if (!missingStorage && !missingColour) return false
 

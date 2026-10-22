@@ -2232,6 +2232,67 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             attempts += direct
                         }
                     }
+                    // Independent archive fallback: Wayback can be empty or rate-limited while
+                    // Arquivo.pt still has snapshots. Run Memento at most once, only for a verified
+                    // direct retailer URL, and reuse the exact same product-identity parser/guards.
+                    if (shouldAttemptMementoFallback(
+                            alreadyAttempted = mementoAttempted,
+                            hasEligibleDirectUrl = candidate.directUrl != null,
+                            hasVerifiedQuotes = attempts.any { it.quotes.isNotEmpty() },
+                            rateLimited = attempts.any { it.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") }
+                        )
+                    ) {
+                        mementoAttempted = true
+                        if (diagnosticProductId != null) {
+                            reportWaybackDiagnostic(
+                                diagnosticProductId, 7, WaybackTraceStatus.RUNNING,
+                                "Wayback no proporcionó un precio verificable; se prueba una fuente de archivo independiente (Memento) una sola vez."
+                            )
+                        }
+                        val mementoResult = withTimeoutOrNull(MAX_ARCHIVE_MEMENTO_FALLBACK_MS) {
+                            mementoClient.fetchHistory(
+                                originalUrl = candidate.directUrl,
+                                expectedTitle = candidate.title,
+                                knownProductTitlesById = knownProductTitlesById,
+                                maxSnapshots = 4,
+                                onVerifiedQuotes = persistQuotesAsTheyArrive
+                            )
+                        }
+                        if (mementoResult == null) {
+                            diagnosticCodes.add("MEMENTO_LOOKUP_TIMEOUT")
+                            if (diagnosticProductId != null) {
+                                reportWaybackDiagnostic(
+                                    diagnosticProductId, 7, WaybackTraceStatus.FAILED,
+                                    "La alternativa Memento superó su límite de 25 segundos; las capturas no se han dado por válidas."
+                                )
+                            }
+                        } else {
+                            attempts += mementoResult
+                            diagnosticCodes.addAll(mementoResult.diagnosticCodes)
+                            if (diagnosticProductId != null) {
+                                val mementoStatus = when {
+                                    mementoResult.quotes.isNotEmpty() -> WaybackTraceStatus.PASSED
+                                    mementoResult.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") -> WaybackTraceStatus.SKIPPED
+                                    mementoResult.capturesFound == 0 && !mementoResult.requestFailed -> WaybackTraceStatus.FAILED
+                                    else -> WaybackTraceStatus.FAILED
+                                }
+                                reportWaybackDiagnostic(
+                                    diagnosticProductId, 7, mementoStatus,
+                                    when {
+                                        mementoResult.quotes.isNotEmpty() ->
+                                            "Memento recuperó ${mementoResult.quotes.size} precio(s) archivado(s) que aún deben guardarse en su ficha exacta."
+                                        mementoResult.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") ->
+                                            "Arquivo.pt pidió limitar las consultas; Mínimo detuvo el respaldo Memento."
+                                        mementoResult.capturesFound == 0 && !mementoResult.requestFailed ->
+                                            "Memento respondió correctamente, pero no encontró capturas para esta URL."
+                                        else ->
+                                            "Memento no pudo recuperar un precio verificable: ${mementoResult.diagnosticCodes.joinToString(", ").take(180)}."
+                                    }
+                                )
+                            }
+                        }
+                    }
+
                     // Try the broad fallback only if exact lookup did not find verified prices.
                     // Its shorter independent timeout leaves time for result rendering and other stores.
                     val rateLimitedAtDirectStage =
@@ -2348,65 +2409,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             "CDX encontró capturas, pero todas las descargas HTML agotaron el tiempo; no se repite Availability en esta ejecución para evitar solicitudes duplicadas."
                         )
                     }
-                    // Independent archive fallback: Wayback can be empty or rate-limited while
-                    // Arquivo.pt still has snapshots. Run Memento at most once, only for a verified
-                    // direct retailer URL, and reuse the exact same product-identity parser/guards.
-                    if (!mementoAttempted &&
-                        candidate.directUrl != null &&
-                        attempts.none { it.quotes.isNotEmpty() } &&
-                        attempts.none { it.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") }
-                    ) {
-                        mementoAttempted = true
-                        if (diagnosticProductId != null) {
-                            reportWaybackDiagnostic(
-                                diagnosticProductId, 7, WaybackTraceStatus.RUNNING,
-                                "Wayback no proporcionó un precio verificable; se prueba una fuente de archivo independiente (Memento) una sola vez."
-                            )
-                        }
-                        val mementoResult = withTimeoutOrNull(MAX_ARCHIVE_MEMENTO_FALLBACK_MS) {
-                            mementoClient.fetchHistory(
-                                originalUrl = candidate.directUrl,
-                                expectedTitle = candidate.title,
-                                knownProductTitlesById = knownProductTitlesById,
-                                maxSnapshots = 4,
-                                onVerifiedQuotes = persistQuotesAsTheyArrive
-                            )
-                        }
-                        if (mementoResult == null) {
-                            diagnosticCodes.add("MEMENTO_LOOKUP_TIMEOUT")
-                            if (diagnosticProductId != null) {
-                                reportWaybackDiagnostic(
-                                    diagnosticProductId, 7, WaybackTraceStatus.FAILED,
-                                    "La alternativa Memento superó su límite de 25 segundos; las capturas no se han dado por válidas."
-                                )
-                            }
-                        } else {
-                            attempts += mementoResult
-                            diagnosticCodes.addAll(mementoResult.diagnosticCodes)
-                            if (diagnosticProductId != null) {
-                                val mementoStatus = when {
-                                    mementoResult.quotes.isNotEmpty() -> WaybackTraceStatus.PASSED
-                                    mementoResult.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") -> WaybackTraceStatus.SKIPPED
-                                    mementoResult.capturesFound == 0 && !mementoResult.requestFailed -> WaybackTraceStatus.FAILED
-                                    else -> WaybackTraceStatus.FAILED
-                                }
-                                reportWaybackDiagnostic(
-                                    diagnosticProductId, 7, mementoStatus,
-                                    when {
-                                        mementoResult.quotes.isNotEmpty() ->
-                                            "Memento recuperó ${mementoResult.quotes.size} precio(s) archivado(s) que aún deben guardarse en su ficha exacta."
-                                        mementoResult.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") ->
-                                            "Arquivo.pt pidió limitar las consultas; Mínimo detuvo el respaldo Memento."
-                                        mementoResult.capturesFound == 0 && !mementoResult.requestFailed ->
-                                            "Memento respondió correctamente, pero no encontró capturas para esta URL."
-                                        else ->
-                                            "Memento no pudo recuperar un precio verificable: ${mementoResult.diagnosticCodes.joinToString(", ").take(180)}."
-                                    }
-                                )
-                            }
-                        }
-                    }
-
                     if (candidateTimedOut && attempts.isEmpty()) {
                         timedOutCount++
                         diagnosticCodes.add("CANDIDATE_TIMEOUT")

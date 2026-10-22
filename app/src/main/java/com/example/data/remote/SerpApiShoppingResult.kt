@@ -401,10 +401,14 @@ fun isGenericGoogleShoppingSearchUrl(sourceUrl: String): Boolean {
         extractGoogleShoppingProductId(sourceUrl) == null
 }
 
-/** Any generated search-results destination is navigation only, not evidence of a seller quote. */
-fun isUnverifiedSearchFallbackUrl(sourceUrl: String): Boolean =
-    isGenericGoogleShoppingSearchUrl(sourceUrl) ||
-        linkTypeForUrl(sourceUrl) == "Búsqueda en tienda"
+/** Any generic search-results destination is navigation only, not evidence of a seller quote. */
+fun isUnverifiedSearchFallbackUrl(sourceUrl: String): Boolean {
+    val uri = runCatching { URI(sourceUrl) }.getOrNull()
+    val path = uri?.path.orEmpty()
+    val genericGoogleSearch = isGoogleShoppingUrl(sourceUrl) &&
+        (path == "/search" || path.startsWith("/search/"))
+    return genericGoogleSearch || linkTypeForUrl(sourceUrl) == "Búsqueda en tienda"
+}
 
 /** True only when the provider identifies a GAME Spain offer by seller name or retailer host. */
 internal fun isGameSpainOffer(offer: SerpApiShoppingResult): Boolean =

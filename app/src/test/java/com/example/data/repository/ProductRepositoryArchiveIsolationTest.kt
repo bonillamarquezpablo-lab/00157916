@@ -475,7 +475,7 @@ class ProductRepositoryArchiveIsolationTest {
                 id = id,
                 title = title,
                 brand = "Apple",
-                category = ProductCategory.PHONES.name,
+                category = ProductCategory.SMARTPHONES.name,
                 currentPrice = price,
                 athMinPrice = price,
                 athMinDate = "Historial en construcción",

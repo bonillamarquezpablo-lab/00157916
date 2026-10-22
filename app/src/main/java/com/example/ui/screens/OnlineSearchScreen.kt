@@ -71,6 +71,7 @@ import com.example.data.remote.formatOnlineSnapshotAge
 import com.example.data.remote.onlineProductRelevanceScore
 import com.example.data.remote.isAccessorySearchQuery
 import com.example.data.remote.isWheelFitmentQuery
+import com.example.data.remote.isGoogleShoppingUrl
 import com.example.ui.viewmodel.OnlineSearchProvider
 import com.example.ui.viewmodel.TrackerUiState
 import kotlinx.coroutines.Dispatchers
@@ -81,7 +82,7 @@ import java.util.Locale
 internal data class OnlineSearchDisplayGroup(
     val group: OnlineProductGroup,
     val stableKey: String,
-    val familyKey: String = onlineSearchFamilyKey(group.identityKey),
+    val familyKey: String = onlineSearchFamilyKey(group.identityKey, group.title),
     val familyLabel: String = onlineSearchFamilyLabel(group.title)
 )
 
@@ -90,7 +91,12 @@ internal data class OnlineSearchDisplayGroup(
  * actual model code. Exact offer identity remains unchanged, so Pro/Max/4G/5G and storage variants
  * stay separate cards under one visible family.
  */
-internal fun onlineSearchFamilyKey(identityKey: String): String {
+internal fun onlineSearchFamilyKey(identityKey: String, title: String = ""): String {
+    val normalizedTitle = title.lowercase(Locale.ROOT).replace(Regex("""[^a-z0-9]+"""), " ").trim()
+    if (
+        Regex("""\badidas\b""").containsMatchIn(normalizedTitle) &&
+        Regex("""\bsuperstar\b""").containsMatchIn(normalizedTitle)
+    ) return "footwear:adidas:superstar"
     val parts = identityKey.split('|').filter { it.isNotBlank() }
     val core = parts.filterNot {
         it.startsWith("variant:") || it.startsWith("memory:") ||
@@ -100,6 +106,11 @@ internal fun onlineSearchFamilyKey(identityKey: String): String {
 }
 
 internal fun onlineSearchFamilyLabel(title: String): String {
+    val normalizedTitle = title.lowercase(Locale.ROOT).replace(Regex("""[^a-z0-9]+"""), " ").trim()
+    if (
+        Regex("""\badidas\b""").containsMatchIn(normalizedTitle) &&
+        Regex("""\bsuperstar\b""").containsMatchIn(normalizedTitle)
+    ) return "Adidas Superstar"
     val spacedTitle = title.replace(
         Regex("""(?i)(\bredmi\s+note\s*\d+)(pro\s*max|pro|plus|ultra|fe|lite|mini|4g|5g)\b"""),
         "$1 $2"
@@ -370,7 +381,9 @@ fun OnlineSearchScreen(
             sourceUrl = offer.sourceUrl,
             storeName = offer.storeName,
             productTitle = offer.title
-        ) ?: return
+        ) ?: offer.sourceUrl.takeIf {
+            offer.sourceProvider.equals("Google Shopping", ignoreCase = true) && isGoogleShoppingUrl(it)
+        } ?: return
         openStoreUrl(
             context,
             destination,

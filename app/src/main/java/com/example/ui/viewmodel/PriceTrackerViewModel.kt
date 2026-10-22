@@ -1509,7 +1509,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
         reportWaybackDiagnostic(
             product.id, 4, WaybackTraceStatus.PASSED,
-            "Precontrol completado: no hay pausa global activa. La consulta puede continuar; caché y límites se comprueban por destino."
+            "Precontrol completado: no hay pausa global activa. Esta búsqueda manual vuelve a revisar fechas aunque exista caché por producto; se mantienen el límite global y el ritmo de peticiones."
         )
         _uiState.value = _uiState.value.copy(
             isSearchingFreeHistory = true,
@@ -1520,7 +1520,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             candidates = orderedCandidates,
             query = product.title,
             provider = current.onlineSearchProvider,
-            targetProductId = product.id
+            targetProductId = product.id,
+            forceRefresh = true
         )
     }
 
@@ -2023,7 +2024,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         candidates: List<FreeArchiveCandidate>,
         query: String,
         provider: OnlineSearchProvider,
-        targetProductId: String? = null
+        targetProductId: String? = null,
+        forceRefresh: Boolean = false
     ) {
         if (candidates.isEmpty()) {
             appendArchiveNotice(
@@ -2212,7 +2214,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 onTrace = traceCallback,
                                 knownProductTitlesById = knownProductTitlesById,
                                 onVerifiedQuotes = persistQuotesAsTheyArrive,
-                                forceRefresh = true
+                                forceRefresh = forceRefresh
                             )
                         }
                         if (direct == null) {
@@ -2257,7 +2259,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 preferredUrlAlreadyQueried = candidate.directUrl != null,
                                 onTrace = traceCallback,
                                 knownProductTitlesById = knownProductTitlesById,
-                                onVerifiedQuotes = persistQuotesAsTheyArrive
+                                onVerifiedQuotes = persistQuotesAsTheyArrive,
+                                forceRefresh = forceRefresh
                             )
                         }
                         if (domainResult == null) {

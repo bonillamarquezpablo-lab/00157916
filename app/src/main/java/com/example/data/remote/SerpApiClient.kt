@@ -394,7 +394,7 @@ class SerpApiClient(
                 title = title,
                 price = price,
                 storeName = "Amazon.es",
-                sourceUrl = safeUrl,
+                sourceUrl = url,
                 thumbnailUrl = thumbnail,
                 delivery = delivery,
                 rating = rating,
@@ -402,7 +402,9 @@ class SerpApiClient(
                 observedAt = observedAt,
                 primeEligible = item.optBoolean("prime", false)
             )
-        }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
+        }.distinctBy {
+            "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}|${onlineProductIdentityKey(it.title)}|${onlineOfferSizeAudienceKey(it.title)}"
+        }
             .sortedWith(
                 compareByDescending<SerpApiShoppingResult> { onlineProductRelevanceScore(query.orEmpty(), it.title) }
                     .thenBy { it.price }
@@ -617,21 +619,19 @@ class SerpApiClient(
             val extractedCandidate = candidateUrls.firstNotNullOfOrNull { raw ->
                 extractDirectRetailerUrl(raw)
             }
-            // Prefer the seller's real HTTPS product page. Known merchants may use their own
-            // storefront search only as a last resort; never expose a generic Google search URL.
+            val googleSearchFallback = googleShoppingSearchUrl(title)
+            // Prefer a seller URL, then the known shop's own search page. If neither exists,
+            // keep the priced variant and point to a specific Google Shopping search.
             val url = extractedCandidate
                 ?: fallbackProviderUrl?.let {
                     retailerDestinationForOffer(it, providerSource.orEmpty(), title)
                 }
                 ?: retailerDestinationForOffer(
-                    googleShoppingSearchUrl(title),
+                    googleSearchFallback,
                     providerSource.orEmpty(),
                     title
                 )
-            // A missing direct merchant URL is a navigation limitation, not proof that the
-            // product result is invalid. Keep the offer and link to a clearly scoped Google
-            // Shopping search rather than silently discarding a valid title/price pair.
-            val safeUrl = url?.takeIf(::isNavigableHttpUrl) ?: googleShoppingSearchUrl(title)
+            val safeUrl = url?.takeIf(::isNavigableHttpUrl) ?: googleSearchFallback
             if (!isNavigableHttpUrl(safeUrl)) {
                 rejectedForLink++
                 recordDiscard(item, title, "No se pudo construir un enlace de búsqueda seguro")
@@ -644,7 +644,11 @@ class SerpApiClient(
             val linkSourceProvider = "Google Shopping"
             val host = runCatching { URI(safeUrl).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()
-            val source = providerSource ?: humanizeHost(host)
+            val source = if (safeUrl == googleSearchFallback || isGoogleShoppingUrl(safeUrl)) {
+                "Google Shopping"
+            } else {
+                providerSource ?: humanizeHost(host)
+            }
             val thumbnail = item.optString("thumbnail").takeIf { isHttpsUrl(it) }.orEmpty()
             val delivery = sequenceOf(item.optString("delivery"), item.optString("shipping"))
                 .firstOrNull { it.isNotBlank() && it != "null" }.orEmpty()
@@ -662,7 +666,7 @@ class SerpApiClient(
                 title = title,
                 price = price,
                 storeName = source,
-                sourceUrl = url,
+                sourceUrl = safeUrl,
                 thumbnailUrl = thumbnail,
                 delivery = delivery,
                 rating = rating,
@@ -674,7 +678,9 @@ class SerpApiClient(
                 isCategoryUnverified = categoryUnverified,
                 sourceProvider = linkSourceProvider
             )
-        }.distinctBy { "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}" }
+        }.distinctBy {
+            "${it.sourceUrl.lowercase(Locale.ROOT)}|${it.price}|${onlineProductIdentityKey(it.title)}|${onlineOfferSizeAudienceKey(it.title)}"
+        }
             .sortedWith(
                 compareByDescending<SerpApiShoppingResult> {
                     onlineProductRelevanceScore(query.orEmpty(), it.title)

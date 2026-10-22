@@ -530,7 +530,8 @@ class WaybackPriceHistoryClient(
         preferredUrlAlreadyQueried: Boolean = false,
         onTrace: ((WaybackTraceEvent) -> Unit)? = null,
         knownProductTitlesById: Map<String, String> = emptyMap(),
-        onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null
+        onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null,
+        forceRefresh: Boolean = false
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
         if (!preferences.getBoolean("enabled", true)) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("WAYBACK_DISABLED"))
@@ -638,7 +639,7 @@ class WaybackPriceHistoryClient(
                     diagnosticCodes = setOf("WAYBACK_RATE_LIMITED")
                 )
             }
-            if (wasAttemptedRecently(attempt, System.currentTimeMillis())) {
+            if (shouldSkipRecentAttempt(attempt, System.currentTimeMillis(), forceRefresh)) {
                 val previousAttemptFailed = preferences.getBoolean("${attempt}_failed", false)
                 emitCachedLookupSkippedTrace(
                     onTrace,
@@ -1725,7 +1726,7 @@ class WaybackPriceHistoryClient(
             val seriesCacheKey = attemptKey(
                 "availability-verified-url-cdx-series-v1|$verifiedSeriesUrl|$expectedTitle|$lookbackDays"
             )
-            if (!wasAttemptedRecently(seriesCacheKey, now)) {
+            if (forceRefresh || !wasAttemptedRecently(seriesCacheKey, now)) {
                 val seriesCdxUrl = buildCdxUrl(
                     originalUrl = verifiedSeriesUrl,
                     now = now,
@@ -2850,6 +2851,12 @@ class WaybackPriceHistoryClient(
         val diagnosticCode: String? = null
     )
 
+
+    internal fun shouldSkipRecentAttempt(
+        key: String,
+        now: Long,
+        forceRefresh: Boolean
+    ): Boolean = !forceRefresh && wasAttemptedRecently(key, now)
 
     internal fun wasAttemptedRecently(key: String, now: Long): Boolean {
         val lastAttempt = preferences.getLong(key, 0L)

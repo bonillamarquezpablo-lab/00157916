@@ -798,7 +798,7 @@ fun onlineProductIdentityKey(title: String): String {
     // Remove target-gender and generic apparel words before trimming a trailing size,
     // so titles such as "Nike Air Force 1 Gris - 40.5 Hombre" normalize correctly.
     val titleForSize = standardizedTitle.replace(
-        Regex("""(?i)\b(zapatillas|zapatilla|sneakers|shoes|calzado|hombre|mujer|men|man|women|woman|unisex)\b"""),
+        Regex("""(?i)\b(zapatillas|zapatilla|sneakers|shoes|calzado|hombre|mujer|men|man|women|woman|unisex|kids?|children|ninos?|ninas?|infantil|junior|youth|baby|bebes?)\b"""),
         " "
     )
     val looksLikeFootwear = Regex(
@@ -870,7 +870,7 @@ fun onlineProductIdentityKey(title: String): String {
         .replace(Regex("""\b(?:4g|5g|wifi|wi-fi|bluetooth|nfc)\b"""), " ")
         .replace(
             Regex(
-                """\b(smartphone|telefono|telefonos|movil|moviles|mobile|phone|nuevo|new|original|oficial|libre|zapatilla|zapatillas|calzado|shoes|sneakers|hombre|mujer|men|man|woman|women|unisex|negro|negra|negros|black|azul|blue|blanco|blanca|white|verde|green|rojo|roja|red|gris|gray|grey|rosa|pink|morado|purple|plateado|silver)\b"""
+                """\b(smartphone|telefono|telefonos|movil|moviles|mobile|phone|nuevo|new|original|oficial|libre|zapatilla|zapatillas|calzado|shoes|sneakers|hombre|mujer|men|man|woman|women|unisex|kids?|children|ninos?|ninas?|infantil|junior|youth|baby|bebes?|negro|negra|negros|black|azul|blue|blanco|blanca|white|verde|green|rojo|roja|red|gris|gray|grey|rosa|pink|morado|purple|plateado|silver)\b"""
             ),
             " "
         )
@@ -1017,6 +1017,33 @@ internal fun onlineOfferDeduplicationUrlKey(rawUrl: String): String {
     }
 }
 
+/**
+ * Size/audience qualifier for footwear offers. Product URLs and prices can be shared across sizes;
+ * dedupe repeated entries for the same size but preserve other sizes and age/gender variants.
+ */
+internal fun onlineOfferSizeAudienceKey(title: String): String {
+    val normalized = normalizeOnlineSearchText(title)
+    val footwear = Regex(
+        """\b(adidas|nike|puma|asics|new balance|reebok|converse|vans|air force|air max|jordan|dunk|samba|gazelle|pegasus|superstar|sneakers?|shoes?|zapatillas?|calzado)\b"""
+    ).containsMatchIn(normalized)
+    if (!footwear) return ""
+    val audience = when {
+        Regex("""\b(kids?|children|ninos?|ninas?|infantil|junior|youth|baby|bebes?)\b""").containsMatchIn(normalized) -> "kids"
+        Regex("""\b(mujer|women|woman|womens|femenina|feminina)\b""").containsMatchIn(normalized) -> "women"
+        Regex("""\b(hombre|men|man|mens|masculino)\b""").containsMatchIn(normalized) -> "men"
+        Regex("""\bunisex\b""").containsMatchIn(normalized) -> "unisex"
+        else -> null
+    }
+    val labelledSize = Regex(
+        """\b(?:talla|size|eu|eur|uk|us)\s*[:#-]?\s*(\d{1,2}(?:[.,]\d)?)\b"""
+    ).find(normalized)?.groupValues?.getOrNull(1)
+    val trailingSize = if (labelledSize == null) {
+        Regex("""(?:^|\s)(1[6-9]|[2-4]\d|5[0-2])(?:[.,]\d)?$""").find(normalized)?.value?.trim()
+    } else null
+    val size = (labelledSize ?: trailingSize)?.replace(',', '.')?.removeSuffix(".0")
+    return listOfNotNull(audience?.let { "audience:$it" }, size?.let { "size:$it" }).joinToString("|")
+}
+
 /** Groups repeated seller listings into one product card, retaining all separate offers. */
 fun groupOnlineShoppingResults(
     results: List<SerpApiShoppingResult>
@@ -1042,7 +1069,7 @@ fun groupOnlineShoppingResults(
                     } else {
                         offer.price.toString()
                     }
-                    "$sellerKey|$priceKey"
+                    "$sellerKey|$priceKey|${onlineOfferSizeAudienceKey(offer.title)}"
                 }
                 .sortedBy { it.price }
             if (sortedOffers.isEmpty()) null

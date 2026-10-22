@@ -4044,10 +4044,32 @@ class WaybackPriceHistoryClient(
                 // strict SKU comparison first, with the exact URL only to resolve a title that
                 // omits variant details. A sibling with a conflicting capacity/colour is not
                 // classified as the primary product simply because it appears on the same page.
-                val isPrimarySavedProduct =
-                    isMatchingProductTitle(primaryExpectedTitle, savedTitle) ||
-                        (isMatchingTitleForArchivedUrl(primaryExpectedTitle, savedTitle, originalUrl) &&
-                            !hasExplicitVariantConflictInProductUrl(primaryExpectedTitle, originalUrl))
+                val primaryNormalizedTitle = normalizeTitle(primaryExpectedTitle)
+                val savedNormalizedTitle = normalizeTitle(savedTitle)
+                val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+                val primaryStorage = storagePattern.findAll(primaryNormalizedTitle)
+                    .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
+                val savedStorage = storagePattern.findAll(savedNormalizedTitle)
+                    .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
+                val explicitStorageConflict = primaryStorage.isNotEmpty() &&
+                    savedStorage.isNotEmpty() && primaryStorage != savedStorage
+                val primaryColour = productColourFamily(primaryNormalizedTitle)
+                val savedColour = productColourFamily(savedNormalizedTitle)
+                val explicitColourConflict = primaryColour != null && savedColour != null &&
+                    primaryColour != savedColour
+                val explicitModelVariantConflict =
+                    productModelVariantTokens(primaryNormalizedTitle) !=
+                        productModelVariantTokens(savedNormalizedTitle)
+
+                // A saved row with a different explicit capacity, colour or edition is a sibling,
+                // even if a broad archive-page matcher could otherwise treat the family URL as a
+                // match. Never drop it from the sibling-offer pipeline as if it were the primary.
+                val isPrimarySavedProduct = !explicitStorageConflict &&
+                    !explicitColourConflict && !explicitModelVariantConflict && (
+                        isMatchingProductTitle(primaryExpectedTitle, savedTitle) ||
+                            (isMatchingTitleForArchivedUrl(primaryExpectedTitle, savedTitle, originalUrl) &&
+                                !hasExplicitVariantConflictInProductUrl(primaryExpectedTitle, originalUrl))
+                    )
                 if (isPrimarySavedProduct) return@mapNotNull null
 
                 val offerUrls = jsonLdProductUrlsForOffer(
@@ -4635,7 +4657,7 @@ class WaybackPriceHistoryClient(
      * explicitly names every missing detail. The model and edition must still match exactly.
      * This supports retailer pages whose visible heading is generic but whose URL targets a SKU.
      */
-    private fun matchesVariantDetailsConfirmedByUrl(
+    internal fun matchesVariantDetailsConfirmedByUrl(
         expectedTitle: String,
         archivedTitle: String,
         originalUrl: String

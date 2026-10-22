@@ -22,6 +22,7 @@ import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.isIrrelevantMultiProductBundle
+import com.example.data.remote.hasXiaomiModelMismatch
 import com.example.data.remote.isAccessoryListingTitle
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.linkTypeForUrl
@@ -315,6 +316,7 @@ class ProductRepository(
                 !result.isRentalOrMonthly &&
                 !isPromotionalBulkListing(result.title, searchQuery) &&
                 !isIrrelevantMultiProductBundle(searchQuery, result.title) &&
+                !hasXiaomiModelMismatch(searchQuery, result.title) &&
                 (!isHallEffectKeyboardSearch(searchQuery) || isHallEffectKeyboardResult(result.title)) &&
                 (!isBicycleDrivetrainSearch(searchQuery) || isBicycleDrivetrainComponentTitle(result.title)) &&
                 !isWrongBicycleTireDiameter(searchQuery, result.title) &&

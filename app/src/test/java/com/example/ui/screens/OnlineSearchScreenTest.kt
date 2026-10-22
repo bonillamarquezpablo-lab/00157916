@@ -489,6 +489,47 @@ class OnlineSearchScreenTest {
     }
 
     @Test
+    fun liveIphone16SearchKeepsPricedVariantsAndAccessoriesButExplainsMonthlyDiscard() {
+        val now = System.currentTimeMillis()
+        val response = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {"title":"Apple iPhone 16","price":"574,99 €","extracted_price":574.99,"source":"Google Shopping"},
+                {"title":"Apple iPhone 16 Pro 256 GB","price":"899,00 €","extracted_price":899.0,"link":"http://seller-unknown.example/iphone-16-pro","source":"Google Shopping"},
+                {"title":"Apple iPhone 16 Plus","price":"749,00 €","extracted_price":749.0,"source":"Google Shopping"},
+                {"title":"Apple iPhone 16 Pro Max 512 GB","price":"999,00 €","extracted_price":999.0,"source":"Google Shopping"},
+                {"title":"Funda para Apple iPhone 16","price":"19,99 €","extracted_price":19.99,"source":"Google Shopping"},
+                {"title":"Apple iPhone 16 Pro 44,99 €/mes","price":"44,99 €/mes","extracted_price":44.99,"link":"https://shop.example/monthly-iphone","source":"Google Shopping"}
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = response,
+            query = "iphone 16",
+            observedAt = now
+        )
+        val acceptedTitles = report.results.map { it.title }
+
+        assertEquals("The live parser should explain and reject only the monthly installment", 6, report.rawResultCount)
+        assertEquals(5, report.results.size)
+        assertEquals(0, report.rejectedForLink)
+        assertTrue(acceptedTitles.contains("Apple iPhone 16"))
+        assertTrue(acceptedTitles.contains("Apple iPhone 16 Pro 256 GB"))
+        assertTrue(acceptedTitles.contains("Apple iPhone 16 Plus"))
+        assertTrue(acceptedTitles.contains("Apple iPhone 16 Pro Max 512 GB"))
+        assertTrue(acceptedTitles.contains("Funda para Apple iPhone 16"))
+        assertTrue(report.results.all { it.isSearchFallbackDestination })
+        assertTrue(report.results.single { it.isAccessoryOffer }.title.startsWith("Funda"))
+        assertEquals(1, report.discardedOffers.size)
+        assertTrue(report.discardedOffers.single().reason.contains("cuota mensual", ignoreCase = true))
+        assertTrue(report.discardedOffers.single().priceLabel.contains("/mes"))
+    }
+
+    @Test
     fun pricedOfferWithoutSafeRetailerLinkRemainsUsableThroughSpecificShoppingSearch() {
         val response = JSONObject(
             """

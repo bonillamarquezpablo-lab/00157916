@@ -2565,18 +2565,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     // This final pass catches results from routes that did not stream their points.
                     persistCandidateQuotes(candidate, quotes)
 
-                    // An HTTP 429 is global. Also stop the outer merchant-candidate loop as
-                    // soon as one fully validated primary price exists: the exact CDX call has
-                    // already persisted every quote from that capture, including staged discoveries.
-                    val primaryPriceVerified = attempts.any { attempt ->
-                        attempt.quotes.any {
-                            it.targetProductId.isNullOrBlank() && !it.isDiscoveryCandidate
-                        }
-                    }
-                    if (attempts.any { it.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") } ||
-                        primaryPriceVerified
-                    ) {
-                        if (primaryPriceVerified) diagnosticCodes.add("CDX_EARLY_EXIT_VALID_PRICE")
+                    // An HTTP 429 applies to the shared archive service, so stop trying more
+                    // merchant candidates after it is reported. A valid quote from one merchant
+                    // must not prevent collecting history for the remaining candidates.
+                    if (attempts.any { it.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") }) {
                         break
                     }
                 }

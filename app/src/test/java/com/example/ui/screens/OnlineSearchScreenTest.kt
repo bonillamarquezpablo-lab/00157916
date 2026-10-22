@@ -497,7 +497,15 @@ class OnlineSearchScreenTest {
             "Alternador VW Polo 9N 1.9 SDI ASY" to "89,90 €",
             "Pantalla Original Xiaomi Mi 10 Pro Versión S" to "42,50 €",
             "Funda para Apple iPhone 16" to "19,99 €",
-            "Samsung OLED TV 55 inch" to "799,00 €"
+            "Samsung OLED TV 55 inch" to "799,00 €",
+            "Lenovo ThinkPad T14 Gen 5 32GB RAM" to "1.099,00 €",
+            "PlayStation 5 Slim Digital Edition" to "399,99 €",
+            "Samsung 990 PRO 2TB NVMe SSD" to "169,99 €",
+            "Logitech G923 Racing Wheel" to "279,99 €",
+            "Batería externa INIU 20000mAh 65W" to "49,99 €",
+            "Faro delantero izquierdo Volkswagen Polo 9N" to "39,99 €",
+            "Lavavajillas Bosch Serie 6 SMS6" to "699,00 €",
+            "Cámara Sony Alpha A6400" to "749,00 €"
         )
 
         cases.forEachIndexed { index, (title, priceText) ->
@@ -602,6 +610,20 @@ class OnlineSearchScreenTest {
                       "monthly_payment_amount": 44.99,
                       "monthly_payment_duration": 24,
                       "source": "Google Shopping"
+                    },
+                    {
+                      "title": "Apple iPhone 16 Pro 256 GB Negro",
+                      "price": "899,00 €",
+                      "extracted_price": 899.0,
+                      "payment_description": "Visa y Mastercard",
+                      "source": "Google Shopping"
+                    },
+                    {
+                      "title": "Apple iPhone 16 Pro 256 GB Azul",
+                      "price": "49,99",
+                      "extracted_price": 49.99,
+                      "monthly_payment_duration": 12,
+                      "source": "Google Shopping"
                     }
                   ]
                 }
@@ -611,11 +633,15 @@ class OnlineSearchScreenTest {
             observedAt = System.currentTimeMillis()
         )
 
-        assertEquals(2, report.rawResultCount)
-        assertEquals("A separate, clearly labelled total price remains usable", 1, report.results.size)
-        assertEquals(899.0, report.results.single().price, 0.001)
-        assertEquals(1, report.discardedOffers.size)
-        assertEquals("Alquiler o cuota mensual", report.discardedOffers.single().reason)
+        assertEquals(4, report.rawResultCount)
+        assertEquals("Clear totals and normal card-payment offers remain usable", 2, report.results.size)
+        assertTrue(report.results.all { kotlin.math.abs(it.price - 899.0) < 0.001 })
+        assertTrue(report.results.any { it.title.endsWith("Negro") })
+        assertTrue(report.results.any { it.title == "Apple iPhone 16 Pro 256 GB" })
+        assertEquals(2, report.discardedOffers.size)
+        assertTrue(report.discardedOffers.all { it.reason == "Alquiler o cuota mensual" })
+        assertTrue(report.discardedOffers.any { it.title.contains("Azul") })
+        assertTrue(report.discardedOffers.any { it.priceLabel.contains("44,99") })
     }
 
     @Test

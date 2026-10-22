@@ -1249,34 +1249,50 @@ class SerpApiClient(
         )
         if (excludedTerms.containsMatchIn(title)) return true
 
-        // Some feeds expose the instalment amount separately while showing a full-looking
-        // product price. Explicit monthly fields make that amount non-comparable as a one-off
-        // purchase price even when the field only contains "44.99" or a duration such as "24".
+        val priceText = listOf("price", "price_text", "price_formatted", "formatted_price", "display_price")
+            .mapNotNull { key -> item.opt(key)?.toString()?.takeUnless { it.isBlank() || it == "null" } }
+            .firstOrNull().orEmpty()
+        // An explicitly monthly-looking primary price is never a one-off purchase price.
+        if (excludedTerms.containsMatchIn(priceText)) return true
+
+        val extractedPrice = item.opt("extracted_price")
+            ?.takeIf { it !is JSONObject && it !is JSONArray }
+            ?.toString()
+            ?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() && it > 0.0 }
+        val primaryPrice = extractedPrice ?: parsePrice(priceText)
+        val primaryIsClearlyTotalPrice = primaryPrice != null &&
+            (priceText.contains("€") || priceText.contains("EUR", ignoreCase = true))
+
+        // Explicit monthly amount fields are a strong signal only when the listed price itself
+        // is ambiguous or equals that monthly amount. Preserve a clearly labelled total price
+        // when the feed also advertises a separate monthly-payment option.
         val monthlyAmountKeys = listOf(
             "monthly_payment", "monthly_payment_amount", "monthly_price",
             "monthly_installment", "monthly_installment_amount",
-            "price_per_month", "price_month", "installment_amount_per_month",
-            "monthly_payment_duration"
+            "price_per_month", "price_month", "installment_amount_per_month"
         )
-        val hasExplicitMonthlyMetadata = monthlyAmountKeys.any { key ->
+        val monthlyValues = monthlyAmountKeys.mapNotNull { key ->
+            item.opt(key)?.toString()?.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 }
+        }
+        val monthlySignalKeys = monthlyAmountKeys + "monthly_payment_duration"
+        val hasMonthlyMetadata = monthlySignalKeys.any { key ->
             val value = item.opt(key)?.toString()?.trim()
             !value.isNullOrBlank() &&
                 value.lowercase(Locale.ROOT) !in setOf("null", "0", "0.0", "false", "[]", "{}")
         }
-        if (hasExplicitMonthlyMetadata) return true
+        val primaryMatchesMonthlyAmount = primaryPrice != null &&
+            monthlyValues.any { kotlin.math.abs(it - primaryPrice) < 0.011 }
+        if (hasMonthlyMetadata && (!primaryIsClearlyTotalPrice || primaryMatchesMonthlyAmount)) return true
 
-        // General installment/payment fields are inspected by their values. A bare count such as
-        // "3 installments available" does not by itself prove the displayed product price is a
-        // monthly amount; text that actually describes monthly payments is rejected above.
         val paymentText = listOf(
-            "price", "price_text", "price_formatted", "formatted_price",
-            "display_price", "extracted_price_text", "installments_description",
-            "installments", "installments_count", "payment_description", "payment_plan",
+            "extracted_price_text", "installments_description", "installments",
+            "installments_count", "payment_description", "payment_plan",
             "down_payment", "credit_terms", "payment_terms", "alt_currency"
         ).mapNotNull { key ->
             item.opt(key)?.toString()?.takeUnless { it.isBlank() || it == "null" || it == "0" }
         }.joinToString(" ")
-        if (excludedTerms.containsMatchIn(paymentText)) return true
+        if (excludedTerms.containsMatchIn(paymentText) && !primaryIsClearlyTotalPrice) return true
 
         val conditionText = listOf(
             "second_hand_condition", "condition", "item_condition",
@@ -1284,7 +1300,7 @@ class SerpApiClient(
         ).mapNotNull { key ->
             item.opt(key)?.toString()?.takeUnless { it.isBlank() || it == "null" }
         }.joinToString(" ")
-        return excludedTerms.containsMatchIn(conditionText)
+        return excludedTerms.containsMatchIn(conditionText) && !primaryIsClearlyTotalPrice
     }
 
     private fun nonNewRejectionReason(item: JSONObject, title: String): String {

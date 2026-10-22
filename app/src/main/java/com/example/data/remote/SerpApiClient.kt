@@ -1245,9 +1245,22 @@ class SerpApiClient(
 
     private fun isRentalOrMonthlyListing(item: JSONObject, title: String): Boolean {
         val excludedTerms = Regex(
-            """(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes|al\s+mes)\b|/\s*mes\b)"""
+            """(?i)(?:\\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\\s+a\\s+plazos|por\\s+mes|per\\s+month|mes\\s+a\\s+mes|al\\s+mes)\\b|/\\s*(?:mes|month|mo)\\b)"""
         )
         if (excludedTerms.containsMatchIn(title)) return true
+
+        // Providers may place "44,99 €/mes" in the price field while leaving the product title
+        // clean. Treat price/offer metadata as part of the live listing identity so a monthly
+        // instalment can never be displayed or ranked as the product's total purchase price.
+        val paymentText = listOf(
+            "price", "price_text", "price_formatted", "display_price",
+            "installments_description", "monthly_payment_duration", "down_payment",
+            "alt_currency", "payment_terms"
+        ).mapNotNull { key ->
+            item.opt(key)?.toString()?.takeUnless { it.isBlank() || it == "null" || it == "0" }
+        }.joinToString(" ")
+        if (excludedTerms.containsMatchIn(paymentText)) return true
+
         val conditionText = listOf(
             "second_hand_condition", "condition", "item_condition",
             "product_condition", "condition_description"

@@ -1552,7 +1552,7 @@ class SerpApiClient(
         if (hasXiaomiModelMismatch(
                 requested,
                 returned,
-                allowMissingEdition = isAccessoryListingTitle(returned)
+                allowMissingAccessoryQualifiers = isAccessoryListingTitle(returned)
             )
         ) return false
 

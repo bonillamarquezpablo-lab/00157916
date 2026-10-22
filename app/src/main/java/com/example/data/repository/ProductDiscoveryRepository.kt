@@ -123,7 +123,22 @@ class ProductDiscoveryRepository(private val database: AppDatabase) {
             storeDomain = productHost,
             sourceName = archiveProviderName(snapshotUrl),
             collectedAt = now,
-            verificationNote = "Oferta estructurada Product/Offer verificada en una captura pública archivada. La página capturada y el destino de la variante se conservan por separado; no representa un precio actual."
+            verificationNote = if (
+                quote.sourceCurrency.equals("USD", ignoreCase = true) &&
+                quote.exchangeRate != null &&
+                !quote.exchangeRateDate.isNullOrBlank()
+            ) {
+                "Precio archivado originalmente en " +
+                    String.format(Locale.ROOT, "%.2f", quote.sourcePrice) + " USD; convertido a " +
+                    String.format(Locale.ROOT, "%.2f", quote.price) +
+                    " EUR con 1 USD = " + String.format(Locale.ROOT, "%.4f", quote.exchangeRate) +
+                    " EUR, fecha efectiva " + quote.exchangeRateDate +
+                    " (fuente " + (quote.conversionSource ?: "no indicada") + "). " +
+                    "Producto identificado en Product/Offer JSON-LD; es histórico, no una oferta actual."
+            } else {
+                "Oferta estructurada Product/Offer verificada en una captura pública archivada. " +
+                    "La página capturada y el destino de la variante se conservan por separado; no representa un precio actual."
+            }
         )
         if (dao.insertObservation(observation) < 0L) return@withTransaction false
 

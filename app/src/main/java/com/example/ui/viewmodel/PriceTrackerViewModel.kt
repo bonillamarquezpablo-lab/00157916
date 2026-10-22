@@ -1865,14 +1865,16 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         }
                     }
 
-                    // Keep CPU-heavy product relevance filtering off Android's UI thread.
-                    val (results, discarded) = withContext(Dispatchers.Default) {
+                    // Keep display classification off Android's UI thread, but do not let
+                    // history trust rules hide real priced listings from the live results.
+                    val (results, historyCandidates, discarded) = withContext(Dispatchers.Default) {
                         val rawResults = providerResults
-                        val repositoryDiscarded = repository.diagnoseOnlineSearchRejections(rawResults, query)
-                        val accepted = repository.filterOnlineSearchResults(rawResults, query)
+                        val visible = repository.filterVisibleLiveSearchResults(rawResults, query)
+                        val eligibleForHistory = repository.filterOnlineSearchResults(visible, query)
+                        val repositoryDiscarded = diagnoseLiveSearchHiddenOffers(rawResults, visible, query)
                         val rejected = (providerDiscardedOffers + repositoryDiscarded)
                             .distinctBy { "${it.provider}|${it.title}|${it.priceLabel}|${it.reason}" }
-                        accepted to rejected
+                        Triple(visible, eligibleForHistory, rejected)
                     }
                     onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = discarded
                     val savedObservations = if (results.isNotEmpty()) {

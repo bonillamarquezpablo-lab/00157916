@@ -4264,26 +4264,37 @@ class WaybackPriceHistoryClient(
         fun read(vararg keys: String): String? = keys.firstNotNullOfOrNull { key ->
             readMeta(document, setOf(key)) ?: readItemPropValue(document, key)
         }
-        fun dataValue(vararg attributes: String): String? = document.getAllElements().asSequence()
-            .mapNotNull { element ->
+        // Keep data-* signals from one element together. Pulling colour from one product card
+        // and capacity from a neighbouring card could fabricate a variant that never existed.
+        val dataAttributeNames = linkedMapOf(
+            "model" to listOf("data-model", "data-model-number", "data-product-model", "data-device-model"),
+            "color" to listOf("data-color", "data-colour", "data-product-color"),
+            "storage" to listOf("data-storage", "data-capacity", "data-memory", "data-product-storage", "data-product-capacity"),
+            "sku" to listOf("data-sku", "data-product-sku", "data-variant-id", "data-product-id"),
+            "mpn" to listOf("data-mpn", "data-product-mpn"),
+            "gtin" to listOf("data-gtin", "data-ean", "data-product-gtin"),
+            "brand" to listOf("data-brand", "data-product-brand")
+        )
+        val dataValues = document.getAllElements().asSequence().mapNotNull { element ->
+            val fields = linkedMapOf<String, String>()
+            dataAttributeNames.forEach { (field, attributes) ->
                 attributes.firstNotNullOfOrNull { attribute ->
                     element.attr(attribute).takeIf { element.hasAttr(attribute) && it.isNotBlank() }
-                }
-            }.firstOrNull()
+                }?.let { fields[field] = it }
+            }
+            fields.takeIf { it.isNotEmpty() }
+        }.maxByOrNull { it.size }.orEmpty()
+
         val properties = linkedMapOf<String, String>()
         listOf(
-            "model" to (read("product:model", "model", "modelnumber", "model_number")
-                ?: dataValue("data-model", "data-model-number", "data-product-model", "data-device-model")),
-            "color" to (read("product:color", "color", "colour")
-                ?: dataValue("data-color", "data-colour", "data-product-color")),
-            "storage" to (read("product:storage", "storage", "capacity", "memory", "ram", "rom")
-                ?: dataValue("data-storage", "data-capacity", "data-memory", "data-product-storage", "data-product-capacity")),
-            "sku" to (read("product:sku", "sku", "product:retailer_item_id", "retailer_item_id")
-                ?: dataValue("data-sku", "data-product-sku", "data-variant-id", "data-product-id")),
-            "mpn" to (read("mpn", "product:mpn") ?: dataValue("data-mpn", "data-product-mpn")),
+            "model" to (read("product:model", "model", "modelnumber", "model_number") ?: dataValues["model"]),
+            "color" to (read("product:color", "color", "colour") ?: dataValues["color"]),
+            "storage" to (read("product:storage", "storage", "capacity", "memory", "ram", "rom") ?: dataValues["storage"]),
+            "sku" to (read("product:sku", "sku", "product:retailer_item_id", "retailer_item_id") ?: dataValues["sku"]),
+            "mpn" to (read("mpn", "product:mpn") ?: dataValues["mpn"]),
             "gtin" to (read("gtin", "gtin8", "gtin12", "gtin13", "gtin14", "ean", "product:gtin")
-                ?: dataValue("data-gtin", "data-ean", "data-product-gtin")),
-            "brand" to (read("product:brand", "brand") ?: dataValue("data-brand", "data-product-brand"))
+                ?: dataValues["gtin"]),
+            "brand" to (read("product:brand", "brand") ?: dataValues["brand"])
         ).forEach { (key, value) -> if (!value.isNullOrBlank()) properties[key] = value }
         return ArchivedProductIdentityEvidence(
             brand = properties["brand"],

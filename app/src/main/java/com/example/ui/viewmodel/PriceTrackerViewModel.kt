@@ -298,6 +298,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     /** Prevent a streaming callback and the final consolidation pass from scheduling the same staged write twice. */
     private val scheduledDiscoveryQuoteKeys =
         java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    /** Prevent duplicate current-price lookups when several archive candidates fail together. */
+    private val inFlightArchiveFailureFallbacks =
+        java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private var lastDisplayedSearchIdentity: String? = null
 
     private fun onlineSearchIdentity(provider: OnlineSearchProvider, query: String): String =
@@ -342,10 +345,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     private fun waybackRateLimitNotice(now: Long = System.currentTimeMillis()): String {
         val until = waybackPriceHistoryClient.activeRateLimitUntil(now)
-            ?: return "Internet Archive devolvió HTTP 429, pero la pausa local ya ha vencido. Mínimo no repetirá automáticamente la consulta; si la caché lo permite, puedes volver a pulsar «Buscar histórico gratis». No se ha gastado cuota de SerpApi."
+            ?: return "Internet Archive devolvió HTTP 429, pero la pausa local ya ha vencido. Mínimo no repetirá automáticamente la consulta; si la caché lo permite, puedes volver a pulsar «Buscar histórico gratis». Las consultas al archivo son gratuitas; el respaldo del precio actual, si se activa, puede consumir una búsqueda de SerpApi."
         val remainingMinutes = ((until - now + 59_999L) / 60_000L).coerceAtLeast(1L)
         val retryAt = SimpleDateFormat("HH:mm", Locale("es", "ES")).format(Date(until))
-        return "Internet Archive ha pedido una pausa temporal (HTTP 429). Mínimo no enviará más peticiones hasta aproximadamente las ${retryAt} (en unos ${remainingMinutes} min). Vuelve a pulsar «Buscar histórico gratis» entonces. No se consume cuota de SerpApi."
+        return "Internet Archive ha pedido una pausa temporal (HTTP 429). Mínimo no enviará más peticiones al archivo hasta aproximadamente las ${retryAt} (en unos ${remainingMinutes} min). El respaldo del precio actual, si se activa y SerpApi tiene saldo, puede consumir una búsqueda de SerpApi."
     }
 
     private fun startWaybackDiagnostic(product: Product) {
@@ -1437,8 +1440,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             )
             finishWaybackDiagnostic(
                 product.id, WaybackTraceStatus.SKIPPED,
-                "Reintento no enviado durante la pausa global. ${status}"
+                "Reintento de archivo no enviado durante la pausa global (HTTP 429). Se intentará una búsqueda separada del precio actual si SerpApi tiene saldo; esa búsqueda puede consumir una consulta de SerpApi."
             )
+            viewModelScope.launch {
+                runLivePriceFallbackAfterArchiveFailure(
+                    product = product,
+                    archiveFailureReason = "Internet Archive está temporalmente limitado (HTTP 429)"
+                )
+            }
             return
         }
 
@@ -1551,10 +1560,18 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             )
             _uiState.value = _uiState.value.copy(
                 isSearchingFreeHistory = false,
-                freeHistoryStatus = "Mínimo no pudo identificar la tienda de esta oferta para buscar capturas gratuitas. No se ha gastado cuota de SerpApi.",
+                freeHistoryStatus = "No se encontró una URL válida para el archivo histórico. Se intentará buscar el precio actual por separado si SerpApi tiene saldo.",
                 freeHistoryProductId = product.id
             )
-            finishWaybackDiagnostic(product.id, WaybackTraceStatus.FAILED, "No se generó ninguna URL de tienda válida.")
+            finishWaybackDiagnostic(product.id, WaybackTraceStatus.FAILED, "No se generó ninguna URL válida para consultar el archivo.")
+            // The historical archive has no safe URL, but the product title is still enough
+            // to attempt one separately budgeted live-price lookup. This does not call Wayback.
+            viewModelScope.launch {
+                runLivePriceFallbackAfterArchiveFailure(
+                    product = product,
+                    archiveFailureReason = "No se pudo identificar una URL archivada válida"
+                )
+            }
             return
         }
 
@@ -1572,8 +1589,220 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             query = product.title,
             provider = current.onlineSearchProvider,
             targetProductId = product.id,
-            forceRefresh = true
+            forceRefresh = true,
+            liveFallbackProduct = product
         )
+    }
+
+    /**
+     * Archive lookup and current-price discovery are separate jobs. If the free archive has no
+     * verified point (or is paused by HTTP 429), run one independently budgeted live lookup rather
+     * than silently ending the user's "find price" action. This never calls Wayback or edits its
+     * cache/history; only trusted live retailer offers can be saved.
+     */
+    private suspend fun runLivePriceFallbackAfterArchiveFailure(
+        product: Product,
+        archiveFailureReason: String
+    ) {
+        val productId = product.id.trim()
+        if (productId.isBlank() || !inFlightArchiveFailureFallbacks.add(productId)) return
+        val attemptKey = "archive_live_price_fallback_attempt_$productId"
+        try {
+            val now = System.currentTimeMillis()
+            val previousAttempt = priceRefreshPreferences.getLong(attemptKey, 0L)
+            if (previousAttempt > 0L && now - previousAttempt < TRACKED_REFRESH_COOLDOWN_MS) {
+                val minutes = ((TRACKED_REFRESH_COOLDOWN_MS - (now - previousAttempt) + 59_999L) / 60_000L)
+                    .coerceAtLeast(1L)
+                val message = "El histórico gratuito no dio un precio verificable ($archiveFailureReason). " +
+                    "La búsqueda alternativa del precio actual ya se intentó recientemente; " +
+                    "se protege la cuota y no se repetirá durante unas $minutes min."
+                _uiState.update { current -> current.copy(
+                    isSearchingFreeHistory = false,
+                    freeHistoryProductId = productId,
+                    freeHistoryStatus = message,
+                    serpApiActionStatus = message
+                ) }
+                showSnackbar(message)
+                return
+            }
+
+            val currentState = _uiState.value
+            if (currentState.isOnlineSearching || currentState.isRefreshingPrices ||
+                currentState.isPreparingSerpApiAction || currentState.isExecutingSerpApiAction ||
+                currentState.isCheckingSerpApiAccount
+            ) {
+                val message = "El histórico gratuito no dio un precio verificable ($archiveFailureReason). " +
+                    "La búsqueda del precio actual no se ha lanzado porque ya hay otra consulta activa; " +
+                    "usa «Buscar precio actual» cuando termine para no duplicar consumo de SerpApi."
+                _uiState.update { current -> current.copy(
+                    isSearchingFreeHistory = false,
+                    freeHistoryProductId = productId,
+                    freeHistoryStatus = message,
+                    serpApiActionStatus = message
+                ) }
+                showSnackbar(message)
+                return
+            }
+
+            val token = withContext(Dispatchers.IO) { serpApiTokenStore.read() }
+            if (token.isNullOrBlank()) {
+                val message = "El histórico gratuito no encontró precio verificable ($archiveFailureReason). " +
+                    "No se pudo activar la búsqueda del precio actual porque falta la clave de SerpApi en Ajustes."
+                _uiState.update { current -> current.copy(
+                    isSearchingFreeHistory = false,
+                    freeHistoryProductId = productId,
+                    freeHistoryStatus = message,
+                    serpApiActionStatus = message
+                ) }
+                showSnackbar(message)
+                return
+            }
+
+            val accountInfo = readAccountInfo(token)
+            if (accountInfo == null) {
+                val message = "El histórico gratuito falló ($archiveFailureReason) y no se pudo comprobar el saldo de SerpApi. " +
+                    "No se lanzó la búsqueda alternativa ni se consumió cuota."
+                _uiState.update { current -> current.copy(
+                    isSearchingFreeHistory = false,
+                    freeHistoryProductId = productId,
+                    freeHistoryStatus = message,
+                    serpApiActionStatus = message
+                ) }
+                showSnackbar(message)
+                return
+            }
+            val blockedAccount = accountStatusBlockMessage(accountInfo)
+            if (blockedAccount != null || accountCapacity(accountInfo) < 1) {
+                val message = blockedAccount ?: quotaBlockMessage(accountInfo)
+                val combined = "El histórico gratuito falló ($archiveFailureReason). " +
+                    "No se ha lanzado la búsqueda del precio actual: $message"
+                _uiState.update { current -> current.copy(
+                    isSearchingFreeHistory = false,
+                    freeHistoryProductId = productId,
+                    freeHistoryStatus = combined,
+                    serpApiActionStatus = combined,
+                    serpApiAccountStatus = quotaMessage(accountInfo)
+                ) }
+                showSnackbar(combined)
+                return
+            }
+
+            // Persist the cooldown only after the API key/account/quota are validated and immediately
+            // before the one paid lookup, so missing credentials or an empty quota can be retried later.
+            val attemptStartedAt = System.currentTimeMillis()
+            if (!priceRefreshPreferences.edit().putLong(attemptKey, attemptStartedAt).commit()) {
+                val message = "No se pudo registrar el límite de seguridad de la búsqueda alternativa. " +
+                    "No se ha lanzado otra consulta ni gastado cuota."
+                _uiState.update { current -> current.copy(
+                    isSearchingFreeHistory = false,
+                    freeHistoryProductId = productId,
+                    freeHistoryStatus = message,
+                    serpApiActionStatus = message
+                ) }
+                showSnackbar(message)
+                return
+            }
+
+            val progress = "El histórico gratuito no encontró precio verificable ($archiveFailureReason). " +
+                "Se activa ahora una búsqueda independiente del precio actual de «${product.title}» " +
+                "con una consulta SerpApi; Wayback permanece en pausa."
+            _uiState.update { current -> current.copy(
+                isSearchingFreeHistory = true,
+                freeHistoryProductId = productId,
+                freeHistoryStatus = progress,
+                serpApiActionStatus = progress,
+                serpApiAccountStatus = quotaMessage(accountInfo)
+            ) }
+
+            val googleProductId = sequenceOf(
+                product.googleProductId,
+                extractGoogleShoppingProductId(product.storeUrl),
+                product.offers.firstNotNullOfOrNull { extractGoogleShoppingProductId(it.url) }
+            ).mapNotNull { candidate ->
+                candidate?.trim()?.takeIf { it.matches(Regex("[0-9]{5,}")) }
+            }.firstOrNull()
+
+            val details = withTimeoutOrNull(25_000L) {
+                if (googleProductId != null) {
+                    serpApiClient.searchGoogleProductDetails(
+                        token = token,
+                        productId = googleProductId,
+                        expectedTitle = product.title,
+                        observedAt = attemptStartedAt
+                    )
+                } else {
+                    val report = serpApiClient.searchOnlineWithDiagnostics(token, product.title)
+                    com.example.data.remote.SerpApiGoogleProductDetails(
+                        offers = report.results,
+                        priceInsights = emptyList(),
+                        priceHistoryAvailable = false
+                    )
+                }
+            } ?: throw SerpApiException("La búsqueda del precio actual agotó los 25 segundos de espera.")
+
+            // Keep this as a current-price refresh only. We deliberately do not import archive
+            // points or replace the historical engine's validation/retention rules here.
+            val safeOffers = repository.filterProductComparisonOffers(details.offers, product.title)
+            val savedOffers = if (safeOffers.isNotEmpty()) {
+                repository.recordProductComparisonOffers(productId, product.title, safeOffers)
+            } else 0
+
+            if (savedOffers > 0) {
+                val refreshed = withTimeoutOrNull(6_000L) {
+                    repository.allProductsStream.first { products ->
+                        products.any { candidate ->
+                            candidate.id == productId && (candidate.priceObservedAt ?: 0L) >= attemptStartedAt
+                        }
+                    }.first { it.id == productId }
+                }
+                if (refreshed != null && _uiState.value.selectedProduct?.id == productId) {
+                    _uiState.update { current -> current.copy(selectedProduct = refreshed) }
+                }
+            }
+
+            val after = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
+            val resultMessage = when {
+                safeOffers.isNotEmpty() -> "Respaldo automático completado: se encontraron ${safeOffers.size} oferta(s) " +
+                    "actuales para «${product.title}» y se guardaron $savedOffers observación(es) nuevas o actualizadas. " +
+                    "El histórico de Wayback no se ha modificado."
+                else -> "Se lanzó la búsqueda alternativa del precio actual de «${product.title}», pero no apareció " +
+                    "ninguna oferta con precio y enlace directo verificables. No se ha inventado un precio ni se ha " +
+                    "guardado un resultado de búsqueda genérico. El histórico de Wayback no se ha modificado."
+            }
+            _uiState.update { current -> current.copy(
+                isSearchingFreeHistory = false,
+                freeHistoryProductId = productId,
+                freeHistoryStatus = resultMessage,
+                serpApiActionStatus = resultMessage,
+                serpApiAccountStatus = after?.let(::quotaMessage) ?: quotaMessage(accountInfo)
+            ) }
+            showSnackbar(resultMessage)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: SerpApiException) {
+            val message = "El histórico gratuito falló ($archiveFailureReason) y se intentó la búsqueda del precio actual, " +
+                "pero SerpApi respondió: ${error.message.orEmpty()}. No se han alterado los datos históricos."
+            _uiState.update { current -> current.copy(
+                isSearchingFreeHistory = false,
+                freeHistoryProductId = productId,
+                freeHistoryStatus = message,
+                serpApiActionStatus = message
+            ) }
+            showSnackbar(message)
+        } catch (_: Exception) {
+            val message = "El histórico gratuito falló ($archiveFailureReason) y la búsqueda del precio actual no se completó. " +
+                "No se ha guardado un precio sin verificar; puedes revisar el estado de SerpApi e intentarlo más adelante."
+            _uiState.update { current -> current.copy(
+                isSearchingFreeHistory = false,
+                freeHistoryProductId = productId,
+                freeHistoryStatus = message,
+                serpApiActionStatus = message
+            ) }
+            showSnackbar(message)
+        } finally {
+            inFlightArchiveFailureFallbacks.remove(productId)
+            _uiState.update { current -> current.copy(isSearchingFreeHistory = false) }
+        }
     }
 
     /**
@@ -2131,7 +2360,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         query: String,
         provider: OnlineSearchProvider,
         targetProductId: String? = null,
-        forceRefresh: Boolean = false
+        forceRefresh: Boolean = false,
+        liveFallbackProduct: Product? = null
     ) {
         if (candidates.isEmpty()) {
             appendArchiveNotice(
@@ -2917,6 +3147,22 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         )
                     }
                 }
+                if (liveFallbackProduct != null &&
+                    shouldTriggerLivePriceFallback(foundPrimaryCount, savedCount)
+                ) {
+                    val archiveFailureReason = when {
+                        diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ->
+                            "Internet Archive limitó las consultas (HTTP 429)"
+                        capturesFoundCount == 0 ->
+                            "el archivo no devolvió capturas"
+                        else ->
+                            "no se obtuvo un precio histórico verificable para el producto seleccionado"
+                    }
+                    runLivePriceFallbackAfterArchiveFailure(
+                        product = liveFallbackProduct,
+                        archiveFailureReason = archiveFailureReason
+                    )
+                }
             } catch (cancelled: CancellationException) {
                 if (diagnosticProductId != null) {
                     finishWaybackDiagnostic(diagnosticProductId, WaybackTraceStatus.FAILED, "La operación fue cancelada.")
@@ -3113,3 +3359,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(verifierResult = null, verifierInput = "")
     }
 }
+
+/**
+ * True only when the archive lookup did not find or save any verified point for the selected
+ * product. Secondary variants must not suppress a current-price fallback for the selected item.
+ */
+internal fun shouldTriggerLivePriceFallback(
+    selectedProductHistoricalQuotesFound: Int,
+    selectedProductHistoricalQuotesSaved: Int
+): Boolean = selectedProductHistoricalQuotesFound <= 0 &&
+    selectedProductHistoricalQuotesSaved <= 0
+

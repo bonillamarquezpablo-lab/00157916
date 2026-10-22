@@ -243,7 +243,7 @@ class SerpApiVariantMismatchTest {
     }
 
     @Test
-    fun refusesToReturnGenericGoogleSearchAsTheOnlyOfferDestination() {
+    fun keepsPricedOfferWhenOnlyGoogleShoppingSearchFallbackIsAvailable() {
         val report = SerpApiClient().parseShoppingResultsDetailed(
             root = JSONObject(
                 """
@@ -261,8 +261,55 @@ class SerpApiVariantMismatchTest {
             observedAt = 1_800_000_000_000L
         )
 
-        assertTrue(report.results.isEmpty())
-        assertEquals(1, report.rejectedForLink)
+        assertEquals(1, report.results.size)
+        assertEquals("Google Shopping", report.results.single().storeName)
+        assertTrue(report.results.single().sourceUrl.contains("tbm=shop"))
+        assertTrue(report.results.single().sourceUrl.contains("Sony") || report.results.single().sourceUrl.contains("sony"))
+        assertEquals(0, report.rejectedForLink)
+    }
+
+    @Test
+    fun keepsExactXiaomiMi10ProButRejectsRedmiNote10ProAndMi11Pro() {
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "shopping_results": [
+                    {
+                      "title": "Xiaomi Mi 10 Pro 5G 8GB/256GB Gris",
+                      "price": "180,00 €",
+                      "extracted_price": 180.0,
+                      "link": "https://shop.example/mi-10-pro",
+                      "source": "Tienda A"
+                    },
+                    {
+                      "title": "Xiaomi Redmi Note 10 Pro 6GB/128GB",
+                      "price": "100,00 €",
+                      "extracted_price": 100.0,
+                      "link": "https://shop.example/redmi-note-10-pro",
+                      "source": "Tienda B"
+                    },
+                    {
+                      "title": "Xiaomi Mi 11 Pro 8GB/256GB",
+                      "price": "220,00 €",
+                      "extracted_price": 220.0,
+                      "link": "https://shop.example/mi-11-pro",
+                      "source": "Tienda C"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "xiaomi mi 10 pro",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals(1, report.results.size)
+        assertEquals("Xiaomi Mi 10 Pro 5G 8GB/256GB Gris", report.results.single().title)
+        assertEquals(2, report.rejectedAsIrrelevant)
+        assertTrue(hasXiaomiModelMismatch("xiaomi mi 10 pro", "Xiaomi Redmi Note 10 Pro"))
+        assertTrue(hasXiaomiModelMismatch("xiaomi mi 10 pro", "Xiaomi Mi 11 Pro"))
+        assertFalse(hasXiaomiModelMismatch("xiaomi mi 10 pro", "Xiaomi Mi 10 Pro 5G"))
     }
 
     @Test

@@ -1,5 +1,15 @@
 package com.example.ui.viewmodel
 
+/**
+ * True only when the archive lookup did not find or save any verified point for the selected
+ * product. Secondary variants must not suppress a current-price fallback for the selected item.
+ */
+internal fun shouldTriggerLivePriceFallback(
+    selectedProductHistoricalQuotesFound: Int,
+    selectedProductHistoricalQuotesSaved: Int
+): Boolean = selectedProductHistoricalQuotesFound <= 0 &&
+    selectedProductHistoricalQuotesSaved <= 0
+
 import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
@@ -1718,7 +1728,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 ?: extractGoogleShoppingProductId(product.storeUrl)
                 ?: product.offers.firstNotNullOfOrNull { extractGoogleShoppingProductId(it.url) }
 
-            val details = withTimeout(25_000L) {
+            val details = withTimeoutOrNull(25_000L) {
                 if (googleProductId != null) {
                     serpApiClient.searchGoogleProductDetails(
                         token = token,
@@ -1734,7 +1744,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         priceHistoryAvailable = false
                     )
                 }
-            }
+            } ?: throw SerpApiException("La búsqueda del precio actual agotó los 25 segundos de espera.")
 
             // Keep this as a current-price refresh only. We deliberately do not import archive
             // points or replace the historical engine's validation/retention rules here.

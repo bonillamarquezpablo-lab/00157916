@@ -57,7 +57,11 @@ data class ArchivedPriceQuote(
      * explicitly identifies (for example, capacity in a product slug). It never overrides a
      * conflicting model, edition, colour, or capacity.
      */
-    val variantIdentityConfirmedByUrl: Boolean = false
+    val variantIdentityConfirmedByUrl: Boolean = false,
+    /** Direct product URL attached to the matching structured Product/Offer record. */
+    val productUrl: String? = null,
+    /** True only for a strict secondary offer that belongs in the discovery quarantine, not the catalogue. */
+    val isDiscoveryCandidate: Boolean = false
 )
 
 data class WaybackBackfillResult(
@@ -4021,27 +4025,28 @@ class WaybackPriceHistoryClient(
         observedAt: Long,
         acceptedCurrencies: Set<String> = setOf("EUR", "USD")
     ): List<ArchivedPriceQuote> {
-        if (primaryExpectedTitle.isBlank() || observedAt <= 0L || knownProductTitlesById.isEmpty()) return emptyList()
+        if (primaryExpectedTitle.isBlank() || observedAt <= 0L) return emptyList()
         val allowedCurrencies = acceptedCurrencies.map { it.uppercase(Locale.ROOT) }.toSet()
         val output = mutableListOf<ArchivedPriceQuote>()
         for ((archivedTitle, price, rawCurrency) in extractJsonLdProductOffers(document)) {
             val currency = rawCurrency.uppercase(Locale.ROOT)
             if (currency !in allowedCurrencies || price !in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE) continue
+            if (isMatchingTitleForArchivedUrl(primaryExpectedTitle, archivedTitle, originalUrl)) continue
+
+            // Resolve the URL once for this exact structured offer. Never use the page URL as a
+            // substitute for a related product's own URL; it could be a different SKU.
+            val offerUrls = jsonLdProductUrlsForOffer(
+                document = document,
+                productTitle = archivedTitle,
+                expectedPrice = price,
+                expectedCurrency = currency,
+                pageUrl = originalUrl
+            ).distinctBy { it.trimEnd('/').lowercase(Locale.ROOT) }
             val matches = knownProductTitlesById.entries.mapNotNull { (productId, savedTitle) ->
                 if (productId.isBlank() || savedTitle.isBlank() ||
                     isMatchingTitleForArchivedUrl(primaryExpectedTitle, savedTitle, originalUrl)
                 ) return@mapNotNull null
 
-                val offerUrls = jsonLdProductUrlsForOffer(
-                    document = document,
-                    productTitle = archivedTitle,
-                    expectedPrice = price,
-                    expectedCurrency = currency,
-                    pageUrl = originalUrl
-                )
-                // A structured product URL is stronger evidence than a family-page URL. If it
-                // explicitly names storage or colour that the saved row does not identify, do
-                // not attach the price to that broader/ambiguous row.
                 val urlExplicitlyContradictsSavedSku = offerUrls.any { offerUrl ->
                     val uri = runCatching { URI(offerUrl) }.getOrNull()
                     val urlIdentityText = normalizeTitle(
@@ -4070,8 +4075,7 @@ class WaybackPriceHistoryClient(
                     hasExplicitVariantConflictInProductUrl(savedTitle, offerUrl) ||
                         (urlStorage.isNotEmpty() &&
                             (expectedStorage.isEmpty() || urlStorage.any { it !in expectedStorage })) ||
-                        (urlColour != null &&
-                            (expectedColour == null || expectedColour != urlColour))
+                        (urlColour != null && (expectedColour == null || expectedColour != urlColour))
                 }
                 if (urlExplicitlyContradictsSavedSku) return@mapNotNull null
 
@@ -4081,36 +4085,88 @@ class WaybackPriceHistoryClient(
                     !hasExplicitVariantConflictInProductUrl(savedTitle, offerUrl) &&
                         matchesVariantDetailsConfirmedByUrl(savedTitle, archivedTitle, offerUrl)
                 }
-                // hasExplicitProductVariantConflict also flags a title that omits capacity.
-                // That is not proof of a mismatch when this exact JSON-LD offer has a URL that
-                // independently verifies the missing SKU details. Explicit model/edition/
-                // colour/capacity conflicts still fail matchesVariantDetailsConfirmedByUrl.
-                if (hasExplicitProductVariantConflict(savedTitle, archivedTitle) &&
-                    !offerUrlConfirmsVariant
-                ) return@mapNotNull null
+                if (hasExplicitProductVariantConflict(savedTitle, archivedTitle) && !offerUrlConfirmsVariant) {
+                    return@mapNotNull null
+                }
                 if (!pageConfirmsVariant && !offerUrlConfirmsVariant) return@mapNotNull null
                 Triple(productId, savedTitle, offerUrlConfirmsVariant)
             }
-            // Duplicate retailer listings or similarly named variants are ambiguous: do not guess.
-            if (matches.size != 1) continue
-            val (productId, canonicalTitle, offerUrlConfirmed) = matches.single()
+
+            // Ambiguous matches must be quarantined from both automatic history import and auto-
+            // discovery. It is safer to lose one candidate than to duplicate or cross-wire a SKU.
+            if (matches.size > 1) continue
+            if (matches.size == 1) {
+                val (productId, canonicalTitle, offerUrlConfirmed) = matches.single()
+                output += ArchivedPriceQuote(
+                    observedAt = observedAt,
+                    price = price,
+                    currency = currency,
+                    productTitle = canonicalTitle,
+                    originalUrl = originalUrl,
+                    snapshotUrl = snapshotUrl,
+                    sourceCurrency = currency,
+                    sourcePrice = price,
+                    targetProductId = productId,
+                    variantIdentityConfirmedByUrl = offerUrlConfirmed,
+                    productUrl = offerUrls.singleOrNull()
+                )
+                if (output.size >= 12) break
+                continue
+            }
+
+            // Unknown secondary products may be staged only with a specific same-merchant URL,
+            // a non-generic title and no accessory/promotional markers. The stage itself performs
+            // the catalogue, URL, price, seller and snapshot checks again before saving anything.
+            val offerUrl = offerUrls.singleOrNull() ?: continue
+            if (!isEligibleDirectUrl(offerUrl) ||
+                !isSameMerchantHost(originalUrl, offerUrl) ||
+                isMatchingTitleForArchivedUrl(primaryExpectedTitle, archivedTitle, offerUrl) ||
+                !isEligibleArchivedDiscoveryTitle(archivedTitle) ||
+                hasExplicitProductVariantConflict(archivedTitle, archivedTitle)
+            ) continue
             output += ArchivedPriceQuote(
                 observedAt = observedAt,
                 price = price,
                 currency = currency,
-                productTitle = canonicalTitle,
+                productTitle = archivedTitle,
                 originalUrl = originalUrl,
                 snapshotUrl = snapshotUrl,
                 sourceCurrency = currency,
                 sourcePrice = price,
-                targetProductId = productId,
-                variantIdentityConfirmedByUrl = offerUrlConfirmed
+                productUrl = offerUrl,
+                isDiscoveryCandidate = true
             )
-            if (output.size >= 8) break
+            if (output.size >= 12) break
         }
         return output.distinctBy {
-            listOf(it.targetProductId.orEmpty(), it.observedAt.toString(), it.price.toString(), it.currency)
+            listOf(
+                it.targetProductId.orEmpty(),
+                it.isDiscoveryCandidate.toString(),
+                it.productUrl.orEmpty(),
+                normalizeTitle(it.productTitle),
+                it.observedAt.toString(),
+                it.price.toString(),
+                it.currency
+            )
         }
+    }
+
+    private fun isSameMerchantHost(firstUrl: String, secondUrl: String): Boolean {
+        val firstHost = runCatching { URI(firstUrl).host.orEmpty() }.getOrDefault("")
+            .lowercase(Locale.ROOT).removePrefix("www.")
+        val secondHost = runCatching { URI(secondUrl).host.orEmpty() }.getOrDefault("")
+            .lowercase(Locale.ROOT).removePrefix("www.")
+        return firstHost.isNotBlank() && firstHost == secondHost
+    }
+
+    private fun isEligibleArchivedDiscoveryTitle(title: String): Boolean {
+        val normalized = normalizeTitle(title)
+        if (title.length !in 12..180 || normalized.split(' ').filter { it.isNotBlank() }.size < 3) return false
+        if (Regex("""(?i)\b(fundas?|carcasas?|cristal\s+templado|vidrio\s+templado|protectores?|cables?|cargadores?|adaptadores?|soportes?|recambios?|repuestos?|cases?|covers?|screen\s+protector|tempered\s+glass|accessories|accesorios)\b""")
+                .containsMatchIn(normalized)
+        ) return false
+        return !Regex("""(?i)\b(productos relacionados|productos recomendados|related products|recommended products|you may also like|completa tu compra)\b""")
+            .containsMatchIn(normalized)
     }
 
     private fun extractJsonLdProductOffers(document: Document): List<Triple<String, Double, String>> {

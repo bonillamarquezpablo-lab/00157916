@@ -2137,7 +2137,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                     quotes = variantQuotes.map { it.copy(targetProductId = null) },
                                     targetProductId = secondaryProductId
                                 )
-                                savedCount += variantSavedCount
+                                // Cross-saved observations belong to the sibling product,
+                                // not the product selected by the user. Keep this total separate
+                                // so the primary product's diagnostic/success state stays accurate.
                                 if (variantSavedCount > 0) {
                                     crossSavedVariantObservationCount += variantSavedCount
                                     crossSavedVariantTitles += variantQuotes.first().productTitle

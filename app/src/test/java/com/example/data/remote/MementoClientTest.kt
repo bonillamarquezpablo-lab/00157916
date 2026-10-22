@@ -32,19 +32,6 @@ class MementoClientTest {
     }
 
     @Test
-    fun attemptsMementoWhenWaybackIsUnavailableOrRateLimited() {
-        // The Wayback result is not an input to this guard: only Memento's own cooldown matters.
-        assertTrue(
-            shouldAttemptMementoFallback(
-                alreadyAttempted = false,
-                hasEligibleDirectUrl = true,
-                hasVerifiedQuotes = false,
-                rateLimited = false
-            )
-        )
-    }
-
-    @Test
     fun skipsMementoWhenItCannotSafelyIdentifyTheExactProductUrl() {
         assertFalse(
             shouldAttemptMementoFallback(

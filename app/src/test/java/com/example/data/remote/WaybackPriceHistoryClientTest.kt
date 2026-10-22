@@ -4480,4 +4480,33 @@ class WaybackPriceHistoryClientTest {
         assertEquals(1099.0, quote!!.price, 0.001)
     }
 
+
+
+    @Test
+    fun archivedHiddenDataAttributesCanSupplyExactCapacityAndColour() {
+        val html = """
+            <html><head>
+              <meta property="og:title" content="Samsung Galaxy S25 Ultra">
+              <meta property="product:price:amount" content="1099.00">
+              <meta property="product:price:currency" content="EUR">
+            </head><body>
+              <main data-brand="Samsung" data-product-model="SM-S938B"
+                    data-color="Titanium Gray" data-storage="256 GB">
+                Samsung Galaxy S25 Ultra
+              </main>
+            </body></html>
+        """.trimIndent()
+
+        val quote = newClient().parseArchivedPrice(
+            html = html,
+            expectedTitle = "Samsung Galaxy S25 Ultra 256 GB Titanium Gray",
+            originalUrl = "https://shop.example/products/galaxy-s25-ultra",
+            snapshotUrl = "https://web.archive.org/web/20260101000000/https://shop.example/products/galaxy-s25-ultra",
+            observedAt = 1_767_225_600_000L
+        )
+
+        assertNotNull("Generic data-* identity fields should complete the archived title", quote)
+        assertEquals(1099.0, quote!!.price, 0.001)
+    }
+
 }

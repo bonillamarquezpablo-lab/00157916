@@ -427,7 +427,10 @@ class ProductDiscoveryRepository(private val database: AppDatabase) {
             "morado" to "purple", "purple" to "purple", "dorado" to "gold", "gold" to "gold",
             "plateado" to "silver", "silver" to "silver"
         )
-        return colors.firstOrNull { normalized.contains(it.first) }?.second
+        return colors.firstOrNull { (term, _) ->
+            val normalizedTerm = normalizeText(term)
+            Regex("""\\b${Regex.escape(normalizedTerm)}\\b""").containsMatchIn(normalized)
+        }?.second
     }
 
     private fun modelSignal(value: String): String? =

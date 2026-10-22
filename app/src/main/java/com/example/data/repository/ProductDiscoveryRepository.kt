@@ -429,7 +429,7 @@ class ProductDiscoveryRepository(private val database: AppDatabase) {
         )
         return colors.firstOrNull { (term, _) ->
             val normalizedTerm = normalizeText(term)
-            Regex("""\\b${Regex.escape(normalizedTerm)}\\b""").containsMatchIn(normalized)
+            Regex("""\b${Regex.escape(normalizedTerm)}\b""").containsMatchIn(normalized)
         }?.second
     }
 

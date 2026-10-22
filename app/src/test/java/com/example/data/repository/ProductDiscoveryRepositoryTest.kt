@@ -123,4 +123,27 @@ class ProductDiscoveryRepositoryTest {
             database.close()
         }
     }
+
+
+    @Test
+    fun bluetoothTermIsNotMistakenForTheBlueColourVariant() = runBlocking {
+        val database = newDatabase()
+        try {
+            val discoveries = ProductDiscoveryRepository(database)
+            assertTrue(
+                discoveries.stageArchivedQuote(
+                    quote(
+                        title = "Sony WH-1000XM5 Auriculares Bluetooth Inalámbricos",
+                        productUrl = "https://shop.example/products/sony-wh-1000xm5-bluetooth-wireless"
+                    ),
+                    "Tienda Ejemplo"
+                )
+            )
+            assertEquals(1, database.productDiscoveryDao().observePending().first().size)
+            assertEquals(0, database.productDao().getProductCount())
+        } finally {
+            database.close()
+        }
+    }
+
 }

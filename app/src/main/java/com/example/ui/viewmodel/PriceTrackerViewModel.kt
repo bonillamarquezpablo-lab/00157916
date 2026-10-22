@@ -1560,7 +1560,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             )
             _uiState.value = _uiState.value.copy(
                 isSearchingFreeHistory = false,
-                freeHistoryStatus = "Mínimo no pudo identificar la tienda de esta oferta para buscar capturas gratuitas. No se ha gastado cuota de SerpApi.",
+                freeHistoryStatus = "No se encontró una URL válida para el archivo histórico. Se intentará buscar el precio actual por separado si SerpApi tiene saldo.",
                 freeHistoryProductId = product.id
             )
             finishWaybackDiagnostic(product.id, WaybackTraceStatus.FAILED, "No se generó ninguna URL válida para consultar el archivo.")

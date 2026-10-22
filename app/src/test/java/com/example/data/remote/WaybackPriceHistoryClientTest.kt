@@ -4316,4 +4316,58 @@ class WaybackPriceHistoryClientTest {
         assertNotNull(urls)
         assertEquals(listOf("www.shop.example", "shop.example"), urls!!.map { it.queryParameter("url") })
     }
+
+
+    @Test
+    fun exactCdxStopsPrefixDiscoveryAfterOneVerifiedPrimaryPrice() {
+        val quote = ArchivedPriceQuote(
+            observedAt = 1_756_684_800_000L,
+            price = 950.98,
+            currency = "EUR",
+            productTitle = "Apple iPhone 15 Plus 256GB Amarillo Libre",
+            originalUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb",
+            snapshotUrl = "https://web.archive.org/web/20250901000000id_/https://www.pccomponentes.com/apple-iphone-15-plus-256gb"
+        )
+
+        assertTrue(
+            "One verified price for the selected product is enough to avoid a secondary prefix-CDX timeout",
+            hasVerifiedPrimaryExactCdxQuote(
+                WaybackBackfillResult(quotes = listOf(quote), capturesFound = 3)
+            )
+        )
+    }
+
+    @Test
+    fun secondaryVariantQuoteAloneDoesNotSuppressLookupForSelectedProduct() {
+        val siblingVariant = ArchivedPriceQuote(
+            observedAt = 1_756_684_800_000L,
+            price = 699.99,
+            currency = "EUR",
+            productTitle = "Apple iPhone 15 Plus 128GB Amarillo Libre",
+            originalUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-family",
+            snapshotUrl = "https://web.archive.org/web/20250901000000id_/https://www.pccomponentes.com/apple-iphone-15-plus-family",
+            targetProductId = "saved-iphone-128"
+        )
+
+        assertFalse(
+            "A sibling offer can be saved opportunistically but must not count as a hit for the requested 256 GB model",
+            hasVerifiedPrimaryExactCdxQuote(
+                WaybackBackfillResult(quotes = listOf(siblingVariant), capturesFound = 3)
+            )
+        )
+    }
+
+    @Test
+    fun exactCdxWithoutVerifiedQuotesKeepsPrefixFallbackEnabled() {
+        assertFalse(
+            hasVerifiedPrimaryExactCdxQuote(
+                WaybackBackfillResult(
+                    quotes = emptyList(),
+                    capturesFound = 3,
+                    diagnosticCodes = setOf("NO_VERIFIED_EUR_PRICE")
+                )
+            )
+        )
+    }
+
 }

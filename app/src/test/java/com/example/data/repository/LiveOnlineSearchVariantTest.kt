@@ -8,8 +8,7 @@ import com.example.data.remote.SerpApiShoppingResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -39,6 +38,9 @@ class LiveOnlineSearchVariantTest {
                 priceObservationDao = database.priceObservationDao(),
                 externalScope = repositoryScope
             )
+            // Wait for the repository's non-destructive Room startup reconciliation before
+            // running synchronous filter assertions or closing the in-memory database.
+            repository.recordOnlineSearchResults(emptyList(), "Google Shopping", "test")
             val now = System.currentTimeMillis()
             fun offer(title: String, price: Double, observedAt: Long = now) = SerpApiShoppingResult(
                 title = title,
@@ -96,7 +98,7 @@ class LiveOnlineSearchVariantTest {
                 ).isNotEmpty()
             )
         } finally {
-            repositoryScope.coroutineContext[Job]?.cancelAndJoin()
+            repositoryScope.cancel()
             database.close()
         }
     }
@@ -117,6 +119,9 @@ class LiveOnlineSearchVariantTest {
                 priceObservationDao = database.priceObservationDao(),
                 externalScope = repositoryScope
             )
+            // Wait for the repository's non-destructive Room startup reconciliation before
+            // running synchronous filter assertions or closing the in-memory database.
+            repository.recordOnlineSearchResults(emptyList(), "Google Shopping", "test")
             val now = System.currentTimeMillis()
             fun offer(title: String, price: Double) = SerpApiShoppingResult(
                 title = title,
@@ -154,7 +159,7 @@ class LiveOnlineSearchVariantTest {
             )
             assertEquals("Apple iPhone 16 Pro 256 GB", proResults.single().title)
         } finally {
-            repositoryScope.coroutineContext[Job]?.cancelAndJoin()
+            repositoryScope.cancel()
             database.close()
         }
     }

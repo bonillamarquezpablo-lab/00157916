@@ -335,6 +335,10 @@ class SerpApiVariantMismatchTest {
 
         assertTrue(hasXiaomiModelMismatch(expected5g, actual4g))
         assertTrue(hasXiaomiModelMismatch(expected4g, actual5g))
+        assertFalse(
+            "A result that omits 4G/5G is not a proven contradiction",
+            hasXiaomiModelMismatch(expected5g, "Xiaomi Redmi Note 15 Pro 8GB/256GB")
+        )
         assertEquals(0, parse(expected5g, actual4g).results.size)
         assertEquals(1, parse(expected5g, expected5g).results.size)
         assertEquals(0, parse(expected4g, actual5g).results.size)

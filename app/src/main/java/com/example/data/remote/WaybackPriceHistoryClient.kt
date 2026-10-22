@@ -4264,14 +4264,24 @@ class WaybackPriceHistoryClient(
         fun read(vararg keys: String): String? = keys.firstNotNullOfOrNull { key ->
             readMeta(document, setOf(key)) ?: readItemPropValue(document, key)
         }
+        fun dataValue(vararg attributes: String): String? = document.getAllElements().asSequence()
+            .mapNotNull { element ->
+                attributes.firstNotNullOfOrNull { attribute ->
+                    element.attr(attribute).takeIf { element.hasAttr(attribute) && it.isNotBlank() }
+                }
+            }.firstOrNull()
         val properties = linkedMapOf<String, String>()
         listOf(
-            "model" to read("product:model", "model", "modelnumber", "model_number"),
-            "color" to read("product:color", "color", "colour"),
-            "storage" to read("product:storage", "storage", "capacity", "memory", "ram", "rom"),
-            "sku" to read("product:sku", "sku", "product:retailer_item_id", "retailer_item_id"),
-            "mpn" to read("mpn", "product:mpn"),
-            "brand" to read("product:brand", "brand")
+            "model" to (read("product:model", "model", "modelnumber", "model_number")
+                ?: dataValue("data-model", "data-model-number", "data-product-model", "data-device-model")),
+            "color" to (read("product:color", "color", "colour")
+                ?: dataValue("data-color", "data-colour", "data-product-color")),
+            "storage" to (read("product:storage", "storage", "capacity", "memory", "ram", "rom")
+                ?: dataValue("data-storage", "data-capacity", "data-memory", "data-product-storage", "data-product-capacity")),
+            "sku" to (read("product:sku", "sku", "product:retailer_item_id", "retailer_item_id")
+                ?: dataValue("data-sku", "data-product-sku", "data-variant-id", "data-product-id")),
+            "mpn" to (read("mpn", "product:mpn") ?: dataValue("data-mpn", "data-product-mpn")),
+            "brand" to (read("product:brand", "brand") ?: dataValue("data-brand", "data-product-brand"))
         ).forEach { (key, value) -> if (!value.isNullOrBlank()) properties[key] = value }
         return ArchivedProductIdentityEvidence(
             brand = properties["brand"],

@@ -2062,6 +2062,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             try {
                 var savedCount = 0
+                var crossSavedVariantObservationCount = 0
+                val crossSavedVariantTitles = linkedSetOf<String>()
                 var checkedCount = 0
                 var foundCount = 0
                 var capturesFoundCount = 0
@@ -2128,13 +2130,18 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 !it.targetProductId.isNullOrBlank() && it.targetProductId != targetProductId
                             }
                             for ((secondaryProductId, variantQuotes) in secondaryQuotes.groupBy { it.targetProductId!! }) {
-                                savedCount += repository.recordArchivedPriceHistory(
+                                val variantSavedCount = repository.recordArchivedPriceHistory(
                                     expectedTitle = variantQuotes.first().productTitle,
                                     originalUrl = archiveUrl,
                                     storeName = candidate.storeName,
                                     quotes = variantQuotes.map { it.copy(targetProductId = null) },
                                     targetProductId = secondaryProductId
                                 )
+                                savedCount += variantSavedCount
+                                if (variantSavedCount > 0) {
+                                    crossSavedVariantObservationCount += variantSavedCount
+                                    crossSavedVariantTitles += variantQuotes.first().productTitle
+                                }
                             }
                         }
                     } catch (cancelled: CancellationException) {
@@ -2469,8 +2476,15 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         else ->
                             "No se guardaron registros: ninguna captura produjo un precio verificado."
                     }
+                    val crossSaveDetail = if (crossSavedVariantObservationCount > 0) {
+                        " Guardado oportunista: $crossSavedVariantObservationCount punto(s) adicional(es) en " +
+                            "${crossSavedVariantTitles.size} otra(s) ficha(s): " +
+                            crossSavedVariantTitles.joinToString().take(180) + "."
+                    } else {
+                        ""
+                    }
                     reportWaybackDiagnostic(
-                        diagnosticProductId, 19, persistenceStatus, persistenceDetail
+                        diagnosticProductId, 19, persistenceStatus, persistenceDetail + crossSaveDetail
                     )
                     val gateStatus = when {
                         // Network activity is stronger evidence than aggregate error codes: the
@@ -2627,10 +2641,17 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         }
                     }
                 }
-                val noticeWithDiagnostics = if (diagnosticLabels.isNotEmpty() && skippedCount != candidates.size) {
+                val baseNotice = if (diagnosticLabels.isNotEmpty() && skippedCount != candidates.size) {
                     "$notice\nDiagnóstico Wayback: ${diagnosticLabels.joinToString(" · ")}."
                 } else notice
-                appendArchiveNotice(query, provider, noticeWithDiagnostics, targetProductId)
+                val crossSavedVariantNotice = if (crossSavedVariantObservationCount > 0) {
+                    "\n\nAdemás, Mínimo aprovechó capturas de la misma descarga para guardar " +
+                        "$crossSavedVariantObservationCount punto(s) histórico(s) en otras variantes ya guardadas: " +
+                        crossSavedVariantTitles.joinToString().take(180) + ". No se hicieron búsquedas adicionales para ellas."
+                } else {
+                    ""
+                }
+                appendArchiveNotice(query, provider, baseNotice + crossSavedVariantNotice, targetProductId)
                 if (diagnosticProductId != null) {
                     when {
                         savedCount > 0 -> finishWaybackDiagnostic(

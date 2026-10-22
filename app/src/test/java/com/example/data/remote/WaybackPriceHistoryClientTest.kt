@@ -4503,6 +4503,14 @@ class WaybackPriceHistoryClientTest {
             "JSON-LD extraction should return the sibling's own product URL; got " + siblingOfferUrls,
             siblingOfferUrls.any { it.contains("128gb-amarillo-libre") }
         )
+        assertTrue(
+            "The sibling's own URL should positively confirm its exact model, storage and colour",
+            diagnosticClient.matchesVariantDetailsConfirmedByUrl(
+                expectedTitle = siblingTitle,
+                archivedTitle = siblingTitle,
+                originalUrl = siblingUrl
+            )
+        )
         val directSiblingQuotes = WaybackPriceHistoryClient(context, http)
             .parseArchivedPricesForKnownProducts(
                 document = Jsoup.parse(siblingHtml),

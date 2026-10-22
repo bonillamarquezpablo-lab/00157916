@@ -295,6 +295,8 @@ fun ProductDetailSheet(
     }
     val currentSourceLabel = if (!product.isPriceVerified && product.savedHistoricalPrice != null) {
         product.savedHistoricalPriceSource.takeIf { it.isNotBlank() } ?: "Historial archivado"
+    } else if (product.isUnverifiedLiveListing) {
+        "Precio listado en búsqueda pública"
     } else if (!product.isPriceVerified) {
         "Sin precio actual verificado"
     } else {
@@ -476,7 +478,12 @@ fun ProductDetailSheet(
                     ) {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             Text(
-                                text = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT) "Precio actual verificado" else "Precio guardado · pendiente de revalidación",
+                                text = when (product.priceDisplayStatus) {
+                                    com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT -> "Precio actual verificado"
+                                    com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION -> "Precio guardado · pendiente de revalidación"
+                                    com.example.data.model.PriceDisplayStatus.UNVERIFIED_LIVE_LISTING -> "Precio listado · sin confirmar"
+                                    com.example.data.model.PriceDisplayStatus.DEMONSTRATION -> "Precio no disponible"
+                                },
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -510,10 +517,12 @@ fun ProductDetailSheet(
                                 )
                             }
                             Text(
-                                text = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION) {
-                                    "Última fuente guardada: $currentSourceLabel · no confirma precio actual ni stock."
-                                } else {
-                                    "$currentSourceLabel · confirma precio final y stock en la tienda."
+                                text = when (product.priceDisplayStatus) {
+                                    com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION ->
+                                        "Última fuente guardada: $currentSourceLabel · no confirma precio actual ni stock."
+                                    com.example.data.model.PriceDisplayStatus.UNVERIFIED_LIVE_LISTING ->
+                                        "El importe apareció en una búsqueda pública, pero falta un enlace directo verificable. Confirma vendedor, precio final, envío y stock."
+                                    else -> "$currentSourceLabel · confirma precio final y stock en la tienda."
                                 },
                                 fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant

@@ -62,7 +62,7 @@ private fun xiaomiModelIdentity(value: String): XiaomiModelIdentity? {
     val mi = Regex(
         """\bmi\s+(\d{1,2})([a-z]?)\b(?:\s+(pro\s*max|pro|max|ultra|lite|plus|mix))?"""
     ).find(normalized) ?: return null
-    val edition = mi.groupValues[4].takeIf { it.isNotBlank() }
+    val edition = mi.groupValues[3].takeIf { it.isNotBlank() }
         ?.replace(Regex("""\s+"""), "")
     return XiaomiModelIdentity("mi", mi.groupValues[1] + mi.groupValues[2], edition)
 }

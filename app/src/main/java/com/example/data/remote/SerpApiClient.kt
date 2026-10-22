@@ -631,28 +631,10 @@ class SerpApiClient(
                     providerSource.orEmpty(),
                     title
                 )
-            fun isSpecificGoogleProductDestination(raw: String): Boolean {
-                if (!isGoogleShoppingUrl(raw)) return false
-                val path = runCatching { URI(raw).path.orEmpty() }.getOrDefault("")
-                return extractGoogleShoppingProductId(raw) != null ||
-                    Regex("""(?i)/shopping/product/[^/]+""").containsMatchIn(path)
-            }
-            val canUseShoppingSearchFallback =
-                providerSource.equals("Google Shopping", ignoreCase = true) &&
-                    extractedCandidate == null &&
-                    candidateUrls.none(::isSpecificGoogleProductDestination)
-            val safeUrl = url?.takeIf { candidate ->
-                isNavigableHttpUrl(candidate) &&
-                    (!isGoogleShoppingUrl(candidate) || isSpecificGoogleProductDestination(candidate))
-            } ?: googleSearchFallback.takeIf {
-                // Keep price-bearing model variants if the feed explicitly labels them as aggregate
-                // Google Shopping results and supplied no usable seller/product destination.
-                // A generic Google search link attributed to another retailer is still rejected.
-                canUseShoppingSearchFallback && isNavigableHttpUrl(it)
-            }
-            if (safeUrl == null || !isNavigableHttpUrl(safeUrl)) {
+            val safeUrl = url?.takeIf(::isNavigableHttpUrl) ?: googleSearchFallback
+            if (!isNavigableHttpUrl(safeUrl)) {
                 rejectedForLink++
-                recordDiscard(item, title, "El proveedor no facilitó un enlace HTTPS útil a la tienda")
+                recordDiscard(item, title, "No se pudo construir un enlace de búsqueda seguro")
                 return@mapNotNull null
             }
             // This parser is fed by the Google Shopping provider. Provider provenance must
@@ -662,13 +644,13 @@ class SerpApiClient(
             val linkSourceProvider = "Google Shopping"
             val host = runCatching { URI(safeUrl).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()
-            val source = if (safeUrl == googleSearchFallback) {
+            // The merchant label comes from the offer itself, not from the host used to open it.
+            // A Google Shopping product URL can still be an Fnac offer; replacing its seller label
+            // with "Google Shopping" makes merchant filters and result diagnostics incorrect.
+            val source = providerSource ?: if (safeUrl == googleSearchFallback || isGoogleShoppingUrl(safeUrl)) {
                 "Google Shopping"
             } else {
-                // A specific Shopping product page can still represent the named retailer
-                // (for example, a product listing attributed to Fnac); only our generated
-                // search fallback should be labelled as the aggregate Google Shopping source.
-                providerSource ?: humanizeHost(host)
+                humanizeHost(host)
             }
             val thumbnail = item.optString("thumbnail").takeIf { isHttpsUrl(it) }.orEmpty()
             val delivery = sequenceOf(item.optString("delivery"), item.optString("shipping"))

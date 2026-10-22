@@ -308,7 +308,10 @@ class SerpApiVariantMismatchTest {
         assertEquals("Google Shopping", phone.storeName)
         assertTrue(phone.isGoogleShoppingSearchFallback)
         assertTrue(phone.sourceUrl.contains("tbm=shop"))
-        assertTrue(phone.sourceUrl.contains("iphone+16", ignoreCase = true))
+        assertTrue(
+            java.net.URLDecoder.decode(phone.sourceUrl, "UTF-8")
+                .contains("Apple iPhone 16", ignoreCase = true)
+        )
         assertEquals(0, report.rejectedForLink)
         assertTrue(report.discardedOffers.any { it.reason.contains("cuota", ignoreCase = true) })
     }

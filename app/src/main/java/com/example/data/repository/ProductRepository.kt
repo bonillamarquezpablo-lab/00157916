@@ -667,6 +667,79 @@ class ProductRepository(
     }
 
     /**
+     * Ensure live-search results have a Room catalogue identity even when Shopping supplies only
+     * a generic search URL. These rows let the user open a product detail and find it in Mercado,
+     * but their displayed listing price is kept unverified and no price observation is written.
+     * The stricter recordOnlineSearchResults() path remains responsible for verified seller offers.
+     */
+    suspend fun ensureVisibleOnlineSearchProducts(
+        results: List<SerpApiShoppingResult>,
+        searchQuery: String = ""
+    ): Int {
+        startupCleanupCompleted.await()
+        val visible = filterVisibleLiveSearchResults(results, searchQuery)
+            .filterNot { it.isSecondHand || it.isFitmentUnverified || it.isCategoryUnverified }
+            .filterNot { it.isAccessoryOffer && !isAccessorySearchQuery(searchQuery) }
+            .filterNot {
+                isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
+                    isAccessoryListing(it.title)
+            }
+        if (visible.isEmpty()) return 0
+
+        val currentEntities = productDao.getAllProductsSnapshot().toMutableList()
+        var inserted = 0
+        for (group in groupOnlineShoppingResults(visible)) {
+            // Never replace a saved product with a search-only placeholder. Existing trusted
+            // products are updated by recordOnlineSearchResults() before this helper is called.
+            if (currentEntities.any { onlineProductIdentityKey(it.title) == group.identityKey }) continue
+
+            // A direct URL may be stored as navigation metadata only when it passes the same
+            // merchant/model validation as normal live offers. It still is not verified until a
+            // proper observation has been saved.
+            val safeDirectOffer = filterOnlineSearchResults(group.offers, searchQuery)
+                .filterNot { it.isSuspiciousPrice || it.isSearchFallbackDestination }
+                .minByOrNull { it.price }
+            val fallbackDisplayOffer = group.offers
+                .filter { it.price.isFinite() && it.price > 0.0 && !it.isRentalOrMonthly }
+                .minByOrNull { it.price }
+            val displayOffer = safeDirectOffer ?: fallbackDisplayOffer
+            val directUrl = safeDirectOffer?.sourceUrl.orEmpty()
+            val candidate = ProductEntity(
+                id = stableOnlineId("online_candidate_", group.identityKey),
+                title = group.title,
+                brand = inferProductBrand(group.title),
+                category = inferProductCategory(group.title, searchQuery).name,
+                // This is the observed catalogue listing amount, not a confirmed current price.
+                // Product.priceDisplayStatus intentionally keeps it out of verified price claims.
+                currentPrice = displayOffer?.price ?: 0.0,
+                athMinPrice = 0.0,
+                athMinDate = "Pendiente de verificación",
+                athMinStore = "",
+                athMaxPrice = 0.0,
+                avg90dPrice = 0.0,
+                officialPvp = 0.0,
+                currentStoreId = safeDirectOffer?.let {
+                    canonicalStoreId(it.storeName, it.sourceUrl)
+                } ?: "unknown_store",
+                storeUrl = directUrl,
+                ean = "",
+                imageUrl = group.representativeImageUrl.takeIf { it.isNotBlank() },
+                rating = 0.0,
+                reviewCount = 0,
+                isPriceVerified = false,
+                googleProductId = group.offers.firstNotNullOfOrNull { it.googleProductId }
+            )
+            // IGNORE handles a concurrent search safely: never replace a trusted row inserted
+            // for the same stable identity between the snapshot and this insert.
+            if (productDao.insertIfAbsent(candidate) != -1L) {
+                currentEntities += candidate
+                inserted++
+            }
+        }
+        return inserted
+    }
+
+    /**
      * Persist each valid "new in store" result returned by a manual online search.
      * Results are observations, not synthetic historical points. A known catalogue product
      * reuses its product ID; an unmatched result still gets a stable Room identity and title.

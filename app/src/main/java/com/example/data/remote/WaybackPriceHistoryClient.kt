@@ -4472,20 +4472,32 @@ class WaybackPriceHistoryClient(
         if (isMatchingProductTitle(expectedTitle, archivedTitle)) return true
         if (matchesVariantDetailsConfirmedByUrl(expectedTitle, archivedTitle, originalUrl)) return true
 
+        // Archived Apple purchase pages often expose a generic title ("iPhone 16") although
+        // their exact URL contains the selected model, capacity and colour. Accept the omission
+        // only when every SKU detail is verified by Apple's Spanish configurator route.
         val expected = normalizeTitle(expectedTitle)
         val archived = normalizeTitle(archivedTitle)
-        if (!Regex("""\biphone\s+15\b""").containsMatchIn(expected) ||
-            !Regex("""\biphone\s+15\b""").containsMatchIn(archived)
-        ) return false
+        val expectedModel = Regex("""\biphone\s+(\d{1,2})\b""")
+            .find(expected)?.groupValues?.getOrNull(1) ?: return false
+        val archivedModel = Regex("""\biphone\s+(\d{1,2})\b""")
+            .find(archived)?.groupValues?.getOrNull(1) ?: return false
+        if (expectedModel != archivedModel) return false
 
-        val expectedVariants = productModelVariantTokens(expected)
-        if (expectedVariants.any { it != "plus" }) return false
         val uri = runCatching { URI(originalUrl) }.getOrNull() ?: return false
         val host = uri.host?.lowercase(Locale.ROOT)?.removePrefix("www.")
         if (host != "apple.com") return false
 
+        val expectedVariants = productModelVariantTokens(expected)
+        // Keep this narrow fallback limited to base and Plus models; other models need
+        // their own independently verified route formats.
+        if (expectedVariants.any { it != "plus" }) return false
+        val variantSuffix = if ("plus" in expectedVariants) "-plus" else ""
+        val routePrefix = "/es/shop/buy-iphone/iphone-$" + "expectedModel$variantSuffix/"
+        val path = uri.path.orEmpty().lowercase(Locale.ROOT)
+        if (!path.contains(routePrefix)) return false
+
         val capacity = Regex("""\b(128|256|512)\s*gb\b""")
-            .find(expected)?.groupValues?.get(1) ?: return false
+            .find(expected)?.groupValues?.getOrNull(1) ?: return false
         val colourSlug = when (productColourFamily(expected)) {
             "black" -> "negro"
             "blue" -> "azul"
@@ -4495,20 +4507,20 @@ class WaybackPriceHistoryClient(
             else -> return false
         }
         val display = if ("plus" in expectedVariants) "6,7" else "6,1"
-        val expectedPath = "/es/shop/buy-iphone/iphone-15/pantalla-de-$display″-${capacity}gb-$colourSlug"
-        if (!uri.path.orEmpty().lowercase(Locale.ROOT).contains(expectedPath)) return false
+        val expectedSkuPath = "pantalla-de-$display″-$" + "capacitygb-$colourSlug"
+        if (!path.contains(expectedSkuPath)) return false
 
-        // Missing variant labels on Apple's page title are acceptable because the exact route
-        // has been verified. An explicit mismatch is not.
+        // Missing labels are acceptable only when the exact URL verifies the SKU.
+        // Explicitly conflicting sibling models, colours or capacities remain rejected.
         val archivedVariants = productModelVariantTokens(archived)
         if (archivedVariants.any { it !in expectedVariants }) return false
         val archivedColour = productColourFamily(archived)
         val expectedColour = productColourFamily(expected)
         if (archivedColour != null && archivedColour != expectedColour) return false
-
         val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
         val archivedStorage = storagePattern.findAll(archived)
-            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
+            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }
+            .toSet()
         if (archivedStorage.isNotEmpty() && "${capacity}gb" !in archivedStorage) return false
         return true
     }

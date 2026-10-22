@@ -3927,7 +3927,7 @@ class WaybackPriceHistoryClient(
      * may contain several variants; the page URL alone cannot verify a secondary offer's storage.
      * The returned URLs are still checked against the requested SKU before they can validate it.
      */
-    private fun jsonLdProductUrlsForOffer(
+    internal fun jsonLdProductUrlsForOffer(
         document: Document,
         productTitle: String,
         expectedPrice: Double,

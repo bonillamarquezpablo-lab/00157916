@@ -637,18 +637,15 @@ class SerpApiClient(
                 return extractGoogleShoppingProductId(raw) != null ||
                     Regex("""(?i)/shopping/product/[^/]+""").containsMatchIn(path)
             }
-            val canUseShoppingSearchFallback =
-                providerSource.equals("Google Shopping", ignoreCase = true) &&
-                    extractedCandidate == null &&
-                    candidateUrls.none(::isSpecificGoogleProductDestination)
             val safeUrl = url?.takeIf { candidate ->
                 isNavigableHttpUrl(candidate) &&
                     (!isGoogleShoppingUrl(candidate) || isSpecificGoogleProductDestination(candidate))
             } ?: googleSearchFallback.takeIf {
-                // Keep price-bearing model variants if the feed explicitly labels them as aggregate
-                // Google Shopping results and supplied no usable seller/product destination.
-                // A generic Google search link attributed to another retailer is still rejected.
-                canUseShoppingSearchFallback && isNavigableHttpUrl(it)
+                // If Google provided a valid price/title but no safe retailer URL, keep the offer
+                // usable through a query for this exact listing. The card will be labelled
+                // "Google Shopping", never as a direct seller link. This is preferable to hiding
+                // every priced result simply because a seller URL is missing or insecure.
+                isNavigableHttpUrl(it)
             }
             if (safeUrl == null || !isNavigableHttpUrl(safeUrl)) {
                 rejectedForLink++

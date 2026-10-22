@@ -45,7 +45,11 @@ data class SerpApiQuote(
     val storeName: String,
     val sourceName: String = "SerpApi · Google Shopping España",
     val googleProductId: String? = null
-)
+) {
+    /** Search-result URLs are navigation aids, not verified destinations for a quoted price. */
+    val isSearchFallbackDestination: Boolean
+        get() = isUnverifiedSearchFallbackUrl(sourceUrl)
+}
 
 /** A historical point explicitly returned by Google's product-price insights. */
 data class SerpApiPriceInsight(
@@ -637,18 +641,15 @@ class SerpApiClient(
                 return extractGoogleShoppingProductId(raw) != null ||
                     Regex("""(?i)/shopping/product/[^/]+""").containsMatchIn(path)
             }
-            val canUseShoppingSearchFallback =
-                providerSource?.equals("Google Shopping", ignoreCase = true) == true &&
-                    extractedCandidate == null &&
-                    candidateUrls.none(::isSpecificGoogleProductDestination)
             val safeUrl = url?.takeIf { candidate ->
                 isNavigableHttpUrl(candidate) &&
                     (!isGoogleShoppingUrl(candidate) || isSpecificGoogleProductDestination(candidate))
             } ?: googleSearchFallback.takeIf {
-                // A generic Shopping query is only a fallback when the provider itself labels
-                // this as an aggregate Google Shopping offer and no usable retailer/product URL
-                // exists. Never invent a Google search link for a named seller's offer.
-                canUseShoppingSearchFallback && isNavigableHttpUrl(it)
+                // Last-resort navigation for a priced listing whose seller/product destination
+                // cannot be used. The parsed result is labelled "Google Shopping", not as the
+                // named seller, because this opens a title-specific search rather than a product
+                // page. Generic search fallbacks are kept out of verified price history below.
+                isNavigableHttpUrl(it)
             }
             if (safeUrl == null || !isNavigableHttpUrl(safeUrl)) {
                 rejectedForLink++
@@ -891,7 +892,7 @@ class SerpApiClient(
                 store.optString("alt_currency")
             ).filter { it.isNotBlank() && it != "null" }.joinToString(" ")
             if (Regex(
-                    """(?i)(?:\b(cuota|cuotas|mensual|monthly|installment|installments|por\s+mes|per\s+month|alquiler|rental|renting)\b|/\s*mes\b)"""
+                    """(?i)(?:\b(cuota|cuotas|mensual|monthly|installment|installments|por\s+mes|per\s+month|al\s+mes|alquiler|rental|renting)\b|/\s*mes\b)"""
                 ).containsMatchIn(paymentTerms) ||
                 store.optInt("monthly_payment_duration", 0) > 0 ||
                 isRentalOrMonthlyListing(store, combinedTitle)
@@ -1075,7 +1076,9 @@ class SerpApiClient(
                 priceText.contains("EUR", ignoreCase = true)
             if (extractedPrice == null && !isEuroPrice) return@mapNotNull null
 
-            // Apply the same URL-routing policy used by the interactive offer cards.
+            // This quote parser is also used for legacy HTTP merchant observations. Preserve
+            // its existing return contract, but tag generic search URLs through the quote model so
+            // the repository can refuse to persist their prices as verified history.
             val candidateUrls = sequenceOf(
                 item.optString("link_clean"),
                 item.optString("link"),
@@ -1242,7 +1245,7 @@ class SerpApiClient(
 
     private fun isRentalOrMonthlyListing(item: JSONObject, title: String): Boolean {
         val excludedTerms = Regex(
-            """(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b|/\s*mes\b)"""
+            """(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes|al\s+mes)\b|/\s*mes\b)"""
         )
         if (excludedTerms.containsMatchIn(title)) return true
         val conditionText = listOf(
@@ -1259,7 +1262,7 @@ class SerpApiClient(
             .mapNotNull { item.optString(it).takeIf { value -> value.isNotBlank() && value != "null" } }
             .joinToString(" ")
         val text = "$title $condition"
-        return if (Regex("""(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b|/\s*mes\b)""").containsMatchIn(text)) {
+        return if (Regex("""(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes|al\s+mes)\b|/\s*mes\b)""").containsMatchIn(text)) {
             "Alquiler o cuota mensual"
         } else {
             "Segunda mano o reacondicionado"
@@ -1511,7 +1514,7 @@ class SerpApiClient(
 
     private fun isClearlyNonNewListing(item: JSONObject, title: String): Boolean {
         val excludedTerms = Regex(
-            """(?i)(?:\b(segunda[\s_-]+mano|second[\s_-]*hand|pre[\s_-]*owned|used|usad[oa]s?|seminuev[oa]s?|reacondicionad[oa]s?|refurbished|renewed|open[\s_-]*box|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b|/\s*mes\b)"""
+            """(?i)(?:\b(segunda[\s_-]+mano|second[\s_-]*hand|pre[\s_-]*owned|used|usad[oa]s?|seminuev[oa]s?|reacondicionad[oa]s?|refurbished|renewed|open[\s_-]*box|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes|al\s+mes)\b|/\s*mes\b)"""
         )
         if (excludedTerms.containsMatchIn(title)) return true
 

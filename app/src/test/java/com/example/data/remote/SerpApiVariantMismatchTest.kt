@@ -243,7 +243,7 @@ class SerpApiVariantMismatchTest {
     }
 
     @Test
-    fun refusesToReturnGenericGoogleSearchAsTheOnlyOfferDestination() {
+    fun keepsPricedOfferWhenSellerDestinationIsMissingViaSpecificShoppingSearch() {
         val report = SerpApiClient().parseShoppingResultsDetailed(
             root = JSONObject(
                 """
@@ -261,8 +261,59 @@ class SerpApiVariantMismatchTest {
             observedAt = 1_800_000_000_000L
         )
 
-        assertTrue(report.results.isEmpty())
-        assertEquals(1, report.rejectedForLink)
+        assertEquals(1, report.results.size)
+        val offer = report.results.single()
+        assertEquals(199.99, offer.price, 0.001)
+        assertEquals("Google Shopping", offer.storeName)
+        assertEquals("Google Shopping", offer.linkType)
+        assertTrue(offer.isGoogleShoppingSearchFallback)
+        assertTrue(offer.sourceUrl.startsWith("https://www.google.com/search?"))
+        assertTrue(offer.sourceUrl.contains("tbm=shop"))
+        assertTrue(offer.sourceUrl.contains("WH-1000XM5") || offer.sourceUrl.contains("WH-1000XM5".replace("-", "")))
+        assertEquals(0, report.rejectedForLink)
+        assertTrue(report.discardedOffers.none { it.reason.contains("enlace HTTPS útil") })
+    }
+
+    @Test
+    fun iphone16SearchKeepsPricedOfferWhenGoogleDoesNotProvideASellerUrl() {
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "shopping_results": [
+                    {
+                      "title": "Apple iPhone 16",
+                      "price": "574,99 €",
+                      "extracted_price": 574.99,
+                      "source": "Tienda de electrónica"
+                    },
+                    {
+                      "title": "Apple iPhone 16 Pro 256GB 44,99 € al mes",
+                      "price": "44,99 €",
+                      "extracted_price": 44.99,
+                      "source": "Tienda de electrónica"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "iphone 16",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals(1, report.results.size)
+        val phone = report.results.single()
+        assertEquals("Apple iPhone 16", phone.title)
+        assertEquals(574.99, phone.price, 0.001)
+        assertEquals("Google Shopping", phone.storeName)
+        assertTrue(phone.isGoogleShoppingSearchFallback)
+        assertTrue(phone.sourceUrl.contains("tbm=shop"))
+        assertTrue(
+            java.net.URLDecoder.decode(phone.sourceUrl, "UTF-8")
+                .contains("Apple iPhone 16", ignoreCase = true)
+        )
+        assertEquals(0, report.rejectedForLink)
+        assertTrue(report.discardedOffers.any { it.reason.contains("cuota", ignoreCase = true) })
     }
 
     @Test

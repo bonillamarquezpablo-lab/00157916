@@ -254,6 +254,7 @@ class ProductRepository(
                 quote.observedAt >= HISTORY_START_TIMESTAMP &&
                 isEligibleHistoryTitle(title) &&
                 !isPromotionalBulkListing(title, "") &&
+                !quote.isSearchFallbackDestination &&
                 isEligibleSeller(quote.storeName, quote.sourceUrl) &&
                 isPlausibleHistoryPrice(title, quote.price)
         }
@@ -353,10 +354,14 @@ class ProductRepository(
 
         val suspiciousByGroup = eligible.groupBy(::comparisonKey).mapValues { (_, comparableOffers) ->
             val trustedPrices = comparableOffers.filterNot {
-                it.isSecondHand || it.isAccessoryOffer || it.isFitmentUnverified || it.isCategoryUnverified
+                it.isSecondHand || it.isAccessoryOffer || it.isFitmentUnverified ||
+                    it.isCategoryUnverified || it.isSearchFallbackDestination
             }.map { it.price }.sorted()
-            val fallbackPrices = comparableOffers.filterNot { it.isFitmentUnverified }
-                .map { it.price }.sorted()
+            // Search-result URLs have no reliable seller price, so they must never set the
+            // median that determines whether direct offers are considered suspicious.
+            val fallbackPrices = comparableOffers.filterNot {
+                it.isFitmentUnverified || it.isSearchFallbackDestination
+            }.map { it.price }.sorted()
             val prices = trustedPrices.ifEmpty { fallbackPrices }
             if (prices.size < 2) {
                 // One listing alone provides no same-product reference for a statistical outlier.
@@ -406,7 +411,8 @@ class ProductRepository(
         return results.mapNotNull { result ->
             val filtered = acceptedByKey[key(result)]
             val visibleButNotHistory = filtered != null && (
-                result.isSecondHand ||
+                result.isSearchFallbackDestination ||
+                    result.isSecondHand ||
                     result.isFitmentUnverified ||
                     result.isCategoryUnverified ||
                     (isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
@@ -637,6 +643,10 @@ class ProductRepository(
         // and wheel listings missing requested fitment dimensions stay visible in the search UI,
         // but are not added to Mercado or its price history.
         val eligible = filterOnlineSearchResults(results, searchQuery)
+            // A title-specific Google Shopping query is useful for opening the result, but it
+            // does not prove which seller offers that price. Show it in live search without
+            // inventing a verified store price or attaching it to persistent history.
+            .filterNot { it.isSearchFallbackDestination }
             .filterNot { it.isSecondHand || it.isFitmentUnverified || it.isCategoryUnverified }
             // Marketplace accessory matches remain visible for inspection, but must never be
             // persisted as the searched product. Explicit accessory searches are still supported.
@@ -1049,7 +1059,8 @@ class ProductRepository(
         val expectedIdentity = onlineProductIdentityKey(expectedTitle)
         return filterOnlineSearchResults(offers, expectedTitle)
             .filterNot {
-                it.isSecondHand || it.isRentalOrMonthly ||
+                it.isSearchFallbackDestination ||
+                    it.isSecondHand || it.isRentalOrMonthly ||
                     it.isFitmentUnverified || it.isCategoryUnverified ||
                     (!targetIsAccessory &&
                         (it.isAccessoryOffer || isAccessoryListing(it.title)) &&
@@ -1178,7 +1189,7 @@ class ProductRepository(
         if (title.isBlank()) return false
         val normalized = normalizedProductTitle(title)
         val excludedListing = Regex(
-            """\b(segunda\s+mano|usad[oa]s?|used|reacondicionad[oa]s?|refurbished|renewed|pre owned|seminuev[oa]s?|open\s+box|caja\s+abierta|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|cuota|mensual|suscripcion|subscription|pago\s+a\s+plazos|monthly|por\s+mes|per\s+month|mes\s+a\s+mes)\b"""
+            """\b(segunda\s+mano|usad[oa]s?|used|reacondicionad[oa]s?|refurbished|renewed|pre owned|seminuev[oa]s?|open\s+box|caja\s+abierta|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|cuota|mensual|suscripcion|subscription|pago\s+a\s+plazos|monthly|por\s+mes|per\s+month|mes\s+a\s+mes|al\s+mes)\b"""
         )
         return !excludedListing.containsMatchIn(normalized) &&
             !Regex("""(?i)/\s*mes\b""").containsMatchIn(title)

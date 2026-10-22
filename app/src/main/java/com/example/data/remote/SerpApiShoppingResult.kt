@@ -274,6 +274,21 @@ data class SerpApiShoppingResult(
     val isGoogleShoppingProductLink: Boolean
         get() = isGoogleShoppingUrl(sourceUrl)
 
+    /**
+     * True for a generic Google Shopping results page, not a specific catalog product or seller.
+     * Such links are useful for continuing a search, but their quoted price must not be saved as
+     * a verified current price or historical observation because no seller destination is known.
+     */
+    val isGoogleShoppingSearchFallback: Boolean
+        get() = isGenericGoogleShoppingSearchUrl(sourceUrl)
+
+    /**
+     * True when an offer opens search results rather than a specific seller/product destination.
+     * Such offers remain visible, but their quoted price is not reliable evidence for price history.
+     */
+    val isSearchFallbackDestination: Boolean
+        get() = isUnverifiedSearchFallbackUrl(sourceUrl)
+
     val isSecondHand: Boolean
         get() {
             val listingText = "$title $storeName $sourceUrl $condition"
@@ -288,9 +303,9 @@ data class SerpApiShoppingResult(
 
     val isRentalOrMonthly: Boolean
         get() = Regex(
-            """(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b|/\s*mes\b)"""
+            """(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes|al\s+mes)\b|/\s*mes\b)"""
         ).containsMatchIn(title) || Regex(
-            """(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes)\b|/\s*mes\b)"""
+            """(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes|al\s+mes)\b|/\s*mes\b)"""
         ).containsMatchIn(condition)
 
     /** Describes the link the user will actually open; sourceProvider keeps origin provenance separate. */
@@ -365,6 +380,34 @@ fun isGoogleShoppingUrl(sourceUrl: String): Boolean {
     // google.com.attacker.example, which otherwise pass a startsWith("google.") check.
     return Regex("(?i)^(?:[a-z0-9-]+\\.)*google\\.(?:com|es|[a-z]{2,3}(?:\\.[a-z]{2,3})?)$")
         .matches(host)
+}
+
+/** Identifies a query results page, rather than a specific Google catalog-product destination. */
+fun isGenericGoogleShoppingSearchUrl(sourceUrl: String): Boolean {
+    if (!isGoogleShoppingUrl(sourceUrl)) return false
+    val uri = runCatching { URI(sourceUrl) }.getOrNull() ?: return false
+    val path = uri.path.orEmpty()
+    if (path != "/search" && !path.startsWith("/search/")) return false
+
+    val params = uri.rawQuery.orEmpty().split('&').mapNotNull { part ->
+        val key = part.substringBefore('=')
+        val value = part.substringAfter('=', "")
+        runCatching {
+            URLDecoder.decode(key, "UTF-8").lowercase(Locale.ROOT) to
+                URLDecoder.decode(value, "UTF-8")
+        }.getOrNull()
+    }.toMap()
+    return params["tbm"] == "shop" && params["q"].orEmpty().isNotBlank() &&
+        extractGoogleShoppingProductId(sourceUrl) == null
+}
+
+/** Any generic search-results destination is navigation only, not evidence of a seller quote. */
+fun isUnverifiedSearchFallbackUrl(sourceUrl: String): Boolean {
+    val uri = runCatching { URI(sourceUrl) }.getOrNull()
+    val path = uri?.path.orEmpty()
+    val genericGoogleSearch = isGoogleShoppingUrl(sourceUrl) &&
+        (path == "/search" || path.startsWith("/search/"))
+    return genericGoogleSearch || linkTypeForUrl(sourceUrl) == "Búsqueda en tienda"
 }
 
 /** True only when the provider identifies a GAME Spain offer by seller name or retailer host. */

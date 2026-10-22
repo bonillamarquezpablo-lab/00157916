@@ -391,11 +391,20 @@ class ExampleRobolectricTest {
             query = "Samsung Galaxy S26 Ultra 512 GB",
             observedAt = 123L
         )
-        assertEquals("Only offers with a seller destination or a specific Google product page survive", 5, report.results.size)
-        assertEquals(4, report.results.count { it.linkType == "Google Shopping" && !it.isSecondHand })
+        assertEquals(
+            "A generic Google Shopping result is replaced by a title-specific search instead of being discarded",
+            6,
+            report.results.size
+        )
+        assertEquals(5, report.results.count { it.linkType == "Google Shopping" && !it.isSecondHand })
         assertEquals(1, report.results.count { it.isSecondHand })
-        assertEquals(1, report.rejectedForLink)
+        assertEquals(0, report.rejectedForLink)
         assertTrue(report.results.none { it.sourceUrl.contains("google.es/search", ignoreCase = true) })
+        assertTrue(report.results.any {
+            it.isGoogleShoppingSearchFallback &&
+                java.net.URLDecoder.decode(it.sourceUrl, "UTF-8")
+                    .contains("Samsung Galaxy S26 Ultra", ignoreCase = true)
+        })
         assertTrue(report.results.none { it.title.contains("alquiler", ignoreCase = true) })
     }
 
@@ -2186,19 +2195,31 @@ class ExampleRobolectricTest {
 
         val results = client.parseShoppingResults(payload, observedAt = 123L)
 
-        assertEquals("Offers without a safe seller destination must not be sent to generic Google search", 2, results.size)
-        assertEquals("PcComponentes", results[0].storeName)
-        assertEquals(79.99, results[0].price, 0.001)
+        assertEquals(
+            "A priced offer without a safe seller destination remains visible through a labelled Google Shopping search",
+            3,
+            results.size
+        )
+        val fallback = results.single { it.isGoogleShoppingSearchFallback }
+        assertEquals("Google Shopping", fallback.storeName)
+        assertEquals(49.99, fallback.price, 0.001)
+        assertEquals("Google Shopping", fallback.linkType)
+        assertTrue(java.net.URLDecoder.decode(fallback.sourceUrl, "UTF-8")
+            .contains("Auriculares Sony WH-1000XM5", ignoreCase = true))
+
+        val pcComponentes = results.single { it.storeName == "PcComponentes" }
+        assertEquals(79.99, pcComponentes.price, 0.001)
         assertFalse("A decoded HTTPS seller destination is not an indirect Google URL",
-            results[0].isGoogleShoppingProductLink)
-        assertEquals("Google Shopping", results[0].sourceProvider)
-        assertEquals("directo", results[0].linkType)
-        assertEquals("Amazon.es", results[1].storeName)
-        assertEquals(89.99, results[1].price, 0.001)
-        assertFalse(results[1].isGoogleShoppingProductLink)
-        assertTrue(results[1].isAmazonOffer)
-        assertEquals(123L, results[1].observedAt)
-        assertEquals("https://images.example.test/sony.jpg", results[1].thumbnailUrl)
+            pcComponentes.isGoogleShoppingProductLink)
+        assertEquals("Google Shopping", pcComponentes.sourceProvider)
+        assertEquals("directo", pcComponentes.linkType)
+
+        val amazon = results.single { it.storeName == "Amazon.es" }
+        assertEquals(89.99, amazon.price, 0.001)
+        assertFalse(amazon.isGoogleShoppingProductLink)
+        assertTrue(amazon.isAmazonOffer)
+        assertEquals(123L, amazon.observedAt)
+        assertEquals("https://images.example.test/sony.jpg", amazon.thumbnailUrl)
     }
 
     @Test
@@ -2256,7 +2277,11 @@ class ExampleRobolectricTest {
         )
 
         assertEquals(5, report.rawResultCount)
-        assertEquals("Only matching offers with a usable destination remain", 2, report.results.size)
+        assertEquals(
+            "Matching offers remain visible when a safe seller link is missing; the fallback is labelled Google Shopping",
+            3,
+            report.results.size
+        )
         val amazonResult = report.results.single { it.storeName == "Amazon.es" }
         assertEquals("Sony WH1000XM5 Wireless Noise Canceling Headphones", amazonResult.title)
         assertEquals(249.99, amazonResult.price, 0.001)
@@ -2266,11 +2291,16 @@ class ExampleRobolectricTest {
         assertEquals(239.99, googleResult.price, 0.001)
         assertTrue(googleResult.isGoogleShoppingProductLink)
         assertEquals("Google Shopping", googleResult.linkType)
+
+        val fallbackResult = report.results.single { it.isGoogleShoppingSearchFallback }
+        assertEquals("Google Shopping", fallbackResult.storeName)
+        assertEquals(229.99, fallbackResult.price, 0.001)
+        assertTrue(fallbackResult.sourceUrl.contains("tbm=shop"))
         assertFalse(report.results.any { it.storeName == "Unsafe HTTP" })
 
         assertEquals(1, report.rejectedAsIrrelevant)
         assertEquals(1, report.rejectedForPriceOrCurrency)
-        assertEquals(1, report.rejectedForLink)
+        assertEquals(0, report.rejectedForLink)
         assertTrue(report.emptyResultMessage("Sony WH-1000XM5").isNotBlank())
     }
 
@@ -2608,6 +2638,53 @@ class ExampleRobolectricTest {
                 )
             )
 
+            val googleSearchOnlyOffer = results.first().copy(
+                price = 229.49,
+                storeName = "Google Shopping",
+                sourceUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=Sony+WH-1000XM5"
+            )
+            assertTrue(
+                "The Google Shopping fallback should remain visible for the user to continue the search",
+                repository.filterOnlineSearchResults(
+                    listOf(googleSearchOnlyOffer),
+                    "Sony WH-1000XM5"
+                ).single().isGoogleShoppingSearchFallback
+            )
+            assertEquals(
+                "A generic Shopping search is not proof of a seller quote and must not be persisted",
+                0,
+                repository.recordOnlineSearchResults(
+                    listOf(googleSearchOnlyOffer),
+                    sourceType = "GOOGLE_SHOPPING",
+                    searchQuery = "Sony WH-1000XM5"
+                )
+            )
+            assertTrue("An unlinked search fallback must not create a catalog product", database.productDao().getAllProductsSnapshot().isEmpty())
+            assertEquals(0, database.priceObservationDao().getVerifiedObservationCount())
+
+            val retailerSearchFallback = results.first().copy(
+                price = 228.99,
+                storeName = "Fnac",
+                sourceUrl = "https://www.fnac.es/SearchResult/ResultList.aspx?Search=Sony+WH-1000XM5"
+            )
+            assertTrue(
+                "A generated retailer search page must also be marked unverified",
+                repository.filterOnlineSearchResults(
+                    listOf(retailerSearchFallback),
+                    "Sony WH-1000XM5"
+                ).single().isSearchFallbackDestination
+            )
+            assertEquals(
+                "A retailer's generic search URL is not a verified offer and must not be persisted",
+                0,
+                repository.recordOnlineSearchResults(
+                    listOf(retailerSearchFallback),
+                    sourceType = "GOOGLE_SHOPPING",
+                    searchQuery = "Sony WH-1000XM5"
+                )
+            )
+            assertTrue(database.productDao().getAllProductsSnapshot().isEmpty())
+
             val suspiciousRedmi = com.example.data.remote.SerpApiShoppingResult(
                 title = "Xiaomi Redmi 17 5G 4GB 128GB Negro",
                 price = 9.90,
@@ -2889,10 +2966,18 @@ class ExampleRobolectricTest {
                 .put(item("Samsung Galaxy S26 Ultra 512 GB negro", price = "1.259,99 €", extractedPrice = 1259.99,
                     link = "https://www.tienda.example/samsung-s26")))
         val validReport = client.parseShoppingResultsDetailed(mostlyGoogle, "Samsung Galaxy S26 Ultra 512 GB", 123L)
-        assertEquals("Only a specific Google Shopping product page and a direct seller URL should survive", 2, validReport.results.size)
-        assertEquals(1, validReport.results.count { it.linkType == "Google Shopping" })
+        assertEquals(
+            "Specific product links, direct seller links, and a title-specific Shopping search remain usable",
+            3,
+            validReport.results.size
+        )
+        assertEquals(2, validReport.results.count { it.linkType == "Google Shopping" })
         assertEquals(1, validReport.results.count { it.linkType == "directo" })
-        assertEquals("A generic Google search URL is discarded instead of being used as a product destination", 1, validReport.rejectedForLink)
+        assertEquals(0, validReport.rejectedForLink)
+        val titleSpecificFallback = validReport.results.single { it.isGoogleShoppingSearchFallback }
+        assertEquals("Google Shopping", titleSpecificFallback.storeName)
+        assertTrue(titleSpecificFallback.sourceUrl.contains("tbm=shop"))
+        assertTrue(titleSpecificFallback.sourceUrl.contains("Samsung+Galaxy") || titleSpecificFallback.sourceUrl.contains("Samsung%20Galaxy"))
 
         val used = parse("Samsung Galaxy S26 Ultra 512 GB",
             item("Samsung Galaxy S26 Ultra 512 GB", condition = "used"))
@@ -3980,6 +4065,106 @@ class ExampleRobolectricTest {
                 "The suspicious observation may be retained for audit but must stay unverified",
                 database.priceObservationDao().observeVerifiedHistory(product.id).first().isEmpty()
             )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun shoppingSearchFallbackPricesDoNotDistortTheDirectOfferMedian() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val now = System.currentTimeMillis()
+            val directOffer = SerpApiShoppingResult(
+                title = "Sony WH-1000XM5 Wireless Headphones",
+                price = 199.99,
+                storeName = "PcComponentes",
+                sourceUrl = "https://www.pccomponentes.com/auriculares-sony-wh-1000xm5",
+                observedAt = now,
+                condition = "new"
+            )
+            val fallbackOne = directOffer.copy(
+                price = 10.00,
+                storeName = "Google Shopping",
+                sourceUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=Sony+WH-1000XM5",
+                observedAt = now - 60_000L
+            )
+            val fallbackTwo = fallbackOne.copy(price = 11.00, observedAt = now - 120_000L)
+
+            val filtered = repository.filterOnlineSearchResults(
+                listOf(fallbackOne, fallbackTwo, directOffer),
+                "Sony WH-1000XM5"
+            )
+
+            assertEquals("All three valid-title results stay visible during live search", 3, filtered.size)
+            assertTrue(filtered.count { it.isSearchFallbackDestination } == 2)
+            assertFalse(
+                "Cheap Google search fallbacks must not make the direct merchant offer look like an outlier",
+                filtered.single { it.storeName == "PcComponentes" }.isSuspiciousPrice
+            )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun retailerSearchFallbackQuoteIsNeverPersistedAsVerifiedHistory() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val product = ProductEntity(
+                id = "sony-search-fallback-history-guard",
+                title = "Sony WH-1000XM5 Wireless Headphones",
+                brand = "Sony",
+                category = "TV_AUDIO",
+                currentPrice = 0.0,
+                athMinPrice = 0.0,
+                athMinDate = "",
+                athMinStore = "",
+                athMaxPrice = 0.0,
+                avg90dPrice = 0.0,
+                officialPvp = 0.0,
+                currentStoreId = "unknown_store",
+                storeUrl = "",
+                ean = "",
+                isPriceVerified = false
+            )
+            database.productDao().insert(product)
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val quote = SerpApiQuote(
+                productId = product.id,
+                price = 229.99,
+                currency = "EUR",
+                observedAt = System.currentTimeMillis(),
+                sourceUrl = "https://www.fnac.es/SearchResult/ResultList.aspx?Search=Sony+WH-1000XM5",
+                storeId = "fnac",
+                storeName = "Fnac"
+            )
+
+            assertTrue(quote.isSearchFallbackDestination)
+            assertEquals(0, repository.recordSerpApiQuotes(listOf(quote)))
+            assertEquals(0, database.priceObservationDao().getObservationCount(product.id))
+            assertFalse(database.productDao().getProductById(product.id)!!.isPriceVerified)
         } finally {
             database.close()
         }

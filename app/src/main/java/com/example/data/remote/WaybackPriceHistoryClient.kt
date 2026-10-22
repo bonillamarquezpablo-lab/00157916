@@ -4715,6 +4715,12 @@ class WaybackPriceHistoryClient(
             if (key !in identityQueryKeys) null else decodeQueryUrlComponent(rawValue).takeIf { it.isNotBlank() }
         }.joinToString(" ")
         val urlTitle = normalizeTitle(pathText + " " + queryIdentityText)
+        // Xiaomi Mi model numbers are part of product identity, not just descriptive text.
+        // A URL for Mi 11 must never validate an offer for Mi 10 merely because both share
+        // the "Pro" edition and the expected storage capacity.
+        val expectedXiaomiModel = xiaomiMiModel(expected)
+        if (expectedXiaomiModel != null && xiaomiMiModel(urlTitle) != expectedXiaomiModel) return false
+
         val urlStorage = storagePattern.findAll(urlTitle)
             .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
         if (missingStorage && !urlStorage.containsAll(expectedStorage)) return false

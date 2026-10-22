@@ -4071,6 +4071,54 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun shoppingSearchFallbackPricesDoNotDistortTheDirectOfferMedian() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val now = System.currentTimeMillis()
+            val directOffer = SerpApiShoppingResult(
+                title = "Sony WH-1000XM5 Wireless Headphones",
+                price = 199.99,
+                storeName = "PcComponentes",
+                sourceUrl = "https://www.pccomponentes.com/auriculares-sony-wh-1000xm5",
+                observedAt = now,
+                condition = "new"
+            )
+            val fallbackOne = directOffer.copy(
+                price = 10.00,
+                storeName = "Google Shopping",
+                sourceUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=Sony+WH-1000XM5",
+                observedAt = now - 60_000L
+            )
+            val fallbackTwo = fallbackOne.copy(price = 11.00, observedAt = now - 120_000L)
+
+            val filtered = repository.filterOnlineSearchResults(
+                listOf(fallbackOne, fallbackTwo, directOffer),
+                "Sony WH-1000XM5"
+            )
+
+            assertEquals("All three valid-title results stay visible during live search", 3, filtered.size)
+            assertTrue(filtered.count { it.isSearchFallbackDestination } == 2)
+            assertFalse(
+                "Cheap Google search fallbacks must not make the direct merchant offer look like an outlier",
+                filtered.single { it.storeName == "PcComponentes" }.isSuspiciousPrice
+            )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun retailerSearchFallbackQuoteIsNeverPersistedAsVerifiedHistory() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(

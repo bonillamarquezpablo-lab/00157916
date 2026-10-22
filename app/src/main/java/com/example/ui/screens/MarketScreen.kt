@@ -123,7 +123,7 @@ fun MarketScreen(
         item {
             Text(
                 text = "Productos guardados",
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -135,7 +135,7 @@ fun MarketScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 5.dp)
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
             ) {
                 OutlinedTextField(
                     value = uiState.searchQuery,
@@ -169,8 +169,11 @@ fun MarketScreen(
                     singleLine = true,
                     shape = MaterialTheme.shapes.medium,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surface,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.38f),
+                        cursorColor = MaterialTheme.colorScheme.primary
                     )
                 )
             }
@@ -188,8 +191,8 @@ fun MarketScreen(
                 ) {
                     Text(
                         text = "Tiendas con precios",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     if (uiState.selectedStoreName != null) {
@@ -252,8 +255,8 @@ fun MarketScreen(
                                 }
                             },
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
                             ),
                             modifier = Modifier.testTag("store_chip_${store.id}")
                         )
@@ -527,7 +530,15 @@ fun MarketScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(32.dp),
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .clip(MaterialTheme.shapes.large)
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.outline.copy(alpha = 0.28f),
+                            MaterialTheme.shapes.large
+                        )
+                        .padding(24.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -562,8 +573,8 @@ fun MarketScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.50f))
+                                .clip(MaterialTheme.shapes.medium)
+                                .background(MaterialTheme.colorScheme.surfaceContainer)
                                 .clickable {
                                     if (familyExpanded) {
                                         expandedFamilyKeys = emptySet()

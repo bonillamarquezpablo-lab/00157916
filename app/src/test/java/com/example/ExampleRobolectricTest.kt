@@ -400,7 +400,11 @@ class ExampleRobolectricTest {
         assertEquals(1, report.results.count { it.isSecondHand })
         assertEquals(0, report.rejectedForLink)
         assertTrue(report.results.none { it.sourceUrl.contains("google.es/search", ignoreCase = true) })
-        assertTrue(report.results.any { it.isGoogleShoppingSearchFallback && it.sourceUrl.contains("Samsung+Galaxy") })
+        assertTrue(report.results.any {
+            it.isGoogleShoppingSearchFallback &&
+                java.net.URLDecoder.decode(it.sourceUrl, "UTF-8")
+                    .contains("Samsung Galaxy S26 Ultra 512 GB", ignoreCase = true)
+        })
         assertTrue(report.results.none { it.title.contains("alquiler", ignoreCase = true) })
     }
 
@@ -2191,19 +2195,31 @@ class ExampleRobolectricTest {
 
         val results = client.parseShoppingResults(payload, observedAt = 123L)
 
-        assertEquals("Offers without a safe seller destination must not be sent to generic Google search", 2, results.size)
-        assertEquals("PcComponentes", results[0].storeName)
-        assertEquals(79.99, results[0].price, 0.001)
+        assertEquals(
+            "A priced offer without a safe seller destination remains visible through a labelled Google Shopping search",
+            3,
+            results.size
+        )
+        val fallback = results.single { it.isGoogleShoppingSearchFallback }
+        assertEquals("Google Shopping", fallback.storeName)
+        assertEquals(49.99, fallback.price, 0.001)
+        assertEquals("Google Shopping", fallback.linkType)
+        assertTrue(java.net.URLDecoder.decode(fallback.sourceUrl, "UTF-8")
+            .contains("Auriculares Sony WH-1000XM5", ignoreCase = true))
+
+        val pcComponentes = results.single { it.storeName == "PcComponentes" }
+        assertEquals(79.99, pcComponentes.price, 0.001)
         assertFalse("A decoded HTTPS seller destination is not an indirect Google URL",
-            results[0].isGoogleShoppingProductLink)
-        assertEquals("Google Shopping", results[0].sourceProvider)
-        assertEquals("directo", results[0].linkType)
-        assertEquals("Amazon.es", results[1].storeName)
-        assertEquals(89.99, results[1].price, 0.001)
-        assertFalse(results[1].isGoogleShoppingProductLink)
-        assertTrue(results[1].isAmazonOffer)
-        assertEquals(123L, results[1].observedAt)
-        assertEquals("https://images.example.test/sony.jpg", results[1].thumbnailUrl)
+            pcComponentes.isGoogleShoppingProductLink)
+        assertEquals("Google Shopping", pcComponentes.sourceProvider)
+        assertEquals("directo", pcComponentes.linkType)
+
+        val amazon = results.single { it.storeName == "Amazon.es" }
+        assertEquals(89.99, amazon.price, 0.001)
+        assertFalse(amazon.isGoogleShoppingProductLink)
+        assertTrue(amazon.isAmazonOffer)
+        assertEquals(123L, amazon.observedAt)
+        assertEquals("https://images.example.test/sony.jpg", amazon.thumbnailUrl)
     }
 
     @Test

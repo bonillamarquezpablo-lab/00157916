@@ -2068,6 +2068,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 var capturesFoundCount = 0
                 var selectedProductRefreshed = false
                 var mementoAttempted = false
+                val archiveProvidersUsed = linkedSetOf<String>()
                 var successfulLookupsCount = 0
                 var requestFailedCount = 0
                 var skippedCount = 0
@@ -2095,6 +2096,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 ) {
                     val uniqueQuotes = incomingQuotes.distinctBy { archiveQuoteIdentity(candidate, it) }
                     if (uniqueQuotes.isEmpty()) return
+                    uniqueQuotes.forEach { quote ->
+                        archiveProvidersUsed += if (quote.snapshotUrl.contains("arquivo.pt", ignoreCase = true)) {
+                            "Arquivo.pt"
+                        } else {
+                            "Internet Archive"
+                        }
+                    }
                     for (quote in uniqueQuotes) {
                         if (countedArchiveQuoteKeys.add(archiveQuoteIdentity(candidate, quote))) {
                             foundCount++
@@ -2237,10 +2245,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     // Independent archive fallback: Wayback can be empty or rate-limited while
                     // Arquivo.pt still has snapshots. Run Memento at most once, only for a verified
                     // direct retailer URL, and reuse the exact same product-identity parser/guards.
+                    val currentCandidateQuotes = attempts.flatMap { it.quotes }
+                        .filter { it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId }
+                    val hasSufficientHistory =
+                        com.example.data.remote.hasSufficientHistoricalCoverage(currentCandidateQuotes)
                     if (directProductUrl != null && shouldAttemptMementoFallback(
                             alreadyAttempted = mementoAttempted,
                             hasEligibleDirectUrl = true,
-                            hasVerifiedQuotes = attempts.any { it.quotes.isNotEmpty() },
+                            hasSufficientHistory = hasSufficientHistory,
                             rateLimited = attempts.any { it.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") }
                         )
                     ) {
@@ -2248,7 +2260,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         if (diagnosticProductId != null) {
                             reportWaybackDiagnostic(
                                 diagnosticProductId, 7, WaybackTraceStatus.RUNNING,
-                                "Wayback no proporcionó un precio verificable; se prueba una fuente de archivo independiente (Memento) una sola vez."
+                                if (currentCandidateQuotes.isNotEmpty()) {
+                                    "Wayback encontró solo ${currentCandidateQuotes.map { Math.floorDiv(it.observedAt, com.example.data.remote.WaybackPriceHistoryClient.DAY_MS) }.distinct().size} fecha(s) histórica(s); se consulta Arquivo.pt para intentar completar la serie."
+                                } else {
+                                    "Wayback no proporcionó un precio verificable; se prueba una fuente de archivo independiente (Memento)."
+                                }
                             )
                         }
                         val mementoResult = withTimeoutOrNull(MAX_ARCHIVE_MEMENTO_FALLBACK_MS) {
@@ -2560,12 +2576,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         val oldest = archiveDates.minOrNull()?.let { timestamp ->
                             SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(timestamp))
                         }
-                        val recoveredFromMemento = attempts.any { attempt ->
-                            attempt.quotes.isNotEmpty() && attempt.quotes.all { quote ->
-                                quote.snapshotUrl.contains("arquivo.pt", ignoreCase = true)
-                            }
-                        }
-                        val archiveProvider = if (recoveredFromMemento) "Arquivo.pt" else "Internet Archive"
+                        val archiveProvider = archiveProvidersUsed.takeIf { it.isNotEmpty() }
+                            ?.joinToString(" y ")
+                            ?: "Internet Archive"
                         "Histórico gratuito recuperado de $archiveProvider: $savedCount precios antiguos guardados" +
                             (oldest?.let { ", con capturas desde $it" } ?: "") +
                             ". Son precios anunciados en páginas archivadas; puede haber huecos y no garantizan envío, stock ni precio final."

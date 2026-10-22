@@ -576,7 +576,7 @@ class OnlineSearchScreenTest {
         assertTrue(report.results.single { it.isAccessoryOffer }.title.startsWith("Funda"))
         assertEquals(1, report.discardedOffers.size)
         assertTrue(report.discardedOffers.single().reason.contains("cuota mensual", ignoreCase = true))
-        assertTrue(report.discardedOffers.single().priceLabel.contains("/mes"))
+        assertTrue(report.discardedOffers.single().priceLabel.contains("al mes", ignoreCase = true))
     }
 
     @Test

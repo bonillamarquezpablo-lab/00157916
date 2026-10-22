@@ -1257,6 +1257,7 @@ class SerpApiClient(
             "monthly_installment", "monthly_installment_amount",
             "price_per_month", "price_month", "installment_amount_per_month",
             "installment_plan", "installments", "installments_count",
+            "installments_description", "payment_description", "payment_plan",
             "monthly_payment_duration", "down_payment"
         )
         val hasExplicitFinancingMetadata = financingKeys.any { key ->
@@ -1545,6 +1546,9 @@ class SerpApiClient(
     }
 
     private fun isClearlyNonNewListing(item: JSONObject, title: String): Boolean {
+        // Shared payment metadata check also covers numeric monthly-payment fields (e.g. 44.99)
+        // for which the title and visible price text contain no indication that this is a quota.
+        if (isRentalOrMonthlyListing(item, title)) return true
         val excludedTerms = Regex(
             """(?i)(?:\b(segunda[\s_-]+mano|second[\s_-]*hand|pre[\s_-]*owned|used|usad[oa]s?|seminuev[oa]s?|reacondicionad[oa]s?|refurbished|renewed|open[\s_-]*box|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes|al\s+mes)\b|/\s*mes\b)"""
         )

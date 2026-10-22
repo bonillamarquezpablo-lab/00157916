@@ -2662,6 +2662,29 @@ class ExampleRobolectricTest {
             assertTrue("An unlinked search fallback must not create a catalog product", database.productDao().getAllProductsSnapshot().isEmpty())
             assertEquals(0, database.priceObservationDao().getVerifiedObservationCount())
 
+            val retailerSearchFallback = results.first().copy(
+                price = 228.99,
+                storeName = "Fnac",
+                sourceUrl = "https://www.fnac.es/SearchResult/ResultList.aspx?Search=Sony+WH-1000XM5"
+            )
+            assertTrue(
+                "A generated retailer search page must also be marked unverified",
+                repository.filterOnlineSearchResults(
+                    listOf(retailerSearchFallback),
+                    "Sony WH-1000XM5"
+                ).single().isSearchFallbackDestination
+            )
+            assertEquals(
+                "A retailer's generic search URL is not a verified offer and must not be persisted",
+                0,
+                repository.recordOnlineSearchResults(
+                    listOf(retailerSearchFallback),
+                    sourceType = "GOOGLE_SHOPPING",
+                    searchQuery = "Sony WH-1000XM5"
+                )
+            )
+            assertTrue(database.productDao().getAllProductsSnapshot().isEmpty())
+
             val suspiciousRedmi = com.example.data.remote.SerpApiShoppingResult(
                 title = "Xiaomi Redmi 17 5G 4GB 128GB Negro",
                 price = 9.90,
@@ -4042,6 +4065,58 @@ class ExampleRobolectricTest {
                 "The suspicious observation may be retained for audit but must stay unverified",
                 database.priceObservationDao().observeVerifiedHistory(product.id).first().isEmpty()
             )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun retailerSearchFallbackQuoteIsNeverPersistedAsVerifiedHistory() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val product = ProductEntity(
+                id = "sony-search-fallback-history-guard",
+                title = "Sony WH-1000XM5 Wireless Headphones",
+                brand = "Sony",
+                category = "TV_AUDIO",
+                currentPrice = 0.0,
+                athMinPrice = 0.0,
+                athMinDate = "",
+                athMinStore = "",
+                athMaxPrice = 0.0,
+                avg90dPrice = 0.0,
+                officialPvp = 0.0,
+                currentStoreId = "unknown_store",
+                storeUrl = "",
+                ean = "",
+                isPriceVerified = false
+            )
+            database.productDao().insert(product)
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val quote = SerpApiQuote(
+                productId = product.id,
+                price = 229.99,
+                currency = "EUR",
+                observedAt = System.currentTimeMillis(),
+                sourceUrl = "https://www.fnac.es/SearchResult/ResultList.aspx?Search=Sony+WH-1000XM5",
+                storeId = "fnac",
+                storeName = "Fnac"
+            )
+
+            assertTrue(quote.isSearchFallbackDestination)
+            assertEquals(0, repository.recordSerpApiQuotes(listOf(quote)))
+            assertEquals(0, database.priceObservationDao().getObservationCount(product.id))
+            assertFalse(database.productDao().getProductById(product.id)!!.isPriceVerified)
         } finally {
             database.close()
         }

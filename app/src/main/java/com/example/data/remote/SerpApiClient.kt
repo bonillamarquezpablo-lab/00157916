@@ -631,10 +631,19 @@ class SerpApiClient(
                     providerSource.orEmpty(),
                     title
                 )
-            val safeUrl = url?.takeIf(::isNavigableHttpUrl) ?: googleSearchFallback
-            if (!isNavigableHttpUrl(safeUrl)) {
+            val safeUrl = url?.takeIf(::isNavigableHttpUrl)
+                ?: googleSearchFallback.takeIf {
+                    // A generic Shopping query is only an acceptable fallback when the feed
+                    // explicitly says this is an aggregate Google Shopping result and provides
+                    // no candidate URL at all. If a claimed retailer supplies a generic Google
+                    // search link, keep rejecting it instead of mislabelling it as a valid offer.
+                    candidateUrls.isEmpty() &&
+                        providerSource.equals("Google Shopping", ignoreCase = true) &&
+                        isNavigableHttpUrl(it)
+                }
+            if (safeUrl == null || !isNavigableHttpUrl(safeUrl)) {
                 rejectedForLink++
-                recordDiscard(item, title, "No se pudo construir un enlace de búsqueda seguro")
+                recordDiscard(item, title, "El proveedor no facilitó un enlace HTTPS útil a la tienda")
                 return@mapNotNull null
             }
             // This parser is fed by the Google Shopping provider. Provider provenance must

@@ -48,22 +48,22 @@ private data class XiaomiModelIdentity(
 private fun xiaomiModelIdentity(value: String): XiaomiModelIdentity? {
     val normalized = normalizeOnlineSearchText(value)
     val redmi = Regex(
-        """\\bredmi\\s+(?:(note)\\s+)?(\\d{1,2})\\b(?:\\s+(pro\\s*max|pro|max|ultra|lite|plus|prime|4g|5g))?"""
+        """\bredmi\s+(?:(note)\s+)?(\d{1,2})\b(?:\s+(pro\s*max|pro|max|ultra|lite|plus|prime|4g|5g))?"""
     ).find(normalized)
     if (redmi != null) {
         val family = if (redmi.groupValues[1].isNotBlank()) "redmi-note" else "redmi"
         val edition = redmi.groupValues[3].takeIf { it.isNotBlank() }
-            ?.replace(Regex("""\\s+"""), "")
+            ?.replace(Regex("""\s+"""), "")
         return XiaomiModelIdentity(family, redmi.groupValues[2], edition)
     }
 
     // "Mi 10 Pro" and "Mi 11 Pro" are different models. The word boundary prevents
     // the "mi" inside "Redmi" from being treated as Xiaomi's separate Mi family.
     val mi = Regex(
-        """\\bmi\\s+(\\d{1,2})([a-z]?)\\b(?:\\s+(pro\\s*max|pro|max|ultra|lite|plus|mix))?"""
+        """\bmi\s+(\d{1,2})([a-z]?)\b(?:\s+(pro\s*max|pro|max|ultra|lite|plus|mix))?"""
     ).find(normalized) ?: return null
     val edition = mi.groupValues[4].takeIf { it.isNotBlank() }
-        ?.replace(Regex("""\\s+"""), "")
+        ?.replace(Regex("""\s+"""), "")
     return XiaomiModelIdentity("mi", mi.groupValues[1] + mi.groupValues[2], edition)
 }
 

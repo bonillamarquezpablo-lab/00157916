@@ -627,6 +627,55 @@ class OnlineSearchScreenTest {
     }
 
     @Test
+    fun iphone16VariantsStaySeparateAndAccessoriesCanBeShownWithoutHidingPhones() {
+        val now = System.currentTimeMillis()
+        fun offer(title: String, price: Double) = SerpApiShoppingResult(
+            title = title,
+            price = price,
+            storeName = "Google Shopping",
+            sourceUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=" +
+                java.net.URLEncoder.encode(title, "UTF-8"),
+            observedAt = now,
+            condition = "new"
+        )
+
+        val rows = listOf(
+            offer("Apple iPhone 16", 574.99),
+            offer("Apple iPhone 16 Pro 256 GB", 899.00),
+            offer("Apple iPhone 16 Plus", 749.00),
+            offer("Apple iPhone 16 Pro Max 512 GB", 999.00),
+            offer("Funda para Apple iPhone 16", 19.99),
+            offer("Original Screen for Apple iPhone 16", 149.99)
+        )
+        val phonesOnly = buildOnlineSearchDisplayGroups(
+            results = rows,
+            query = "iphone 16",
+            showSecondHand = false,
+            amazonOnly = false,
+            showAccessories = false
+        )
+        val phonesAndAccessories = buildOnlineSearchDisplayGroups(
+            results = rows,
+            query = "iphone 16",
+            showSecondHand = false,
+            amazonOnly = false,
+            showAccessories = true
+        )
+        val mainTitles = phonesOnly.flatMap { it.group.offers }.map { it.title }
+
+        assertEquals("Each iPhone 16 model should remain a separate card", 4, phonesOnly.size)
+        assertTrue(mainTitles.contains("Apple iPhone 16"))
+        assertTrue(mainTitles.contains("Apple iPhone 16 Pro 256 GB"))
+        assertTrue(mainTitles.contains("Apple iPhone 16 Plus"))
+        assertTrue(mainTitles.contains("Apple iPhone 16 Pro Max 512 GB"))
+        assertTrue(mainTitles.none { it.startsWith("Funda") || it.startsWith("Original Screen") })
+
+        val expandedTitles = phonesAndAccessories.flatMap { it.group.offers }.map { it.title }
+        assertTrue(expandedTitles.contains("Funda para Apple iPhone 16"))
+        assertTrue(expandedTitles.contains("Original Screen for Apple iPhone 16"))
+    }
+
+    @Test
     fun wheelSetsDisplayPerWheelPriceAndExplicitSetBadge() {
         val query = "autec zenit 14 5x100"
         val rows = listOf(

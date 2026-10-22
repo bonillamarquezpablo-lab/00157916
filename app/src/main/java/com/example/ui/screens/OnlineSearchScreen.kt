@@ -986,7 +986,16 @@ private fun ShoppingResultCard(
                             .padding(horizontal = 7.dp, vertical = 3.dp)
                     ) {
                         Text(
-                            text = "Enlace: ${best.linkType}",
+                            text = when {
+                                best.isSearchFallbackDestination && best.isGoogleShoppingSearchFallback ->
+                                    "Enlace no disponible · buscar en Google Shopping"
+                                best.isSearchFallbackDestination -> {
+                                    val seller = Store.findKnownByName(best.storeName, best.sourceUrl)?.name
+                                        ?: best.storeName
+                                    "Enlace no disponible · buscar en $seller"
+                                }
+                                else -> "Enlace: ${best.linkType}"
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
@@ -1020,8 +1029,30 @@ private fun ShoppingResultCard(
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.SemiBold
                                 )
-                                if (offer.isGoogleShoppingProductLink) {
-                                    Text("Precio listado en Google Shopping · confirmar en tienda", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                when {
+                                    offer.isSearchFallbackDestination && offer.isGoogleShoppingSearchFallback -> {
+                                        Text(
+                                            "Enlace directo no disponible · buscar en Google Shopping",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    offer.isSearchFallbackDestination -> {
+                                        val sellerName = Store.findKnownByName(offer.storeName, offer.sourceUrl)?.name
+                                            ?: offer.storeName
+                                        Text(
+                                            "Enlace directo no disponible · buscar en $sellerName",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    offer.isGoogleShoppingProductLink -> {
+                                        Text(
+                                            "Precio listado en Google Shopping · confirmar en tienda",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                             Text(
@@ -1045,6 +1076,9 @@ private fun ShoppingResultCard(
                         (categoryUnverified || fitmentUnverified) && !canOpenRetailer && purchaseOffer.isGoogleShoppingProductLink -> "Revisar variante en Google Shopping"
                         (categoryUnverified || fitmentUnverified) && knownRetailer != null && directRetailerUrl == null -> "Buscar variante en ${knownRetailer.name}"
                         (categoryUnverified || fitmentUnverified) -> "Revisar variante · " + purchaseOffer.storeName
+                        purchaseOffer.isSearchFallbackDestination && purchaseOffer.isGoogleShoppingSearchFallback -> "Buscar en Google Shopping"
+                        purchaseOffer.isSearchFallbackDestination && knownRetailer != null -> "Buscar en ${knownRetailer.name}"
+                        purchaseOffer.isSearchFallbackDestination -> "Buscar oferta (enlace directo no disponible)"
                         !hasTrustedPrice && !canOpenRetailer && purchaseOffer.isGoogleShoppingProductLink -> "Revisar oferta sin verificar en Google Shopping"
                         !hasTrustedPrice && knownRetailer != null && directRetailerUrl == null -> "Buscar oferta sin verificar en ${knownRetailer.name}"
                         !hasTrustedPrice -> "Revisar oferta sin verificar · ${purchaseOffer.storeName}"

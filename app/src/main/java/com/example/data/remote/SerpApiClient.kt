@@ -1245,24 +1245,75 @@ class SerpApiClient(
 
     private fun isRentalOrMonthlyListing(item: JSONObject, title: String): Boolean {
         val excludedTerms = Regex(
-            """(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes|al\s+mes)\b|/\s*mes\b)"""
+            """(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|installments?|installment|down\s+payment|entrada\s+inicial|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes|al\s+mes)\b|/\s*(?:mes|month|mo)\b)"""
         )
         if (excludedTerms.containsMatchIn(title)) return true
+
+        val priceText = listOf("price", "price_text", "price_formatted", "formatted_price", "display_price")
+            .mapNotNull { key -> item.opt(key)?.toString()?.takeUnless { it.isBlank() || it == "null" } }
+            .firstOrNull().orEmpty()
+        // An explicitly monthly-looking primary price is never a one-off purchase price.
+        if (excludedTerms.containsMatchIn(priceText)) return true
+
+        val extractedPrice = item.opt("extracted_price")
+            ?.takeIf { it !is JSONObject && it !is JSONArray }
+            ?.toString()
+            ?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() && it > 0.0 }
+        val primaryPrice = extractedPrice ?: parsePrice(priceText)
+        val primaryIsClearlyTotalPrice = primaryPrice != null &&
+            (priceText.contains("€") || priceText.contains("EUR", ignoreCase = true))
+
+        // Explicit monthly amount fields are a strong signal only when the listed price itself
+        // is ambiguous or equals that monthly amount. Preserve a clearly labelled total price
+        // when the feed also advertises a separate monthly-payment option.
+        val monthlyAmountKeys = listOf(
+            "monthly_payment", "monthly_payment_amount", "monthly_price",
+            "monthly_installment", "monthly_installment_amount",
+            "price_per_month", "price_month", "installment_amount_per_month"
+        )
+        val monthlyValues = monthlyAmountKeys.mapNotNull { key ->
+            item.opt(key)?.toString()?.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 }
+        }
+        val monthlySignalKeys = monthlyAmountKeys + "monthly_payment_duration"
+        val hasMonthlyMetadata = monthlySignalKeys.any { key ->
+            val value = item.opt(key)?.toString()?.trim()
+            !value.isNullOrBlank() &&
+                value.lowercase(Locale.ROOT) !in setOf("null", "0", "0.0", "false", "[]", "{}")
+        }
+        val primaryMatchesMonthlyAmount = primaryPrice != null &&
+            monthlyValues.any { kotlin.math.abs(it - primaryPrice) < 0.011 }
+        if (hasMonthlyMetadata && (!primaryIsClearlyTotalPrice || primaryMatchesMonthlyAmount)) return true
+
+        val paymentText = listOf(
+            "extracted_price_text", "installments_description", "installments",
+            "installments_count", "payment_description", "payment_plan",
+            "down_payment", "credit_terms", "payment_terms", "alt_currency"
+        ).mapNotNull { key ->
+            item.opt(key)?.toString()?.takeUnless { it.isBlank() || it == "null" || it == "0" }
+        }.joinToString(" ")
+        if (excludedTerms.containsMatchIn(paymentText) && !primaryIsClearlyTotalPrice) return true
+
         val conditionText = listOf(
             "second_hand_condition", "condition", "item_condition",
             "product_condition", "condition_description"
         ).mapNotNull { key ->
             item.opt(key)?.toString()?.takeUnless { it.isBlank() || it == "null" }
         }.joinToString(" ")
-        return excludedTerms.containsMatchIn(conditionText)
+        return excludedTerms.containsMatchIn(conditionText) && !primaryIsClearlyTotalPrice
     }
 
     private fun nonNewRejectionReason(item: JSONObject, title: String): String {
-        val condition = listOf("second_hand_condition", "condition", "item_condition", "product_condition", "condition_description")
-            .mapNotNull { item.optString(it).takeIf { value -> value.isNotBlank() && value != "null" } }
+        val condition = listOf(
+            "second_hand_condition", "condition", "item_condition",
+            "product_condition", "condition_description"
+        ).mapNotNull { item.optString(it).takeIf { value -> value.isNotBlank() && value != "null" } }
             .joinToString(" ")
         val text = "$title $condition"
-        return if (Regex("""(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes|al\s+mes)\b|/\s*mes\b)""").containsMatchIn(text)) {
+        return if (
+            Regex("""(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes|al\s+mes)\b|/\s*(?:mes|month|mo)\b)""")
+                .containsMatchIn(text) || isRentalOrMonthlyListing(item, title)
+        ) {
             "Alquiler o cuota mensual"
         } else {
             "Segunda mano o reacondicionado"
@@ -1513,6 +1564,9 @@ class SerpApiClient(
     }
 
     private fun isClearlyNonNewListing(item: JSONObject, title: String): Boolean {
+        // Shared payment metadata check also covers numeric monthly-payment fields (e.g. 44.99)
+        // for which the title and visible price text contain no indication that this is a quota.
+        if (isRentalOrMonthlyListing(item, title)) return true
         val excludedTerms = Regex(
             """(?i)(?:\b(segunda[\s_-]+mano|second[\s_-]*hand|pre[\s_-]*owned|used|usad[oa]s?|seminuev[oa]s?|reacondicionad[oa]s?|refurbished|renewed|open[\s_-]*box|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes|al\s+mes)\b|/\s*mes\b)"""
         )

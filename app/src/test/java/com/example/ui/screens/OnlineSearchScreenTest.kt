@@ -489,6 +489,162 @@ class OnlineSearchScreenTest {
     }
 
     @Test
+    fun livePricedOffersWithoutSellerLinksRemainVisibleAcrossProductCategories() {
+        val client = SerpApiClient()
+        val cases = listOf(
+            "Apple iPhone 16" to "574,99 €",
+            "Sony WH-1000XM5 Wireless Headphones" to "199,99 €",
+            "Alternador VW Polo 9N 1.9 SDI ASY" to "89,90 €",
+            "Pantalla Original Xiaomi Mi 10 Pro Versión S" to "42,50 €",
+            "Funda para Apple iPhone 16" to "19,99 €",
+            "Samsung OLED TV 55 inch" to "799,00 €",
+            "Lenovo ThinkPad T14 Gen 5 32GB RAM" to "1.099,00 €",
+            "PlayStation 5 Slim Digital Edition" to "399,99 €",
+            "Samsung 990 PRO 2TB NVMe SSD" to "169,99 €",
+            "Logitech G923 Racing Wheel" to "279,99 €",
+            "Batería externa INIU 20000mAh 65W" to "49,99 €",
+            "Faro delantero izquierdo Volkswagen Polo 9N" to "39,99 €",
+            "Lavavajillas Bosch Serie 6 SMS6" to "699,00 €",
+            "Cámara Sony Alpha A6400" to "749,00 €"
+        )
+
+        cases.forEachIndexed { index, (title, priceText) ->
+            val payload = JSONObject().put(
+                "search_metadata",
+                JSONObject().put("status", "Success")
+            ).put(
+                "shopping_results",
+                org.json.JSONArray().put(
+                    JSONObject()
+                        .put("title", title)
+                        .put("price", priceText)
+                        .put("extracted_price", priceText.replace(".", "").replace(",", ".")
+                            .replace(Regex("[^0-9.]"), "").toDouble())
+                        .put("source", "Google Shopping")
+                        // Intentionally no seller URL: a valid price must remain visible via
+                        // an honestly labelled query fallback in every product category.
+                )
+            )
+
+            val report = client.parseShoppingResultsDetailed(
+                root = payload,
+                query = title,
+                observedAt = System.currentTimeMillis() + index
+            )
+
+            assertEquals(
+                "A valid priced offer must not be discarded only because its seller URL is absent: $title; " +
+                    "discarded=${report.discardedOffers.map { it.reason }}",
+                1,
+                report.results.size
+            )
+            val offer = report.results.single()
+            assertEquals(title, offer.title)
+            assertTrue(offer.isSearchFallbackDestination)
+            assertTrue(offer.sourceUrl.startsWith("https://www.google.com/search?"))
+            assertTrue(offer.sourceUrl.contains("tbm=shop"))
+        }
+    }
+
+    @Test
+    fun liveIphone16SearchKeepsPricedVariantsAndAccessoriesButExplainsMonthlyDiscard() {
+        val now = System.currentTimeMillis()
+        val response = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {"title":"Apple iPhone 16","price":"574,99 €","extracted_price":574.99,"source":"Google Shopping"},
+                {"title":"Apple iPhone 16 Pro 256 GB","price":"899,00 €","extracted_price":899.0,"link":"http://seller-unknown.example/iphone-16-pro","source":"Google Shopping"},
+                {"title":"Apple iPhone 16 Plus","price":"749,00 €","extracted_price":749.0,"source":"Google Shopping"},
+                {"title":"Apple iPhone 16 Pro Max 512 GB","price":"999,00 €","extracted_price":999.0,"source":"Google Shopping"},
+                {"title":"Funda para Apple iPhone 16","price":"19,99 €","extracted_price":19.99,"source":"Google Shopping"},
+                {"title":"Apple iPhone 16 Pro 256 GB","price":"44,99 € al mes","extracted_price":44.99,"link":"https://shop.example/monthly-iphone","source":"Google Shopping"}
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = response,
+            query = "iphone 16",
+            observedAt = now
+        )
+        val acceptedTitles = report.results.map { it.title }
+
+        assertEquals("The live parser should explain and reject only the monthly installment", 6, report.rawResultCount)
+        assertEquals(5, report.results.size)
+        assertEquals(0, report.rejectedForLink)
+        assertTrue(acceptedTitles.contains("Apple iPhone 16"))
+        assertTrue(acceptedTitles.contains("Apple iPhone 16 Pro 256 GB"))
+        assertTrue(acceptedTitles.contains("Apple iPhone 16 Plus"))
+        assertTrue(acceptedTitles.contains("Apple iPhone 16 Pro Max 512 GB"))
+        assertTrue(acceptedTitles.contains("Funda para Apple iPhone 16"))
+        assertTrue(report.results.all { it.isSearchFallbackDestination })
+        assertTrue(report.results.single { it.isAccessoryOffer }.title.startsWith("Funda"))
+        assertEquals(1, report.discardedOffers.size)
+        assertTrue(report.discardedOffers.single().reason.contains("cuota mensual", ignoreCase = true))
+        assertTrue(report.discardedOffers.single().priceLabel.contains("al mes", ignoreCase = true))
+    }
+
+    @Test
+    fun monthlyInstallmentMetadataIsRejectedButASeparateClearTotalPriceIsPreserved() {
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "search_metadata": {"status": "Success"},
+                  "shopping_results": [
+                    {
+                      "title": "Apple iPhone 16 Pro 256 GB",
+                      "price": "899,00 €",
+                      "extracted_price": 899.0,
+                      "monthly_payment_amount": 44.99,
+                      "monthly_payment_duration": 24,
+                      "source": "Google Shopping"
+                    },
+                    {
+                      "title": "Apple iPhone 16 Pro 256 GB",
+                      "price": "44,99 €",
+                      "extracted_price": 44.99,
+                      "monthly_payment_amount": 44.99,
+                      "monthly_payment_duration": 24,
+                      "source": "Google Shopping"
+                    },
+                    {
+                      "title": "Apple iPhone 16 Pro 256 GB Negro",
+                      "price": "899,00 €",
+                      "extracted_price": 899.0,
+                      "payment_description": "Visa y Mastercard",
+                      "source": "Google Shopping"
+                    },
+                    {
+                      "title": "Apple iPhone 16 Pro 256 GB Azul",
+                      "price": "49,99",
+                      "extracted_price": 49.99,
+                      "monthly_payment_duration": 12,
+                      "source": "Google Shopping"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "Apple iPhone 16 Pro 256 GB",
+            observedAt = System.currentTimeMillis()
+        )
+
+        assertEquals(4, report.rawResultCount)
+        assertEquals("Clear totals and normal card-payment offers remain usable", 2, report.results.size)
+        assertTrue(report.results.all { kotlin.math.abs(it.price - 899.0) < 0.001 })
+        assertTrue(report.results.any { it.title.endsWith("Negro") })
+        assertTrue(report.results.any { it.title == "Apple iPhone 16 Pro 256 GB" })
+        assertEquals(2, report.discardedOffers.size)
+        assertTrue(report.discardedOffers.all { it.reason == "Alquiler o cuota mensual" })
+        assertTrue(report.discardedOffers.any { it.title.contains("Azul") })
+        assertTrue(report.discardedOffers.any { it.priceLabel.contains("44,99") })
+    }
+
+    @Test
     fun pricedOfferWithoutSafeRetailerLinkRemainsUsableThroughSpecificShoppingSearch() {
         val response = JSONObject(
             """
@@ -523,6 +679,51 @@ class OnlineSearchScreenTest {
     }
 
     @Test
+    fun liveOfferWithoutDirectSellerLinkRemainsVisibleAndSaysLinkIsUnavailable() {
+        val fallback = SerpApiShoppingResult(
+            title = "Apple iPhone 16",
+            price = 574.99,
+            storeName = "Google Shopping",
+            sourceUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=Apple+iPhone+16",
+            observedAt = System.currentTimeMillis(),
+            condition = "new"
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                OnlineSearchScreen(
+                    state = TrackerUiState(
+                        onlineSearchQuery = "iphone 16",
+                        onlineSearchResults = listOf(fallback),
+                        onlineSearchProvider = OnlineSearchProvider.GOOGLE_SHOPPING
+                    ),
+                    onQueryChange = {},
+                    onSearch = {},
+                    onAmazonSearch = {},
+                    onForceRefresh = {},
+                    onAmazonOnlyChange = {},
+                    onShowSecondHandChange = {},
+                    onToggleDiscarded = {},
+                    onOpenSettings = {},
+                    onOpenProduct = {},
+                    modifier = Modifier.testTag("online-search-list")
+                )
+            }
+        }
+
+        val list = composeRule.onNodeWithTag("online-search-list")
+        list.performScrollToNode(hasText("Apple iPhone 16"))
+        assertTrue(
+            "The iPhone 16 offer must remain visible in live results",
+            composeRule.onAllNodesWithText("Apple iPhone 16").fetchSemanticsNodes().isNotEmpty()
+        )
+        list.performScrollToNode(hasText("Enlace no disponible · buscar en Google Shopping"))
+        composeRule.onNodeWithText("Enlace no disponible · buscar en Google Shopping").assertIsDisplayed()
+        list.performScrollToNode(hasText("Buscar en Google Shopping"))
+        composeRule.onNodeWithText("Buscar en Google Shopping").assertIsDisplayed()
+    }
+
+    @Test
     fun replacementScreensAndForeignLanguageProtectorsAreRecognizedAsAccessories() {
         fun offer(title: String) = SerpApiShoppingResult(
             title = title,
@@ -541,6 +742,55 @@ class OnlineSearchScreenTest {
         assertTrue(isAccessorySearchQuery("Pantalla Original Xiaomi Mi 10 Pro"))
         assertTrue(isAccessorySearchQuery("Original Screen for Xiaomi Mi 10 Pro"))
         assertFalse(isAccessorySearchQuery("Xiaomi Mi 10 Pro"))
+    }
+
+    @Test
+    fun iphone16VariantsStaySeparateAndAccessoriesCanBeShownWithoutHidingPhones() {
+        val now = System.currentTimeMillis()
+        fun offer(title: String, price: Double) = SerpApiShoppingResult(
+            title = title,
+            price = price,
+            storeName = "Google Shopping",
+            sourceUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=" +
+                java.net.URLEncoder.encode(title, "UTF-8"),
+            observedAt = now,
+            condition = "new"
+        )
+
+        val rows = listOf(
+            offer("Apple iPhone 16", 574.99),
+            offer("Apple iPhone 16 Pro 256 GB", 899.00),
+            offer("Apple iPhone 16 Plus", 749.00),
+            offer("Apple iPhone 16 Pro Max 512 GB", 999.00),
+            offer("Funda para Apple iPhone 16", 19.99),
+            offer("Original Screen for Apple iPhone 16", 149.99)
+        )
+        val phonesOnly = buildOnlineSearchDisplayGroups(
+            results = rows,
+            query = "iphone 16",
+            showSecondHand = false,
+            amazonOnly = false,
+            showAccessories = false
+        )
+        val phonesAndAccessories = buildOnlineSearchDisplayGroups(
+            results = rows,
+            query = "iphone 16",
+            showSecondHand = false,
+            amazonOnly = false,
+            showAccessories = true
+        )
+        val mainTitles = phonesOnly.flatMap { it.group.offers }.map { it.title }
+
+        assertEquals("Each iPhone 16 model should remain a separate card", 4, phonesOnly.size)
+        assertTrue(mainTitles.contains("Apple iPhone 16"))
+        assertTrue(mainTitles.contains("Apple iPhone 16 Pro 256 GB"))
+        assertTrue(mainTitles.contains("Apple iPhone 16 Plus"))
+        assertTrue(mainTitles.contains("Apple iPhone 16 Pro Max 512 GB"))
+        assertTrue(mainTitles.none { it.startsWith("Funda") || it.startsWith("Original Screen") })
+
+        val expandedTitles = phonesAndAccessories.flatMap { it.group.offers }.map { it.title }
+        assertTrue(expandedTitles.contains("Funda para Apple iPhone 16"))
+        assertTrue(expandedTitles.contains("Original Screen for Apple iPhone 16"))
     }
 
     @Test

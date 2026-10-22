@@ -294,8 +294,54 @@ class ProductRepository(
     }
 
     /**
-     * Applies the same conservative quality rules to visible results and Room history.
-     * This keeps a suspicious price out of both the UI and the permanent price log.
+     * Filters results that should not be shown in the live-search list.
+     *
+     * This deliberately does NOT apply price-history restrictions such as the history price
+     * ceiling, minimum observation date, seller allowlist, merchant-domain policy, or outlier
+     * checks. Those rules decide whether a result is trustworthy enough for Room/history, not
+     * whether a real, priced offer should be hidden from the user. Keep the stricter
+     * filterOnlineSearchResults() unchanged for those downstream uses.
+     */
+    fun filterVisibleLiveSearchResults(
+        results: List<SerpApiShoppingResult>,
+        searchQuery: String = ""
+    ): List<SerpApiShoppingResult> {
+        val queryModelMarkers = explicitModelMarkers(searchQuery)
+        return results.filter { result ->
+            val accessoryForMainSearch =
+                isDeviceSearchQuery(searchQuery) &&
+                    !isAccessorySearchQuery(searchQuery) &&
+                    isAccessoryListing(result.title)
+            result.title.isNotBlank() &&
+                result.storeName.isNotBlank() &&
+                result.price.isFinite() &&
+                result.price > 0.0 &&
+                !result.isRentalOrMonthly &&
+                // Older compact live-search cache entries may preserve a monthly suffix in
+                // the title; filter it before display so it cannot look like a total purchase price.
+                !Regex("""(?i)/\s*(?:mes|month|mo)\b""").containsMatchIn(result.title) &&
+                !isIrrelevantMultiProductBundle(searchQuery, result.title) &&
+                !hasXiaomiModelMismatch(
+                    searchQuery,
+                    result.title,
+                    allowMissingAccessoryQualifiers = result.isAccessoryOffer
+                ) &&
+                (!isHallEffectKeyboardSearch(searchQuery) || isHallEffectKeyboardResult(result.title)) &&
+                (!isBicycleDrivetrainSearch(searchQuery) || isBicycleDrivetrainComponentTitle(result.title)) &&
+                !isWrongBicycleTireDiameter(searchQuery, result.title) &&
+                !hasStrictModelMismatch(
+                    searchQuery,
+                    queryModelMarkers,
+                    result.title,
+                    allowAccessoryMemoryMismatch = accessoryForMainSearch
+                )
+        }
+    }
+
+    /**
+     * Applies conservative trust rules before an online offer can influence Room history,
+     * current-price verification or historical comparisons. Results rejected here may still
+     * remain visible in live search via filterVisibleLiveSearchResults().
      */
     fun filterOnlineSearchResults(
         results: List<SerpApiShoppingResult>,

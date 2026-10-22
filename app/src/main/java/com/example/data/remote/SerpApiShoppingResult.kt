@@ -39,6 +39,43 @@ private fun normalizeOnlineSearchText(value: String): String =
         .trim()
         .replace(Regex("""\s+"""), " ")
 
+private data class XiaomiModelIdentity(
+    val family: String,
+    val number: String,
+    val edition: String?
+)
+
+private fun xiaomiModelIdentity(value: String): XiaomiModelIdentity? {
+    val normalized = normalizeOnlineSearchText(value)
+    val redmi = Regex(
+        """\\bredmi\\s+(?:(note)\\s+)?(\\d{1,2})\\b(?:\\s+(pro\\s*max|pro|max|ultra|lite|plus|prime|4g|5g))?"""
+    ).find(normalized)
+    if (redmi != null) {
+        val family = if (redmi.groupValues[1].isNotBlank()) "redmi-note" else "redmi"
+        val edition = redmi.groupValues[3].takeIf { it.isNotBlank() }
+            ?.replace(Regex("""\\s+"""), "")
+        return XiaomiModelIdentity(family, redmi.groupValues[2], edition)
+    }
+
+    // "Mi 10 Pro" and "Mi 11 Pro" are different models. The word boundary prevents
+    // the "mi" inside "Redmi" from being treated as Xiaomi's separate Mi family.
+    val mi = Regex(
+        """\\bmi\\s+(\\d{1,2})([a-z]?)\\b(?:\\s+(pro\\s*max|pro|max|ultra|lite|plus|mix))?"""
+    ).find(normalized) ?: return null
+    val edition = mi.groupValues[4].takeIf { it.isNotBlank() }
+        ?.replace(Regex("""\\s+"""), "")
+    return XiaomiModelIdentity("mi", mi.groupValues[1] + mi.groupValues[2], edition)
+}
+
+/** Exact Xiaomi Mi/Redmi identity guard for near-identical model names. */
+internal fun hasXiaomiModelMismatch(query: String, title: String): Boolean {
+    val expected = xiaomiModelIdentity(query) ?: return false
+    val actual = xiaomiModelIdentity(title) ?: return false
+    return expected.family != actual.family ||
+        expected.number != actual.number ||
+        (expected.edition != null && expected.edition != actual.edition)
+}
+
 private fun explicitOnlineModelCodes(value: String): Set<String> {
     val normalized = normalizeOnlineSearchText(value)
     val codes = ONLINE_MODEL_CODE.findAll(normalized)

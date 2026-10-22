@@ -81,8 +81,10 @@ internal fun hasXiaomiModelMismatch(
     val editionMismatch = expected.edition != null &&
         !(allowMissingAccessoryQualifiers && actual.edition == null) &&
         expected.edition != actual.edition
+    // Missing network labels are common in retailer titles. Reject only an explicit
+    // contradiction (4G vs 5G); absence of the network token alone is not proof of a mismatch.
     val networkMismatch = expected.network != null &&
-        !(allowMissingAccessoryQualifiers && actual.network == null) &&
+        actual.network != null &&
         expected.network != actual.network
     return expected.family != actual.family ||
         expected.number != actual.number ||

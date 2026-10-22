@@ -319,7 +319,7 @@ class ProductRepository(
                 !hasXiaomiModelMismatch(
                     searchQuery,
                     result.title,
-                    allowMissingEdition = result.isAccessoryOffer
+                    allowMissingAccessoryQualifiers = result.isAccessoryOffer
                 ) &&
                 (!isHallEffectKeyboardSearch(searchQuery) || isHallEffectKeyboardResult(result.title)) &&
                 (!isBicycleDrivetrainSearch(searchQuery) || isBicycleDrivetrainComponentTitle(result.title)) &&

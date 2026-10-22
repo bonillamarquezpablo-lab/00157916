@@ -2293,6 +2293,18 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         }
                     }
 
+                    } else if (
+                        !mementoAttempted &&
+                        candidate.directUrl == null &&
+                        attempts.none { it.quotes.isNotEmpty() } &&
+                        diagnosticProductId != null
+                    ) {
+                        reportWaybackDiagnostic(
+                            diagnosticProductId, 7, WaybackTraceStatus.SKIPPED,
+                            "Memento no se ha consultado: esta oferta no tiene una URL directa HTTPS validada del producto. No se inventa una dirección a partir del dominio."
+                        )
+                    }
+
                     // Try the broad fallback only if exact lookup did not find verified prices.
                     // Its shorter independent timeout leaves time for result rendering and other stores.
                     val rateLimitedAtDirectStage =

@@ -2515,9 +2515,18 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     // This final pass catches results from routes that did not stream their points.
                     persistCandidateQuotes(candidate, quotes)
 
-                    // An HTTP 429 applies to the archive service, not only this product.
-                    // Stop the batch now instead of iterating through the remaining candidates.
-                    if (attempts.any { it.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") }) {
+                    // An HTTP 429 is global. Also stop the outer merchant-candidate loop as
+                    // soon as one fully validated primary price exists: the exact CDX call has
+                    // already persisted every quote from that capture, including staged discoveries.
+                    val primaryPriceVerified = attempts.any { attempt ->
+                        attempt.quotes.any {
+                            it.targetProductId.isNullOrBlank() && !it.isDiscoveryCandidate
+                        }
+                    }
+                    if (attempts.any { it.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") } ||
+                        primaryPriceVerified
+                    ) {
+                        if (primaryPriceVerified) diagnosticCodes.add("CDX_EARLY_EXIT_VALID_PRICE")
                         break
                     }
                 }
@@ -2691,6 +2700,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             "CANDIDATE_TIMEOUT" -> "$code (se agotó el tiempo total de la búsqueda de esta tienda)"
                             "CDX_URL_PREFIX_CANDIDATE_TIMEOUT" -> "$code (la consulta por prefijo superó su límite de tiempo)"
                             "CDX_DOMAIN_CANDIDATE_TIMEOUT" -> "$code (la búsqueda amplia por dominio superó su límite de tiempo)"
+                            "CDX_EARLY_EXIT_VALID_PRICE" -> "CDX_EARLY_EXIT_VALID_PRICE (se cancelaron alternativas al confirmar un precio)"
                             else -> code
                         }
                     }

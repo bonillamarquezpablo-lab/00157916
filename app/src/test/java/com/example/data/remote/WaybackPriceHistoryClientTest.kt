@@ -4412,7 +4412,9 @@ class WaybackPriceHistoryClientTest {
     fun secondaryOfferFromExactCdxIsStreamedButPrefixFallbackStillRunsForPrimaryVariant() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        WaybackPriceHistoryClient(context).clearRateLimitForTests()
         preferences.edit()
+            .putBoolean("enabled", true)
             .remove("wayback_rate_limit_until")
             .remove("wayback_last_availability_request_at")
             .commit()
@@ -4422,6 +4424,7 @@ class WaybackPriceHistoryClientTest {
         val siblingTitle = "Apple iPhone 15 Plus 128GB Amarillo Libre"
         val siblingUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-128gb-amarillo-libre"
         val cdxMatchTypes = CopyOnWriteArrayList<String>()
+        val snapshotRequests = CopyOnWriteArrayList<String>()
         val streamedQuotes = CopyOnWriteArrayList<ArchivedPriceQuote>()
         val exactCdxBody = """
             [
@@ -4468,6 +4471,7 @@ class WaybackPriceHistoryClientTest {
                 }
                 request.url.host == "web.archive.org" &&
                     request.url.encodedPath.startsWith("/web/") -> {
+                    snapshotRequests += request.url.encodedPath
                     Response.Builder()
                         .request(request)
                         .protocol(Protocol.HTTP_1_1)
@@ -4502,9 +4506,11 @@ class WaybackPriceHistoryClientTest {
             }
         )
 
+        val fetchClient = WaybackPriceHistoryClient(context, http)
+        fetchClient.clearRateLimitForTests()
         try {
             val result = withTimeout(15_000L) {
-                WaybackPriceHistoryClient(context, http).fetchHistory(
+                fetchClient.fetchHistory(
                     originalUrl = primaryUrl,
                     expectedTitle = primaryTitle,
                     knownProductTitlesById = mapOf("saved-iphone-128" to siblingTitle),
@@ -4518,7 +4524,10 @@ class WaybackPriceHistoryClientTest {
                 result.quotes.isEmpty()
             )
             assertTrue(
-                "The capture callback must still receive the uniquely identified sibling variant",
+                "The capture callback must still receive the uniquely identified sibling variant; " +
+                    "snapshotRequests=${snapshotRequests.size}, cdxMatchTypes=$cdxMatchTypes, " +
+                    "captures=${result.capturesFound}/${result.capturesChecked}, " +
+                    "diagnostics=${result.diagnosticCodes}",
                 streamedQuotes.any {
                     it.targetProductId == "saved-iphone-128" &&
                         it.productTitle == siblingTitle &&
@@ -4531,7 +4540,9 @@ class WaybackPriceHistoryClientTest {
                     cdxMatchTypes.indexOf("prefix") > cdxMatchTypes.indexOf("exact")
             )
         } finally {
+            fetchClient.clearRateLimitForTests()
             preferences.edit()
+                .remove("enabled")
                 .remove("wayback_rate_limit_until")
                 .remove("wayback_last_availability_request_at")
                 .commit()

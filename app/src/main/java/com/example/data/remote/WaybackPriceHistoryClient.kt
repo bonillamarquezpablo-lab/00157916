@@ -701,7 +701,8 @@ class WaybackPriceHistoryClient(
                     failureCodes = setOf("CDX_INFERRED_URL_AVAILABILITY_FIRST"),
                     onTrace = onTrace,
                     snapshotResultsCache = snapshotResultsCache,
-                    onVerifiedQuotes = onVerifiedQuotes
+                    onVerifiedQuotes = onVerifiedQuotes,
+                    forceRefresh = forceRefresh
                 )
             }
             if (preferredUrlAlreadyQueried && resolvedPreferredUrl != null) {
@@ -715,7 +716,8 @@ class WaybackPriceHistoryClient(
                     failureCodes = setOf("CDX_DIRECT_URL_ALREADY_QUERIED"),
                     onTrace = onTrace,
                     snapshotResultsCache = snapshotResultsCache,
-                    onVerifiedQuotes = onVerifiedQuotes
+                    onVerifiedQuotes = onVerifiedQuotes,
+                    forceRefresh = forceRefresh
                 )
             }
             if (productUrlCandidate != null) {
@@ -763,7 +765,8 @@ class WaybackPriceHistoryClient(
                         },
                         onTrace = onTrace,
                         snapshotResultsCache = snapshotResultsCache,
-                        onVerifiedQuotes = onVerifiedQuotes
+                        onVerifiedQuotes = onVerifiedQuotes,
+                        forceRefresh = forceRefresh
                     )
                 }
             }
@@ -782,7 +785,8 @@ class WaybackPriceHistoryClient(
                     failureCodes = setOf("DOMAIN_CDX_CANDIDATES_EMPTY"),
                     onTrace = onTrace,
                     snapshotResultsCache = snapshotResultsCache,
-                    onVerifiedQuotes = onVerifiedQuotes
+                    onVerifiedQuotes = onVerifiedQuotes,
+                    forceRefresh = forceRefresh
                 )
             }
 
@@ -839,7 +843,8 @@ class WaybackPriceHistoryClient(
                         onTrace = onTrace,
                         snapshotResultsCache = snapshotResultsCache,
                         onVerifiedQuotes = onVerifiedQuotes,
-                        knownProductTitlesById = knownProductTitlesById
+                        knownProductTitlesById = knownProductTitlesById,
+                        forceRefresh = forceRefresh
                     )
                 }
                 if (
@@ -870,7 +875,8 @@ class WaybackPriceHistoryClient(
         onTrace: ((WaybackTraceEvent) -> Unit)?,
         knownProductTitlesById: Map<String, String> = emptyMap(),
         snapshotResultsCache: MutableMap<String, SnapshotFetch>? = null,
-        onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null
+        onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null,
+        forceRefresh: Boolean = false
     ): WaybackBackfillResult {
         val failureLabel = when {
             failureCodes.contains("CDX_DIRECT_URL_ALREADY_QUERIED") ->

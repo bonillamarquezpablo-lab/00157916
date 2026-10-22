@@ -2167,12 +2167,21 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             // promote a discovery into products/price_observations.
                             val discoveryQuotes = urlQuotes.filter { it.isDiscoveryCandidate }
                             for (quote in discoveryQuotes) {
-                                if (productDiscoveryRepository.stageArchivedQuote(
-                                        quote = quote,
-                                        fallbackStoreName = candidate.storeName
-                                    )
-                                ) {
-                                    stagedDiscoveryObservationsCount++
+                                try {
+                                    if (productDiscoveryRepository.stageArchivedQuote(
+                                            quote = quote,
+                                            fallbackStoreName = candidate.storeName
+                                        )
+                                    ) {
+                                        stagedDiscoveryObservationsCount++
+                                    }
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (_: Exception) {
+                                    // A quarantine write must never prevent a verified quote for
+                                    // the requested/catalogued product from being persisted.
+                                    persistenceCompleted = false
+                                    diagnosticCodes.add("ARCHIVE_DISCOVERY_STAGE_FAILED")
                                 }
                             }
 
@@ -2537,6 +2546,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         else -> WaybackTraceStatus.SKIPPED
                     }
                     val persistenceDetail = when {
+                        savedCount > 0 && stagedDiscoveryObservationsCount > 0 ->
+                            "Guardado completado: $savedCount punto(s) para el catálogo y $stagedDiscoveryObservationsCount observación(es) secundarias en cuarentena."
                         savedCount > 0 ->
                             "Guardado completado: $savedCount punto(s) nuevo(s) en el histórico del catálogo."
                         stagedDiscoveryObservationsCount > 0 ->
@@ -2714,6 +2725,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 appendArchiveNotice(query, provider, noticeWithDiagnostics, targetProductId)
                 if (diagnosticProductId != null) {
                     when {
+                        savedCount > 0 && stagedDiscoveryObservationsCount > 0 -> finishWaybackDiagnostic(
+                            diagnosticProductId, WaybackTraceStatus.PASSED,
+                            "$savedCount precio(s) histórico(s) guardado(s) en el catálogo y $stagedDiscoveryObservationsCount observación(es) secundarias en Radar."
+                        )
                         savedCount > 0 -> finishWaybackDiagnostic(
                             diagnosticProductId, WaybackTraceStatus.PASSED,
                             "$savedCount precio(s) histórico(s) guardado(s) en la base de datos local."

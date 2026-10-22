@@ -1059,7 +1059,8 @@ class ProductRepository(
         val expectedIdentity = onlineProductIdentityKey(expectedTitle)
         return filterOnlineSearchResults(offers, expectedTitle)
             .filterNot {
-                it.isSecondHand || it.isRentalOrMonthly ||
+                it.isSearchFallbackDestination ||
+                    it.isSecondHand || it.isRentalOrMonthly ||
                     it.isFitmentUnverified || it.isCategoryUnverified ||
                     (!targetIsAccessory &&
                         (it.isAccessoryOffer || isAccessoryListing(it.title)) &&

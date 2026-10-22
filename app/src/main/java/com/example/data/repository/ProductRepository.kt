@@ -317,6 +317,9 @@ class ProductRepository(
                 result.price.isFinite() &&
                 result.price > 0.0 &&
                 !result.isRentalOrMonthly &&
+                // Older compact live-search cache entries may preserve a monthly suffix in
+                // the title; filter it before display so it cannot look like a total purchase price.
+                !Regex("""(?i)/\s*(?:mes|month|mo)\b""").containsMatchIn(result.title) &&
                 !isIrrelevantMultiProductBundle(searchQuery, result.title) &&
                 !hasXiaomiModelMismatch(
                     searchQuery,

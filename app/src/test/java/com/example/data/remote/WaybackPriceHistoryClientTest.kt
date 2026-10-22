@@ -779,6 +779,52 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun exactAppleIphone16SkuUrlAllowsGenericTitleAndRejectsPlusSibling() {
+        val client = newClient()
+        val expected = "Apple iPhone 16 128 GB Negro"
+        val exactSkuUrl =
+            "https://www.apple.com/es/shop/buy-iphone/iphone-16/pantalla-de-6,1%E2%80%B3-128gb-negro"
+        val snapshotUrl = "https://web.archive.org/web/20250108174736/" + exactSkuUrl
+        val genericTitleHtml = """
+            <html><head><title>iPhone 16</title>
+              <script type="application/ld+json">
+                {"@type":"Product","name":"iPhone 16",
+                 "offers":{"@type":"Offer","price":"899.00","priceCurrency":"EUR"}}
+              </script>
+            </head><body><h1>iPhone 16</h1></body></html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = genericTitleHtml,
+            expectedTitle = expected,
+            originalUrl = exactSkuUrl,
+            snapshotUrl = snapshotUrl,
+            observedAt = 1736368056000L
+        )
+        assertNotNull("The exact Apple SKU route may confirm a generic iPhone 16 page title", quote)
+        assertEquals(899.0, quote!!.price, 0.001)
+
+        val siblingVariantHtml = """
+            <html><head><title>iPhone 16 Plus 128 GB Negro</title>
+              <script type="application/ld+json">
+                {"@type":"Product","name":"iPhone 16 Plus 128 GB Negro",
+                 "offers":{"@type":"Offer","price":"999.00","priceCurrency":"EUR"}}
+              </script>
+            </head><body><h1>iPhone 16 Plus 128 GB Negro</h1></body></html>
+        """.trimIndent()
+        assertNull(
+            "A base iPhone URL must not accept a Plus model price",
+            client.parseArchivedPrice(
+                html = siblingVariantHtml,
+                expectedTitle = expected,
+                originalUrl = exactSkuUrl,
+                snapshotUrl = snapshotUrl,
+                observedAt = 1736368056000L
+            )
+        )
+    }
+
+    @Test
     fun explicitlyWrongVariantUrlIsDeferredButFamilyUrlRemainsEligible() {
         val client = newClient()
         val expected = "Apple iPhone 15 256 GB Amarillo"
@@ -4316,4 +4362,182 @@ class WaybackPriceHistoryClientTest {
         assertNotNull(urls)
         assertEquals(listOf("www.shop.example", "shop.example"), urls!!.map { it.queryParameter("url") })
     }
+
+
+    @Test
+    fun genericArchivedProductTitleCanBeRecoveredFromStructuredVariantAttributes() {
+        val html = """
+            <html><head>
+              <title>Samsung Galaxy S25 Ultra</title>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@type":"Product",
+                "name":"Samsung Galaxy S25 Ultra",
+                "brand":{"@type":"Brand","name":"Samsung"},
+                "model":"SM-S938B",
+                "color":"Titanium Gray",
+                "additionalProperty":[
+                  {"@type":"PropertyValue","name":"Storage capacity","value":"256 GB"}
+                ],
+                "offers":{"@type":"Offer","price":"1099.00","priceCurrency":"EUR"}
+              }
+              </script>
+            </head><body>Samsung Galaxy S25 Ultra</body></html>
+        """.trimIndent()
+
+        val quote = newClient().parseArchivedPrice(
+            html = html,
+            expectedTitle = "Samsung Galaxy S25 Ultra 256 GB Titanium Gray",
+            originalUrl = "https://shop.example/products/galaxy-s25-ultra",
+            snapshotUrl = "https://web.archive.org/web/20260101000000/https://shop.example/products/galaxy-s25-ultra",
+            observedAt = 1_767_225_600_000L
+        )
+
+        assertNotNull("Generic headings must be recoverable from the same Product's JSON-LD facts", quote)
+        assertEquals(1099.0, quote!!.price, 0.001)
+        assertEquals("EUR", quote.currency)
+    }
+
+    @Test
+    fun structuredArchivedCapacityAndColourConflictsAreRejectedEvenWhenTitleIsGeneric() {
+        fun quote(capacity: String, color: String) = newClient().parseArchivedPrice(
+            html = """
+                <html><head><title>Samsung Galaxy S25 Ultra</title>
+                <script type="application/ld+json">
+                {
+                  "@context":"https://schema.org",
+                  "@type":"Product",
+                  "name":"Samsung Galaxy S25 Ultra",
+                  "brand":{"@type":"Brand","name":"Samsung"},
+                  "color":"$color",
+                  "additionalProperty":[
+                    {"@type":"PropertyValue","name":"Storage capacity","value":"$capacity"}
+                  ],
+                  "offers":{"@type":"Offer","price":"799.00","priceCurrency":"EUR"}
+                }
+                </script></head><body>Samsung Galaxy S25 Ultra</body></html>
+            """.trimIndent(),
+            expectedTitle = "Samsung Galaxy S25 Ultra 256 GB Titanium Gray",
+            originalUrl = "https://shop.example/products/galaxy-s25-ultra",
+            snapshotUrl = "https://web.archive.org/web/20260101000000/https://shop.example/products/galaxy-s25-ultra",
+            observedAt = 1_767_225_600_000L
+        )
+
+        assertNull("512 GB cannot be attached to the selected 256 GB variant", quote("512 GB", "Titanium Gray"))
+        assertNull("A conflicting colour must not be accepted", quote("256 GB", "Titanium Black"))
+    }
+
+    @Test
+    fun exactManufacturerModelCodeCanRecoverGenericHeadingButConflictingCodeIsRejected() {
+        fun quote(model: String) = newClient().parseArchivedPrice(
+            html = """
+                <html><head><title>Sony BRAVIA Television</title>
+                <script type="application/ld+json">
+                {
+                  "@context":"https://schema.org",
+                  "@type":"Product",
+                  "name":"Sony BRAVIA Television",
+                  "brand":{"@type":"Brand","name":"Sony"},
+                  "model":"$model",
+                  "offers":{"@type":"Offer","price":"1299.00","priceCurrency":"EUR"}
+                }
+                </script></head><body>Sony BRAVIA Television</body></html>
+            """.trimIndent(),
+            expectedTitle = "Sony BRAVIA XR55A80L 55 inch OLED TV",
+            originalUrl = "https://shop.example/products/bravia-oled",
+            snapshotUrl = "https://web.archive.org/web/20260101000000/https://shop.example/products/bravia-oled",
+            observedAt = 1_767_225_600_000L
+        )
+
+        assertNotNull("The exact structured model code is stronger than a generic page title", quote("XR55A80L"))
+        assertNull("A different Sony model code must never be blended into the chart", quote("XR55X90L"))
+    }
+
+    @Test
+    fun archivedMetaIdentityCanCompleteAGenericTitleWithoutJsonLd() {
+        val html = """
+            <html><head>
+              <meta property="og:title" content="Samsung Galaxy S25 Ultra">
+              <meta property="product:brand" content="Samsung">
+              <meta property="product:model" content="SM-S938B">
+              <meta property="product:color" content="Titanium Gray">
+              <meta property="product:storage" content="256 GB">
+              <meta property="product:price:amount" content="1099.00">
+              <meta property="product:price:currency" content="EUR">
+            </head><body>Samsung Galaxy S25 Ultra</body></html>
+        """.trimIndent()
+
+        val quote = newClient().parseArchivedPrice(
+            html = html,
+            expectedTitle = "Samsung Galaxy S25 Ultra 256 GB Titanium Gray",
+            originalUrl = "https://shop.example/products/galaxy-s25-ultra",
+            snapshotUrl = "https://web.archive.org/web/20260101000000/https://shop.example/products/galaxy-s25-ultra",
+            observedAt = 1_767_225_600_000L
+        )
+
+        assertNotNull("Product meta tags should complement a generic archived page title", quote)
+        assertEquals(1099.0, quote!!.price, 0.001)
+    }
+
+
+
+    @Test
+    fun archivedHiddenDataAttributesCanSupplyExactCapacityAndColour() {
+        val html = """
+            <html><head>
+              <meta property="og:title" content="Samsung Galaxy S25 Ultra">
+              <meta property="product:price:amount" content="1099.00">
+              <meta property="product:price:currency" content="EUR">
+            </head><body>
+              <main data-brand="Samsung" data-product-model="SM-S938B"
+                    data-color="Titanium Gray" data-storage="256 GB">
+                Samsung Galaxy S25 Ultra
+              </main>
+            </body></html>
+        """.trimIndent()
+
+        val quote = newClient().parseArchivedPrice(
+            html = html,
+            expectedTitle = "Samsung Galaxy S25 Ultra 256 GB Titanium Gray",
+            originalUrl = "https://shop.example/products/galaxy-s25-ultra",
+            snapshotUrl = "https://web.archive.org/web/20260101000000/https://shop.example/products/galaxy-s25-ultra",
+            observedAt = 1_767_225_600_000L
+        )
+
+        assertNotNull("Generic data-* identity fields should complete the archived title", quote)
+        assertEquals(1099.0, quote!!.price, 0.001)
+    }
+
+
+
+    @Test
+    fun explicitVariantInOriginalUrlCanCompleteAnArchivedGenericHeading() {
+        val html = """
+            <html><head>
+              <title>Samsung Galaxy S25 Ultra</title>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@type":"Product",
+                "name":"Samsung Galaxy S25 Ultra",
+                "brand":{"@type":"Brand","name":"Samsung"},
+                "offers":{"@type":"Offer","price":"1099.00","priceCurrency":"EUR"}
+              }
+              </script>
+            </head><body>Samsung Galaxy S25 Ultra</body></html>
+        """.trimIndent()
+
+        val quote = newClient().parseArchivedPrice(
+            html = html,
+            expectedTitle = "Samsung Galaxy S25 Ultra 256 GB Titanium Gray",
+            originalUrl = "https://shop.example/products/galaxy-s25-ultra-256gb-titanium-gray",
+            snapshotUrl = "https://web.archive.org/web/20260101000000/https://shop.example/products/galaxy-s25-ultra-256gb-titanium-gray",
+            observedAt = 1_767_225_600_000L
+        )
+
+        assertNotNull("The exact product URL can verify omitted capacity/colour in an archived heading", quote)
+        assertEquals(1099.0, quote!!.price, 0.001)
+    }
+
 }

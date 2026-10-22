@@ -1720,37 +1720,45 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             }
                         }
                         val cachedResults = cachedReport.results
-                        val (safeCachedResults, cachedDiscarded) = withContext(Dispatchers.Default) {
-                            val eligible = repository.filterOnlineSearchResults(cachedResults, query)
-                            val discarded = (cachedReport.discardedOffers +
-                                repository.diagnoseOnlineSearchRejections(cachedResults, query))
-                                .distinctBy { it.provider + "|" + it.title + "|" + it.priceLabel + "|" + it.reason }
-                            eligible to discarded
-                        }
+                        val (visibleCachedResults, cachedHistoryCandidates, cachedDiscarded) =
+                            withContext(Dispatchers.Default) {
+                                // A result can be suitable for showing now without being safe enough
+                                // to write into verified price history. Don't hide it just because its
+                                // seller URL or price evidence fails the stricter history policy.
+                                val visible = repository.filterVisibleLiveSearchResults(cachedResults, query)
+                                val historyCandidates = repository.filterOnlineSearchResults(visible, query)
+                                val discarded = (cachedReport.discardedOffers +
+                                    diagnoseLiveSearchHiddenOffers(cachedResults, visible, query))
+                                    .distinctBy { it.provider + "|" + it.title + "|" + it.priceLabel + "|" + it.reason }
+                                Triple(visible, historyCandidates, discarded)
+                            }
                         onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = cachedDiscarded
-                        val base = if (safeCachedResults.isEmpty()) {
+                        val base = if (visibleCachedResults.isEmpty()) {
                             cachedReport.emptyResultMessage(query)
                         } else {
-                            onlineSearchResultMessage(safeCachedResults, provider, query)
+                            onlineSearchResultMessage(visibleCachedResults, provider, query)
                         }
                         val cacheNotice = "Resultados recuperados de caché: consulta capturada ${formatOnlineSnapshotAge(cached.savedAt)}. No se ha consumido otra búsqueda; los precios pueden haber cambiado."
-                        val savedObservations = if (safeCachedResults.isNotEmpty()) {
+                        val savedObservations = if (cachedHistoryCandidates.isNotEmpty()) {
                             withContext(Dispatchers.IO) {
-                                repository.recordOnlineSearchResults(safeCachedResults, provider.name, query)
+                                repository.recordOnlineSearchResults(cachedHistoryCandidates, provider.name, query)
                             }
                         } else 0
-                        val historyNotice = if (safeCachedResults.isNotEmpty()) {
-                            onlineHistoryNotice(savedObservations, safeCachedResults.size)
+                        val historyNotice = if (cachedHistoryCandidates.isNotEmpty()) {
+                            onlineHistoryNotice(savedObservations, cachedHistoryCandidates.size)
                         } else ""
+                        val eligibilityNotice = liveHistoryEligibilityNotice(
+                            visibleCachedResults.size,
+                            cachedHistoryCandidates.size
+                        )
                         val filterNotice = onlineFilterNotice(cachedDiscarded)
-                        val status = listOf(base, queryOptimizationNotice, cacheNotice, filterNotice, historyNotice)
-                            .map { it.trim() }
-                            .filter { it.isNotBlank() }
-                            .joinToString("\n\n")
+                        val status = listOf(
+                            base, queryOptimizationNotice, cacheNotice, filterNotice, historyNotice, eligibilityNotice
+                        ).map { it.trim() }.filter { it.isNotBlank() }.joinToString("\n\n")
                         if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
                         lastDisplayedSearchIdentity = onlineSearchIdentity(provider, query)
                         _uiState.value = _uiState.value.copy(
-                            onlineSearchResults = safeCachedResults,
+                            onlineSearchResults = visibleCachedResults,
                             onlineSearchDiscardedOffers = cachedDiscarded,
                             showOnlineSearchDiscarded = false,
                             onlineSearchStatus = status

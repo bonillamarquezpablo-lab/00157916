@@ -2113,7 +2113,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             try {
                 var savedCount = 0
-                var stagedDiscoveryObservationsCount = 0
+                val stagedDiscoveryObservationsCount = java.util.concurrent.atomic.AtomicInteger(0)
                 var checkedCount = 0
                 var foundCount = 0
                 var capturesFoundCount = 0
@@ -2200,7 +2200,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 val discoveryKey = archiveQuoteIdentity(candidate, quote)
                                 if (!scheduledDiscoveryQuoteKeys.add(discoveryKey)) continue
                                 viewModelScope.launch(Dispatchers.IO) {
-                                    var finished = false
                                     var finalFailure = false
                                     try {
                                         for (attempt in 0..1) {
@@ -2210,10 +2209,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                                         fallbackStoreName = candidate.storeName
                                                     )
                                                 ) {
-                                                    stagedDiscoveryObservationsCount++
+                                                    stagedDiscoveryObservationsCount.incrementAndGet()
                                                     showSnackbar("Nuevo descubrimiento guardado en Radar; no se ha añadido a Mercado.")
                                                 }
-                                                finished = true
                                                 break
                                             } catch (cancelled: CancellationException) {
                                                 throw cancelled
@@ -2568,12 +2566,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
                 if (diagnosticProductId != null) {
                     val persistenceStatus = when {
-                        savedCount > 0 || foundCount > 0 || stagedDiscoveryObservationsCount > 0 -> WaybackTraceStatus.PASSED
+                        savedCount > 0 || foundCount > 0 || stagedDiscoveryObservationsCount.get() > 0 -> WaybackTraceStatus.PASSED
                         else -> WaybackTraceStatus.SKIPPED
                     }
                     val persistenceDetail = when {
                         savedCount > 0 && stagedDiscoveryObservationsCount > 0 ->
-                            "Guardado completado: $savedCount punto(s) para el catálogo y $stagedDiscoveryObservationsCount observación(es) secundarias en cuarentena."
+                            "Guardado completado: $savedCount punto(s) para el catálogo y ${stagedDiscoveryObservationsCount.get()} observación(es) secundarias en cuarentena."
                         savedCount > 0 ->
                             "Guardado completado: $savedCount punto(s) nuevo(s) en el histórico del catálogo."
                         stagedDiscoveryObservationsCount > 0 ->

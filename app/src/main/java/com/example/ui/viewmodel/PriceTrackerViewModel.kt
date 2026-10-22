@@ -2691,6 +2691,15 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         "Internet Archive no respondió en el intento anterior. Mínimo evita repetir enseguida una consulta que agotó el tiempo; vuelve a probar dentro de unos minutos. Esto no significa que no existan capturas."
                     skippedCount == candidates.size ->
                         "Estas consultas gratuitas ya se comprobaron recientemente. La caché evita repetir búsquedas completadas sin resultados útiles."
+                    savedCount > 0 && crossSavedVariantObservationCount > 0 -> {
+                        val oldest = archiveDates.minOrNull()?.let { timestamp ->
+                            SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(timestamp))
+                        }
+                        "Histórico gratuito recuperado de Internet Archive: $savedCount precios antiguos guardados para el producto seleccionado" +
+                            (oldest?.let { ", con capturas desde $it" } ?: "") +
+                            "; además, se guardaron $crossSavedVariantObservationCount precios en fichas de variantes relacionadas." +
+                            " Son precios anunciados en páginas archivadas; puede haber huecos y no garantizan envío, stock ni precio final."
+                    }
                     savedCount > 0 -> {
                         val oldest = archiveDates.minOrNull()?.let { timestamp ->
                             SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(timestamp))
@@ -2699,10 +2708,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             (oldest?.let { ", con capturas desde $it" } ?: "") +
                             ". Son precios anunciados en páginas archivadas; puede haber huecos y no garantizan envío, stock ni precio final."
                     }
-                    foundPrimaryCount > 0 ->
-                        "Se encontraron capturas con precios previos del producto seleccionado, pero ya existían esos registros diarios y no se añadieron puntos nuevos."
+                    foundPrimaryCount > 0 && crossSavedVariantObservationCount > 0 ->
+                        "El histórico del producto seleccionado ya tenía esos registros diarios; además, se guardaron " +
+                            "$crossSavedVariantObservationCount precios en fichas de variantes relacionadas."
                     crossSavedVariantObservationCount > 0 ->
                         "Se guardaron $crossSavedVariantObservationCount precios históricos en fichas de variantes relacionadas; no se añadió historial nuevo al producto seleccionado."
+                    foundPrimaryCount > 0 ->
+                        "Se encontraron capturas con precios previos del producto seleccionado, pero ya existían esos registros diarios y no se añadieron puntos nuevos."
                     foundSecondaryCount > 0 ->
                         "Se encontraron capturas de variantes relacionadas, pero sus registros ya existían; no se añadió historial nuevo al producto seleccionado."
                     requestFailedCount > 0 && diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ->

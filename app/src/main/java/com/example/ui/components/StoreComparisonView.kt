@@ -78,10 +78,10 @@ fun StoreComparisonView(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(16.dp))
-            .padding(14.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.28f), RoundedCornerShape(20.dp))
+            .padding(16.dp)
             .testTag("store_comparison_view")
     ) {
         Row(
@@ -147,12 +147,12 @@ fun StoreComparisonView(
                     .border(
                         width = if (isBestCurrent) 1.5.dp else 1.dp,
                         color = if (isBestCurrent) Color(0xFF10B981) else MaterialTheme.colorScheme.outline.copy(alpha = 0.15f),
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(12.dp)
                     )
                     .clickable(enabled = safeExternalHttpsUrl(actionDestination) != null) {
                         openExternalHttpsUrl(context, actionDestination)
                     },
-                color = if (isBestCurrent) Color(0xFF10B981).copy(alpha = 0.06f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                color = if (isBestCurrent) Color(0xFF10B981).copy(alpha = 0.06f) else MaterialTheme.colorScheme.surfaceContainer
             ) {
                 Row(
                     modifier = Modifier

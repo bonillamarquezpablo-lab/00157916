@@ -87,6 +87,14 @@ internal fun shouldSkipDomainFallbackAfterSnapshotTimeout(
         !result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
 }
 
+/**
+ * A primary quote already verified from the exact product URL is enough to stop secondary
+ * URL-prefix discovery. Secondary/sibling-product quotes alone must not suppress the lookup
+ * for the product the user selected. Any sibling quotes from the same HTML are still persisted.
+ */
+internal fun hasVerifiedPrimaryExactCdxQuote(result: WaybackBackfillResult): Boolean =
+    result.quotes.any { it.targetProductId.isNullOrBlank() }
+
 /** Common UTC boundary for eight-calendar-year discovery, archive fallbacks and local persistence. */
 internal fun archiveHistoryWindowStartTimestampUtc(now: Long, lookbackDays: Int): Long {
     val safeNow = now.coerceAtLeast(0L)
@@ -468,13 +476,16 @@ class WaybackPriceHistoryClient(
                 )
                 return@serializedArchiveLookup exactResult
             }
-            // If exact URL already yields a usable series, avoid the more expensive prefix scan.
-            if (exactResult.quotes.size >= 2) {
+            // The exact CDX response already gives us the historical candidates for this URL.
+            // Once at least one price for the selected product has passed identity + price checks,
+            // do not spend another timeout on prefix discovery. Other offers found in those same
+            // HTML captures are already streamed to Room by onVerifiedQuotes.
+            if (hasVerifiedPrimaryExactCdxQuote(exactResult)) {
                 rememberAttempt(attempt, now, hasQuotes = true, failed = false)
                 return@serializedArchiveLookup exactResult.copy(diagnosticCodes = emptySet())
             }
 
-            // Prefix matching is a fallback for alternate slashes, locale paths and canonical URL variants.
+            // Prefix matching is only needed when exact CDX has no verified price for the selected product.
             val prefixResult = queryCdxAndFetchPrices(
                 cdxUrl = prefixCdxUrl,
                 expectedTitle = expectedTitle,

@@ -56,7 +56,11 @@ class LiveSearchMarketPersistenceTest {
             assertEquals(title, savedRow.title)
             assertEquals(49.95, savedRow.currentPrice, 0.001)
             assertFalse("A Google search page must never be promoted to a verified current price", savedRow.isPriceVerified)
-            assertEquals("A generic search URL must not be stored as a retailer product URL", "", savedRow.storeUrl)
+            assertEquals(
+                "Keep the generic search URL only so the product ficha can reopen the same Shopping results",
+                fallback.sourceUrl,
+                savedRow.storeUrl
+            )
             assertEquals(0, database.priceObservationDao().getObservationCount(savedRow.id))
 
             val openedFicha = repository.awaitProductForOnlineIdentity(onlineProductIdentityKey(title))

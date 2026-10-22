@@ -2291,8 +2291,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 )
                             }
                         }
-                    }
-
                     } else if (
                         !mementoAttempted &&
                         candidate.directUrl == null &&

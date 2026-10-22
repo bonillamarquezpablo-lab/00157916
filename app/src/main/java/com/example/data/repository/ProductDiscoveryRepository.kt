@@ -509,18 +509,6 @@ class ProductDiscoveryRepository(private val database: AppDatabase) {
     private fun localDayBounds(timestamp: Long): Pair<Long, Long> =
         localDayStart(timestamp) to (localDayStart(timestamp) + 24L * 60L * 60L * 1000L)
 
-    private fun inferBrand(title: String): String {
-        val brands = listOf(
-            "Samsung", "Apple", "Xiaomi", "Redmi", "POCO", "Google", "Sony", "LG", "Nintendo",
-            "PlayStation", "Microsoft", "Xbox", "Lenovo", "ASUS", "Acer", "HP", "Dell", "MSI",
-            "Huawei", "Motorola", "OnePlus", "OPPO", "Anker", "Logitech", "JBL", "Bose", "Philips",
-            "Hisense", "TCL", "Dyson", "Bosch", "Canon", "Nikon", "Garmin", "Intel", "AMD", "NVIDIA"
-        )
-        val normalized = normalizeText(title)
-        return brands.firstOrNull { normalizeText(it) in normalized.split(' ') }
-            ?: title.split(' ').firstOrNull().orEmpty().take(40)
-    }
-
     companion object {
         private const val MIN_DISCOVERY_PRICE = 0.50
         private const val MAX_DISCOVERY_PRICE = 10_000.0

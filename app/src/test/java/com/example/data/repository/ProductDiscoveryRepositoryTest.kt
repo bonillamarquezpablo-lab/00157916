@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.AppDatabase
+import com.example.data.local.ProductDiscoveryEntity
 import com.example.data.remote.ArchivedPriceQuote
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -73,6 +74,34 @@ class ProductDiscoveryRepositoryTest {
             assertEquals(1, database.priceObservationDao().observeAllStored().first().size)
             assertEquals("archive", database.priceObservationDao().observeAllStored().first().single().evidenceType)
             assertTrue(database.productDiscoveryDao().observePending().first().isEmpty())
+            assertFalse(
+                "An accepted discovery must not be changed to dismissed",
+                discoveries.dismiss(pending.single().id)
+            )
+            assertEquals(
+                ProductDiscoveryEntity.STATUS_ACCEPTED,
+                database.productDiscoveryDao().getById(pending.single().id)?.status
+            )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun dismissOnlyChangesPendingDiscoveries() = runBlocking {
+        val database = newDatabase()
+        try {
+            val discoveries = ProductDiscoveryRepository(database)
+            assertTrue(discoveries.stageArchivedQuote(quote(), "Tienda Ejemplo"))
+            val pending = database.productDiscoveryDao().observePending().first().single()
+
+            assertTrue(discoveries.dismiss(pending.id))
+            assertEquals(
+                ProductDiscoveryEntity.STATUS_DISMISSED,
+                database.productDiscoveryDao().getById(pending.id)?.status
+            )
+            assertFalse(discoveries.dismiss(pending.id))
+            assertFalse(discoveries.dismiss("missing-discovery-id"))
         } finally {
             database.close()
         }

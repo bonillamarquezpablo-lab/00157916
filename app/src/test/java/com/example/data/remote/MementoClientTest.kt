@@ -80,7 +80,7 @@ class MementoClientTest {
             shouldAttemptMementoFallback(
                 alreadyAttempted = false,
                 hasEligibleDirectUrl = false,
-                hasVerifiedQuotes = false,
+                hasSufficientHistory = false,
                 rateLimited = false
             )
         )
@@ -92,7 +92,7 @@ class MementoClientTest {
             shouldAttemptMementoFallback(
                 alreadyAttempted = true,
                 hasEligibleDirectUrl = true,
-                hasVerifiedQuotes = false,
+                hasSufficientHistory = false,
                 rateLimited = false
             )
         )
@@ -112,7 +112,7 @@ class MementoClientTest {
             shouldAttemptMementoFallback(
                 alreadyAttempted = false,
                 hasEligibleDirectUrl = true,
-                hasVerifiedQuotes = false,
+                hasSufficientHistory = false,
                 rateLimited = true
             )
         )

@@ -598,7 +598,10 @@ class OnlineSearchScreenTest {
 
         val list = composeRule.onNodeWithTag("online-search-list")
         list.performScrollToNode(hasText("Apple iPhone 16"))
-        composeRule.onNodeWithText("Apple iPhone 16").assertIsDisplayed()
+        assertTrue(
+            "The iPhone 16 offer must remain visible in live results",
+            composeRule.onAllNodesWithText("Apple iPhone 16").fetchSemanticsNodes().isNotEmpty()
+        )
         list.performScrollToNode(hasText("Enlace no disponible · buscar en Google Shopping"))
         composeRule.onNodeWithText("Enlace no disponible · buscar en Google Shopping").assertIsDisplayed()
         list.performScrollToNode(hasText("Buscar en Google Shopping"))

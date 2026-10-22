@@ -68,12 +68,19 @@ private fun xiaomiModelIdentity(value: String): XiaomiModelIdentity? {
 }
 
 /** Exact Xiaomi Mi/Redmi identity guard for near-identical model names. */
-internal fun hasXiaomiModelMismatch(query: String, title: String): Boolean {
+internal fun hasXiaomiModelMismatch(
+    query: String,
+    title: String,
+    allowMissingEdition: Boolean = false
+): Boolean {
     val expected = xiaomiModelIdentity(query) ?: return false
     val actual = xiaomiModelIdentity(title) ?: return false
+    val editionMismatch = expected.edition != null &&
+        !(allowMissingEdition && actual.edition == null) &&
+        expected.edition != actual.edition
     return expected.family != actual.family ||
         expected.number != actual.number ||
-        (expected.edition != null && expected.edition != actual.edition)
+        editionMismatch
 }
 
 private fun explicitOnlineModelCodes(value: String): Set<String> {

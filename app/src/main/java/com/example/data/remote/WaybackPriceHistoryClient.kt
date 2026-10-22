@@ -4281,6 +4281,8 @@ class WaybackPriceHistoryClient(
             "sku" to (read("product:sku", "sku", "product:retailer_item_id", "retailer_item_id")
                 ?: dataValue("data-sku", "data-product-sku", "data-variant-id", "data-product-id")),
             "mpn" to (read("mpn", "product:mpn") ?: dataValue("data-mpn", "data-product-mpn")),
+            "gtin" to (read("gtin", "gtin8", "gtin12", "gtin13", "gtin14", "ean", "product:gtin")
+                ?: dataValue("data-gtin", "data-ean", "data-product-gtin")),
             "brand" to (read("product:brand", "brand") ?: dataValue("data-brand", "data-product-brand"))
         ).forEach { (key, value) -> if (!value.isNullOrBlank()) properties[key] = value }
         return ArchivedProductIdentityEvidence(
@@ -4290,6 +4292,7 @@ class WaybackPriceHistoryClient(
             capacity = properties["storage"],
             sku = properties["sku"],
             mpn = properties["mpn"],
+            gtin = properties["gtin"],
             variantProperties = properties
         )
     }

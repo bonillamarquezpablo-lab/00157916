@@ -662,9 +662,12 @@ class SerpApiClient(
             val linkSourceProvider = "Google Shopping"
             val host = runCatching { URI(safeUrl).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()
-            val source = if (safeUrl == googleSearchFallback || isGoogleShoppingUrl(safeUrl)) {
+            val source = if (safeUrl == googleSearchFallback) {
                 "Google Shopping"
             } else {
+                // A specific Shopping product page can still represent the named retailer
+                // (for example, a product listing attributed to Fnac); only our generated
+                // search fallback should be labelled as the aggregate Google Shopping source.
                 providerSource ?: humanizeHost(host)
             }
             val thumbnail = item.optString("thumbnail").takeIf { isHttpsUrl(it) }.orEmpty()

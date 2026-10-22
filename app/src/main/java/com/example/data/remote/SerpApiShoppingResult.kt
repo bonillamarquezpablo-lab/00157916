@@ -282,6 +282,13 @@ data class SerpApiShoppingResult(
     val isGoogleShoppingSearchFallback: Boolean
         get() = isGenericGoogleShoppingSearchUrl(sourceUrl)
 
+    /**
+     * True when an offer opens search results rather than a specific seller/product destination.
+     * Such offers remain visible, but their quoted price is not reliable evidence for price history.
+     */
+    val isSearchFallbackDestination: Boolean
+        get() = isUnverifiedSearchFallbackUrl(sourceUrl)
+
     val isSecondHand: Boolean
         get() {
             val listingText = "$title $storeName $sourceUrl $condition"
@@ -393,6 +400,11 @@ fun isGenericGoogleShoppingSearchUrl(sourceUrl: String): Boolean {
     return params["tbm"] == "shop" && params["q"].orEmpty().isNotBlank() &&
         extractGoogleShoppingProductId(sourceUrl) == null
 }
+
+/** Any generated search-results destination is navigation only, not evidence of a seller quote. */
+fun isUnverifiedSearchFallbackUrl(sourceUrl: String): Boolean =
+    isGenericGoogleShoppingSearchUrl(sourceUrl) ||
+        linkTypeForUrl(sourceUrl) == "Búsqueda en tienda"
 
 /** True only when the provider identifies a GAME Spain offer by seller name or retailer host. */
 internal fun isGameSpainOffer(offer: SerpApiShoppingResult): Boolean =

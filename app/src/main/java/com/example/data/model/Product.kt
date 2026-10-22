@@ -5,6 +5,8 @@ enum class PriceDisplayStatus {
     VERIFIED_CURRENT,
     /** A real saved observation exists, but must not be represented as today's price. */
     SAVED_PENDING_REVALIDATION,
+    /** A provider listed an amount, but seller/link is not confirmed; never treat it as a verified quote. */
+    UNVERIFIED_LIVE_LISTING,
     /** No source-backed saved price can be safely shown; bundled/demo values stay hidden. */
     DEMONSTRATION
 }
@@ -134,6 +136,13 @@ data class Product(
      * Never infer a real saved price from currentPrice alone: old catalogue rows also contain
      * placeholder numbers, so a verified source flag and valid price are required.
      */
+    /** A search-only catalogue row can show its listed amount without asserting seller verification. */
+    val isUnverifiedLiveListing: Boolean
+        get() = !isPriceVerified &&
+            id.startsWith("online_candidate_") &&
+            currentPrice.isFinite() && currentPrice > 0.0 &&
+            savedHistoricalPrice == null
+
     val priceDisplayStatus: PriceDisplayStatus
         get() = when {
             isPriceFresh && currentPrice.isFinite() && currentPrice > 0.0 ->
@@ -143,11 +152,13 @@ data class Product(
             savedHistoricalPrice?.let { it.isFinite() && it > 0.0 } == true &&
                 savedHistoricalPriceObservedAt?.let { it > 0L && it <= System.currentTimeMillis() } == true ->
                 PriceDisplayStatus.SAVED_PENDING_REVALIDATION
+            isUnverifiedLiveListing -> PriceDisplayStatus.UNVERIFIED_LIVE_LISTING
             else -> PriceDisplayStatus.DEMONSTRATION
         }
 
     val priceFreshnessLabel: String
         get() {
+            if (isUnverifiedLiveListing) return "Precio listado en búsqueda pública; vendedor y precio final sin confirmar"
             if (!isPriceVerified) return "Sin observación online válida"
             if (priceObservedAt == null) return "Fecha de observación desconocida"
             val age = priceAgeMillis ?: return "Fecha de observación inválida"

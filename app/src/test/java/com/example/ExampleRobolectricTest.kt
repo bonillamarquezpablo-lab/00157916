@@ -391,11 +391,16 @@ class ExampleRobolectricTest {
             query = "Samsung Galaxy S26 Ultra 512 GB",
             observedAt = 123L
         )
-        assertEquals("Only offers with a seller destination or a specific Google product page survive", 5, report.results.size)
-        assertEquals(4, report.results.count { it.linkType == "Google Shopping" && !it.isSecondHand })
+        assertEquals(
+            "A generic Google Shopping result is replaced by a title-specific search instead of being discarded",
+            6,
+            report.results.size
+        )
+        assertEquals(5, report.results.count { it.linkType == "Google Shopping" && !it.isSecondHand })
         assertEquals(1, report.results.count { it.isSecondHand })
-        assertEquals(1, report.rejectedForLink)
+        assertEquals(0, report.rejectedForLink)
         assertTrue(report.results.none { it.sourceUrl.contains("google.es/search", ignoreCase = true) })
+        assertTrue(report.results.any { it.isGoogleShoppingSearchFallback && it.sourceUrl.contains("Samsung+Galaxy") })
         assertTrue(report.results.none { it.title.contains("alquiler", ignoreCase = true) })
     }
 

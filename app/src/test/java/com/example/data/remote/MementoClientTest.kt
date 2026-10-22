@@ -19,6 +19,75 @@ import java.util.TimeZone
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class MementoClientTest {
+    @Test
+    fun attemptsMementoWhenWaybackHasNoVerifiedHistory() {
+        assertTrue(
+            shouldAttemptMementoFallback(
+                alreadyAttempted = false,
+                hasEligibleDirectUrl = true,
+                hasVerifiedQuotes = false,
+                rateLimited = false
+            )
+        )
+    }
+
+    @Test
+    fun attemptsMementoWhenWaybackIsUnavailableOrRateLimited() {
+        // The Wayback result is not an input to this guard: only Memento's own cooldown matters.
+        assertTrue(
+            shouldAttemptMementoFallback(
+                alreadyAttempted = false,
+                hasEligibleDirectUrl = true,
+                hasVerifiedQuotes = false,
+                rateLimited = false
+            )
+        )
+    }
+
+    @Test
+    fun skipsMementoWhenItCannotSafelyIdentifyTheExactProductUrl() {
+        assertFalse(
+            shouldAttemptMementoFallback(
+                alreadyAttempted = false,
+                hasEligibleDirectUrl = false,
+                hasVerifiedQuotes = false,
+                rateLimited = false
+            )
+        )
+    }
+
+    @Test
+    fun skipsMementoWhenHistoryWasAlreadyRecoveredOrAttempted() {
+        assertFalse(
+            shouldAttemptMementoFallback(
+                alreadyAttempted = true,
+                hasEligibleDirectUrl = true,
+                hasVerifiedQuotes = false,
+                rateLimited = false
+            )
+        )
+        assertFalse(
+            shouldAttemptMementoFallback(
+                alreadyAttempted = false,
+                hasEligibleDirectUrl = true,
+                hasVerifiedQuotes = true,
+                rateLimited = false
+            )
+        )
+    }
+
+    @Test
+    fun skipsMementoWhenMementoItselfIsRateLimited() {
+        assertFalse(
+            shouldAttemptMementoFallback(
+                alreadyAttempted = false,
+                hasEligibleDirectUrl = true,
+                hasVerifiedQuotes = false,
+                rateLimited = true
+            )
+        )
+    }
+
     private fun newClient() = MementoClient(ApplicationProvider.getApplicationContext<Context>())
 
     @Test

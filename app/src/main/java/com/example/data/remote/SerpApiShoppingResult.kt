@@ -1044,6 +1044,43 @@ internal fun onlineOfferSizeAudienceKey(title: String): String {
     return listOfNotNull(audience?.let { "audience:$it" }, size?.let { "size:$it" }).joinToString("|")
 }
 
+/** A compact, human-readable qualifier shown when two retailer offers differ by variant. */
+internal fun onlineOfferSizeAudienceLabel(title: String): String {
+    val keyParts = onlineOfferSizeAudienceKey(title).split('|').filter { it.isNotBlank() }
+    val size = keyParts.firstOrNull { it.startsWith("size:") }?.substringAfter(':')
+    val audience = keyParts.firstOrNull { it.startsWith("audience:") }?.substringAfter(':')?.let {
+        when (it) {
+            "women" -> "Mujer"
+            "men" -> "Hombre"
+            "kids" -> "Infantil"
+            "unisex" -> "Unisex"
+            else -> null
+        }
+    }
+    val color = onlineProductColorFamily(title)?.let {
+        when (it) {
+            "black" -> "Negro"
+            "white" -> "Blanco"
+            "blue" -> "Azul"
+            "green" -> "Verde"
+            "yellow" -> "Amarillo"
+            "red" -> "Rojo"
+            "pink" -> "Rosa"
+            "purple" -> "Morado"
+            "grey" -> "Gris"
+            "titanium" -> "Titanio"
+            "orange" -> "Naranja"
+            "gold" -> "Dorado"
+            "brown" -> "Marrón"
+            "beige" -> "Beige"
+            else -> it.replaceFirstChar { char -> char.uppercase(Locale.ROOT) }
+        }
+    }
+    return listOfNotNull(color, size?.let { "Talla $it" }, audience)
+        .distinct()
+        .joinToString(" · ")
+}
+
 /** Groups repeated seller listings into one product card, retaining all separate offers. */
 fun groupOnlineShoppingResults(
     results: List<SerpApiShoppingResult>

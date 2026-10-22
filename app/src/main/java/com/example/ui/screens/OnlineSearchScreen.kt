@@ -72,6 +72,8 @@ import com.example.data.remote.onlineProductRelevanceScore
 import com.example.data.remote.isAccessorySearchQuery
 import com.example.data.remote.isWheelFitmentQuery
 import com.example.data.remote.isGoogleShoppingUrl
+import com.example.data.remote.onlineOfferSizeAudienceKey
+import com.example.data.remote.onlineOfferSizeAudienceLabel
 import com.example.ui.viewmodel.OnlineSearchProvider
 import com.example.ui.viewmodel.TrackerUiState
 import kotlinx.coroutines.Dispatchers
@@ -986,12 +988,15 @@ private fun ShoppingResultCard(
             val displayedOffers = buildList {
                 addAll(group.offers.filterNot { it.isSuspiciousPrice }.sortedBy { it.price }.take(4))
                 group.offers.firstOrNull { Store.findKnownByName(it.storeName, it.sourceUrl)?.id == Store.GAME.id }?.let(::add)
-            }.distinctBy { onlineOfferStoreKey(it) + "|" + it.price }
+            }.distinctBy {
+                onlineOfferStoreKey(it) + "|" + it.price + "|" + onlineOfferSizeAudienceKey(it.title)
+            }
             if (displayedOffers.isNotEmpty()) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Tiendas y precios", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                     displayedOffers.forEach { offer ->
                         val seller = Store.findKnownByName(offer.storeName, offer.sourceUrl)?.name ?: offer.storeName
+                        val variantLabel = onlineOfferSizeAudienceLabel(offer.title)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1002,7 +1007,11 @@ private fun ShoppingResultCard(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(seller, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    if (variantLabel.isBlank()) seller else "$seller · $variantLabel",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
                                 if (offer.isGoogleShoppingProductLink) {
                                     Text("Precio listado en Google Shopping · confirmar en tienda", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }

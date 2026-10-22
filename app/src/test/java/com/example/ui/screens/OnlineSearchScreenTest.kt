@@ -161,6 +161,9 @@ class OnlineSearchScreenTest {
         assertEquals("Exact editions remain distinct groups", 3, groups.size)
         assertEquals("Superstar siblings share one family header", 1, groups.map { it.familyKey }.distinct().size)
         assertTrue(groups.all { it.familyLabel == "Adidas Superstar" })
+        assertEquals("Talla 39 · Mujer", com.example.data.remote.onlineOfferSizeAudienceLabel(rows[0].title))
+        assertEquals("Talla 40 · Mujer", com.example.data.remote.onlineOfferSizeAudienceLabel(rows[2].title))
+        assertEquals("Talla 33 · Infantil", com.example.data.remote.onlineOfferSizeAudienceLabel(rows[4].title))
 
         val standardIdentity = com.example.data.remote.onlineProductIdentityKey(rows[0].title)
         val standard = groups.single { it.group.identityKey == standardIdentity }

@@ -940,7 +940,8 @@ class WaybackPriceHistoryClient(
             onTrace = onTrace,
             snapshotResultsCache = snapshotResultsCache,
             onVerifiedQuotes = onVerifiedQuotes,
-            knownProductTitlesById = knownProductTitlesById
+            knownProductTitlesById = knownProductTitlesById,
+            forceRefresh = forceRefresh
         )
         emitWaybackTrace(
             onTrace, 6,
@@ -1408,7 +1409,8 @@ class WaybackPriceHistoryClient(
         onTrace: ((WaybackTraceEvent) -> Unit)? = null,
         knownProductTitlesById: Map<String, String> = emptyMap(),
         snapshotResultsCache: MutableMap<String, SnapshotFetch>? = null,
-        onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null
+        onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null,
+        forceRefresh: Boolean = false
     ): WaybackBackfillResult {
         val urls = candidateUrls.asSequence()
             .filter(::isEligibleDirectUrl)

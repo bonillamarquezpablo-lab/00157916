@@ -2096,13 +2096,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 ) {
                     val uniqueQuotes = incomingQuotes.distinctBy { archiveQuoteIdentity(candidate, it) }
                     if (uniqueQuotes.isEmpty()) return
-                    uniqueQuotes.forEach { quote ->
-                        archiveProvidersUsed += if (quote.snapshotUrl.contains("arquivo.pt", ignoreCase = true)) {
-                            "Arquivo.pt"
-                        } else {
-                            "Internet Archive"
-                        }
-                    }
                     for (quote in uniqueQuotes) {
                         if (countedArchiveQuoteKeys.add(archiveQuoteIdentity(candidate, quote))) {
                             foundCount++
@@ -2162,6 +2155,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     // be allowed to retry persistence for a verified quote retained in memory.
                     if (persistenceCompleted) {
                         processedArchiveQuoteKeys.addAll(toPersist.map { archiveQuoteIdentity(candidate, it) })
+                        toPersist.forEach { quote ->
+                            archiveProvidersUsed += if (quote.snapshotUrl.contains("arquivo.pt", ignoreCase = true)) {
+                                "Arquivo.pt"
+                            } else {
+                                "Internet Archive"
+                            }
+                        }
                     }
                     val hasPrimaryProductQuote = uniqueQuotes.any {
                         it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId

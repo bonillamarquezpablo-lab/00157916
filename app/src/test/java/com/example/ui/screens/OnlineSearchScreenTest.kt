@@ -19,11 +19,13 @@ import androidx.compose.ui.platform.testTag
 import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiShoppingResult
+import com.example.data.remote.isAccessorySearchQuery
 import com.example.ui.viewmodel.OnlineSearchProvider
 import com.example.ui.viewmodel.optimizedOnlineShoppingQuery
 import com.example.ui.viewmodel.TrackerUiState
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -477,6 +479,58 @@ class OnlineSearchScreenTest {
             query = query,
             observedAt = System.currentTimeMillis()
         ).results
+    }
+
+    @Test
+    fun pricedOfferWithoutSafeRetailerLinkRemainsUsableThroughSpecificShoppingSearch() {
+        val response = JSONObject(
+            """
+            {
+              "search_metadata": {"status": "Success"},
+              "shopping_results": [
+                {
+                  "title": "Xiaomi Mi 10 Pro 5G 8GB/256GB Gris",
+                  "price": "180,00 €",
+                  "extracted_price": 180.0,
+                  "link": "http://seller-unknown.example/xiaomi-mi-10-pro",
+                  "source": "Vendedor no catalogado",
+                  "second_hand_condition": "new"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = response,
+            query = "xiaomi mi 10 pro",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals("The valid priced offer should not be lost only due to a missing HTTPS seller link", 1, report.results.size)
+        val offer = report.results.single()
+        assertEquals("Google Shopping", offer.storeName)
+        assertTrue(offer.sourceUrl.startsWith("https://www.google.com/search?"))
+        assertTrue(offer.sourceUrl.contains("tbm=shop"))
+        assertTrue(offer.sourceUrl.contains("xiaomi"))
+    }
+
+    @Test
+    fun replacementScreensAndForeignLanguageProtectorsAreRecognizedAsAccessories() {
+        fun offer(title: String) = SerpApiShoppingResult(
+            title = title,
+            price = 99.0,
+            storeName = "Google Shopping",
+            sourceUrl = "https://www.google.com/search?tbm=shop&q=test",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertFalse(offer("Xiaomi Mi 10 Pro 5G 8GB/256GB Gris").isAccessoryOffer)
+        assertTrue(offer("Pantalla Original Xiaomi Mi 10 Pro Versión S").isAccessoryOffer)
+        assertTrue(offer("Pantalla Completa con Marco para Google Pixel 10").isAccessoryOffer)
+        assertTrue(offer("Google Pixel 10 Displayschutz & Schutzfolie – Crystal Advanced").isAccessoryOffer)
+        assertTrue(isAccessorySearchQuery("Pantalla Original Xiaomi Mi 10 Pro"))
+        assertFalse(isAccessorySearchQuery("Xiaomi Mi 10 Pro"))
     }
 
     @Test

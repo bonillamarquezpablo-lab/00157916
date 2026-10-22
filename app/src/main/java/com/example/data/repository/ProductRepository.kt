@@ -316,7 +316,11 @@ class ProductRepository(
                 !result.isRentalOrMonthly &&
                 !isPromotionalBulkListing(result.title, searchQuery) &&
                 !isIrrelevantMultiProductBundle(searchQuery, result.title) &&
-                !hasXiaomiModelMismatch(searchQuery, result.title) &&
+                !hasXiaomiModelMismatch(
+                    searchQuery,
+                    result.title,
+                    allowMissingEdition = result.isAccessoryOffer
+                ) &&
                 (!isHallEffectKeyboardSearch(searchQuery) || isHallEffectKeyboardResult(result.title)) &&
                 (!isBicycleDrivetrainSearch(searchQuery) || isBicycleDrivetrainComponentTitle(result.title)) &&
                 !isWrongBicycleTireDiameter(searchQuery, result.title) &&

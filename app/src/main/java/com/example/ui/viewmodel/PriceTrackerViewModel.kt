@@ -2513,6 +2513,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         .distinctBy {
                             listOf(
                                 it.targetProductId.orEmpty(), it.productTitle, it.originalUrl,
+                                it.productUrl.orEmpty(), it.isDiscoveryCandidate.toString(),
                                 it.observedAt.toString(), it.price.toString(), it.currency.uppercase(Locale.ROOT)
                             )
                         }

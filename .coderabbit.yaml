@@ -1,0 +1,41 @@
+# CodeRabbit configuration for Mínimo
+# This file configures reviews; the CodeRabbit GitHub App must also be installed
+# and enabled for this repository in GitHub.
+
+language: "es-ES"
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  poem: false
+  collapse_walkthrough: false
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "main"
+
+  path_instructions:
+    - path: "app/src/main/java/**"
+      instructions: |
+        Mínimo is an Android application written in Kotlin. Focus on concrete correctness,
+        regression, security, performance, and lifecycle issues. Avoid speculative comments.
+        Do not recommend adding dependencies unless there is a demonstrated need.
+        Pay special attention to preserving existing behavior, cancellation, coroutine
+        lifecycle, bounded network requests, HTTP 429 and Retry-After handling, and avoiding
+        duplicate or misleading product prices.
+    - path: "app/src/main/java/**/remote/**"
+      instructions: |
+        For live search and historical price retrieval, check URL validation, product/model
+        matching, variant handling, timeouts, rate limiting, retries, and safe handling of
+        missing or malformed provider data. Never suggest bypassing a provider's rate limits.
+    - path: "app/src/main/java/**/repository/**"
+      instructions: |
+        Check Room persistence, duplicate prevention, transaction boundaries, and whether
+        incremental results survive cancellation or process interruption.
+    - path: "app/src/test/**"
+      instructions: |
+        Prefer focused regression tests for each reported bug. Check that tests assert actual
+        behavior and do not merely test implementation details.

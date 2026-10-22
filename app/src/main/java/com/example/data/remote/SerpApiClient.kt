@@ -394,7 +394,7 @@ class SerpApiClient(
                 title = title,
                 price = price,
                 storeName = "Amazon.es",
-                sourceUrl = url,
+                sourceUrl = safeUrl,
                 thumbnailUrl = thumbnail,
                 delivery = delivery,
                 rating = rating,
@@ -628,9 +628,13 @@ class SerpApiClient(
                     providerSource.orEmpty(),
                     title
                 )
-            if (url.isNullOrBlank()) {
+            // A missing direct merchant URL is a navigation limitation, not proof that the
+            // product result is invalid. Keep the offer and link to a clearly scoped Google
+            // Shopping search rather than silently discarding a valid title/price pair.
+            val safeUrl = url?.takeIf(::isNavigableHttpUrl) ?: googleShoppingSearchUrl(title)
+            if (!isNavigableHttpUrl(safeUrl)) {
                 rejectedForLink++
-                recordDiscard(item, title, "El proveedor no facilitó un enlace HTTPS útil a la tienda")
+                recordDiscard(item, title, "No se pudo construir un enlace de búsqueda seguro")
                 return@mapNotNull null
             }
             // This parser is fed by the Google Shopping provider. Provider provenance must
@@ -638,7 +642,7 @@ class SerpApiClient(
             // we generate the retailer's search page because the response omitted a link entirely.
             // Destination classification remains derived separately from sourceUrl/linkType.
             val linkSourceProvider = "Google Shopping"
-            val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
+            val host = runCatching { URI(safeUrl).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()
             val source = providerSource ?: humanizeHost(host)
             val thumbnail = item.optString("thumbnail").takeIf { isHttpsUrl(it) }.orEmpty()

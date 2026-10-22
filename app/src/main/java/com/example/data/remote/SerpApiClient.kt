@@ -631,16 +631,25 @@ class SerpApiClient(
                     providerSource.orEmpty(),
                     title
                 )
-            val safeUrl = url?.takeIf(::isNavigableHttpUrl)
-                ?: googleSearchFallback.takeIf {
-                    // A generic Shopping query is only an acceptable fallback when the feed
-                    // explicitly says this is an aggregate Google Shopping result and provides
-                    // no candidate URL at all. If a claimed retailer supplies a generic Google
-                    // search link, keep rejecting it instead of mislabelling it as a valid offer.
-                    candidateUrls.isEmpty() &&
-                        providerSource.equals("Google Shopping", ignoreCase = true) &&
-                        isNavigableHttpUrl(it)
-                }
+            fun isSpecificGoogleProductDestination(raw: String): Boolean {
+                if (!isGoogleShoppingUrl(raw)) return false
+                val path = runCatching { URI(raw).path.orEmpty() }.getOrDefault("")
+                return extractGoogleShoppingProductId(raw) != null ||
+                    Regex("""(?i)/shopping/product/[^/]+""").containsMatchIn(path)
+            }
+            val canUseShoppingSearchFallback =
+                providerSource.equals("Google Shopping", ignoreCase = true) &&
+                    extractedCandidate == null &&
+                    candidateUrls.none(::isSpecificGoogleProductDestination)
+            val safeUrl = url?.takeIf { candidate ->
+                isNavigableHttpUrl(candidate) &&
+                    (!isGoogleShoppingUrl(candidate) || isSpecificGoogleProductDestination(candidate))
+            } ?: googleSearchFallback.takeIf {
+                // Keep price-bearing model variants if the feed explicitly labels them as aggregate
+                // Google Shopping results and supplied no usable seller/product destination.
+                // A generic Google search link attributed to another retailer is still rejected.
+                canUseShoppingSearchFallback && isNavigableHttpUrl(it)
+            }
             if (safeUrl == null || !isNavigableHttpUrl(safeUrl)) {
                 rejectedForLink++
                 recordDiscard(item, title, "El proveedor no facilitó un enlace HTTPS útil a la tienda")

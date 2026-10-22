@@ -128,9 +128,9 @@ fun MainScreen(
                             showOnlineSearch -> "Buscador online"
                             else -> "Mínimo"
                         },
-                        fontWeight = FontWeight.Black,
-                        fontSize = 20.sp,
-                        letterSpacing = (-0.5).sp
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.35).sp
                     )
                 },
                 actions = {
@@ -186,12 +186,12 @@ fun MainScreen(
                     .clip(FloatingSurfaceShape)
                     .border(
                         width = 1.dp,
-                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.32f),
                         shape = FloatingSurfaceShape
                     )
                     .testTag("main_bottom_nav"),
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-                tonalElevation = 3.dp
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                tonalElevation = 0.dp
             ) {
                 MainTab.values().forEach { tab ->
                     val isSelected = currentTab == tab
@@ -237,7 +237,7 @@ fun MainScreen(
                                 Icon(
                                     imageVector = if (isSelected) tab.selectedIcon else tab.unselectedIcon,
                                     contentDescription = tab.title,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(22.dp)
                                 )
                             }
                         },
@@ -245,13 +245,13 @@ fun MainScreen(
                             Text(
                                 text = tab.title,
                                 fontSize = 11.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                             )
                         },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = MaterialTheme.colorScheme.primary,
                             selectedTextColor = MaterialTheme.colorScheme.primary,
-                            indicatorColor = MaterialTheme.colorScheme.secondaryContainer
+                            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
                         ),
                         modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
                     )

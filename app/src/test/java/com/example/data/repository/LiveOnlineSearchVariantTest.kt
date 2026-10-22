@@ -64,6 +64,17 @@ class LiveOnlineSearchVariantTest {
                 )
             }
 
+            // A compact cached result can preserve the monthly suffix only in its title.
+            // This must be excluded from the LIVE list too, not formatted as a total purchase price.
+            val cachedMonthlyOffer = offer("Apple iPhone 16 Pro 256 GB 49,99 €/mo", 49.99)
+            assertTrue(
+                "Cached monthly prices must not look like one-off product prices in live search",
+                repository.filterVisibleLiveSearchResults(
+                    listOf(cachedMonthlyOffer),
+                    "Apple iPhone 16 Pro 256 GB"
+                ).isEmpty()
+            )
+
             // Older cached evidence or high-priced equipment can fall outside the historical
             // storage policy without becoming invisible in the live search list.
             val highValueOldOffer = offer("Industrial CNC milling machine X1000", 99_999_999.0, observedAt = 1L)

@@ -119,7 +119,7 @@ class LiveOnlineSearchVariantTest {
                 offer("Apple iPhone 16 Pro Max 512 GB", 999.00)
             )
 
-            val broadResults = repository.filterOnlineSearchResults(rawOffers, "iphone 16")
+            val broadResults = repository.filterVisibleLiveSearchResults(rawOffers, "iphone 16")
             assertEquals(
                 "A broad iPhone 16 search should let the user choose each model family separately",
                 4,
@@ -130,7 +130,7 @@ class LiveOnlineSearchVariantTest {
             assertTrue(broadResults.any { it.title == "Apple iPhone 16 Plus" })
             assertTrue(broadResults.any { it.title == "Apple iPhone 16 Pro Max 512 GB" })
 
-            val proResults = repository.filterOnlineSearchResults(rawOffers, "iphone 16 pro")
+            val proResults = repository.filterVisibleLiveSearchResults(rawOffers, "iphone 16 pro")
             assertEquals(
                 "A specific iPhone 16 Pro search must not return base, Plus or Pro Max models",
                 1,

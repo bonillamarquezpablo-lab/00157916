@@ -2196,40 +2196,57 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 )
                             }
 
-                            for (quote in discoveryQuotes) {
-                                val discoveryKey = archiveQuoteIdentity(candidate, quote)
-                                if (!scheduledDiscoveryQuoteKeys.add(discoveryKey)) continue
+                            val discoveryKeysToSchedule = discoveryQuotes.filter { quote ->
+                                scheduledDiscoveryQuoteKeys.add(archiveQuoteIdentity(candidate, quote))
+                            }
+                            if (discoveryKeysToSchedule.isNotEmpty()) {
+                                val discoveryKeys = discoveryKeysToSchedule
+                                    .map { archiveQuoteIdentity(candidate, it) }
+                                    .toSet()
                                 viewModelScope.launch(Dispatchers.IO) {
-                                    var finalFailure = false
+                                    var stagedInBatch = 0
+                                    var failuresInBatch = 0
                                     try {
-                                        for (attempt in 0..1) {
-                                            try {
-                                                if (productDiscoveryRepository.stageArchivedQuote(
-                                                        quote = quote,
-                                                        fallbackStoreName = candidate.storeName
-                                                    )
-                                                ) {
-                                                    stagedDiscoveryObservationsCount.incrementAndGet()
-                                                    showSnackbar("Nuevo descubrimiento guardado en Radar; no se ha añadido a Mercado.")
-                                                }
-                                                break
-                                            } catch (cancelled: CancellationException) {
-                                                throw cancelled
-                                            } catch (_: Exception) {
-                                                if (attempt == 0) {
-                                                    kotlinx.coroutines.delay(250L)
-                                                } else {
-                                                    finalFailure = true
+                                        // Serialize the Room writes off the search path. A large
+                                        // secondary catalogue card must not block the primary quote
+                                        // or flood the UI with one snackbar per snapshot.
+                                        for (quote in discoveryKeysToSchedule) {
+                                            var attempt = 0
+                                            var completed = false
+                                            while (attempt < 2 && !completed) {
+                                                try {
+                                                    if (productDiscoveryRepository.stageArchivedQuote(
+                                                            quote = quote,
+                                                            fallbackStoreName = candidate.storeName
+                                                        )
+                                                    ) {
+                                                        stagedDiscoveryObservationsCount.incrementAndGet()
+                                                        stagedInBatch++
+                                                    }
+                                                    completed = true
+                                                } catch (cancelled: CancellationException) {
+                                                    throw cancelled
+                                                } catch (_: Exception) {
+                                                    attempt++
+                                                    if (attempt < 2) kotlinx.coroutines.delay(250L)
+                                                    else failuresInBatch++
                                                 }
                                             }
                                         }
-                                        if (finalFailure) {
-                                            showSnackbar("No se pudo guardar un producto descubierto en Radar. El precio principal ya se ha conservado.")
+                                        if (stagedInBatch > 0) {
+                                            showSnackbar(
+                                                "Radar: $stagedInBatch observación(es) de productos nuevos guardadas en cuarentena; no se han añadido a Mercado."
+                                            )
+                                        }
+                                        if (failuresInBatch > 0) {
+                                            showSnackbar(
+                                                "No se pudieron guardar $failuresInBatch observación(es) en Radar. El precio principal ya se ha conservado."
+                                            )
                                         }
                                     } finally {
-                                        // The caller already retained the downloaded quote. If a
-                                        // later network attempt replays it, it may be staged again.
-                                        scheduledDiscoveryQuoteKeys.remove(discoveryKey)
+                                        // A later capture/replay may retry if the asynchronous
+                                        // Room write failed; the primary search never waits for it.
+                                        scheduledDiscoveryQuoteKeys.removeAll(discoveryKeys)
                                     }
                                 }
                             }

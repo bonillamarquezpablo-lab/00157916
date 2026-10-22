@@ -4483,6 +4483,25 @@ class WaybackPriceHistoryClientTest {
             }
         }.build()
 
+        val directSiblingQuotes = WaybackPriceHistoryClient(context, http)
+            .parseArchivedPricesForKnownProducts(
+                document = Jsoup.parse(siblingHtml),
+                primaryExpectedTitle = primaryTitle,
+                knownProductTitlesById = mapOf("saved-iphone-128" to siblingTitle),
+                originalUrl = primaryUrl,
+                snapshotUrl = "https://web.archive.org/web/20250124124812id_/$primaryUrl",
+                observedAt = 1_737_000_000_000L
+            )
+        assertTrue(
+            "Direct JSON-LD parsing should identify the sibling offer from its own SKU URL; " +
+                "got ${directSiblingQuotes.map { listOf(it.targetProductId, it.productTitle, it.price, it.originalUrl) }}",
+            directSiblingQuotes.any {
+                it.targetProductId == "saved-iphone-128" &&
+                    it.productTitle == siblingTitle &&
+                    it.price == 699.99
+            }
+        )
+
         try {
             val result = withTimeout(15_000L) {
                 WaybackPriceHistoryClient(context, http).fetchHistory(

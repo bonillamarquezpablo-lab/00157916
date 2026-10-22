@@ -22,6 +22,17 @@ import java.util.concurrent.TimeUnit
  * This client is a bounded fallback to Wayback, not a price provider on its own: every retrieved
  * page is parsed by WaybackPriceHistoryClient's existing strict title/variant/EUR-price validator.
  */
+/**
+ * Memento should be tried as soon as Wayback has no verified prices, before slower broad
+ * Wayback/domain recovery. A missing or rate-limited Wayback response is not a reason to skip it.
+ */
+internal fun shouldAttemptMementoFallback(
+    alreadyAttempted: Boolean,
+    hasEligibleDirectUrl: Boolean,
+    hasVerifiedQuotes: Boolean,
+    rateLimited: Boolean
+): Boolean = !alreadyAttempted && hasEligibleDirectUrl && !hasVerifiedQuotes && !rateLimited
+
 class MementoClient(
     context: Context,
     private val priceParser: WaybackPriceHistoryClient = WaybackPriceHistoryClient(context),

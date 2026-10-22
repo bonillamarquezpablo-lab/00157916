@@ -523,6 +523,48 @@ class OnlineSearchScreenTest {
     }
 
     @Test
+    fun liveOfferWithoutDirectSellerLinkRemainsVisibleAndSaysLinkIsUnavailable() {
+        val fallback = SerpApiShoppingResult(
+            title = "Apple iPhone 16",
+            price = 574.99,
+            storeName = "Google Shopping",
+            sourceUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=Apple+iPhone+16",
+            observedAt = System.currentTimeMillis(),
+            condition = "new"
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                OnlineSearchScreen(
+                    state = TrackerUiState(
+                        onlineSearchQuery = "iphone 16",
+                        onlineSearchResults = listOf(fallback),
+                        onlineSearchProvider = OnlineSearchProvider.GOOGLE_SHOPPING
+                    ),
+                    onQueryChange = {},
+                    onSearch = {},
+                    onAmazonSearch = {},
+                    onForceRefresh = {},
+                    onAmazonOnlyChange = {},
+                    onShowSecondHandChange = {},
+                    onToggleDiscarded = {},
+                    onOpenSettings = {},
+                    onOpenProduct = {},
+                    modifier = Modifier.testTag("online-search-list")
+                )
+            }
+        }
+
+        val list = composeRule.onNodeWithTag("online-search-list")
+        list.performScrollToNode(hasText("Apple iPhone 16"))
+        composeRule.onNodeWithText("Apple iPhone 16").assertIsDisplayed()
+        list.performScrollToNode(hasText("Enlace no disponible · buscar en Google Shopping"))
+        composeRule.onNodeWithText("Enlace no disponible · buscar en Google Shopping").assertIsDisplayed()
+        list.performScrollToNode(hasText("Buscar en Google Shopping"))
+        composeRule.onNodeWithText("Buscar en Google Shopping").assertIsDisplayed()
+    }
+
+    @Test
     fun replacementScreensAndForeignLanguageProtectorsAreRecognizedAsAccessories() {
         fun offer(title: String) = SerpApiShoppingResult(
             title = title,

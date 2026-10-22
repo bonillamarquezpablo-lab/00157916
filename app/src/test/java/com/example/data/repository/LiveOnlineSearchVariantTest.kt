@@ -8,6 +8,7 @@ import com.example.data.remote.SerpApiShoppingResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -28,13 +29,14 @@ class LiveOnlineSearchVariantTest {
             context,
             AppDatabase::class.java
         ).allowMainThreadQueries().build()
+        val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         try {
             val repository = ProductRepository(
                 storeDao = database.storeDao(),
                 productDao = database.productDao(),
                 trackedDao = database.trackedProductDao(),
                 priceObservationDao = database.priceObservationDao(),
-                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+                externalScope = repositoryScope
             )
             val now = System.currentTimeMillis()
             fun offer(title: String, price: Double, observedAt: Long = now) = SerpApiShoppingResult(
@@ -93,6 +95,7 @@ class LiveOnlineSearchVariantTest {
                 ).isNotEmpty()
             )
         } finally {
+            repositoryScope.cancel()
             database.close()
         }
     }
@@ -104,13 +107,14 @@ class LiveOnlineSearchVariantTest {
             context,
             AppDatabase::class.java
         ).allowMainThreadQueries().build()
+        val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         try {
             val repository = ProductRepository(
                 storeDao = database.storeDao(),
                 productDao = database.productDao(),
                 trackedDao = database.trackedProductDao(),
                 priceObservationDao = database.priceObservationDao(),
-                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+                externalScope = repositoryScope
             )
             val now = System.currentTimeMillis()
             fun offer(title: String, price: Double) = SerpApiShoppingResult(
@@ -149,6 +153,7 @@ class LiveOnlineSearchVariantTest {
             )
             assertEquals("Apple iPhone 16 Pro 256 GB", proResults.single().title)
         } finally {
+            repositoryScope.cancel()
             database.close()
         }
     }

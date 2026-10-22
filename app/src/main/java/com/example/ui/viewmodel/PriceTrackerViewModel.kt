@@ -1605,17 +1605,41 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         archiveFailureReason: String
     ) {
         val productId = product.id.trim()
-        if (productId.isBlank() || !inFlightArchiveFailureFallbacks.add(productId)) return
+        if (productId.isBlank()) return
+        if (!inFlightArchiveFailureFallbacks.add(productId)) {
+            val message = "La búsqueda del precio actual de «${product.title}» ya está en curso; no se lanzará una segunda consulta."
+            _uiState.update { current -> current.copy(
+                freeHistoryProductId = productId,
+                freeHistoryStatus = message,
+                serpApiActionStatus = message
+            ) }
+            return
+        }
         val attemptKey = "archive_live_price_fallback_attempt_$productId"
+        val successKey = "archive_live_price_fallback_success_$productId"
         try {
             val now = System.currentTimeMillis()
             val previousAttempt = priceRefreshPreferences.getLong(attemptKey, 0L)
-            if (previousAttempt > 0L && now - previousAttempt < TRACKED_REFRESH_COOLDOWN_MS) {
-                val minutes = ((TRACKED_REFRESH_COOLDOWN_MS - (now - previousAttempt) + 59_999L) / 60_000L)
-                    .coerceAtLeast(1L)
-                val message = "El histórico gratuito no dio un precio verificable ($archiveFailureReason). " +
-                    "La búsqueda alternativa del precio actual ya se intentó recientemente; " +
-                    "se protege la cuota y no se repetirá durante unas $minutes min."
+            val previousSuccess = priceRefreshPreferences.getLong(successKey, 0L)
+            val cooldownRemaining = archiveLiveFallbackCooldownRemainingMs(
+                nowMillis = now,
+                previousAttemptAtMillis = previousAttempt,
+                previousSuccessAtMillis = previousSuccess
+            )
+            if (cooldownRemaining > 0L) {
+                val minutes = ((cooldownRemaining + 59_999L) / 60_000L).coerceAtLeast(1L)
+                val wasSuccessful = previousSuccess > 0L &&
+                    now >= previousSuccess &&
+                    now - previousSuccess < ARCHIVE_LIVE_FALLBACK_SUCCESS_COOLDOWN_MS
+                val message = if (wasSuccessful) {
+                    "El histórico gratuito no dio un precio verificable ($archiveFailureReason). " +
+                        "La búsqueda alternativa ya encontró ofertas recientemente; para proteger la cuota, " +
+                        "se podrá repetir en unas $minutes min."
+                } else {
+                    "El histórico gratuito no dio un precio verificable ($archiveFailureReason). " +
+                        "La última búsqueda alternativa no obtuvo un resultado confirmado; se podrá reintentar " +
+                        "en unas $minutes min. No se repetirá una consulta de pago en bucle."
+                }
                 _uiState.update { current -> current.copy(
                     isSearchingFreeHistory = false,
                     freeHistoryProductId = productId,
@@ -1626,22 +1650,29 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 return
             }
 
-            val currentState = _uiState.value
-            if (currentState.isOnlineSearching || currentState.isRefreshingPrices ||
-                currentState.isPreparingSerpApiAction || currentState.isExecutingSerpApiAction ||
-                currentState.isCheckingSerpApiAccount
-            ) {
-                val message = "El histórico gratuito no dio un precio verificable ($archiveFailureReason). " +
-                    "La búsqueda del precio actual no se ha lanzado porque ya hay otra consulta activa; " +
-                    "usa «Buscar precio actual» cuando termine para no duplicar consumo de SerpApi."
+            if (hasConflictingSerpApiWork(_uiState.value)) {
+                val queued = "El histórico gratuito no dio un precio verificable ($archiveFailureReason). " +
+                    "La búsqueda del precio actual queda en cola hasta que termine la consulta activa; no se perderá el evento."
                 _uiState.update { current -> current.copy(
-                    isSearchingFreeHistory = false,
                     freeHistoryProductId = productId,
-                    freeHistoryStatus = message,
-                    serpApiActionStatus = message
+                    freeHistoryStatus = queued,
+                    serpApiActionStatus = queued
                 ) }
-                showSnackbar(message)
-                return
+                val becameIdle = withTimeoutOrNull(ARCHIVE_LIVE_FALLBACK_WAIT_FOR_IDLE_MS) {
+                    _uiState.first { !hasConflictingSerpApiWork(it) }
+                }
+                if (becameIdle == null) {
+                    val message = "La búsqueda del precio actual quedó pendiente porque otra consulta sigue activa tras esperar 60 segundos. " +
+                        "No se ha gastado una búsqueda duplicada; vuelve a intentarlo cuando termine la consulta activa."
+                    _uiState.update { current -> current.copy(
+                        isSearchingFreeHistory = false,
+                        freeHistoryProductId = productId,
+                        freeHistoryStatus = message,
+                        serpApiActionStatus = message
+                    ) }
+                    showSnackbar(message)
+                    return
+                }
             }
 
             val token = withContext(Dispatchers.IO) { serpApiTokenStore.read() }
@@ -1746,6 +1777,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             val savedOffers = if (safeOffers.isNotEmpty()) {
                 repository.recordProductComparisonOffers(productId, product.title, safeOffers)
             } else 0
+            if (safeOffers.isNotEmpty()) {
+                priceRefreshPreferences.edit()
+                    .putLong(successKey, System.currentTimeMillis())
+                    .apply()
+            }
 
             if (savedOffers > 0) {
                 val refreshed = withTimeoutOrNull(6_000L) {
@@ -2370,6 +2406,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 "No hay un enlace directo ni un dominio de comercio identificable para buscar capturas gratuitas. No se han inventado precios previos.",
                 targetProductId
             )
+            if (liveFallbackProduct != null) {
+                viewModelScope.launch {
+                    runLivePriceFallbackAfterArchiveFailure(
+                        product = liveFallbackProduct,
+                        archiveFailureReason = "no se encontraron destinos válidos para el archivo histórico"
+                    )
+                }
+            }
             return
         }
 
@@ -2396,6 +2440,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             }
         }
         viewModelScope.launch {
+            var selectedProductHistoricalQuoteFound = false
             try {
                 var savedCount = 0
                 var crossSavedVariantObservationCount = 0
@@ -2441,6 +2486,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 quote.isDiscoveryCandidate -> Unit
                                 quote.targetProductId.isNullOrBlank() || quote.targetProductId == targetProductId -> {
                                     foundPrimaryCount++
+                                    selectedProductHistoricalQuoteFound = true
                                     // Only the selected product's observations determine the
                                     // "capturas desde" date shown in its own history message.
                                     archiveDates.add(quote.observedAt)
@@ -3178,9 +3224,19 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 appendArchiveNotice(
                     query,
                     provider,
-                    "No se pudo completar la consulta gratuita del archivo. No se ha gastado cuota de SerpApi; puedes volver a intentarlo más adelante.",
+                    "No se pudo completar la consulta gratuita del archivo. Se comprobará por separado el precio actual; el histórico y sus datos guardados no se modificarán.",
                     targetProductId
                 )
+                if (shouldTriggerLiveFallbackAfterArchiveException(
+                        hasFallbackProduct = liveFallbackProduct != null,
+                        selectedProductHistoricalQuoteFound = selectedProductHistoricalQuoteFound
+                    )
+                ) {
+                    runLivePriceFallbackAfterArchiveFailure(
+                        product = liveFallbackProduct!!,
+                        archiveFailureReason = "la consulta histórica terminó con un error controlado (${error.javaClass.simpleName})"
+                    )
+                }
             } finally {
                 if (targetProductId != null) {
                     _uiState.value = _uiState.value.copy(isSearchingFreeHistory = false)
@@ -3369,4 +3425,42 @@ internal fun shouldTriggerLivePriceFallback(
     selectedProductHistoricalQuotesSaved: Int
 ): Boolean = selectedProductHistoricalQuotesFound <= 0 &&
     selectedProductHistoricalQuotesSaved <= 0
+
+/** A terminal archive exception must not bypass the current-price fallback. */
+internal fun shouldTriggerLiveFallbackAfterArchiveException(
+    hasFallbackProduct: Boolean,
+    selectedProductHistoricalQuoteFound: Boolean
+): Boolean = hasFallbackProduct && !selectedProductHistoricalQuoteFound
+
+internal const val ARCHIVE_LIVE_FALLBACK_RETRY_COOLDOWN_MS = 15L * 60L * 1000L
+internal const val ARCHIVE_LIVE_FALLBACK_SUCCESS_COOLDOWN_MS = 24L * 60L * 60L * 1000L
+internal const val ARCHIVE_LIVE_FALLBACK_WAIT_FOR_IDLE_MS = 60L * 1000L
+
+/**
+ * Recent failed lookups may be retried after 15 minutes. Only a successful lookup with trusted
+ * retailer offers gets the regular 24-hour cooldown. This prevents a failed first attempt from
+ * suppressing the event for an entire day.
+ */
+internal fun archiveLiveFallbackCooldownRemainingMs(
+    nowMillis: Long,
+    previousAttemptAtMillis: Long,
+    previousSuccessAtMillis: Long
+): Long {
+    fun remaining(timestamp: Long, cooldownMs: Long): Long {
+        if (timestamp <= 0L) return 0L
+        val elapsed = (nowMillis - timestamp).coerceAtLeast(0L)
+        return (cooldownMs - elapsed).coerceAtLeast(0L)
+    }
+    val successRemaining = remaining(previousSuccessAtMillis, ARCHIVE_LIVE_FALLBACK_SUCCESS_COOLDOWN_MS)
+    if (successRemaining > 0L) return successRemaining
+    return remaining(previousAttemptAtMillis, ARCHIVE_LIVE_FALLBACK_RETRY_COOLDOWN_MS)
+}
+
+/** Used to queue, rather than silently abandon, a current-price fallback behind a live request. */
+internal fun hasConflictingSerpApiWork(state: TrackerUiState): Boolean =
+    state.isOnlineSearching ||
+        state.isRefreshingPrices ||
+        state.isPreparingSerpApiAction ||
+        state.isExecutingSerpApiAction ||
+        state.isCheckingSerpApiAccount
 

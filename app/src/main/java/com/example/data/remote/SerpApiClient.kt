@@ -1245,7 +1245,7 @@ class SerpApiClient(
 
     private fun isRentalOrMonthlyListing(item: JSONObject, title: String): Boolean {
         val excludedTerms = Regex(
-            """(?i)(?:\\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\\s+a\\s+plazos|por\\s+mes|per\\s+month|mes\\s+a\\s+mes|al\\s+mes)\\b|/\\s*(?:mes|month|mo)\\b)"""
+            """(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes|al\s+mes)\b|/\s*(?:mes|month|mo)\b)"""
         )
         if (excludedTerms.containsMatchIn(title)) return true
 

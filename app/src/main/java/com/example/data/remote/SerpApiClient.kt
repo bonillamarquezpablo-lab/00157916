@@ -637,18 +637,15 @@ class SerpApiClient(
                 return extractGoogleShoppingProductId(raw) != null ||
                     Regex("""(?i)/shopping/product/[^/]+""").containsMatchIn(path)
             }
-            val canUseShoppingSearchFallback =
-                providerSource?.equals("Google Shopping", ignoreCase = true) == true &&
-                    extractedCandidate == null &&
-                    candidateUrls.none(::isSpecificGoogleProductDestination)
             val safeUrl = url?.takeIf { candidate ->
                 isNavigableHttpUrl(candidate) &&
                     (!isGoogleShoppingUrl(candidate) || isSpecificGoogleProductDestination(candidate))
             } ?: googleSearchFallback.takeIf {
-                // A generic Shopping query is only a fallback when the provider itself labels
-                // this as an aggregate Google Shopping offer and no usable retailer/product URL
-                // exists. Never invent a Google search link for a named seller's offer.
-                canUseShoppingSearchFallback && isNavigableHttpUrl(it)
+                // Last-resort navigation for a priced listing whose seller/product destination
+                // cannot be used. The parsed result is labelled "Google Shopping", not as the
+                // named seller, because this opens a title-specific search rather than a product
+                // page. Generic search fallbacks are kept out of verified price history below.
+                isNavigableHttpUrl(it)
             }
             if (safeUrl == null || !isNavigableHttpUrl(safeUrl)) {
                 rejectedForLink++

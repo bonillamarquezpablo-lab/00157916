@@ -473,8 +473,14 @@ class WaybackPriceHistoryClient(
                 return@serializedArchiveLookup exactResult
             }
             // If exact URL already yields a usable series, avoid the more expensive prefix scan.
-            if (exactResult.quotes.isNotEmpty()) {
+            val exactHasPrimaryVerifiedPrice = exactResult.quotes.any {
+                it.targetProductId.isNullOrBlank() && !it.isDiscoveryCandidate
+            }
+            if (exactHasPrimaryVerifiedPrice) {
                 rememberAttempt(attempt, now, hasQuotes = true, failed = false)
+                // The exact CDX path already verified the requested product. The prefix scan
+                // is an expensive recovery path for missed slugs, not a reason to wait another
+                // 5–7 seconds after the selected product is already confirmed.
                 return@serializedArchiveLookup exactResult.copy(diagnosticCodes = emptySet())
             }
 
@@ -3227,6 +3233,7 @@ class WaybackPriceHistoryClient(
 
         val sampled = sampleCaptures(captures, maxSnapshots)
         val fetched = mutableListOf<SnapshotFetch>()
+        var stoppedAfterVerifiedPrimaryPrice = false
         for ((snapshotIndex, capture) in sampled.withIndex()) {
             val snapshot = fetchSnapshotOnce(
                 capture = capture,
@@ -3242,6 +3249,17 @@ class WaybackPriceHistoryClient(
             )
             fetched += snapshot
             if (snapshot.diagnosticCode == "WAYBACK_RATE_LIMITED") break
+            if (snapshot.quote != null) {
+                stoppedAfterVerifiedPrimaryPrice = snapshotIndex < sampled.lastIndex
+                if (stoppedAfterVerifiedPrimaryPrice) {
+                    emitWaybackTrace(
+                        onTrace, 10, WaybackTraceStatus.SKIPPED,
+                        "Se obtuvo un precio válido del producto buscado; se cancelan las descargas de capturas restantes para evitar esperas redundantes.",
+                        diagnosticStep = 13
+                    )
+                }
+                break
+            }
         }
         when {
             sampled.isEmpty() -> {

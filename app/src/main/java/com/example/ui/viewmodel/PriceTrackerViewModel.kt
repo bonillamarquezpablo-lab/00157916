@@ -2031,8 +2031,16 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 repository.recordOnlineSearchResults(cachedHistoryCandidates, provider.name, query)
                             }
                         } else 0
-                        val newCatalogueProducts = withContext(Dispatchers.IO) {
-                            repository.ensureVisibleOnlineSearchProducts(visibleCachedResults, query)
+                        val newCatalogueProducts = try {
+                            withContext(Dispatchers.IO) {
+                                repository.ensureVisibleOnlineSearchProducts(visibleCachedResults, query)
+                            }
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            // The live result view must remain usable even if Room cannot save a candidate.
+                            // A card tap will retry the same safe, non-destructive persistence path.
+                            0
                         }
                         val catalogueNotice = onlineCatalogueNotice(newCatalogueProducts)
                         val historyNotice = if (cachedHistoryCandidates.isNotEmpty()) {
@@ -2175,8 +2183,16 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             repository.recordOnlineSearchResults(historyCandidates, provider.name, query)
                         }
                     } else 0
-                    val newCatalogueProducts = withContext(Dispatchers.IO) {
-                        repository.ensureVisibleOnlineSearchProducts(results, query)
+                    val newCatalogueProducts = try {
+                        withContext(Dispatchers.IO) {
+                            repository.ensureVisibleOnlineSearchProducts(results, query)
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        // Never discard valid live results just because catalogue persistence failed.
+                        // Tapping a visible result attempts to create/resume its ficha separately.
+                        0
                     }
 
                     // Cache the merged snapshot only after the supplement succeeds. Otherwise retain

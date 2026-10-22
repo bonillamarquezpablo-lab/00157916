@@ -2113,9 +2113,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             try {
                 var savedCount = 0
+                var crossSavedVariantObservationCount = 0
                 val stagedDiscoveryObservationsCount = java.util.concurrent.atomic.AtomicInteger(0)
                 var checkedCount = 0
                 var foundCount = 0
+                var foundPrimaryCount = 0
+                var foundSecondaryCount = 0
                 var capturesFoundCount = 0
                 var selectedProductRefreshed = false
                 var mementoAttempted = false
@@ -2151,7 +2154,16 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     for (quote in uniqueQuotes) {
                         if (countedArchiveQuoteKeys.add(archiveQuoteIdentity(candidate, quote))) {
                             foundCount++
-                            archiveDates.add(quote.observedAt)
+                            when {
+                                quote.isDiscoveryCandidate -> Unit
+                                quote.targetProductId.isNullOrBlank() || quote.targetProductId == targetProductId -> {
+                                    foundPrimaryCount++
+                                    // Only the selected product's observations determine the
+                                    // "capturas desde" date shown in its own history message.
+                                    archiveDates.add(quote.observedAt)
+                                }
+                                else -> foundSecondaryCount++
+                            }
                         }
                     }
                     if (diagnosticProductId != null) {
@@ -2187,7 +2199,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 !it.targetProductId.isNullOrBlank() && it.targetProductId != targetProductId
                             }
                             for ((secondaryProductId, variantQuotes) in secondaryQuotes.groupBy { it.targetProductId!! }) {
-                                savedCount += repository.recordArchivedPriceHistory(
+                                crossSavedVariantObservationCount += repository.recordArchivedPriceHistory(
                                     expectedTitle = variantQuotes.first().productTitle,
                                     originalUrl = archiveUrl,
                                     storeName = candidate.storeName,
@@ -2575,18 +2587,38 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
                 if (diagnosticProductId != null) {
                     val persistenceStatus = when {
-                        savedCount > 0 || foundCount > 0 || stagedDiscoveryObservationsCount.get() > 0 -> WaybackTraceStatus.PASSED
+                        savedCount > 0 || crossSavedVariantObservationCount > 0 ||
+                            foundPrimaryCount > 0 || foundSecondaryCount > 0 ||
+                            stagedDiscoveryObservationsCount.get() > 0 -> WaybackTraceStatus.PASSED
                         else -> WaybackTraceStatus.SKIPPED
                     }
                     val persistenceDetail = when {
+                        savedCount > 0 && crossSavedVariantObservationCount > 0 &&
+                            stagedDiscoveryObservationsCount.get() > 0 ->
+                            "Guardado completado: $savedCount punto(s) para el producto seleccionado, " +
+                                "$crossSavedVariantObservationCount punto(s) en variantes relacionadas y " +
+                                "${stagedDiscoveryObservationsCount.get()} observación(es) nueva(s) en cuarentena."
+                        savedCount > 0 && crossSavedVariantObservationCount > 0 ->
+                            "Guardado completado: $savedCount punto(s) para el producto seleccionado y " +
+                                "$crossSavedVariantObservationCount punto(s) en variantes relacionadas."
                         savedCount > 0 && stagedDiscoveryObservationsCount.get() > 0 ->
-                            "Guardado completado: $savedCount punto(s) para el catálogo y ${stagedDiscoveryObservationsCount.get()} observación(es) secundarias en cuarentena."
+                            "Guardado completado: $savedCount punto(s) para el producto seleccionado y " +
+                                "${stagedDiscoveryObservationsCount.get()} observación(es) secundaria(s) en cuarentena."
                         savedCount > 0 ->
-                            "Guardado completado: $savedCount punto(s) nuevo(s) en el histórico del catálogo."
+                            "Guardado completado: $savedCount punto(s) nuevo(s) en el histórico del producto seleccionado."
+                        crossSavedVariantObservationCount > 0 && stagedDiscoveryObservationsCount.get() > 0 ->
+                            "El producto seleccionado no recibió puntos nuevos. Se guardaron " +
+                                "$crossSavedVariantObservationCount punto(s) en variantes relacionadas y " +
+                                "${stagedDiscoveryObservationsCount.get()} observación(es) en cuarentena."
+                        crossSavedVariantObservationCount > 0 ->
+                            "Guardado cruzado: $crossSavedVariantObservationCount punto(s) nuevo(s) en fichas de variantes relacionadas; " +
+                                "no se añadieron puntos nuevos al producto seleccionado."
                         stagedDiscoveryObservationsCount.get() > 0 ->
                             "Radar de Descubrimientos: ${stagedDiscoveryObservationsCount.get()} observación(es) de productos nuevos guardadas en cuarentena; siguen fuera del catálogo principal."
-                        foundCount > 0 ->
-                            "Se verificaron $foundCount punto(s); no se añadieron duplicados porque los registros ya existían."
+                        foundPrimaryCount > 0 ->
+                            "Se verificaron $foundPrimaryCount punto(s) del producto seleccionado, pero no se añadieron duplicados porque esos registros ya existían."
+                        foundSecondaryCount > 0 ->
+                            "Se verificaron $foundSecondaryCount punto(s) de variantes relacionadas, pero sus registros ya existían; no se añadieron puntos al producto seleccionado."
                         else ->
                             "No se guardaron registros: ninguna captura produjo un precio verificado."
                     }
@@ -2663,8 +2695,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             (oldest?.let { ", con capturas desde $it" } ?: "") +
                             ". Son precios anunciados en páginas archivadas; puede haber huecos y no garantizan envío, stock ni precio final."
                     }
-                    foundCount > 0 ->
-                        "Se encontraron capturas con precios previos, pero no se pudieron vincular a la ficha del producto o ya existían esos registros diarios."
+                    foundPrimaryCount > 0 ->
+                        "Se encontraron capturas con precios previos del producto seleccionado, pero ya existían esos registros diarios y no se añadieron puntos nuevos."
+                    crossSavedVariantObservationCount > 0 ->
+                        "Se guardaron $crossSavedVariantObservationCount precios históricos en fichas de variantes relacionadas; no se añadió historial nuevo al producto seleccionado."
+                    foundSecondaryCount > 0 ->
+                        "Se encontraron capturas de variantes relacionadas, pero sus registros ya existían; no se añadió historial nuevo al producto seleccionado."
                     requestFailedCount > 0 && diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ->
                         waybackRateLimitNotice() + " Esto no significa que no existan capturas."
                     capturesFoundCount > 0 && checkedCount == 0 && requestFailedCount > 0 ->

@@ -489,6 +489,56 @@ class OnlineSearchScreenTest {
     }
 
     @Test
+    fun livePricedOffersWithoutSellerLinksRemainVisibleAcrossProductCategories() {
+        val client = SerpApiClient()
+        val cases = listOf(
+            "Apple iPhone 16" to "574,99 €",
+            "Sony WH-1000XM5 Wireless Headphones" to "199,99 €",
+            "Alternador VW Polo 9N 1.9 SDI ASY" to "89,90 €",
+            "Pantalla Original Xiaomi Mi 10 Pro Versión S" to "42,50 €",
+            "Funda para Apple iPhone 16" to "19,99 €",
+            "Samsung OLED TV 55 inch" to "799,00 €"
+        )
+
+        cases.forEachIndexed { index, (title, priceText) ->
+            val payload = JSONObject().put(
+                "search_metadata",
+                JSONObject().put("status", "Success")
+            ).put(
+                "shopping_results",
+                org.json.JSONArray().put(
+                    JSONObject()
+                        .put("title", title)
+                        .put("price", priceText)
+                        .put("extracted_price", priceText.replace(".", "").replace(",", ".")
+                            .replace(Regex("[^0-9.]"), "").toDouble())
+                        .put("source", "Google Shopping")
+                        // Intentionally no seller URL: a valid price must remain visible via
+                        // an honestly labelled query fallback in every product category.
+                )
+            )
+
+            val report = client.parseShoppingResultsDetailed(
+                root = payload,
+                query = title,
+                observedAt = System.currentTimeMillis() + index
+            )
+
+            assertEquals(
+                "A valid priced offer must not be discarded only because its seller URL is absent: $title; " +
+                    "discarded=${report.discardedOffers.map { it.reason }}",
+                1,
+                report.results.size
+            )
+            val offer = report.results.single()
+            assertEquals(title, offer.title)
+            assertTrue(offer.isSearchFallbackDestination)
+            assertTrue(offer.sourceUrl.startsWith("https://www.google.com/search?"))
+            assertTrue(offer.sourceUrl.contains("tbm=shop"))
+        }
+    }
+
+    @Test
     fun liveIphone16SearchKeepsPricedVariantsAndAccessoriesButExplainsMonthlyDiscard() {
         val now = System.currentTimeMillis()
         val response = JSONObject(

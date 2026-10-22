@@ -4338,23 +4338,114 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun secondaryVariantQuoteAloneDoesNotSuppressLookupForSelectedProduct() {
-        val siblingVariant = ArchivedPriceQuote(
-            observedAt = 1_756_684_800_000L,
-            price = 699.99,
-            currency = "EUR",
-            productTitle = "Apple iPhone 15 Plus 128GB Amarillo Libre",
-            originalUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-family",
-            snapshotUrl = "https://web.archive.org/web/20250901000000id_/https://www.pccomponentes.com/apple-iphone-15-plus-family",
-            targetProductId = "saved-iphone-128"
-        )
+    fun secondaryOfferFromExactCdxIsStreamedButPrefixFallbackStillRunsForPrimaryVariant() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .commit()
 
-        assertFalse(
-            "A sibling offer can be saved opportunistically but must not count as a hit for the requested 256 GB model",
-            hasVerifiedPrimaryExactCdxQuote(
-                WaybackBackfillResult(quotes = listOf(siblingVariant), capturesFound = 3)
+        val primaryTitle = "Apple iPhone 15 Plus 256GB Amarillo Libre"
+        val primaryUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo-libre"
+        val siblingTitle = "Apple iPhone 15 Plus 128GB Amarillo Libre"
+        val siblingUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-128gb-amarillo-libre"
+        val cdxMatchTypes = CopyOnWriteArrayList<String>()
+        val streamedQuotes = CopyOnWriteArrayList<ArchivedPriceQuote>()
+        val exactCdxBody = """
+            [
+              ["timestamp","original","statuscode","mimetype"],
+              ["20250124124812","$primaryUrl","200","text/html"]
+            ]
+        """.trimIndent()
+        val emptyCdxBody = """[["timestamp","original","statuscode","mimetype"]]"""
+        val siblingHtml = """
+            <html><head>
+              <title>Apple iPhone 15 Plus</title>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@type":"Product",
+                "name":"$siblingTitle",
+                "url":"$siblingUrl",
+                "offers":{"@type":"Offer","price":"699.99","priceCurrency":"EUR"}
+              }
+              </script>
+            </head><body>Apple iPhone 15 Plus</body></html>
+        """.trimIndent()
+
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            when {
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    val matchType = request.url.queryParameter("matchType").orEmpty()
+                    cdxMatchTypes += matchType
+                    val body = if (matchType.equals("exact", ignoreCase = true)) {
+                        exactCdxBody
+                    } else {
+                        emptyCdxBody
+                    }
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(body.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/web/") -> {
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "text/html; charset=utf-8")
+                        .body(siblingHtml.toResponseBody("text/html; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                else -> throw AssertionError(
+                    "Unexpected archive request: ${request.url.host}${request.url.encodedPath}"
+                )
+            }
+        }.build()
+
+        try {
+            val result = withTimeout(15_000L) {
+                WaybackPriceHistoryClient(context, http).fetchHistory(
+                    originalUrl = primaryUrl,
+                    expectedTitle = primaryTitle,
+                    knownProductTitlesById = mapOf("saved-iphone-128" to siblingTitle),
+                    onVerifiedQuotes = { batch -> streamedQuotes.addAll(batch) },
+                    forceRefresh = true
+                )
+            }
+
+            assertTrue(
+                "The primary 256 GB price must remain empty when the only structured offer is 128 GB",
+                result.quotes.isEmpty()
             )
-        )
+            assertTrue(
+                "The capture callback must still receive the uniquely identified sibling variant",
+                streamedQuotes.any {
+                    it.targetProductId == "saved-iphone-128" &&
+                        it.productTitle == siblingTitle &&
+                        it.price == 699.99
+                }
+            )
+            assertTrue(
+                "After processing a sibling-only exact capture, fetchHistory must continue to the prefix query",
+                cdxMatchTypes.indexOf("exact") >= 0 &&
+                    cdxMatchTypes.indexOf("prefix") > cdxMatchTypes.indexOf("exact")
+            )
+        } finally {
+            preferences.edit()
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .commit()
+        }
     }
 
     @Test

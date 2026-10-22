@@ -3846,8 +3846,9 @@ class WaybackPriceHistoryClient(
             // same Product record or page metadata. Never append opaque SKU identifiers as words.
             return evidence.any { identity ->
                 val enriched = buildArchivedIdentityTitle(expectedTitle, originalUrl, identity)
-                enriched.isNotBlank() &&
-                    isMatchingTitleForArchivedUrl(expectedTitle, enriched, originalUrl)
+                (enriched.isNotBlank() &&
+                    isMatchingTitleForArchivedUrl(expectedTitle, enriched, originalUrl)) ||
+                    hasExactStructuredModelIdentifier(expectedTitle, originalUrl, identity)
             }
         }
 
@@ -4340,6 +4341,21 @@ class WaybackPriceHistoryClient(
             ) return false
         }
         return true
+    }
+
+    private fun hasExactStructuredModelIdentifier(
+        expectedTitle: String,
+        originalUrl: String,
+        identity: ArchivedProductIdentityEvidence
+    ): Boolean {
+        val model = identity.model?.takeIf { it.isNotBlank() } ?: return false
+        val compactModel = normalizeTitle(model).replace(Regex("""[^a-z0-9]"""), "")
+        if (compactModel.length < 5) return false
+        val target = normalizeTitle(expectedTitle + " " + archivedUrlIdentityText(originalUrl))
+            .replace(Regex("""[^a-z0-9]"""), "")
+        // A model code is strong evidence only if the selected title or its product URL contains
+        // that exact code. Capacity/colour conflicts have already been rejected above.
+        return target.contains(compactModel)
     }
 
     private fun buildArchivedIdentityTitle(

@@ -310,6 +310,38 @@ class SerpApiVariantMismatchTest {
     }
 
     @Test
+    fun rejectsOppositeRedmiNote15Pro4GAnd5GVariantsInBothDirections() {
+        fun parse(query: String, title: String) =
+            SerpApiClient().parseShoppingResultsDetailed(
+                root = JSONObject().put(
+                    "shopping_results",
+                    JSONArray().put(
+                        JSONObject()
+                            .put("title", title)
+                            .put("price", "299,99 €")
+                            .put("extracted_price", 299.99)
+                            .put("link", "https://shop.example/redmi-note-15")
+                            .put("source", "Tienda fiable")
+                    )
+                ),
+                query = query,
+                observedAt = 1_800_000_000_000L
+            )
+
+        val expected5g = "Xiaomi Redmi Note 15 Pro 5G 8GB/256GB"
+        val actual4g = "Xiaomi Redmi Note 15 Pro 4G 8GB/256GB"
+        val expected4g = "Xiaomi Redmi Note 15 Pro 4G 8GB/256GB"
+        val actual5g = "Xiaomi Redmi Note 15 Pro 5G 8GB/256GB"
+
+        assertTrue(hasXiaomiModelMismatch(expected5g, actual4g))
+        assertTrue(hasXiaomiModelMismatch(expected4g, actual5g))
+        assertEquals(0, parse(expected5g, actual4g).results.size)
+        assertEquals(1, parse(expected5g, expected5g).results.size)
+        assertEquals(0, parse(expected4g, actual5g).results.size)
+        assertEquals(1, parse(expected4g, expected4g).results.size)
+    }
+
+    @Test
     fun formatsResultAgeForFreshnessDisclosure() {
         assertEquals(
             "hace 2 h 15 min",

@@ -267,7 +267,10 @@ class ProductDiscoveryRepository(private val database: AppDatabase) {
     }
 
     suspend fun dismiss(discoveryId: String): Boolean = database.withTransaction {
-        database.productDiscoveryDao().updateStatus(
+        val dao = database.productDiscoveryDao()
+        val current = dao.getById(discoveryId) ?: return@withTransaction false
+        if (current.status != ProductDiscoveryEntity.STATUS_PENDING) return@withTransaction false
+        dao.updateStatus(
             id = discoveryId,
             status = ProductDiscoveryEntity.STATUS_DISMISSED,
             updatedAt = System.currentTimeMillis()

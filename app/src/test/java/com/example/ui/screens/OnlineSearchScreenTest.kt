@@ -580,6 +580,34 @@ class OnlineSearchScreenTest {
     }
 
     @Test
+    fun monthlyInstallmentMetadataIsRejectedEvenWhenPriceFieldLooksLikeTotalPrice() {
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "search_metadata": {"status": "Success"},
+                  "shopping_results": [{
+                    "title": "Apple iPhone 16 Pro 256 GB",
+                    "price": "899,00 €",
+                    "extracted_price": 899.0,
+                    "monthly_payment_amount": 44.99,
+                    "monthly_payment_duration": 24,
+                    "source": "Google Shopping"
+                  }]
+                }
+                """.trimIndent()
+            ),
+            query = "Apple iPhone 16 Pro 256 GB",
+            observedAt = System.currentTimeMillis()
+        )
+
+        assertEquals(1, report.rawResultCount)
+        assertTrue("A financed monthly amount must never masquerade as the full product price", report.results.isEmpty())
+        assertEquals(1, report.discardedOffers.size)
+        assertEquals("Alquiler o cuota mensual", report.discardedOffers.single().reason)
+    }
+
+    @Test
     fun pricedOfferWithoutSafeRetailerLinkRemainsUsableThroughSpecificShoppingSearch() {
         val response = JSONObject(
             """

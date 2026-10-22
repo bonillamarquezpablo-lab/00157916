@@ -1877,9 +1877,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         Triple(visible, eligibleForHistory, rejected)
                     }
                     onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = discarded
-                    val savedObservations = if (results.isNotEmpty()) {
+                    val savedObservations = if (historyCandidates.isNotEmpty()) {
                         withContext(Dispatchers.IO) {
-                                repository.recordOnlineSearchResults(results, provider.name, query)
+                            repository.recordOnlineSearchResults(historyCandidates, provider.name, query)
                         }
                     } else 0
 
@@ -1948,11 +1948,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         ""
                     }
                     val filterNote = onlineFilterNotice(discarded)
-                    val historyNote = if (results.isNotEmpty()) {
-                        onlineHistoryNotice(savedObservations, results.size)
+                    val historyNote = if (historyCandidates.isNotEmpty()) {
+                        onlineHistoryNotice(savedObservations, historyCandidates.size)
                     } else ""
+                    val eligibilityNotice = liveHistoryEligibilityNotice(results.size, historyCandidates.size)
                     val freshnessNote = "Búsqueda recién realizada; la antigüedad indica cuándo se capturaron estos resultados, no una comprobación en tiempo real del precio de la tienda."
-                    val message = listOf(base, queryOptimizationNotice, freshnessNote, coverageNote, quotaNote, gameSupplementNote, filterNote, historyNote)
+                    val message = listOf(base, queryOptimizationNotice, freshnessNote, coverageNote, quotaNote, gameSupplementNote, filterNote, historyNote, eligibilityNotice)
                         .map { it.trim() }
                         .filter { it.isNotBlank() }
                         .joinToString("\n\n")

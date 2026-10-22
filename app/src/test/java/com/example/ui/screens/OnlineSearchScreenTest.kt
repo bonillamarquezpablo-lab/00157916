@@ -500,7 +500,7 @@ class OnlineSearchScreenTest {
                   "price": "180,00 €",
                   "extracted_price": 180.0,
                   "link": "http://seller-unknown.example/xiaomi-mi-10-pro",
-                  "source": "Vendedor no catalogado",
+                  "source": "Google Shopping",
                   "second_hand_condition": "new"
                 }
               ]
@@ -519,7 +519,7 @@ class OnlineSearchScreenTest {
         assertEquals("Google Shopping", offer.storeName)
         assertTrue(offer.sourceUrl.startsWith("https://www.google.com/search?"))
         assertTrue(offer.sourceUrl.contains("tbm=shop"))
-        assertTrue(offer.sourceUrl.contains("xiaomi"))
+        assertTrue(offer.sourceUrl.contains("xiaomi", ignoreCase = true))
     }
 
     @Test

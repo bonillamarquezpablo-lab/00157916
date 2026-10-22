@@ -644,10 +644,13 @@ class SerpApiClient(
             val linkSourceProvider = "Google Shopping"
             val host = runCatching { URI(safeUrl).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()
-            val source = if (safeUrl == googleSearchFallback || isGoogleShoppingUrl(safeUrl)) {
+            // The merchant label comes from the offer itself, not from the host used to open it.
+            // A Google Shopping product URL can still be an Fnac offer; replacing its seller label
+            // with "Google Shopping" makes merchant filters and result diagnostics incorrect.
+            val source = providerSource ?: if (safeUrl == googleSearchFallback || isGoogleShoppingUrl(safeUrl)) {
                 "Google Shopping"
             } else {
-                providerSource ?: humanizeHost(host)
+                humanizeHost(host)
             }
             val thumbnail = item.optString("thumbnail").takeIf { isHttpsUrl(it) }.orEmpty()
             val delivery = sequenceOf(item.optString("delivery"), item.optString("shipping"))

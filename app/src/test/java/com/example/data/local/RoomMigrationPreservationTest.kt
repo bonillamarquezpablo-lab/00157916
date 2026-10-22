@@ -21,12 +21,12 @@ import org.robolectric.annotation.Config
 class RoomMigrationPreservationTest {
 
     @Test
-    fun room7To11PreservesExistingRealDataAndTrackingTarget() {
+    fun room7To13PreservesExistingRealDataAndTrackingTarget() {
         assertMigrationPreservesRealData(startVersion = 7)
     }
 
     @Test
-    fun room8To11PreservesExistingRealDataAndLeavesAmbiguousRowUnchanged() {
+    fun room8To13PreservesExistingRealDataAndLeavesAmbiguousRowUnchanged() {
         assertMigrationPreservesRealData(startVersion = 8)
     }
 
@@ -68,14 +68,16 @@ class RoomMigrationPreservationTest {
                 AppDatabase.MIGRATION_7_8,
                 AppDatabase.MIGRATION_8_9,
                 AppDatabase.MIGRATION_9_10,
-                AppDatabase.MIGRATION_10_11
+                AppDatabase.MIGRATION_10_11,
+                AppDatabase.MIGRATION_11_12,
+                AppDatabase.MIGRATION_12_13
             )
             .allowMainThreadQueries()
             .build()
 
         try {
             val products = migrated.productDao().getAllProductsSnapshot()
-            assertEquals("Product must survive Room $startVersion -> 11", 1, products.size)
+            assertEquals("Product must survive Room $startVersion -> 13", 1, products.size)
             val product = products.single()
             assertEquals("real-product-1", product.id)
             assertEquals(349.95, product.currentPrice, 0.001)
@@ -102,7 +104,7 @@ class RoomMigrationPreservationTest {
                 while (cursor.moveToNext()) indexNames += cursor.getString(nameColumn)
             }
             assertTrue(
-                "Room 11 must have the composite product/store/date index",
+                "Room 13 must have the composite product/store/date index",
                 "index_price_observations_productId_storeId_observedAt" in indexNames
             )
             assertTrue(

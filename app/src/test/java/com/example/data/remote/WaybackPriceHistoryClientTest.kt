@@ -505,6 +505,95 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun exactDirectCdxVerifiedPrimaryQuoteSkipsPrefixAndNotifiesCallback() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .remove("wayback_rate_limit_last_hit_at")
+            .remove("wayback_rate_limit_hit_count")
+            .commit()
+
+        val title = "Anker Prime 27K Power Bank Exact CDX Regression ${System.currentTimeMillis()}"
+        val originalUrl = "https://shop.example/products/anker-prime-27k-exact-regression"
+        val requestUrls = CopyOnWriteArrayList<String>()
+        val cdxMatchTypes = CopyOnWriteArrayList<String>()
+        val cdxBody = """
+            [
+              ["timestamp","original","statuscode","mimetype"],
+              ["20250101120000","$originalUrl","200","text/html"]
+            ]
+        """.trimIndent()
+        val archivedHtml = """
+            <html><head>
+              <script type="application/ld+json">
+                {"@type":"Product","name":"$title",
+                 "offers":{"@type":"Offer","price":"79.99","priceCurrency":"EUR"}}
+              </script>
+            </head><body></body></html>
+        """.trimIndent()
+
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            val hostAndPath = request.url.host + request.url.encodedPath
+            requestUrls += hostAndPath
+            when {
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    cdxMatchTypes += request.url.queryParameter("matchType").orEmpty()
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(cdxBody.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/web/") -> {
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "text/html; charset=utf-8")
+                        .body(archivedHtml.toResponseBody("text/html; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                else -> throw AssertionError("Unexpected request during exact-CDX test: $hostAndPath")
+            }
+        }.build()
+
+        try {
+            val callbackQuotes = CopyOnWriteArrayList<ArchivedPriceQuote>()
+            val result = withTimeout(12_000L) {
+                WaybackPriceHistoryClient(context, http).fetchHistory(
+                    originalUrl = originalUrl,
+                    expectedTitle = title,
+                    lookbackDays = 2_920,
+                    onVerifiedQuotes = { callbackQuotes.addAll(it) }
+                )
+            }
+
+            assertEquals("Only the exact CDX query should run after a verified primary price", listOf("exact"), cdxMatchTypes.toList())
+            assertEquals(1, result.quotes.size)
+            assertEquals(79.99, result.quotes.single().price, 0.001)
+            assertEquals("The incremental callback must receive the verified primary quote", 1, callbackQuotes.size)
+            assertEquals(79.99, callbackQuotes.single().price, 0.001)
+            assertEquals(1, requestUrls.count { it.startsWith("web.archive.org/web/") })
+        } finally {
+            preferences.edit()
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .remove("wayback_rate_limit_last_hit_at")
+                .remove("wayback_rate_limit_hit_count")
+                .commit()
+        }
+    }
+
+    @Test
     fun directCdx429ActivatesTheSharedPauseAndPreventsASecondRequest() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
@@ -3193,6 +3282,44 @@ class WaybackPriceHistoryClientTest {
         assertNotNull("AggregateOffer.lowPrice is a real structured offer value", quote)
         assertEquals(183.71, quote!!.price, 0.001)
         assertEquals("EUR", quote.currency)
+    }
+
+    @Test
+    fun rejectsXiaomiMiOfferUrlForDifferentModelWhenArchiveTitleOmitsCapacity() {
+        val client = newClient()
+        val primaryUrl = "https://shop.example/products/anker-prime-27k"
+        val wrongModelUrl = "https://shop.example/products/xiaomi-mi-11-pro-128gb"
+        val html = """
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@graph":[
+                  {"@type":"Product","name":"Anker Prime 27K Power Bank",
+                   "url":"$primaryUrl",
+                   "offers":{"@type":"Offer","price":"299.99","priceCurrency":"EUR"}},
+                  {"@type":"Product","name":"Xiaomi 10 Pro",
+                   "url":"$wrongModelUrl",
+                   "offers":{"@type":"Offer","price":"199.99","priceCurrency":"EUR"}}
+                ]
+              }
+              </script>
+            </head></html>
+        """.trimIndent()
+
+        val quotes = client.parseArchivedPricesForKnownProducts(
+            document = Jsoup.parse(html),
+            primaryExpectedTitle = "Anker Prime 27K Power Bank",
+            knownProductTitlesById = mapOf("mi10-128" to "Xiaomi Mi 10 Pro 128GB"),
+            originalUrl = primaryUrl,
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/$primaryUrl",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertTrue(
+            "A Mi 11 offer URL cannot validate the saved Xiaomi Mi 10 product even if the archived title omits capacity",
+            quotes.none { it.targetProductId == "mi10-128" }
+        )
     }
 
     @Test

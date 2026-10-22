@@ -3235,7 +3235,6 @@ class WaybackPriceHistoryClient(
 
         val sampled = sampleCaptures(captures, maxSnapshots)
         val fetched = mutableListOf<SnapshotFetch>()
-        var stoppedAfterVerifiedPrimaryPrice = false
         for ((snapshotIndex, capture) in sampled.withIndex()) {
             val snapshot = fetchSnapshotOnce(
                 capture = capture,
@@ -3252,8 +3251,7 @@ class WaybackPriceHistoryClient(
             fetched += snapshot
             if (snapshot.diagnosticCode == "WAYBACK_RATE_LIMITED") break
             if (snapshot.quote != null) {
-                stoppedAfterVerifiedPrimaryPrice = snapshotIndex < sampled.lastIndex
-                if (stoppedAfterVerifiedPrimaryPrice) {
+                if (snapshotIndex < sampled.lastIndex) {
                     emitWaybackTrace(
                         onTrace, 10, WaybackTraceStatus.SKIPPED,
                         "Se obtuvo un precio válido del producto buscado; se cancelan las descargas de capturas restantes para evitar esperas redundantes.",

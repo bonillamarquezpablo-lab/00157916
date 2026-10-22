@@ -254,6 +254,7 @@ class ProductRepository(
                 quote.observedAt >= HISTORY_START_TIMESTAMP &&
                 isEligibleHistoryTitle(title) &&
                 !isPromotionalBulkListing(title, "") &&
+                !quote.isSearchFallbackDestination &&
                 isEligibleSeller(quote.storeName, quote.sourceUrl) &&
                 isPlausibleHistoryPrice(title, quote.price)
         }
@@ -353,10 +354,14 @@ class ProductRepository(
 
         val suspiciousByGroup = eligible.groupBy(::comparisonKey).mapValues { (_, comparableOffers) ->
             val trustedPrices = comparableOffers.filterNot {
-                it.isSecondHand || it.isAccessoryOffer || it.isFitmentUnverified || it.isCategoryUnverified
+                it.isSecondHand || it.isAccessoryOffer || it.isFitmentUnverified ||
+                    it.isCategoryUnverified || it.isSearchFallbackDestination
             }.map { it.price }.sorted()
-            val fallbackPrices = comparableOffers.filterNot { it.isFitmentUnverified }
-                .map { it.price }.sorted()
+            // Search-result URLs have no reliable seller price, so they must never set the
+            // median that determines whether direct offers are considered suspicious.
+            val fallbackPrices = comparableOffers.filterNot {
+                it.isFitmentUnverified || it.isSearchFallbackDestination
+            }.map { it.price }.sorted()
             val prices = trustedPrices.ifEmpty { fallbackPrices }
             if (prices.size < 2) {
                 // One listing alone provides no same-product reference for a statistical outlier.
@@ -406,7 +411,8 @@ class ProductRepository(
         return results.mapNotNull { result ->
             val filtered = acceptedByKey[key(result)]
             val visibleButNotHistory = filtered != null && (
-                result.isSecondHand ||
+                result.isSearchFallbackDestination ||
+                    result.isSecondHand ||
                     result.isFitmentUnverified ||
                     result.isCategoryUnverified ||
                     (isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
@@ -640,7 +646,7 @@ class ProductRepository(
             // A title-specific Google Shopping query is useful for opening the result, but it
             // does not prove which seller offers that price. Show it in live search without
             // inventing a verified store price or attaching it to persistent history.
-            .filterNot { it.isGoogleShoppingSearchFallback }
+            .filterNot { it.isSearchFallbackDestination }
             .filterNot { it.isSecondHand || it.isFitmentUnverified || it.isCategoryUnverified }
             // Marketplace accessory matches remain visible for inspection, but must never be
             // persisted as the searched product. Explicit accessory searches are still supported.

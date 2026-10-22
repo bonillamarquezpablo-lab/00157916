@@ -1245,32 +1245,34 @@ class SerpApiClient(
 
     private fun isRentalOrMonthlyListing(item: JSONObject, title: String): Boolean {
         val excludedTerms = Regex(
-            """(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes|al\s+mes)\b|/\s*(?:mes|month|mo)\b)"""
+            """(?i)(?:\b(alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|financing|subscription|suscripcion|monthly|mensual|cuota|installments?|installment|down\s+payment|entrada\s+inicial|pago\s+a\s+plazos|por\s+mes|per\s+month|mes\s+a\s+mes|al\s+mes)\b|/\s*(?:mes|month|mo)\b)"""
         )
         if (excludedTerms.containsMatchIn(title)) return true
 
         // Some feeds expose the instalment amount separately while showing a full-looking
-        // product price. Explicit financing fields make that amount non-comparable as a one-off
+        // product price. Explicit monthly fields make that amount non-comparable as a one-off
         // purchase price even when the field only contains "44.99" or a duration such as "24".
-        val financingKeys = listOf(
+        val monthlyAmountKeys = listOf(
             "monthly_payment", "monthly_payment_amount", "monthly_price",
             "monthly_installment", "monthly_installment_amount",
             "price_per_month", "price_month", "installment_amount_per_month",
-            "installment_plan", "installments", "installments_count",
-            "installments_description", "payment_description", "payment_plan",
-            "monthly_payment_duration", "down_payment"
+            "monthly_payment_duration"
         )
-        val hasExplicitFinancingMetadata = financingKeys.any { key ->
+        val hasExplicitMonthlyMetadata = monthlyAmountKeys.any { key ->
             val value = item.opt(key)?.toString()?.trim()
             !value.isNullOrBlank() &&
                 value.lowercase(Locale.ROOT) !in setOf("null", "0", "0.0", "false", "[]", "{}")
         }
-        if (hasExplicitFinancingMetadata) return true
+        if (hasExplicitMonthlyMetadata) return true
 
+        // General installment/payment fields are inspected by their values. A bare count such as
+        // "3 installments available" does not by itself prove the displayed product price is a
+        // monthly amount; text that actually describes monthly payments is rejected above.
         val paymentText = listOf(
             "price", "price_text", "price_formatted", "formatted_price",
             "display_price", "extracted_price_text", "installments_description",
-            "payment_description", "payment_terms", "alt_currency"
+            "installments", "installments_count", "payment_description", "payment_plan",
+            "down_payment", "credit_terms", "payment_terms", "alt_currency"
         ).mapNotNull { key ->
             item.opt(key)?.toString()?.takeUnless { it.isBlank() || it == "null" || it == "0" }
         }.joinToString(" ")

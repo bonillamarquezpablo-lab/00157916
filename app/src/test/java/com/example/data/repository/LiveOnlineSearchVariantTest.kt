@@ -8,7 +8,8 @@ import com.example.data.remote.SerpApiShoppingResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -95,7 +96,7 @@ class LiveOnlineSearchVariantTest {
                 ).isNotEmpty()
             )
         } finally {
-            repositoryScope.cancel()
+            repositoryScope.coroutineContext[Job]?.cancelAndJoin()
             database.close()
         }
     }
@@ -153,7 +154,7 @@ class LiveOnlineSearchVariantTest {
             )
             assertEquals("Apple iPhone 16 Pro 256 GB", proResults.single().title)
         } finally {
-            repositoryScope.cancel()
+            repositoryScope.coroutineContext[Job]?.cancelAndJoin()
             database.close()
         }
     }

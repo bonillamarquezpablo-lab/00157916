@@ -706,8 +706,7 @@ class ProductRepository(
                 .minByOrNull { it.price }
             val displayOffer = safeDirectOffer ?: fallbackDisplayOffer
             val directUrl = safeDirectOffer?.sourceUrl
-                ?: fallbackDisplayOffer?.sourceUrl?.takeIf { fallbackDisplayOffer.isSearchFallbackDestination }
-                .orEmpty()
+                ?: fallbackDisplayOffer?.takeIf { it.isSearchFallbackDestination }?.sourceUrl.orEmpty()
             val candidate = ProductEntity(
                 id = stableOnlineId("online_candidate_", group.identityKey),
                 title = group.title,

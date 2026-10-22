@@ -10,6 +10,7 @@ import com.example.data.remote.formatOnlineSnapshotAge
 import com.example.data.remote.OnlineSearchQuotaGuard
 import com.example.data.remote.ArchivedPriceQuote
 import com.example.data.remote.MementoClient
+import com.example.data.remote.shouldAttemptMementoFallback
 import com.example.data.remote.shouldSkipDomainFallbackAfterSnapshotTimeout
 import com.example.data.remote.WaybackPriceHistoryClient
 import com.example.data.remote.diagnosticIndexForWaybackTrace
@@ -2206,10 +2207,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         persistCandidateQuotes(candidate, batch)
                     }
                     var candidateTimedOut = false
-                    if (candidate.directUrl != null) {
+                    val directProductUrl = candidate.directUrl
+                    if (directProductUrl != null) {
                         val direct = withTimeoutOrNull(MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS) {
                             waybackPriceHistoryClient.fetchHistory(
-                                originalUrl = candidate.directUrl,
+                                originalUrl = directProductUrl,
                                 expectedTitle = candidate.title,
                                 onTrace = traceCallback,
                                 knownProductTitlesById = knownProductTitlesById,
@@ -2235,9 +2237,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     // Independent archive fallback: Wayback can be empty or rate-limited while
                     // Arquivo.pt still has snapshots. Run Memento at most once, only for a verified
                     // direct retailer URL, and reuse the exact same product-identity parser/guards.
-                    if (shouldAttemptMementoFallback(
+                    if (directProductUrl != null && shouldAttemptMementoFallback(
                             alreadyAttempted = mementoAttempted,
-                            hasEligibleDirectUrl = candidate.directUrl != null,
+                            hasEligibleDirectUrl = true,
                             hasVerifiedQuotes = attempts.any { it.quotes.isNotEmpty() },
                             rateLimited = attempts.any { it.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") }
                         )
@@ -2251,7 +2253,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         }
                         val mementoResult = withTimeoutOrNull(MAX_ARCHIVE_MEMENTO_FALLBACK_MS) {
                             mementoClient.fetchHistory(
-                                originalUrl = candidate.directUrl,
+                                originalUrl = directProductUrl,
                                 expectedTitle = candidate.title,
                                 knownProductTitlesById = knownProductTitlesById,
                                 maxSnapshots = 4,
@@ -2293,7 +2295,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         }
                     } else if (
                         !mementoAttempted &&
-                        candidate.directUrl == null &&
+                        directProductUrl == null &&
                         attempts.none { it.quotes.isNotEmpty() } &&
                         diagnosticProductId != null
                     ) {

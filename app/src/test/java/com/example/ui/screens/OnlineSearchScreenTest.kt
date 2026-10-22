@@ -40,6 +40,49 @@ class OnlineSearchScreenTest {
     val composeRule = createComposeRule()
 
     @Test
+    fun genericShoppingResultCardStillOpensTheProductFicha() {
+        val title = "Sony WH-1000XM5 Wireless Headphones"
+        val fallback = SerpApiShoppingResult(
+            title = title,
+            price = 199.99,
+            storeName = "Google Shopping",
+            sourceUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=Sony+WH-1000XM5",
+            observedAt = System.currentTimeMillis(),
+            condition = "new"
+        )
+        var openedIdentity: String? = null
+
+        composeRule.setContent {
+            MaterialTheme {
+                OnlineSearchScreen(
+                    state = TrackerUiState(
+                        onlineSearchQuery = title,
+                        onlineSearchResults = listOf(fallback),
+                        onlineSearchProvider = OnlineSearchProvider.GOOGLE_SHOPPING
+                    ),
+                    onQueryChange = {},
+                    onSearch = {},
+                    onAmazonSearch = {},
+                    onForceRefresh = {},
+                    onAmazonOnlyChange = {},
+                    onShowSecondHandChange = {},
+                    onToggleDiscarded = {},
+                    onOpenSettings = {},
+                    onOpenProduct = { openedIdentity = it },
+                    modifier = Modifier.testTag("online-search-list")
+                )
+            }
+        }
+
+        composeRule.onNodeWithText(title).assertIsDisplayed().performClick()
+        assertEquals(
+            "A product card with a fallback seller link must still open its Room-backed ficha",
+            com.example.data.remote.onlineProductIdentityKey(title),
+            openedIdentity
+        )
+    }
+
+    @Test
     fun onlyKnownAmbiguousBrandQueriesAreRefinedWithoutAddingSearches() {
         assertEquals(
             "Shimano bicycle components cycling",

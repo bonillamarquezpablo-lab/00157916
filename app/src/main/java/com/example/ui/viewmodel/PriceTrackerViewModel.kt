@@ -2677,9 +2677,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     waybackPriceHistoryClient.activeRateLimitUntil() != null ->
                         waybackRateLimitNotice() + when {
                             savedCount > 0 ->
-                                " Se conservaron $savedCount punto(s) de precio verificado(s) antes de la pausa."
-                            foundCount > 0 ->
-                                " Se verificaron $foundCount punto(s), pero la pausa impide completar el resto del histórico."
+                                " Se conservaron $savedCount punto(s) del producto seleccionado antes de la pausa."
+                            crossSavedVariantObservationCount > 0 ->
+                                " Se guardaron $crossSavedVariantObservationCount punto(s) en variantes relacionadas; eso no añade historial al producto seleccionado."
+                            foundPrimaryCount > 0 ->
+                                " Se verificaron $foundPrimaryCount punto(s) del producto seleccionado, pero la pausa impide completar su histórico."
+                            foundSecondaryCount > 0 ->
+                                " Solo se verificaron capturas de variantes relacionadas; la pausa impide completar otras consultas."
                             else ->
                                 " Esto no significa que no existan capturas."
                         }

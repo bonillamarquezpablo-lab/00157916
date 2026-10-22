@@ -4316,4 +4316,82 @@ class WaybackPriceHistoryClientTest {
         assertNotNull(urls)
         assertEquals(listOf("www.shop.example", "shop.example"), urls!!.map { it.queryParameter("url") })
     }
+
+
+    @Test
+    fun unknownStructuredProductWithItsOwnSameStoreUrlBecomesDiscoveryCandidate() {
+        val client = newClient()
+        val primaryUrl = "https://www.pccomponentes.com/apple-iphone-15-256gb-amarillo"
+        val discoveredUrl = "https://www.pccomponentes.com/sony-wh-1000xm5-auriculares-negro"
+        val snapshotUrl = "https://web.archive.org/web/20250101120000id_/$primaryUrl"
+        val html = """
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@graph":[
+                  {"@type":"Product","name":"Apple iPhone 15 256GB Amarillo",
+                   "url":"$primaryUrl",
+                   "offers":{"@type":"Offer","price":"899.99","priceCurrency":"EUR"}},
+                  {"@type":"Product","name":"Sony WH-1000XM5 Auriculares Inalámbricos Negro",
+                   "url":"$discoveredUrl",
+                   "offers":{"@type":"Offer","price":"249.99","priceCurrency":"EUR"}}
+                ]
+              }
+              </script>
+            </head></html>
+        """.trimIndent()
+
+        val quotes = client.parseArchivedPricesForKnownProducts(
+            document = Jsoup.parse(html),
+            primaryExpectedTitle = "Apple iPhone 15 256GB Amarillo",
+            knownProductTitlesById = emptyMap(),
+            originalUrl = primaryUrl,
+            snapshotUrl = snapshotUrl,
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertEquals("Only the unknown secondary product should go to staging", 1, quotes.size)
+        val quote = quotes.single()
+        assertTrue(quote.isDiscoveryCandidate)
+        assertNull(quote.targetProductId)
+        assertEquals("Sony WH-1000XM5 Auriculares Inalámbricos Negro", quote.productTitle)
+        assertEquals(discoveredUrl, quote.productUrl)
+        assertEquals(249.99, quote.price, 0.001)
+    }
+
+    @Test
+    fun accessoryOffersAreNeverReturnedAsDiscoveryCandidates() {
+        val client = newClient()
+        val primaryUrl = "https://www.pccomponentes.com/apple-iphone-15-256gb-amarillo"
+        val html = """
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@graph":[
+                  {"@type":"Product","name":"Apple iPhone 15 256GB Amarillo",
+                   "url":"$primaryUrl",
+                   "offers":{"@type":"Offer","price":"899.99","priceCurrency":"EUR"}},
+                  {"@type":"Product","name":"Funda protectora Apple iPhone 15, carcasa de silicona",
+                   "url":"https://www.pccomponentes.com/funda-protectora-iphone-15",
+                   "offers":{"@type":"Offer","price":"12.99","priceCurrency":"EUR"}}
+                ]
+              }
+              </script>
+            </head></html>
+        """.trimIndent()
+
+        val quotes = client.parseArchivedPricesForKnownProducts(
+            document = Jsoup.parse(html),
+            primaryExpectedTitle = "Apple iPhone 15 256GB Amarillo",
+            knownProductTitlesById = emptyMap(),
+            originalUrl = primaryUrl,
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/$primaryUrl",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertTrue("Accessory pages must not pollute the discovery quarantine", quotes.isEmpty())
+    }
+
 }

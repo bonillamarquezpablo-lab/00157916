@@ -12,9 +12,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         StoreEntity::class,
         ProductEntity::class,
         TrackedProductEntity::class,
-        PriceObservationEntity::class
+        PriceObservationEntity::class,
+        ProductDiscoveryEntity::class,
+        DiscoveryPriceObservationEntity::class
     ],
-    version = 11,
+    version = 13,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -23,6 +25,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun trackedProductDao(): TrackedProductDao
 
     abstract fun priceObservationDao(): PriceObservationDao
+    abstract fun productDiscoveryDao(): ProductDiscoveryDao
 
     companion object {
         /**
@@ -193,6 +196,71 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Creates the hidden discovery quarantine without touching the visible catalogue. */
+        val MIGRATION_11_12: Migration = object : Migration(11, 12) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `product_discoveries` (" +
+                        "`id` TEXT NOT NULL PRIMARY KEY, " +
+                        "`identityKey` TEXT NOT NULL, " +
+                        "`title` TEXT NOT NULL, " +
+                        "`brand` TEXT NOT NULL, " +
+                        "`category` TEXT NOT NULL, " +
+                        "`productUrl` TEXT NOT NULL, " +
+                        "`latestStoreId` TEXT NOT NULL, " +
+                        "`latestStoreName` TEXT NOT NULL, " +
+                        "`latestStoreDomain` TEXT NOT NULL, " +
+                        "`latestPrice` REAL NOT NULL, " +
+                        "`currency` TEXT NOT NULL, " +
+                        "`firstObservedAt` INTEGER NOT NULL, " +
+                        "`lastObservedAt` INTEGER NOT NULL, " +
+                        "`captureCount` INTEGER NOT NULL, " +
+                        "`status` TEXT NOT NULL, " +
+                        "`createdAt` INTEGER NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL)"
+                )
+                database.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_product_discoveries_identityKey` " +
+                        "ON `product_discoveries` (`identityKey`)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_product_discoveries_status_lastObservedAt` " +
+                        "ON `product_discoveries` (`status`, `lastObservedAt`)"
+                )
+            }
+        }
+
+        /** Keeps dated source evidence separately so acceptance can import a complete timeline. */
+        val MIGRATION_12_13: Migration = object : Migration(12, 13) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `discovery_price_observations` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`discoveryId` TEXT NOT NULL, " +
+                        "`price` REAL NOT NULL, " +
+                        "`currency` TEXT NOT NULL, " +
+                        "`observedAt` INTEGER NOT NULL, " +
+                        "`snapshotUrl` TEXT NOT NULL, " +
+                        "`sourcePageUrl` TEXT NOT NULL, " +
+                        "`productUrl` TEXT NOT NULL, " +
+                        "`storeId` TEXT NOT NULL, " +
+                        "`storeName` TEXT NOT NULL, " +
+                        "`storeDomain` TEXT NOT NULL, " +
+                        "`sourceName` TEXT NOT NULL, " +
+                        "`collectedAt` INTEGER NOT NULL, " +
+                        "`verificationNote` TEXT NOT NULL)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_discovery_price_observations_discoveryId_observedAt` " +
+                        "ON `discovery_price_observations` (`discoveryId`, `observedAt`)"
+                )
+                database.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_discovery_price_observations_discoveryId_observedAt_snapshotUrl_price` " +
+                        "ON `discovery_price_observations` (`discoveryId`, `observedAt`, `snapshotUrl`, `price`)"
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -203,7 +271,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "minimo_spanish_market.db"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
                     .build()
                 INSTANCE = instance
                 instance

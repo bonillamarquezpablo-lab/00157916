@@ -35,6 +35,8 @@ import com.example.data.model.PriceBadgeType
 import com.example.data.model.ProductCategory
 import com.example.data.model.Store
 import com.example.data.repository.ProductRepository
+import com.example.data.repository.ProductDiscoveryRepository
+import com.example.data.local.ProductDiscoveryEntity
 import com.example.notifications.PriceAlertScheduler
 import com.example.data.repository.UrlAnalysisResult
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -271,6 +273,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     }
 
     private val database = AppDatabase.getInstance(application)
+    private val productDiscoveryRepository = ProductDiscoveryRepository(database)
+    val pendingDiscoveries: StateFlow<List<ProductDiscoveryEntity>> =
+        productDiscoveryRepository.pendingDiscoveries.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000L),
+            emptyList()
+        )
     private val repository = ProductRepository(
         storeDao = database.storeDao(),
         productDao = database.productDao(),
@@ -286,6 +295,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     private val waybackPriceHistoryClient = WaybackPriceHistoryClient(application)
     private val mementoClient = MementoClient(application)
     private val onlineDiscardedCache = mutableMapOf<String, List<RejectedOnlineOffer>>()
+    /** Prevent a streaming callback and the final consolidation pass from scheduling the same staged write twice. */
+    private val scheduledDiscoveryQuoteKeys =
+        java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private var lastDisplayedSearchIdentity: String? = null
 
     private fun onlineSearchIdentity(provider: OnlineSearchProvider, query: String): String =
@@ -1358,6 +1370,45 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
      * Search public Internet Archive captures only. This path never reads the SerpApi key,
      * checks quota, or spends a provider search credit.
      */
+    fun acceptDiscovery(discoveryId: String) {
+        if (discoveryId.isBlank()) return
+        viewModelScope.launch {
+            try {
+                val result = productDiscoveryRepository.accept(discoveryId)
+                val message = when {
+                    result == null ->
+                        "No se ha podido añadir el producto: la ficha puede haber desaparecido o su identidad ya no ser inequívoca."
+                    result.createdProduct ->
+                        "Producto añadido al catálogo. Se han importado ${result.savedObservations} punto(s) histórico(s); el precio actual sigue sin verificar."
+                    else ->
+                        "El producto ya existía. Se han incorporado ${result.savedObservations} punto(s) histórico(s) a su ficha."
+                }
+                showSnackbar(message)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                showSnackbar("No se ha podido añadir el descubrimiento. La cuarentena se conserva para volver a intentarlo.")
+            }
+        }
+    }
+
+    fun dismissDiscovery(discoveryId: String) {
+        if (discoveryId.isBlank()) return
+        viewModelScope.launch {
+            try {
+                val dismissed = productDiscoveryRepository.dismiss(discoveryId)
+                showSnackbar(
+                    if (dismissed) "Descubrimiento descartado; no se ha añadido al catálogo."
+                    else "El descubrimiento ya no está pendiente."
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                showSnackbar("No se ha podido descartar el descubrimiento.")
+            }
+        }
+    }
+
     fun searchFreeHistoricalPrices(product: Product) {
         val previousState = _uiState.value
         if (previousState.isSearchingFreeHistory) return
@@ -2062,6 +2113,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             try {
                 var savedCount = 0
+                val stagedDiscoveryObservationsCount = java.util.concurrent.atomic.AtomicInteger(0)
                 var checkedCount = 0
                 var foundCount = 0
                 var capturesFoundCount = 0
@@ -2085,7 +2137,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         quote.originalUrl,
                         quote.observedAt.toString(),
                         quote.price.toString(),
-                        quote.currency.uppercase(Locale.ROOT)
+                        quote.currency.uppercase(Locale.ROOT),
+                        quote.productUrl.orEmpty(),
+                        quote.isDiscoveryCandidate.toString()
                     ).joinToString("|")
                 }
                 suspend fun persistCandidateQuotes(
@@ -2112,7 +2166,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     var persistenceCompleted = true
                     try {
                         for ((archiveUrl, urlQuotes) in toPersist.groupBy { it.originalUrl }) {
-                            val primaryQuotes = urlQuotes.filter {
+                            // Route discoveries separately, but don't write them yet. The
+                            // primary and known-catalogue quotes below are persisted first so
+                            // secondary Room work cannot delay the result the user asked for.
+                            val discoveryQuotes = urlQuotes.filter { it.isDiscoveryCandidate }
+                            val knownProductQuotes = urlQuotes.filterNot { it.isDiscoveryCandidate }
+                            val primaryQuotes = knownProductQuotes.filter {
                                 it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId
                             }
                             if (primaryQuotes.isNotEmpty()) {
@@ -2124,7 +2183,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                     targetProductId = targetProductId
                                 )
                             }
-                            val secondaryQuotes = urlQuotes.filter {
+                            val secondaryQuotes = knownProductQuotes.filter {
                                 !it.targetProductId.isNullOrBlank() && it.targetProductId != targetProductId
                             }
                             for ((secondaryProductId, variantQuotes) in secondaryQuotes.groupBy { it.targetProductId!! }) {
@@ -2135,6 +2194,61 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                     quotes = variantQuotes.map { it.copy(targetProductId = null) },
                                     targetProductId = secondaryProductId
                                 )
+                            }
+
+                            val discoveryKeysToSchedule = discoveryQuotes.filter { quote ->
+                                scheduledDiscoveryQuoteKeys.add(archiveQuoteIdentity(candidate, quote))
+                            }
+                            if (discoveryKeysToSchedule.isNotEmpty()) {
+                                val discoveryKeys = discoveryKeysToSchedule
+                                    .map { archiveQuoteIdentity(candidate, it) }
+                                    .toSet()
+                                viewModelScope.launch(Dispatchers.IO) {
+                                    var stagedInBatch = 0
+                                    var failuresInBatch = 0
+                                    try {
+                                        // Serialize the Room writes off the search path. A large
+                                        // secondary catalogue card must not block the primary quote
+                                        // or flood the UI with one snackbar per snapshot.
+                                        for (quote in discoveryKeysToSchedule) {
+                                            var attempt = 0
+                                            var completed = false
+                                            while (attempt < 2 && !completed) {
+                                                try {
+                                                    if (productDiscoveryRepository.stageArchivedQuote(
+                                                            quote = quote,
+                                                            fallbackStoreName = candidate.storeName
+                                                        )
+                                                    ) {
+                                                        stagedDiscoveryObservationsCount.incrementAndGet()
+                                                        stagedInBatch++
+                                                    }
+                                                    completed = true
+                                                } catch (cancelled: CancellationException) {
+                                                    throw cancelled
+                                                } catch (_: Exception) {
+                                                    attempt++
+                                                    if (attempt < 2) kotlinx.coroutines.delay(250L)
+                                                    else failuresInBatch++
+                                                }
+                                            }
+                                        }
+                                        if (stagedInBatch > 0) {
+                                            showSnackbar(
+                                                "Radar: $stagedInBatch observación(es) de productos nuevos guardadas en cuarentena; no se han añadido a Mercado."
+                                            )
+                                        }
+                                        if (failuresInBatch > 0) {
+                                            showSnackbar(
+                                                "No se pudieron guardar $failuresInBatch observación(es) en Radar. El precio principal ya se ha conservado."
+                                            )
+                                        }
+                                    } finally {
+                                        // A later capture/replay may retry if the asynchronous
+                                        // Room write failed; the primary search never waits for it.
+                                        scheduledDiscoveryQuoteKeys.removeAll(discoveryKeys)
+                                    }
+                                }
                             }
                         }
                     } catch (cancelled: CancellationException) {
@@ -2155,7 +2269,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         processedArchiveQuoteKeys.addAll(toPersist.map { archiveQuoteIdentity(candidate, it) })
                     }
                     val hasPrimaryProductQuote = uniqueQuotes.any {
-                        it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId
+                        !it.isDiscoveryCandidate &&
+                            (it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId)
                     }
                     if (hasPrimaryProductQuote) {
                         val targetIdentity = onlineProductIdentityKey(candidate.title)
@@ -2438,6 +2553,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         .distinctBy {
                             listOf(
                                 it.targetProductId.orEmpty(), it.productTitle, it.originalUrl,
+                                it.productUrl.orEmpty(), it.isDiscoveryCandidate.toString(),
                                 it.observedAt.toString(), it.price.toString(), it.currency.uppercase(Locale.ROOT)
                             )
                         }
@@ -2449,8 +2565,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     // This final pass catches results from routes that did not stream their points.
                     persistCandidateQuotes(candidate, quotes)
 
-                    // An HTTP 429 applies to the archive service, not only this product.
-                    // Stop the batch now instead of iterating through the remaining candidates.
+                    // An HTTP 429 applies to the shared archive service, so stop trying more
+                    // merchant candidates after it is reported. A valid quote from one merchant
+                    // must not prevent collecting history for the remaining candidates.
                     if (attempts.any { it.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") }) {
                         break
                     }
@@ -2458,14 +2575,18 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
                 if (diagnosticProductId != null) {
                     val persistenceStatus = when {
-                        savedCount > 0 || foundCount > 0 -> WaybackTraceStatus.PASSED
+                        savedCount > 0 || foundCount > 0 || stagedDiscoveryObservationsCount.get() > 0 -> WaybackTraceStatus.PASSED
                         else -> WaybackTraceStatus.SKIPPED
                     }
                     val persistenceDetail = when {
+                        savedCount > 0 && stagedDiscoveryObservationsCount.get() > 0 ->
+                            "Guardado completado: $savedCount punto(s) para el catálogo y ${stagedDiscoveryObservationsCount.get()} observación(es) secundarias en cuarentena."
                         savedCount > 0 ->
-                            "Guardado completado: ${savedCount} nuevo(s) punto(s) de precio histórico en la base local."
+                            "Guardado completado: $savedCount punto(s) nuevo(s) en el histórico del catálogo."
+                        stagedDiscoveryObservationsCount.get() > 0 ->
+                            "Radar de Descubrimientos: ${stagedDiscoveryObservationsCount.get()} observación(es) de productos nuevos guardadas en cuarentena; siguen fuera del catálogo principal."
                         foundCount > 0 ->
-                            "Se verificaron ${foundCount} punto(s); no se añadieron duplicados porque los registros ya existían."
+                            "Se verificaron $foundCount punto(s); no se añadieron duplicados porque los registros ya existían."
                         else ->
                             "No se guardaron registros: ninguna captura produjo un precio verificado."
                     }
@@ -2623,19 +2744,31 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             "CANDIDATE_TIMEOUT" -> "$code (se agotó el tiempo total de la búsqueda de esta tienda)"
                             "CDX_URL_PREFIX_CANDIDATE_TIMEOUT" -> "$code (la consulta por prefijo superó su límite de tiempo)"
                             "CDX_DOMAIN_CANDIDATE_TIMEOUT" -> "$code (la búsqueda amplia por dominio superó su límite de tiempo)"
+                            "CDX_EARLY_EXIT_VALID_PRICE" -> "CDX_EARLY_EXIT_VALID_PRICE (se cancelaron alternativas al confirmar un precio)"
                             else -> code
                         }
                     }
                 }
+                val discoveryNotice = if (stagedDiscoveryObservationsCount.get() > 0) {
+                    " Radar de Descubrimientos: ${stagedDiscoveryObservationsCount.get()} observación(es) de productos nuevos quedaron en cuarentena, sin crear fichas en Mercado."
+                } else ""
                 val noticeWithDiagnostics = if (diagnosticLabels.isNotEmpty() && skippedCount != candidates.size) {
-                    "$notice\nDiagnóstico Wayback: ${diagnosticLabels.joinToString(" · ")}."
-                } else notice
+                    "$notice$discoveryNotice\nDiagnóstico Wayback: ${diagnosticLabels.joinToString(" · ")}."
+                } else "$notice$discoveryNotice"
                 appendArchiveNotice(query, provider, noticeWithDiagnostics, targetProductId)
                 if (diagnosticProductId != null) {
                     when {
+                        savedCount > 0 && stagedDiscoveryObservationsCount.get() > 0 -> finishWaybackDiagnostic(
+                            diagnosticProductId, WaybackTraceStatus.PASSED,
+                            "$savedCount precio(s) histórico(s) guardado(s) en el catálogo y ${stagedDiscoveryObservationsCount.get()} observación(es) secundarias en Radar."
+                        )
                         savedCount > 0 -> finishWaybackDiagnostic(
                             diagnosticProductId, WaybackTraceStatus.PASSED,
                             "$savedCount precio(s) histórico(s) guardado(s) en la base de datos local."
+                        )
+                        stagedDiscoveryObservationsCount.get() > 0 -> finishWaybackDiagnostic(
+                            diagnosticProductId, WaybackTraceStatus.PASSED,
+                            "${stagedDiscoveryObservationsCount.get()} observación(es) de productos nuevos guardadas en el Radar; no se han añadido a Mercado automáticamente."
                         )
                         foundCount > 0 && selectedProductRefreshed -> finishWaybackDiagnostic(
                             diagnosticProductId, WaybackTraceStatus.PASSED,

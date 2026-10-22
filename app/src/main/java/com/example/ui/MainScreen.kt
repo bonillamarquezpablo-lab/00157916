@@ -57,6 +57,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.components.SetAlertDialog
 import com.example.ui.screens.AlertsScreen
 import com.example.ui.screens.DealsScreen
+import com.example.ui.screens.DiscoveryRadarScreen
 import com.example.ui.screens.MarketScreen
 import com.example.ui.screens.OnlineSearchScreen
 import com.example.ui.screens.ProductDetailSheet
@@ -72,7 +73,7 @@ enum class MainTab(
     val unselectedIcon: ImageVector
 ) {
     MARKET("Mercado", Icons.Filled.Store, Icons.Outlined.Storefront),
-    ATH_DEALS("Mínimos", Icons.Filled.CheckCircle, Icons.Outlined.CheckCircleOutline),
+    RADAR("Radar", Icons.Filled.Search, Icons.Filled.Search),
     STORES("Tiendas", Icons.Filled.Business, Icons.Outlined.Business),
     VERIFIER("Verificar", Icons.Filled.Shield, Icons.Outlined.Shield),
     ALERTS("Alertas", Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder)
@@ -91,6 +92,7 @@ fun MainScreen(
     val filteredProducts by viewModel.filteredProducts.collectAsStateWithLifecycle()
     val trackedProducts by viewModel.trackedProducts.collectAsStateWithLifecycle()
     val todayAthDeals by viewModel.todayAthDeals.collectAsStateWithLifecycle()
+    val pendingDiscoveries by viewModel.pendingDiscoveries.collectAsStateWithLifecycle()
     val spanishStores by viewModel.spanishStores.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -199,14 +201,14 @@ fun MainScreen(
                         selected = isSelected,
                         onClick = { currentTab = tab },
                         icon = {
-                            if (tab == MainTab.ATH_DEALS && todayAthDeals.isNotEmpty()) {
+                            if (tab == MainTab.RADAR && pendingDiscoveries.isNotEmpty()) {
                                 BadgedBox(
                                     badge = {
                                         Badge(
                                             containerColor = MaterialTheme.colorScheme.primary,
                                             contentColor = MaterialTheme.colorScheme.onPrimary
                                         ) {
-                                            Text("${todayAthDeals.size}")
+                                            Text("${pendingDiscoveries.size}")
                                         }
                                     }
                                 ) {
@@ -311,9 +313,12 @@ fun MainScreen(
                         onPrepareTrackedRefresh = viewModel::prepareTrackedRefresh
                     )
                 }
-                MainTab.ATH_DEALS -> {
-                    DealsScreen(
+                MainTab.RADAR -> {
+                    DiscoveryRadarScreen(
+                        discoveries = pendingDiscoveries,
                         athProducts = todayAthDeals,
+                        onAcceptDiscovery = viewModel::acceptDiscovery,
+                        onDismissDiscovery = viewModel::dismissDiscovery,
                         onProductClick = viewModel::onSelectProduct,
                         onToggleTrack = { prod -> viewModel.toggleTracking(prod) }
                     )

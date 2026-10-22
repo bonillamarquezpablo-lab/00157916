@@ -87,6 +87,14 @@ internal fun shouldSkipDomainFallbackAfterSnapshotTimeout(
         !result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
 }
 
+/**
+ * A primary quote already verified from the exact product URL is enough to stop secondary
+ * URL-prefix discovery. Secondary/sibling-product quotes alone must not suppress the lookup
+ * for the product the user selected. Any sibling quotes from the same HTML are still persisted.
+ */
+internal fun hasVerifiedPrimaryExactCdxQuote(result: WaybackBackfillResult): Boolean =
+    result.quotes.any { it.targetProductId.isNullOrBlank() }
+
 /** Common UTC boundary for eight-calendar-year discovery, archive fallbacks and local persistence. */
 internal fun archiveHistoryWindowStartTimestampUtc(now: Long, lookbackDays: Int): Long {
     val safeNow = now.coerceAtLeast(0L)
@@ -468,13 +476,16 @@ class WaybackPriceHistoryClient(
                 )
                 return@serializedArchiveLookup exactResult
             }
-            // If exact URL already yields a usable series, avoid the more expensive prefix scan.
-            if (exactResult.quotes.size >= 2) {
+            // The exact CDX response already gives us the historical candidates for this URL.
+            // Once at least one price for the selected product has passed identity + price checks,
+            // do not spend another timeout on prefix discovery. Other offers found in those same
+            // HTML captures are already streamed to Room by onVerifiedQuotes.
+            if (hasVerifiedPrimaryExactCdxQuote(exactResult)) {
                 rememberAttempt(attempt, now, hasQuotes = true, failed = false)
                 return@serializedArchiveLookup exactResult.copy(diagnosticCodes = emptySet())
             }
 
-            // Prefix matching is a fallback for alternate slashes, locale paths and canonical URL variants.
+            // Prefix matching is only needed when exact CDX has no verified price for the selected product.
             val prefixResult = queryCdxAndFetchPrices(
                 cdxUrl = prefixCdxUrl,
                 expectedTitle = expectedTitle,
@@ -3916,7 +3927,7 @@ class WaybackPriceHistoryClient(
      * may contain several variants; the page URL alone cannot verify a secondary offer's storage.
      * The returned URLs are still checked against the requested SKU before they can validate it.
      */
-    private fun jsonLdProductUrlsForOffer(
+    internal fun jsonLdProductUrlsForOffer(
         document: Document,
         productTitle: String,
         expectedPrice: Double,
@@ -4028,9 +4039,38 @@ class WaybackPriceHistoryClient(
             val currency = rawCurrency.uppercase(Locale.ROOT)
             if (currency !in allowedCurrencies || price !in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE) continue
             val matches = knownProductTitlesById.entries.mapNotNull { (productId, savedTitle) ->
-                if (productId.isBlank() || savedTitle.isBlank() ||
-                    isMatchingTitleForArchivedUrl(primaryExpectedTitle, savedTitle, originalUrl)
-                ) return@mapNotNull null
+                if (productId.isBlank() || savedTitle.isBlank()) return@mapNotNull null
+                // Never stream the selected product back as its own secondary variant. Use the
+                // strict SKU comparison first, with the exact URL only to resolve a title that
+                // omits variant details. A sibling with a conflicting capacity/colour is not
+                // classified as the primary product simply because it appears on the same page.
+                val primaryNormalizedTitle = normalizeTitle(primaryExpectedTitle)
+                val savedNormalizedTitle = normalizeTitle(savedTitle)
+                val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+                val primaryStorage = storagePattern.findAll(primaryNormalizedTitle)
+                    .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
+                val savedStorage = storagePattern.findAll(savedNormalizedTitle)
+                    .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
+                val explicitStorageConflict = primaryStorage.isNotEmpty() &&
+                    savedStorage.isNotEmpty() && primaryStorage != savedStorage
+                val primaryColour = productColourFamily(primaryNormalizedTitle)
+                val savedColour = productColourFamily(savedNormalizedTitle)
+                val explicitColourConflict = primaryColour != null && savedColour != null &&
+                    primaryColour != savedColour
+                val explicitModelVariantConflict =
+                    productModelVariantTokens(primaryNormalizedTitle) !=
+                        productModelVariantTokens(savedNormalizedTitle)
+
+                // A saved row with a different explicit capacity, colour or edition is a sibling,
+                // even if a broad archive-page matcher could otherwise treat the family URL as a
+                // match. Never drop it from the sibling-offer pipeline as if it were the primary.
+                val isPrimarySavedProduct = !explicitStorageConflict &&
+                    !explicitColourConflict && !explicitModelVariantConflict && (
+                        isMatchingProductTitle(primaryExpectedTitle, savedTitle) ||
+                            (isMatchingTitleForArchivedUrl(primaryExpectedTitle, savedTitle, originalUrl) &&
+                                !hasExplicitVariantConflictInProductUrl(primaryExpectedTitle, originalUrl))
+                    )
+                if (isPrimarySavedProduct) return@mapNotNull null
 
                 val offerUrls = jsonLdProductUrlsForOffer(
                     document = document,
@@ -4075,8 +4115,12 @@ class WaybackPriceHistoryClient(
                 }
                 if (urlExplicitlyContradictsSavedSku) return@mapNotNull null
 
+                // Do not let a capture URL for the selected SKU independently confirm a
+                // conflicting sibling row. The sibling must match the structured offer and, when
+                // the capture URL conflicts with that row, its own Product/Offer URL must confirm it.
                 val pageConfirmsVariant =
-                    isMatchingTitleForArchivedUrl(savedTitle, archivedTitle, originalUrl)
+                    !hasExplicitVariantConflictInProductUrl(savedTitle, originalUrl) &&
+                        isMatchingTitleForArchivedUrl(savedTitle, archivedTitle, originalUrl)
                 val offerUrlConfirmsVariant = offerUrls.any { offerUrl ->
                     !hasExplicitVariantConflictInProductUrl(savedTitle, offerUrl) &&
                         matchesVariantDetailsConfirmedByUrl(savedTitle, archivedTitle, offerUrl)
@@ -4088,6 +4132,8 @@ class WaybackPriceHistoryClient(
                 if (hasExplicitProductVariantConflict(savedTitle, archivedTitle) &&
                     !offerUrlConfirmsVariant
                 ) return@mapNotNull null
+                // On a family page the URL may identify the primary target but not this sibling.
+                // Only accept a sibling when its own Product/Offer URL independently confirms it.
                 if (!pageConfirmsVariant && !offerUrlConfirmsVariant) return@mapNotNull null
                 Triple(productId, savedTitle, offerUrlConfirmsVariant)
             }
@@ -4113,7 +4159,7 @@ class WaybackPriceHistoryClient(
         }
     }
 
-    private fun extractJsonLdProductOffers(document: Document): List<Triple<String, Double, String>> {
+    internal fun extractJsonLdProductOffers(document: Document): List<Triple<String, Double, String>> {
         val roots = document.select("script").asSequence()
             .filter { script ->
                 script.attr("type").substringBefore(';').trim()
@@ -4611,7 +4657,7 @@ class WaybackPriceHistoryClient(
      * explicitly names every missing detail. The model and edition must still match exactly.
      * This supports retailer pages whose visible heading is generic but whose URL targets a SKU.
      */
-    private fun matchesVariantDetailsConfirmedByUrl(
+    internal fun matchesVariantDetailsConfirmedByUrl(
         expectedTitle: String,
         archivedTitle: String,
         originalUrl: String
@@ -4662,8 +4708,6 @@ class WaybackPriceHistoryClient(
         // unknown. The selected product must request the colour that the URL proves.
         if (expectedColour == null && archivedColour != null) return false
         if (missingColour && urlColour != expectedColour) return false
-        if (!missingStorage && !missingColour) return false
-
         fun coreIdentity(value: String): String =
             onlineProductIdentityKey(canonicalizeArchiveTitle(value)).split('|')
                 .filterNot {
@@ -4672,6 +4716,38 @@ class WaybackPriceHistoryClient(
                         it.startsWith("specs:")
                 }
                 .joinToString("|")
+
+        if (!missingStorage && !missingColour) {
+            // When the archived page URL points at the primary SKU, a sibling offer needs its
+            // own URL to independently prove the complete variant. A title match alone is not
+            // sufficient. Confirm every explicit discriminator present in the saved title.
+            val expectedModel = Regex(
+                """\b(iphone|ipad|pixel|redmi|poco|galaxy\s+s|galaxy\s+a|galaxy\s+z)\s*(\d{1,3})\b"""
+            ).find(expected)
+            val urlModel = Regex(
+                """\b(iphone|ipad|pixel|redmi|poco|galaxy\s+s|galaxy\s+a|galaxy\s+z)\s*(\d{1,3})\b"""
+            ).find(urlTitle)
+            if (expectedModel != null &&
+                (urlModel == null ||
+                    expectedModel.groupValues[1].replace(Regex("\\s+"), "") !=
+                        urlModel.groupValues[1].replace(Regex("\\s+"), "") ||
+                    expectedModel.groupValues[2] != urlModel.groupValues[2])
+            ) return false
+
+            val expectedVariants = productModelVariantTokens(expected)
+            val urlVariants = productModelVariantTokens(urlTitle)
+            if (!urlVariants.containsAll(expectedVariants)) return false
+            if (expectedStorage.isNotEmpty() && !urlStorage.containsAll(expectedStorage)) return false
+            if (expectedColour != null && urlColour != expectedColour) return false
+
+            // A URL without any SKU-specific evidence is merely another generic product page.
+            val hasSkuEvidence = expectedStorage.isNotEmpty() ||
+                expectedColour != null ||
+                expectedVariants.isNotEmpty() ||
+                expectedModel != null
+            if (!hasSkuEvidence) return false
+            return coreIdentity(expected) == coreIdentity(archived)
+        }
 
         return coreIdentity(expected) == coreIdentity(archived)
     }

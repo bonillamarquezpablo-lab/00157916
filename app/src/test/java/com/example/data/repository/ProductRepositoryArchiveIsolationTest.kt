@@ -454,4 +454,125 @@ class ProductRepositoryArchiveIsolationTest {
         }
     }
 
+
+
+    @Test
+    fun archivedPriceFromSiblingVariantIsSavedOnlyToItsExplicitRoomProductId() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val now = System.currentTimeMillis()
+            val product256Id = "iphone-15-plus-256"
+            val product128Id = "iphone-15-plus-128"
+            val title256 = "Apple iPhone 15 Plus 256GB Amarillo Libre"
+            val title128 = "Apple iPhone 15 Plus 128GB Amarillo Libre"
+            val url256 = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo-libre"
+            val url128 = "https://www.pccomponentes.com/apple-iphone-15-plus-128gb-amarillo-libre"
+
+            fun product(id: String, title: String, price: Double, url: String) = ProductEntity(
+                id = id,
+                title = title,
+                brand = "Apple",
+                category = ProductCategory.SMARTPHONES.name,
+                currentPrice = price,
+                athMinPrice = price,
+                athMinDate = "Historial en construcción",
+                athMinStore = "PcComponentes",
+                athMaxPrice = price,
+                avg90dPrice = 0.0,
+                officialPvp = 0.0,
+                currentStoreId = "pccomponentes",
+                storeUrl = url,
+                ean = "",
+                imageUrl = null,
+                isPriceVerified = true
+            )
+
+            database.productDao().insertAll(
+                listOf(
+                    product(product256Id, title256, 899.99, url256),
+                    product(product128Id, title128, 799.99, url128)
+                )
+            )
+
+            fun liveObservation(id: String, title: String, price: Double, url: String) =
+                PriceObservationEntity(
+                    productId = id,
+                    storeId = "pccomponentes",
+                    price = price,
+                    currency = "EUR",
+                    observedAt = now,
+                    sourceUrl = url,
+                    sourceName = "Google Shopping",
+                    isVerified = true,
+                    productTitle = title,
+                    storeName = "PcComponentes",
+                    sourceType = "Google Shopping",
+                    linkType = "directo",
+                    collectedAt = now,
+                    evidenceType = "live"
+                )
+            database.priceObservationDao().insertAll(
+                listOf(
+                    liveObservation(product256Id, title256, 899.99, url256),
+                    liveObservation(product128Id, title128, 799.99, url128)
+                )
+            )
+
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val capturedAt = java.text.SimpleDateFormat(
+                "yyyyMMddHHmmss",
+                java.util.Locale.ROOT
+            ).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.parse("20250124124812")!!.time
+            val snapshotUrl =
+                "https://web.archive.org/web/20250124124812id_/$url256"
+            val siblingQuote = ArchivedPriceQuote(
+                observedAt = capturedAt,
+                price = 699.99,
+                currency = "EUR",
+                productTitle = title128,
+                originalUrl = url256,
+                snapshotUrl = snapshotUrl
+            )
+
+            val saved = repository.recordArchivedPriceHistory(
+                expectedTitle = title128,
+                originalUrl = url256,
+                storeName = "PcComponentes",
+                quotes = listOf(siblingQuote),
+                targetProductId = product128Id
+            )
+
+            assertEquals("The verified sibling offer should create one row in that product's history", 1, saved)
+            val history128 = database.priceObservationDao().observeVerifiedHistory(product128Id).first()
+            val history256 = database.priceObservationDao().observeVerifiedHistory(product256Id).first()
+            assertEquals(1, history128.count { it.evidenceType == "archive" && it.price == 699.99 })
+            assertTrue("A sibling model's price must never enter the selected 256 GB product history",
+                history256.none { it.evidenceType == "archive" && it.price == 699.99 })
+
+            val duplicate = repository.recordArchivedPriceHistory(
+                expectedTitle = title128,
+                originalUrl = url256,
+                storeName = "PcComponentes",
+                quotes = listOf(siblingQuote),
+                targetProductId = product128Id
+            )
+            assertEquals("The same observation should remain idempotent on retry", 0, duplicate)
+            assertEquals(1, database.priceObservationDao().observeVerifiedHistory(product128Id).first()
+                .count { it.evidenceType == "archive" && it.price == 699.99 })
+        } finally {
+            database.close()
+        }
+    }
+
 }

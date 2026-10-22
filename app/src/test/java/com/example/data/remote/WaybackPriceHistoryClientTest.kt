@@ -2376,6 +2376,77 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun siblingOfferWithoutItsOwnUrlIsRejectedWhenCaptureUrlNamesPrimaryVariant() {
+        val client = newClient()
+        val html = """
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@type":"Product",
+                "name":"Apple iPhone 15 Plus 128GB Amarillo Libre",
+                "offers":{"@type":"Offer","price":"699.99","priceCurrency":"EUR"}
+              }
+              </script>
+            </head></html>
+        """.trimIndent()
+        val primaryUrl =
+            "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo-libre"
+
+        val quotes = client.parseArchivedPricesForKnownProducts(
+            document = Jsoup.parse(html),
+            primaryExpectedTitle = "Apple iPhone 15 Plus 256GB Amarillo Libre",
+            knownProductTitlesById = mapOf(
+                "saved-iphone-128" to "Apple iPhone 15 Plus 128GB Amarillo Libre"
+            ),
+            originalUrl = primaryUrl,
+            snapshotUrl = "https://web.archive.org/web/20260901000000id_/$primaryUrl",
+            observedAt = 1_788_200_000_000L
+        )
+
+        assertTrue(
+            "A sibling offer with no product URL must not borrow identity from the primary 256 GB capture URL",
+            quotes.isEmpty()
+        )
+    }
+
+    @Test
+    fun siblingOfferWithGenericUrlCannotBorrowIdentityFromPrimaryCaptureUrl() {
+        val client = newClient()
+        val html = """
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@type":"Product",
+                "name":"Apple iPhone 15 Plus 128GB Amarillo Libre",
+                "url":"https://www.pccomponentes.com/apple-iphone-15-plus",
+                "offers":{"@type":"Offer","price":"699.99","priceCurrency":"EUR"}
+              }
+              </script>
+            </head></html>
+        """.trimIndent()
+        val primaryUrl =
+            "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo-libre"
+
+        val quotes = client.parseArchivedPricesForKnownProducts(
+            document = Jsoup.parse(html),
+            primaryExpectedTitle = "Apple iPhone 15 Plus 256GB Amarillo Libre",
+            knownProductTitlesById = mapOf(
+                "saved-iphone-128" to "Apple iPhone 15 Plus 128GB Amarillo Libre"
+            ),
+            originalUrl = primaryUrl,
+            snapshotUrl = "https://web.archive.org/web/20260901000000id_/$primaryUrl",
+            observedAt = 1_788_200_000_000L
+        )
+
+        assertTrue(
+            "A generic sibling URL must not prove 128 GB when the archived capture URL identifies 256 GB",
+            quotes.isEmpty()
+        )
+    }
+
+    @Test
     fun secondaryOfferUrlCannotAssign256GbPriceTo128GbOrUnknownCapacityRows() {
         val client = newClient()
         val html = """
@@ -4316,4 +4387,210 @@ class WaybackPriceHistoryClientTest {
         assertNotNull(urls)
         assertEquals(listOf("www.shop.example", "shop.example"), urls!!.map { it.queryParameter("url") })
     }
+
+
+    @Test
+    fun exactCdxStopsPrefixDiscoveryAfterOneVerifiedPrimaryPrice() {
+        val quote = ArchivedPriceQuote(
+            observedAt = 1_756_684_800_000L,
+            price = 950.98,
+            currency = "EUR",
+            productTitle = "Apple iPhone 15 Plus 256GB Amarillo Libre",
+            originalUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb",
+            snapshotUrl = "https://web.archive.org/web/20250901000000id_/https://www.pccomponentes.com/apple-iphone-15-plus-256gb"
+        )
+
+        assertTrue(
+            "One verified price for the selected product is enough to avoid a secondary prefix-CDX timeout",
+            hasVerifiedPrimaryExactCdxQuote(
+                WaybackBackfillResult(quotes = listOf(quote), capturesFound = 3)
+            )
+        )
+    }
+
+    @Test
+    fun secondaryOfferFromExactCdxIsStreamedButPrefixFallbackStillRunsForPrimaryVariant() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        WaybackPriceHistoryClient(context).clearRateLimitForTests()
+        preferences.edit()
+            .putBoolean("enabled", true)
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .commit()
+
+        val primaryTitle = "Apple iPhone 15 Plus 256GB Amarillo Libre"
+        val primaryUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo-libre"
+        val siblingTitle = "Apple iPhone 15 Plus 128GB Amarillo Libre"
+        val siblingUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-128gb-amarillo-libre"
+        val cdxMatchTypes = CopyOnWriteArrayList<String>()
+        val snapshotRequests = CopyOnWriteArrayList<String>()
+        val streamedQuotes = CopyOnWriteArrayList<ArchivedPriceQuote>()
+        val exactCdxBody = """
+            [
+              ["timestamp","original","statuscode","mimetype"],
+              ["20250124124812","$primaryUrl","200","text/html"]
+            ]
+        """.trimIndent()
+        val emptyCdxBody = """[["timestamp","original","statuscode","mimetype"]]"""
+        val siblingHtml = """
+            <html><head>
+              <title>Apple iPhone 15 Plus</title>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@type":"Product",
+                "name":"$siblingTitle",
+                "url":"$siblingUrl",
+                "offers":{"@type":"Offer","price":"699.99","priceCurrency":"EUR"}
+              }
+              </script>
+            </head><body>Apple iPhone 15 Plus</body></html>
+        """.trimIndent()
+
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            when {
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    val matchType = request.url.queryParameter("matchType").orEmpty()
+                    cdxMatchTypes += matchType
+                    val body = if (matchType.equals("exact", ignoreCase = true)) {
+                        exactCdxBody
+                    } else {
+                        emptyCdxBody
+                    }
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(body.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/web/") -> {
+                    snapshotRequests += request.url.encodedPath
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "text/html; charset=utf-8")
+                        .body(siblingHtml.toResponseBody("text/html; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                else -> throw AssertionError(
+                    "Unexpected archive request: ${request.url.host}${request.url.encodedPath}"
+                )
+            }
+        }.build()
+
+        val diagnosticClient = WaybackPriceHistoryClient(context, http)
+        assertTrue(
+            "The sibling's direct URL should be an eligible retail product URL",
+            diagnosticClient.isEligibleDirectUrl(siblingUrl)
+        )
+        val siblingOfferUrls = diagnosticClient.jsonLdProductUrlsForOffer(
+            document = Jsoup.parse(siblingHtml),
+            productTitle = siblingTitle,
+            expectedPrice = 699.99,
+            expectedCurrency = "EUR",
+            pageUrl = primaryUrl
+        )
+        assertTrue(
+            "JSON-LD extraction should return the sibling's own product URL; got " + siblingOfferUrls,
+            siblingOfferUrls.any { it.contains("128gb-amarillo-libre") }
+        )
+        val structuredOffers = diagnosticClient.extractJsonLdProductOffers(Jsoup.parse(siblingHtml))
+        assertTrue(
+            "JSON-LD should yield the sibling's EUR offer before product-identity filtering; got " + structuredOffers,
+            structuredOffers.any {
+                it.first == siblingTitle && it.second == 699.99 && it.third.equals("EUR", ignoreCase = true)
+            }
+        )
+        assertTrue(
+            "The sibling's own URL should positively confirm its exact model, storage and colour",
+            diagnosticClient.matchesVariantDetailsConfirmedByUrl(
+                expectedTitle = siblingTitle,
+                archivedTitle = siblingTitle,
+                originalUrl = siblingUrl
+            )
+        )
+        val directSiblingQuotes = WaybackPriceHistoryClient(context, http)
+            .parseArchivedPricesForKnownProducts(
+                document = Jsoup.parse(siblingHtml),
+                primaryExpectedTitle = primaryTitle,
+                knownProductTitlesById = mapOf("saved-iphone-128" to siblingTitle),
+                originalUrl = primaryUrl,
+                snapshotUrl = "https://web.archive.org/web/20250124124812id_/$primaryUrl",
+                observedAt = 1_737_000_000_000L
+            )
+        assertTrue(
+            "Direct JSON-LD parsing should identify the sibling offer from its own SKU URL; " +
+                "got ${directSiblingQuotes.map { listOf(it.targetProductId, it.productTitle, it.price, it.originalUrl) }}",
+            directSiblingQuotes.any {
+                it.targetProductId == "saved-iphone-128" &&
+                    it.productTitle == siblingTitle &&
+                    it.price == 699.99
+            }
+        )
+
+        val fetchClient = WaybackPriceHistoryClient(context, http)
+        fetchClient.clearRateLimitForTests()
+        try {
+            val result = withTimeout(15_000L) {
+                fetchClient.fetchHistory(
+                    originalUrl = primaryUrl,
+                    expectedTitle = primaryTitle,
+                    knownProductTitlesById = mapOf("saved-iphone-128" to siblingTitle),
+                    onVerifiedQuotes = { batch -> streamedQuotes.addAll(batch) },
+                    forceRefresh = true
+                )
+            }
+
+            assertTrue(
+                "The primary 256 GB price must remain empty when the only structured offer is 128 GB",
+                result.quotes.isEmpty()
+            )
+            assertTrue(
+                "The capture callback must still receive the uniquely identified sibling variant; " +
+                    "snapshotRequests=${snapshotRequests.size}, cdxMatchTypes=$cdxMatchTypes, " +
+                    "captures=${result.capturesFound}/${result.capturesChecked}, " +
+                    "diagnostics=${result.diagnosticCodes}",
+                streamedQuotes.any {
+                    it.targetProductId == "saved-iphone-128" &&
+                        it.productTitle == siblingTitle &&
+                        it.price == 699.99
+                }
+            )
+            assertTrue(
+                "After processing a sibling-only exact capture, fetchHistory must continue to the prefix query",
+                cdxMatchTypes.indexOf("exact") >= 0 &&
+                    cdxMatchTypes.indexOf("prefix") > cdxMatchTypes.indexOf("exact")
+            )
+        } finally {
+            fetchClient.clearRateLimitForTests()
+            preferences.edit()
+                .remove("enabled")
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .commit()
+        }
+    }
+
+    @Test
+    fun exactCdxWithoutVerifiedQuotesKeepsPrefixFallbackEnabled() {
+        assertFalse(
+            hasVerifiedPrimaryExactCdxQuote(
+                WaybackBackfillResult(
+                    quotes = emptyList(),
+                    capturesFound = 3,
+                    diagnosticCodes = setOf("NO_VERIFIED_EUR_PRICE")
+                )
+            )
+        )
+    }
+
 }

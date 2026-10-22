@@ -4040,12 +4040,15 @@ class WaybackPriceHistoryClient(
             if (currency !in allowedCurrencies || price !in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE) continue
             val matches = knownProductTitlesById.entries.mapNotNull { (productId, savedTitle) ->
                 if (productId.isBlank() || savedTitle.isBlank()) return@mapNotNull null
-                // Compare each structured offer against the saved SKU, not against the page's
-                // family URL. The original URL normally names the selected (256 GB) model even
-                // when JSON-LD contains a sibling offer (128 GB) with its own exact product URL.
-                val pageUrlIdentifiesPrimary =
-                    isMatchingTitleForArchivedUrl(primaryExpectedTitle, savedTitle, originalUrl) ||
-                        hasExplicitVariantConflictInProductUrl(primaryExpectedTitle, originalUrl)
+                // Never stream the selected product back as its own secondary variant. Use the
+                // strict SKU comparison first, with the exact URL only to resolve a title that
+                // omits variant details. A sibling with a conflicting capacity/colour is not
+                // classified as the primary product simply because it appears on the same page.
+                val isPrimarySavedProduct =
+                    isMatchingProductTitle(primaryExpectedTitle, savedTitle) ||
+                        (isMatchingTitleForArchivedUrl(primaryExpectedTitle, savedTitle, originalUrl) &&
+                            !hasExplicitVariantConflictInProductUrl(primaryExpectedTitle, originalUrl))
+                if (isPrimarySavedProduct) return@mapNotNull null
 
                 val offerUrls = jsonLdProductUrlsForOffer(
                     document = document,
@@ -4090,11 +4093,16 @@ class WaybackPriceHistoryClient(
                 }
                 if (urlExplicitlyContradictsSavedSku) return@mapNotNull null
 
+                // Do not let a capture URL for the selected SKU independently confirm a
+                // conflicting sibling row. The sibling must match the structured offer and, when
+                // the capture URL conflicts with that row, its own Product/Offer URL must confirm it.
                 val pageConfirmsVariant =
-                    isMatchingTitleForArchivedUrl(savedTitle, archivedTitle, originalUrl)
+                    !hasExplicitVariantConflictInProductUrl(savedTitle, originalUrl) &&
+                        isMatchingTitleForArchivedUrl(savedTitle, archivedTitle, originalUrl)
                 val offerUrlConfirmsVariant = offerUrls.any { offerUrl ->
                     !hasExplicitVariantConflictInProductUrl(savedTitle, offerUrl) &&
-                        matchesVariantDetailsConfirmedByUrl(savedTitle, archivedTitle, offerUrl)
+                        (isMatchingProductTitle(savedTitle, archivedTitle) ||
+                            matchesVariantDetailsConfirmedByUrl(savedTitle, archivedTitle, offerUrl))
                 }
                 // hasExplicitProductVariantConflict also flags a title that omits capacity.
                 // That is not proof of a mismatch when this exact JSON-LD offer has a URL that
@@ -4106,9 +4114,6 @@ class WaybackPriceHistoryClient(
                 // On a family page the URL may identify the primary target but not this sibling.
                 // Only accept a sibling when its own Product/Offer URL independently confirms it.
                 if (!pageConfirmsVariant && !offerUrlConfirmsVariant) return@mapNotNull null
-                if (pageUrlIdentifiesPrimary && !offerUrlConfirmsVariant && !pageConfirmsVariant) {
-                    return@mapNotNull null
-                }
                 Triple(productId, savedTitle, offerUrlConfirmsVariant)
             }
             // Duplicate retailer listings or similarly named variants are ambiguous: do not guess.

@@ -2211,7 +2211,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 expectedTitle = candidate.title,
                                 onTrace = traceCallback,
                                 knownProductTitlesById = knownProductTitlesById,
-                                onVerifiedQuotes = persistQuotesAsTheyArrive
+                                onVerifiedQuotes = persistQuotesAsTheyArrive,
+                                forceRefresh = true
                             )
                         }
                         if (direct == null) {

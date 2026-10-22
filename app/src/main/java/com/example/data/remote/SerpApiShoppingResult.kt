@@ -39,6 +39,59 @@ private fun normalizeOnlineSearchText(value: String): String =
         .trim()
         .replace(Regex("""\s+"""), " ")
 
+private data class XiaomiModelIdentity(
+    val family: String,
+    val number: String,
+    val edition: String?,
+    val network: String?
+)
+
+private fun xiaomiModelIdentity(value: String): XiaomiModelIdentity? {
+    val normalized = normalizeOnlineSearchText(value)
+    val redmi = Regex(
+        """\bredmi\s+(?:(note)\s+)?(\d{1,2})\b(?:\s+(pro\s*max|pro|max|ultra|lite|plus|prime))?(?:\s+(4g|5g))?"""
+    ).find(normalized)
+    if (redmi != null) {
+        val family = if (redmi.groupValues[1].isNotBlank()) "redmi-note" else "redmi"
+        val edition = redmi.groupValues[3].takeIf { it.isNotBlank() }
+            ?.replace(Regex("""\s+"""), "")
+        val network = redmi.groupValues[4].takeIf { it.isNotBlank() }
+        return XiaomiModelIdentity(family, redmi.groupValues[2], edition, network)
+    }
+
+    // "Mi 10 Pro" and "Mi 11 Pro" are different models. Also keep 4G and 5G distinct;
+    // the accessory path below permits compatible cases to omit these details.
+    val mi = Regex(
+        """\bmi\s+(\d{1,2})([a-z]?)\b(?:\s+(pro\s*max|pro|max|ultra|lite|plus|mix))?(?:\s+(4g|5g))?"""
+    ).find(normalized) ?: return null
+    val edition = mi.groupValues[3].takeIf { it.isNotBlank() }
+        ?.replace(Regex("""\s+"""), "")
+    val network = mi.groupValues[4].takeIf { it.isNotBlank() }
+    return XiaomiModelIdentity("mi", mi.groupValues[1] + mi.groupValues[2], edition, network)
+}
+
+/** Exact Xiaomi Mi/Redmi model guard, including opposite 4G/5G variants. */
+internal fun hasXiaomiModelMismatch(
+    query: String,
+    title: String,
+    allowMissingAccessoryQualifiers: Boolean = false
+): Boolean {
+    val expected = xiaomiModelIdentity(query) ?: return false
+    val actual = xiaomiModelIdentity(title) ?: return false
+    val editionMismatch = expected.edition != null &&
+        !(allowMissingAccessoryQualifiers && actual.edition == null) &&
+        expected.edition != actual.edition
+    // Missing network labels are common in retailer titles. Reject only an explicit
+    // contradiction (4G vs 5G); absence of the network token alone is not proof of a mismatch.
+    val networkMismatch = expected.network != null &&
+        actual.network != null &&
+        expected.network != actual.network
+    return expected.family != actual.family ||
+        expected.number != actual.number ||
+        editionMismatch ||
+        networkMismatch
+}
+
 private fun explicitOnlineModelCodes(value: String): Set<String> {
     val normalized = normalizeOnlineSearchText(value)
     val codes = ONLINE_MODEL_CODE.findAll(normalized)
@@ -229,9 +282,9 @@ data class SerpApiShoppingResult(
                 SECOND_HAND_CONDITION_PATTERN.containsMatchIn(title)
         }
 
-    /** True for accessory listings that belong at the end of a main-product search. */
+    /** True for accessories and replacement parts that should not be mixed into the main product results. */
     val isAccessoryOffer: Boolean
-        get() = !isBicycleTireListing(title) && ACCESSORY_LISTING_PATTERN.containsMatchIn(title)
+        get() = !isBicycleTireListing(title) && isAccessoryListingTitle(title)
 
     val isRentalOrMonthly: Boolean
         get() = Regex(
@@ -673,12 +726,21 @@ internal fun isBicycleDrivetrainComponentTitle(title: String): Boolean {
 }
 
 private val ACCESSORY_LISTING_PATTERN = Regex(
-    """(?i)\b(p[oó]ster(?:es)?|poster(?:s)?|funda(?:s)?|carcasa(?:s)?|cases?|covers?|cargador(?:es)?|chargers?|charging|mop\s+kit|protectores?|protector(?:es)?|screen\s+protector|protector\s+de\s+pantalla|cristal(?:es)?\s+templado|cables?|adaptadores?|hubs?|filtros?|recambios?|repuestos?|soportes?)\b"""
+    """(?i)\b(p[oó]ster(?:es)?|poster(?:s)?|funda(?:s)?|carcasa(?:s)?|cases?|covers?|cargador(?:es)?|chargers?|charging|mop\s+kit|protectores?|protector(?:es)?|screen\s+protector|protector\s+de\s+pantalla|cristal(?:es)?\s+templado|cables?|adaptadores?|hubs?|filtros?|recambios?|repuestos?|soportes?|displayschutz|schutzfolie(?:n)?|schutzglas|panzerfolie|schutzhülle|schutzhuelle|schutzhulle|h[uü]llen?)\b"""
 )
+
+private val REPLACEMENT_PART_LISTING_PATTERN = Regex(
+    """(?i)(?:^\s*original(?:e|es)?\s+(?:screens?|displays?|pantallas?)\b|^\s*(?:pantallas?|displays?|screens?)\s+(?:original(?:es)?|complet[oa]s?|de\s+repuesto|de\s+reemplazo|replacement|assembly|(?:google\s+pixel|xiaomi|redmi|iphone|samsung\s+galaxy|galaxy)\b)|\b(?:pantalla|display|screen)\s+(?:original(?:es)?|completa|completo|de\s+repuesto|de\s+reemplazo|replacement|assembly|para\s+(?:google|xiaomi|redmi|samsung|iphone))\b|\b(?:replacement|repuesto|recambio)\s+(?:screen|pantalla|display|lcd|amoled)\b|\b(?:digitizer|digitalizador|digitizador|flex\s+de\s+pantalla|conector\s+de\s+carga|charging\s+port|placa\s+base|mainboard|pantalla\s+con\s+marco|screen\s+assembly|display\s+assembly)\b)"""
+)
+
+/** Shared classification keeps UI filtering, diagnostics and price-history rules consistent. */
+fun isAccessoryListingTitle(title: String): Boolean =
+    ACCESSORY_LISTING_PATTERN.containsMatchIn(title) ||
+        REPLACEMENT_PART_LISTING_PATTERN.containsMatchIn(title)
 
 /** Accessory queries are intentional accessory searches and should not be re-labelled as accessories. */
 fun isAccessorySearchQuery(query: String): Boolean =
-    ACCESSORY_LISTING_PATTERN.containsMatchIn(query)
+    isAccessoryListingTitle(query)
 
 internal fun normalizedWheelCategoryText(value: String): String =
     Normalizer.normalize(value.lowercase(Locale.ROOT), Normalizer.Form.NFD)

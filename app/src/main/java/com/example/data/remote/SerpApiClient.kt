@@ -638,16 +638,16 @@ class SerpApiClient(
                     Regex("""(?i)/shopping/product/[^/]+""").containsMatchIn(path)
             }
             val canUseShoppingSearchFallback =
-                providerSource.equals("Google Shopping", ignoreCase = true) &&
+                providerSource?.equals("Google Shopping", ignoreCase = true) == true &&
                     extractedCandidate == null &&
                     candidateUrls.none(::isSpecificGoogleProductDestination)
             val safeUrl = url?.takeIf { candidate ->
                 isNavigableHttpUrl(candidate) &&
                     (!isGoogleShoppingUrl(candidate) || isSpecificGoogleProductDestination(candidate))
             } ?: googleSearchFallback.takeIf {
-                // Keep price-bearing model variants if the feed explicitly labels them as aggregate
-                // Google Shopping results and supplied no usable seller/product destination.
-                // A generic Google search link attributed to another retailer is still rejected.
+                // A generic Shopping query is only a fallback when the provider itself labels
+                // this as an aggregate Google Shopping offer and no usable retailer/product URL
+                // exists. Never invent a Google search link for a named seller's offer.
                 canUseShoppingSearchFallback && isNavigableHttpUrl(it)
             }
             if (safeUrl == null || !isNavigableHttpUrl(safeUrl)) {
@@ -1547,6 +1547,15 @@ class SerpApiClient(
     }.getOrDefault(false)
 
     private fun isPlausibleProductMatch(requested: String, returned: String): Boolean {
+        // Similar-looking Xiaomi names are not interchangeable: Mi 10 Pro is not
+        // Redmi Note 10 Pro, and Mi 10 Pro is not Mi 11 Pro.
+        if (hasXiaomiModelMismatch(
+                requested,
+                returned,
+                allowMissingAccessoryQualifiers = isAccessoryListingTitle(returned)
+            )
+        ) return false
+
         // "Teclado Hall"/"teclado efecto Hall" is a technology search, not a literal
         // two-word product name. Match Hall/HE/TMR keyboards without accepting "Hall of Fame".
         if (isHallEffectKeyboardSearch(requested)) return isHallEffectKeyboardResult(returned)

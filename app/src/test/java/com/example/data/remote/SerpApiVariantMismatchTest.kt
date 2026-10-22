@@ -266,6 +266,86 @@ class SerpApiVariantMismatchTest {
     }
 
     @Test
+    fun keepsExactXiaomiMi10ProButRejectsRedmiNote10ProAndMi11Pro() {
+        val report = SerpApiClient().parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "shopping_results": [
+                    {
+                      "title": "Xiaomi Mi 10 Pro 5G 8GB/256GB Gris",
+                      "price": "180,00 €",
+                      "extracted_price": 180.0,
+                      "link": "https://shop.example/mi-10-pro",
+                      "source": "Tienda A"
+                    },
+                    {
+                      "title": "Xiaomi Redmi Note 10 Pro 6GB/128GB",
+                      "price": "100,00 €",
+                      "extracted_price": 100.0,
+                      "link": "https://shop.example/redmi-note-10-pro",
+                      "source": "Tienda B"
+                    },
+                    {
+                      "title": "Xiaomi Mi 11 Pro 8GB/256GB",
+                      "price": "220,00 €",
+                      "extracted_price": 220.0,
+                      "link": "https://shop.example/mi-11-pro",
+                      "source": "Tienda C"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "xiaomi mi 10 pro",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals(1, report.results.size)
+        assertEquals("Xiaomi Mi 10 Pro 5G 8GB/256GB Gris", report.results.single().title)
+        assertEquals(2, report.rejectedAsIrrelevant)
+        assertTrue(hasXiaomiModelMismatch("xiaomi mi 10 pro", "Xiaomi Redmi Note 10 Pro"))
+        assertTrue(hasXiaomiModelMismatch("xiaomi mi 10 pro", "Xiaomi Mi 11 Pro"))
+        assertFalse(hasXiaomiModelMismatch("xiaomi mi 10 pro", "Xiaomi Mi 10 Pro 5G"))
+    }
+
+    @Test
+    fun rejectsOppositeRedmiNote15Pro4GAnd5GVariantsInBothDirections() {
+        fun parse(query: String, title: String) =
+            SerpApiClient().parseShoppingResultsDetailed(
+                root = JSONObject().put(
+                    "shopping_results",
+                    JSONArray().put(
+                        JSONObject()
+                            .put("title", title)
+                            .put("price", "299,99 €")
+                            .put("extracted_price", 299.99)
+                            .put("link", "https://shop.example/redmi-note-15")
+                            .put("source", "Tienda fiable")
+                    )
+                ),
+                query = query,
+                observedAt = 1_800_000_000_000L
+            )
+
+        val expected5g = "Xiaomi Redmi Note 15 Pro 5G 8GB/256GB"
+        val actual4g = "Xiaomi Redmi Note 15 Pro 4G 8GB/256GB"
+        val expected4g = "Xiaomi Redmi Note 15 Pro 4G 8GB/256GB"
+        val actual5g = "Xiaomi Redmi Note 15 Pro 5G 8GB/256GB"
+
+        assertTrue(hasXiaomiModelMismatch(expected5g, actual4g))
+        assertTrue(hasXiaomiModelMismatch(expected4g, actual5g))
+        assertFalse(
+            "A result that omits 4G/5G is not a proven contradiction",
+            hasXiaomiModelMismatch(expected5g, "Xiaomi Redmi Note 15 Pro 8GB/256GB")
+        )
+        assertEquals(0, parse(expected5g, actual4g).results.size)
+        assertEquals(1, parse(expected5g, expected5g).results.size)
+        assertEquals(0, parse(expected4g, actual5g).results.size)
+        assertEquals(1, parse(expected4g, expected4g).results.size)
+    }
+
+    @Test
     fun formatsResultAgeForFreshnessDisclosure() {
         assertEquals(
             "hace 2 h 15 min",

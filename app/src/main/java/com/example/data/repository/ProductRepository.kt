@@ -694,9 +694,10 @@ class ProductRepository(
             // products are updated by recordOnlineSearchResults() before this helper is called.
             if (currentEntities.any { onlineProductIdentityKey(it.title) == group.identityKey }) continue
 
-            // A direct URL may be stored as navigation metadata only when it passes the same
-            // merchant/model validation as normal live offers. It still is not verified until a
-            // proper observation has been saved.
+            // Trusted direct URLs are preferred for store and history actions. When the provider
+            // only supplied a generic Shopping-search URL, retain that URL solely for the explicit
+            // "Abrir en Google Shopping" action in the detail sheet; it never becomes a seller quote
+            // or a historical observation.
             val safeDirectOffer = filterOnlineSearchResults(group.offers, searchQuery)
                 .filterNot { it.isSuspiciousPrice || it.isSearchFallbackDestination }
                 .minByOrNull { it.price }
@@ -704,7 +705,9 @@ class ProductRepository(
                 .filter { it.price.isFinite() && it.price > 0.0 && !it.isRentalOrMonthly }
                 .minByOrNull { it.price }
             val displayOffer = safeDirectOffer ?: fallbackDisplayOffer
-            val directUrl = safeDirectOffer?.sourceUrl.orEmpty()
+            val directUrl = safeDirectOffer?.sourceUrl
+                ?: fallbackDisplayOffer?.sourceUrl?.takeIf { fallbackDisplayOffer.isSearchFallbackDestination }
+                .orEmpty()
             val candidate = ProductEntity(
                 id = stableOnlineId("online_candidate_", group.identityKey),
                 title = group.title,

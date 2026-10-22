@@ -295,6 +295,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     private val waybackPriceHistoryClient = WaybackPriceHistoryClient(application)
     private val mementoClient = MementoClient(application)
     private val onlineDiscardedCache = mutableMapOf<String, List<RejectedOnlineOffer>>()
+    /** Prevent a streaming callback and the final consolidation pass from scheduling the same staged write twice. */
+    private val scheduledDiscoveryQuoteKeys =
+        java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private var lastDisplayedSearchIdentity: String? = null
 
     private fun onlineSearchIdentity(provider: OnlineSearchProvider, query: String): String =
@@ -2163,28 +2166,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     var persistenceCompleted = true
                     try {
                         for ((archiveUrl, urlQuotes) in toPersist.groupBy { it.originalUrl }) {
-                            // Unknown secondary products stay quarantined. Only the user can
-                            // promote a discovery into products/price_observations.
+                            // Route discoveries separately, but don't write them yet. The
+                            // primary and known-catalogue quotes below are persisted first so
+                            // secondary Room work cannot delay the result the user asked for.
                             val discoveryQuotes = urlQuotes.filter { it.isDiscoveryCandidate }
-                            for (quote in discoveryQuotes) {
-                                try {
-                                    if (productDiscoveryRepository.stageArchivedQuote(
-                                            quote = quote,
-                                            fallbackStoreName = candidate.storeName
-                                        )
-                                    ) {
-                                        stagedDiscoveryObservationsCount++
-                                    }
-                                } catch (cancelled: CancellationException) {
-                                    throw cancelled
-                                } catch (_: Exception) {
-                                    // A quarantine write must never prevent a verified quote for
-                                    // the requested/catalogued product from being persisted.
-                                    persistenceCompleted = false
-                                    diagnosticCodes.add("ARCHIVE_DISCOVERY_STAGE_FAILED")
-                                }
-                            }
-
                             val knownProductQuotes = urlQuotes.filterNot { it.isDiscoveryCandidate }
                             val primaryQuotes = knownProductQuotes.filter {
                                 it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId
@@ -2209,6 +2194,46 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                     quotes = variantQuotes.map { it.copy(targetProductId = null) },
                                     targetProductId = secondaryProductId
                                 )
+                            }
+
+                            for (quote in discoveryQuotes) {
+                                val discoveryKey = archiveQuoteIdentity(candidate, quote)
+                                if (!scheduledDiscoveryQuoteKeys.add(discoveryKey)) continue
+                                viewModelScope.launch(Dispatchers.IO) {
+                                    var finished = false
+                                    var finalFailure = false
+                                    try {
+                                        for (attempt in 0..1) {
+                                            try {
+                                                if (productDiscoveryRepository.stageArchivedQuote(
+                                                        quote = quote,
+                                                        fallbackStoreName = candidate.storeName
+                                                    )
+                                                ) {
+                                                    stagedDiscoveryObservationsCount++
+                                                    showSnackbar("Nuevo descubrimiento guardado en Radar; no se ha añadido a Mercado.")
+                                                }
+                                                finished = true
+                                                break
+                                            } catch (cancelled: CancellationException) {
+                                                throw cancelled
+                                            } catch (_: Exception) {
+                                                if (attempt == 0) {
+                                                    kotlinx.coroutines.delay(250L)
+                                                } else {
+                                                    finalFailure = true
+                                                }
+                                            }
+                                        }
+                                        if (finalFailure) {
+                                            showSnackbar("No se pudo guardar un producto descubierto en Radar. El precio principal ya se ha conservado.")
+                                        }
+                                    } finally {
+                                        // The caller already retained the downloaded quote. If a
+                                        // later network attempt replays it, it may be staged again.
+                                        scheduledDiscoveryQuoteKeys.remove(discoveryKey)
+                                    }
+                                }
                             }
                         }
                     } catch (cancelled: CancellationException) {

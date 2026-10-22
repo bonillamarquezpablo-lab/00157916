@@ -2116,7 +2116,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 var crossSavedVariantObservationCount = 0
                 val stagedDiscoveryObservationsCount = java.util.concurrent.atomic.AtomicInteger(0)
                 var checkedCount = 0
-                var foundCount = 0
                 var foundPrimaryCount = 0
                 var foundSecondaryCount = 0
                 var capturesFoundCount = 0
@@ -2153,7 +2152,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     if (uniqueQuotes.isEmpty()) return
                     for (quote in uniqueQuotes) {
                         if (countedArchiveQuoteKeys.add(archiveQuoteIdentity(candidate, quote))) {
-                            foundCount++
                             when {
                                 quote.isDiscoveryCandidate -> Unit
                                 quote.targetProductId.isNullOrBlank() || quote.targetProductId == targetProductId -> {

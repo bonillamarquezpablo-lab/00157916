@@ -4509,4 +4509,35 @@ class WaybackPriceHistoryClientTest {
         assertEquals(1099.0, quote!!.price, 0.001)
     }
 
+
+
+    @Test
+    fun explicitVariantInOriginalUrlCanCompleteAnArchivedGenericHeading() {
+        val html = """
+            <html><head>
+              <title>Samsung Galaxy S25 Ultra</title>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@type":"Product",
+                "name":"Samsung Galaxy S25 Ultra",
+                "brand":{"@type":"Brand","name":"Samsung"},
+                "offers":{"@type":"Offer","price":"1099.00","priceCurrency":"EUR"}
+              }
+              </script>
+            </head><body>Samsung Galaxy S25 Ultra</body></html>
+        """.trimIndent()
+
+        val quote = newClient().parseArchivedPrice(
+            html = html,
+            expectedTitle = "Samsung Galaxy S25 Ultra 256 GB Titanium Gray",
+            originalUrl = "https://shop.example/products/galaxy-s25-ultra-256gb-titanium-gray",
+            snapshotUrl = "https://web.archive.org/web/20260101000000/https://shop.example/products/galaxy-s25-ultra-256gb-titanium-gray",
+            observedAt = 1_767_225_600_000L
+        )
+
+        assertNotNull("The exact product URL can verify omitted capacity/colour in an archived heading", quote)
+        assertEquals(1099.0, quote!!.price, 0.001)
+    }
+
 }

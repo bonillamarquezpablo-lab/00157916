@@ -1,15 +1,5 @@
 package com.example.ui.viewmodel
 
-/**
- * True only when the archive lookup did not find or save any verified point for the selected
- * product. Secondary variants must not suppress a current-price fallback for the selected item.
- */
-internal fun shouldTriggerLivePriceFallback(
-    selectedProductHistoricalQuotesFound: Int,
-    selectedProductHistoricalQuotesSaved: Int
-): Boolean = selectedProductHistoricalQuotesFound <= 0 &&
-    selectedProductHistoricalQuotesSaved <= 0
-
 import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
@@ -3365,3 +3355,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(verifierResult = null, verifierInput = "")
     }
 }
+
+/**
+ * True only when the archive lookup did not find or save any verified point for the selected
+ * product. Secondary variants must not suppress a current-price fallback for the selected item.
+ */
+internal fun shouldTriggerLivePriceFallback(
+    selectedProductHistoricalQuotesFound: Int,
+    selectedProductHistoricalQuotesSaved: Int
+): Boolean = selectedProductHistoricalQuotesFound <= 0 &&
+    selectedProductHistoricalQuotesSaved <= 0
+

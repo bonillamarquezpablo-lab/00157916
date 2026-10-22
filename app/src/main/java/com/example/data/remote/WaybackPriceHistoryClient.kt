@@ -473,7 +473,7 @@ class WaybackPriceHistoryClient(
                 return@serializedArchiveLookup exactResult
             }
             // If exact URL already yields a usable series, avoid the more expensive prefix scan.
-            if (exactResult.quotes.size >= 2) {
+            if (exactResult.quotes.isNotEmpty()) {
                 rememberAttempt(attempt, now, hasQuotes = true, failed = false)
                 return@serializedArchiveLookup exactResult.copy(diagnosticCodes = emptySet())
             }
@@ -4121,8 +4121,7 @@ class WaybackPriceHistoryClient(
             if (!isEligibleDirectUrl(offerUrl) ||
                 !isSameMerchantHost(originalUrl, offerUrl) ||
                 isMatchingTitleForArchivedUrl(primaryExpectedTitle, archivedTitle, offerUrl) ||
-                !isEligibleArchivedDiscoveryTitle(archivedTitle) ||
-                hasExplicitProductVariantConflict(archivedTitle, archivedTitle)
+                !isEligibleArchivedDiscoveryTitle(archivedTitle)
             ) continue
             output += ArchivedPriceQuote(
                 observedAt = observedAt,

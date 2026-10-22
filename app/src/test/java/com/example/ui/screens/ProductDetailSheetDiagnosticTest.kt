@@ -56,6 +56,40 @@ class ProductDetailSheetDiagnosticTest {
     }
 
     @Test
+    fun stalePauseHeadlineWithoutCountdownDoesNotOverrideCurrentCacheOnlyStatus() {
+        val staleStatus =
+            "Pausa temporal de Internet Archive (HTTP 429). Mínimo ha detenido las consultas; no implica que falten capturas."
+        val rows = listOf(
+            WaybackDiagnosticEntry(
+                step = 4,
+                title = "Precontrol de pausa global y preparación de consulta",
+                status = WaybackTraceStatus.PASSED,
+                detail = "[19:51:31] Precontrol completado: no hay pausa global activa."
+            ),
+            WaybackDiagnosticEntry(
+                step = 5,
+                title = "Petición enviada al índice CDX",
+                status = WaybackTraceStatus.SKIPPED,
+                detail = "[19:51:31] No ejecutado: consulta CDX omitida por caché reciente."
+            ),
+            WaybackDiagnosticEntry(
+                step = 7,
+                title = "Fallback CDX alternativo / Availability API",
+                status = WaybackTraceStatus.FAILED,
+                detail = "[19:50:44] WAYBACK_RATE_LIMITED: HTTP 429 de un intento anterior."
+            )
+        )
+
+        val summary = buildWaybackDiagnosticSummary(staleStatus, rows)
+        assertTrue(summary.contains("no había una pausa global activa", ignoreCase = true))
+        assertTrue(summary.contains("omitió por caché reciente", ignoreCase = true))
+        assertFalse(
+            "A stale pause headline without a retry clock must not look like a current pause",
+            summary.contains("Pausa temporal de Internet Archive", ignoreCase = true)
+        )
+    }
+
+    @Test
     fun oldRateLimitTraceDoesNotClaimThatThePauseIsStillActiveWhenStatusShowsCache() {
         val status = "Estas consultas gratuitas ya se comprobaron recientemente. La caché evita repetir búsquedas completadas sin resultados útiles."
         val rows = listOf(

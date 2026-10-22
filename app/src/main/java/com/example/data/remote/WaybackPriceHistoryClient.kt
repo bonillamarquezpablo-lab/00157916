@@ -4039,9 +4039,13 @@ class WaybackPriceHistoryClient(
             val currency = rawCurrency.uppercase(Locale.ROOT)
             if (currency !in allowedCurrencies || price !in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE) continue
             val matches = knownProductTitlesById.entries.mapNotNull { (productId, savedTitle) ->
-                if (productId.isBlank() || savedTitle.isBlank() ||
-                    isMatchingTitleForArchivedUrl(primaryExpectedTitle, savedTitle, originalUrl)
-                ) return@mapNotNull null
+                if (productId.isBlank() || savedTitle.isBlank()) return@mapNotNull null
+                // Compare each structured offer against the saved SKU, not against the page's
+                // family URL. The original URL normally names the selected (256 GB) model even
+                // when JSON-LD contains a sibling offer (128 GB) with its own exact product URL.
+                val pageUrlIdentifiesPrimary =
+                    isMatchingTitleForArchivedUrl(primaryExpectedTitle, savedTitle, originalUrl) ||
+                        hasExplicitVariantConflictInProductUrl(primaryExpectedTitle, originalUrl)
 
                 val offerUrls = jsonLdProductUrlsForOffer(
                     document = document,
@@ -4099,7 +4103,12 @@ class WaybackPriceHistoryClient(
                 if (hasExplicitProductVariantConflict(savedTitle, archivedTitle) &&
                     !offerUrlConfirmsVariant
                 ) return@mapNotNull null
+                // On a family page the URL may identify the primary target but not this sibling.
+                // Only accept a sibling when its own Product/Offer URL independently confirms it.
                 if (!pageConfirmsVariant && !offerUrlConfirmsVariant) return@mapNotNull null
+                if (pageUrlIdentifiesPrimary && !offerUrlConfirmsVariant && !pageConfirmsVariant) {
+                    return@mapNotNull null
+                }
                 Triple(productId, savedTitle, offerUrlConfirmsVariant)
             }
             // Duplicate retailer listings or similarly named variants are ambiguous: do not guess.

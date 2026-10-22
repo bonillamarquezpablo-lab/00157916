@@ -136,7 +136,11 @@ fun ProductCard(
                                 .padding(horizontal = 10.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = if (product.isPriceVerified) product.currentStore.name else "Sin precio verificado",
+                                text = when {
+                                    product.isPriceVerified -> product.currentStore.name
+                                    product.isUnverifiedLiveListing -> "Listado sin confirmar"
+                                    else -> "Sin precio verificado"
+                                },
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp,
                                 maxLines = 1,

@@ -2261,6 +2261,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             )
                         }
                         if (mementoResult == null) {
+                            if (candidateQuotesObserved.isNotEmpty()) {
+                                attempts += com.example.data.remote.WaybackBackfillResult(
+                                    quotes = candidateQuotesObserved.values.toList(),
+                                    capturesFound = candidateQuotesObserved.values.map { it.observedAt }.distinct().size,
+                                    requestFailed = true,
+                                    diagnosticCodes = setOf("MEMENTO_LOOKUP_TIMEOUT_PARTIAL_QUOTES")
+                                )
+                            }
                             diagnosticCodes.add("MEMENTO_LOOKUP_TIMEOUT")
                             if (diagnosticProductId != null) {
                                 reportWaybackDiagnostic(
@@ -2552,7 +2560,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         val oldest = archiveDates.minOrNull()?.let { timestamp ->
                             SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(timestamp))
                         }
-                        "Histórico gratuito recuperado de Internet Archive: $savedCount precios antiguos guardados" +
+                        val recoveredFromMemento = attempts.any { attempt ->
+                            attempt.quotes.isNotEmpty() && attempt.quotes.all { quote ->
+                                quote.snapshotUrl.contains("arquivo.pt", ignoreCase = true)
+                            }
+                        }
+                        val archiveProvider = if (recoveredFromMemento) "Arquivo.pt" else "Internet Archive"
+                        "Histórico gratuito recuperado de $archiveProvider: $savedCount precios antiguos guardados" +
                             (oldest?.let { ", con capturas desde $it" } ?: "") +
                             ". Son precios anunciados en páginas archivadas; puede haber huecos y no garantizan envío, stock ni precio final."
                     }

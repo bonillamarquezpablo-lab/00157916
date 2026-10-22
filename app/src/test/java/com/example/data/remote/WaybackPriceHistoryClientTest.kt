@@ -298,6 +298,35 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun manualHistoryRefreshBypassesPerProductCacheButNormalLookupStillSkipsIt() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val client = WaybackPriceHistoryClient(context)
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        val key = "attempt_manual_refresh_test"
+        val now = System.currentTimeMillis()
+        preferences.edit()
+            .putLong(key, now)
+            .putBoolean("${key}_has_quotes", true)
+            .putBoolean("${key}_failed", false)
+            .putBoolean("${key}_rate_limited", false)
+            .commit()
+        try {
+            assertTrue(client.shouldSkipRecentAttempt(key, now, forceRefresh = false))
+            assertFalse(
+                "Manual refresh must recheck dates despite the per-product cache",
+                client.shouldSkipRecentAttempt(key, now, forceRefresh = true)
+            )
+        } finally {
+            preferences.edit()
+                .remove(key)
+                .remove("${key}_has_quotes")
+                .remove("${key}_failed")
+                .remove("${key}_rate_limited")
+                .commit()
+        }
+    }
+
+    @Test
     fun cachedDirectLookupEmitsExplicitSkippedTraceAndDoesNotSendNetworkRequest() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)

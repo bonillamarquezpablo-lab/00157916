@@ -113,6 +113,61 @@ class OnlineSearchScreenTest {
 
 
     @Test
+    fun adidasSuperstarSearchKeepsSizesAndEditionsUnderOneFamilyWithoutCollapsingOffers() {
+        val rows = listOf(
+            SerpApiShoppingResult(
+                title = "adidas Originals Superstar II Mujer Zapatillas talla 39",
+                price = 79.99,
+                storeName = "Tienda Adidas",
+                sourceUrl = "https://shop.example.test/superstar?size=39",
+                observedAt = 123L
+            ),
+            SerpApiShoppingResult(
+                title = "adidas Originals Superstar II Mujer Zapatillas talla 39",
+                price = 79.99,
+                storeName = "Tienda Adidas",
+                sourceUrl = "https://shop.example.test/superstar?size=39&utm_source=shopping",
+                observedAt = 123L
+            ),
+            SerpApiShoppingResult(
+                title = "adidas Originals Superstar II Mujer Zapatillas talla 40",
+                price = 79.99,
+                storeName = "Tienda Adidas",
+                sourceUrl = "https://shop.example.test/superstar?size=40",
+                observedAt = 123L
+            ),
+            SerpApiShoppingResult(
+                title = "adidas Superstar ADV Hombre Zapatillas talla 42",
+                price = 84.99,
+                storeName = "Otra tienda",
+                sourceUrl = "https://shop.example.test/superstar-adv?size=42",
+                observedAt = 123L
+            ),
+            SerpApiShoppingResult(
+                title = "Zapatillas adidas Originals Superstar II Niños Pokemon talla 33",
+                price = 69.99,
+                storeName = "Tienda Infantil",
+                sourceUrl = "https://shop.example.test/superstar-kids?size=33",
+                observedAt = 123L
+            )
+        )
+        val groups = buildOnlineSearchDisplayGroups(
+            results = rows,
+            query = "Adidas Superstar",
+            showSecondHand = false,
+            amazonOnly = false
+        )
+
+        assertEquals("Exact editions remain distinct groups", 3, groups.size)
+        assertEquals("Superstar siblings share one family header", 1, groups.map { it.familyKey }.distinct().size)
+        assertTrue(groups.all { it.familyLabel == "Adidas Superstar" })
+
+        val standardIdentity = com.example.data.remote.onlineProductIdentityKey(rows[0].title)
+        val standard = groups.single { it.group.identityKey == standardIdentity }
+        assertEquals("Same-size duplicates collapse but a second size stays visible", 2, standard.group.offers.size)
+    }
+
+    @Test
     fun generalSearchRanksTheExactModelBeforeACheaperSiblingModel() {
         val query = "Samsung Galaxy S26 Ultra 512 GB"
         val rows = listOf(

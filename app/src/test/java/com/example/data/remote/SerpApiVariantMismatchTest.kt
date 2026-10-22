@@ -16,6 +16,51 @@ import org.robolectric.annotation.Config
 class SerpApiVariantMismatchTest {
 
     @Test
+    fun pricedAdidasSuperstarVariantsWithoutSellerLinksRemainVisibleViaShoppingSearchFallback() {
+        val client = SerpApiClient()
+        val report = client.parseShoppingResultsDetailed(
+            root = JSONObject(
+                """
+                {
+                  "shopping_results": [
+                    {
+                      "title": "adidas Originals Zapatillas Superstar II Mujer talla 39",
+                      "price": "119,95 €",
+                      "extracted_price": 119.95,
+                      "source": "Google Shopping"
+                    },
+                    {
+                      "title": "adidas Superstar II Hombre talla 42",
+                      "price": "120,00 €",
+                      "extracted_price": 120.00,
+                      "source": "Google Shopping"
+                    },
+                    {
+                      "title": "Zapatillas adidas Originals Superstar II Niños Pokemon talla 33",
+                      "price": "69,99 €",
+                      "extracted_price": 69.99,
+                      "source": "Google Shopping"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            ),
+            query = "Adidas Superstar",
+            observedAt = 1_800_000_000_000L
+        )
+
+        assertEquals(
+            "Keep priced variants when seller link fields are missing",
+            3,
+            report.results.size
+        )
+        assertTrue(report.results.all { isGoogleShoppingUrl(it.sourceUrl) })
+        assertTrue(report.results.all { it.storeName == "Google Shopping" })
+        assertTrue(report.discardedOffers.none { it.reason.contains("enlace HTTPS útil") })
+        assertTrue(report.results.any { it.sourceUrl.contains("q=") && it.sourceUrl.contains("Superstar") })
+    }
+
+    @Test
     fun googleShoppingUrlDetectionRejectsLookalikeDomains() {
         assertTrue(isGoogleShoppingUrl("https://www.google.com/shopping/product/123456"))
         assertTrue(isGoogleShoppingUrl("https://www.google.es/search?tbm=shop"))

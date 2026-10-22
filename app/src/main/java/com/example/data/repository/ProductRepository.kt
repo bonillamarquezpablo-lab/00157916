@@ -1234,10 +1234,8 @@ class ProductRepository(
         val excludedListing = Regex(
             """\b(segunda\s+mano|usad[oa]s?|used|reacondicionad[oa]s?|refurbished|renewed|pre owned|seminuev[oa]s?|open\s+box|caja\s+abierta|alquiler|rental|renting|rent|leasing|lease|hire|financiacion|financiar|cuota|mensual|suscripcion|subscription|pago\s+a\s+plazos|monthly|por\s+mes|per\s+month|mes\s+a\s+mes|al\s+mes)\b"""
         )
-        // Cached results can abbreviate monthly prices as /mo or /month.
-        // Keep history eligibility aligned with the live parser after cache round-trips.
         return !excludedListing.containsMatchIn(normalized) &&
-            !Regex("""(?i)/\s*(?:mes|month|mo)\b""").containsMatchIn(title)
+            !Regex("""(?i)/\s*mes\b""").containsMatchIn(title)
     }
 
     private fun isPromotionalBulkListing(title: String, searchQuery: String): Boolean {

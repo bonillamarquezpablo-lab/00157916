@@ -558,7 +558,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 product.isPriceVerified ||
                     product.isTracked ||
                     product.priceHistory.isNotEmpty() ||
-                    product.savedHistoricalPrice != null
+                    product.savedHistoricalPrice != null ||
+                    product.id.startsWith("online_candidate_")
             }
             .filter { product ->
                 // Category filter
@@ -1353,6 +1354,19 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         if (identityKey.isBlank()) return
         viewModelScope.launch {
             try {
+                val current = _uiState.value
+                val selectedOffers = current.onlineSearchResults.filter { offer ->
+                    onlineProductIdentityKey(offer.title) == identityKey
+                }
+                if (selectedOffers.isNotEmpty()) {
+                    withContext(Dispatchers.IO) {
+                        repository.ensureVisibleOnlineSearchProducts(
+                            results = selectedOffers,
+                            searchQuery = selectedOffers.first().title,
+                            allowAccessories = true
+                        )
+                    }
+                }
                 val product = withTimeout(10_000L) {
                     repository.awaitProductForOnlineIdentity(identityKey)
                 }
@@ -1911,6 +1925,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             ""
         }
 
+    private fun onlineCatalogueNotice(insertedProducts: Int): String =
+        if (insertedProducts > 0) {
+            "$insertedProducts ficha(s) nueva(s) guardada(s) en Mercado. Los productos sin enlace de vendedor quedan pendientes de verificación y no se añaden al histórico como precios confirmados."
+        } else {
+            ""
+        }
+
     /** Ignore late results when the user edits the query during an in-flight request. */
     private fun isOnlineSearchStillCurrent(query: String, provider: OnlineSearchProvider): Boolean {
         val current = _uiState.value
@@ -2010,6 +2031,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 repository.recordOnlineSearchResults(cachedHistoryCandidates, provider.name, query)
                             }
                         } else 0
+                        val newCatalogueProducts = withContext(Dispatchers.IO) {
+                            repository.ensureVisibleOnlineSearchProducts(visibleCachedResults, query)
+                        }
+                        val catalogueNotice = onlineCatalogueNotice(newCatalogueProducts)
                         val historyNotice = if (cachedHistoryCandidates.isNotEmpty()) {
                             onlineHistoryNotice(savedObservations, cachedHistoryCandidates.size)
                         } else ""
@@ -2019,7 +2044,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         )
                         val filterNotice = onlineFilterNotice(cachedDiscarded)
                         val status = listOf(
-                            base, queryOptimizationNotice, cacheNotice, filterNotice, historyNotice, eligibilityNotice
+                            base, queryOptimizationNotice, cacheNotice, filterNotice,
+                            historyNotice, catalogueNotice, eligibilityNotice
                         ).map { it.trim() }.filter { it.isNotBlank() }.joinToString("\n\n")
                         if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
                         lastDisplayedSearchIdentity = onlineSearchIdentity(provider, query)
@@ -2149,6 +2175,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             repository.recordOnlineSearchResults(historyCandidates, provider.name, query)
                         }
                     } else 0
+                    val newCatalogueProducts = withContext(Dispatchers.IO) {
+                        repository.ensureVisibleOnlineSearchProducts(results, query)
+                    }
 
                     // Cache the merged snapshot only after the supplement succeeds. Otherwise retain
                     // the primary raw response so accepted/rejected offers can be reclassified.
@@ -2218,9 +2247,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     val historyNote = if (historyCandidates.isNotEmpty()) {
                         onlineHistoryNotice(savedObservations, historyCandidates.size)
                     } else ""
+                    val catalogueNote = onlineCatalogueNotice(newCatalogueProducts)
                     val eligibilityNotice = liveHistoryEligibilityNotice(results.size, historyCandidates.size)
                     val freshnessNote = "Búsqueda recién realizada; la antigüedad indica cuándo se capturaron estos resultados, no una comprobación en tiempo real del precio de la tienda."
-                    val message = listOf(base, queryOptimizationNotice, freshnessNote, coverageNote, quotaNote, gameSupplementNote, filterNote, historyNote, eligibilityNotice)
+                    val message = listOf(base, queryOptimizationNotice, freshnessNote, coverageNote, quotaNote, gameSupplementNote, filterNote, historyNote, catalogueNote, eligibilityNotice)
                         .map { it.trim() }
                         .filter { it.isNotBlank() }
                         .joinToString("\n\n")

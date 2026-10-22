@@ -243,7 +243,7 @@ class SerpApiVariantMismatchTest {
     }
 
     @Test
-    fun refusesToReturnGenericGoogleSearchAsTheOnlyOfferDestination() {
+    fun keepsPricedOfferWhenSellerDestinationIsMissingViaSpecificShoppingSearch() {
         val report = SerpApiClient().parseShoppingResultsDetailed(
             root = JSONObject(
                 """
@@ -261,8 +261,17 @@ class SerpApiVariantMismatchTest {
             observedAt = 1_800_000_000_000L
         )
 
-        assertTrue(report.results.isEmpty())
-        assertEquals(1, report.rejectedForLink)
+        assertEquals(1, report.results.size)
+        val offer = report.results.single()
+        assertEquals(199.99, offer.price, 0.001)
+        assertEquals("Google Shopping", offer.storeName)
+        assertEquals("Google Shopping", offer.linkType)
+        assertTrue(offer.isGoogleShoppingSearchFallback)
+        assertTrue(offer.sourceUrl.startsWith("https://www.google.com/search?"))
+        assertTrue(offer.sourceUrl.contains("tbm=shop"))
+        assertTrue(offer.sourceUrl.contains("WH-1000XM5") || offer.sourceUrl.contains("WH-1000XM5".replace("-", "")))
+        assertEquals(0, report.rejectedForLink)
+        assertTrue(report.discardedOffers.none { it.reason.contains("enlace HTTPS útil") })
     }
 
     @Test

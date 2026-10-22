@@ -49,12 +49,12 @@ private data class XiaomiModelIdentity(
 private fun xiaomiModelIdentity(value: String): XiaomiModelIdentity? {
     val normalized = normalizeOnlineSearchText(value)
     val redmi = Regex(
-        """\\bredmi\\s+(?:(note)\\s+)?(\\d{1,2})\\b(?:\\s+(pro\\s*max|pro|max|ultra|lite|plus|prime))?(?:\\s+(4g|5g))?"""
+        """\bredmi\s+(?:(note)\s+)?(\d{1,2})\b(?:\s+(pro\s*max|pro|max|ultra|lite|plus|prime))?(?:\s+(4g|5g))?"""
     ).find(normalized)
     if (redmi != null) {
         val family = if (redmi.groupValues[1].isNotBlank()) "redmi-note" else "redmi"
         val edition = redmi.groupValues[3].takeIf { it.isNotBlank() }
-            ?.replace(Regex("""\\s+"""), "")
+            ?.replace(Regex("""\s+"""), "")
         val network = redmi.groupValues[4].takeIf { it.isNotBlank() }
         return XiaomiModelIdentity(family, redmi.groupValues[2], edition, network)
     }
@@ -62,10 +62,10 @@ private fun xiaomiModelIdentity(value: String): XiaomiModelIdentity? {
     // "Mi 10 Pro" and "Mi 11 Pro" are different models. Also keep 4G and 5G distinct;
     // the accessory path below permits compatible cases to omit these details.
     val mi = Regex(
-        """\\bmi\\s+(\\d{1,2})([a-z]?)\\b(?:\\s+(pro\\s*max|pro|max|ultra|lite|plus|mix))?(?:\\s+(4g|5g))?"""
+        """\bmi\s+(\d{1,2})([a-z]?)\b(?:\s+(pro\s*max|pro|max|ultra|lite|plus|mix))?(?:\s+(4g|5g))?"""
     ).find(normalized) ?: return null
     val edition = mi.groupValues[3].takeIf { it.isNotBlank() }
-        ?.replace(Regex("""\\s+"""), "")
+        ?.replace(Regex("""\s+"""), "")
     val network = mi.groupValues[4].takeIf { it.isNotBlank() }
     return XiaomiModelIdentity("mi", mi.groupValues[1] + mi.groupValues[2], edition, network)
 }

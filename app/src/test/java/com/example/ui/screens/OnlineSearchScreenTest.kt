@@ -551,7 +551,7 @@ class OnlineSearchScreenTest {
                 {"title":"Apple iPhone 16 Plus","price":"749,00 €","extracted_price":749.0,"source":"Google Shopping"},
                 {"title":"Apple iPhone 16 Pro Max 512 GB","price":"999,00 €","extracted_price":999.0,"source":"Google Shopping"},
                 {"title":"Funda para Apple iPhone 16","price":"19,99 €","extracted_price":19.99,"source":"Google Shopping"},
-                {"title":"Apple iPhone 16 Pro 44,99 €/mes","price":"44,99 €/mes","extracted_price":44.99,"link":"https://shop.example/monthly-iphone","source":"Google Shopping"}
+                {"title":"Apple iPhone 16 Pro 256 GB","price":"44,99 € al mes","extracted_price":44.99,"link":"https://shop.example/monthly-iphone","source":"Google Shopping"}
               ]
             }
             """.trimIndent()

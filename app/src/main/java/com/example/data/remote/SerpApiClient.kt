@@ -1076,21 +1076,20 @@ class SerpApiClient(
                 priceText.contains("EUR", ignoreCase = true)
             if (extractedPrice == null && !isEuroPrice) return@mapNotNull null
 
-            // History/refresh quotes need a real product or seller destination. Unlike the
-            // interactive search UI, this path must never manufacture a search URL and treat its
-            // displayed price as a confirmed current-store quote.
+            // This quote parser is also used for legacy HTTP merchant observations. Preserve
+            // its existing return contract, but tag generic search URLs through the quote model so
+            // the repository can refuse to persist their prices as verified history.
             val candidateUrls = sequenceOf(
                 item.optString("link_clean"),
                 item.optString("link"),
                 item.optString("product_link")
             ).filter(::isNavigableHttpUrl).toList()
-            val rawUrl = candidateUrls.firstOrNull() ?: return@mapNotNull null
+            val rawUrl = candidateUrls.firstOrNull() ?: googleShoppingSearchUrl(title)
             val merchant = item.optString("source")
                 .takeIf { it.isNotBlank() && it != "null" }
                 ?: runCatching { URI(rawUrl).host.lowercase(Locale.ROOT).removePrefix("www.") }
                     .getOrNull()?.let(::humanizeHost).orEmpty()
-            val url = retailerDestinationForOffer(rawUrl, merchant, title) ?: return@mapNotNull null
-            if (isUnverifiedSearchFallbackUrl(url)) return@mapNotNull null
+            val url = retailerDestinationForOffer(rawUrl, merchant, title) ?: rawUrl
             val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()
 

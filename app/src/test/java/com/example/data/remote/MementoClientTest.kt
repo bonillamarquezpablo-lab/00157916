@@ -20,12 +20,55 @@ import java.util.TimeZone
 @Config(sdk = [35])
 class MementoClientTest {
     @Test
+    fun supplementsSparseHistoryButSkipsWhenThreeDistinctDatesAlreadyExist() {
+        assertTrue(
+            shouldAttemptMementoFallback(
+                alreadyAttempted = false,
+                hasEligibleDirectUrl = true,
+                hasSufficientHistory = false,
+                rateLimited = false
+            )
+        )
+        assertFalse(
+            shouldAttemptMementoFallback(
+                alreadyAttempted = false,
+                hasEligibleDirectUrl = true,
+                hasSufficientHistory = true,
+                rateLimited = false
+            )
+        )
+    }
+
+    @Test
+    fun historicalCoverageCountsDistinctUtcDatesInsteadOfDuplicateQuotes() {
+        val day = WaybackPriceHistoryClient.DAY_MS
+        fun quote(at: Long, price: Double) = ArchivedPriceQuote(
+            observedAt = at,
+            price = price,
+            currency = "EUR",
+            productTitle = "Sony WH-1000XM5",
+            originalUrl = "https://shop.example/product",
+            snapshotUrl = "https://web.archive.org/web/20260101000000/https://shop.example/product"
+        )
+        assertFalse(
+            hasSufficientHistoricalCoverage(
+                listOf(quote(day + 1_000L, 249.99), quote(day + 20_000L, 239.99))
+            )
+        )
+        assertTrue(
+            hasSufficientHistoricalCoverage(
+                listOf(quote(day, 249.99), quote(day * 2, 239.99), quote(day * 3, 229.99))
+            )
+        )
+    }
+
+    @Test
     fun attemptsMementoWhenWaybackHasNoVerifiedHistory() {
         assertTrue(
             shouldAttemptMementoFallback(
                 alreadyAttempted = false,
                 hasEligibleDirectUrl = true,
-                hasVerifiedQuotes = false,
+                hasSufficientHistory = false,
                 rateLimited = false
             )
         )
@@ -57,7 +100,7 @@ class MementoClientTest {
             shouldAttemptMementoFallback(
                 alreadyAttempted = false,
                 hasEligibleDirectUrl = true,
-                hasVerifiedQuotes = true,
+                hasSufficientHistory = true,
                 rateLimited = false
             )
         )

@@ -2256,7 +2256,11 @@ class ExampleRobolectricTest {
         )
 
         assertEquals(5, report.rawResultCount)
-        assertEquals("Only matching offers with a usable destination remain", 2, report.results.size)
+        assertEquals(
+            "Matching offers remain visible when a safe seller link is missing; the fallback is labelled Google Shopping",
+            3,
+            report.results.size
+        )
         val amazonResult = report.results.single { it.storeName == "Amazon.es" }
         assertEquals("Sony WH1000XM5 Wireless Noise Canceling Headphones", amazonResult.title)
         assertEquals(249.99, amazonResult.price, 0.001)
@@ -2266,11 +2270,16 @@ class ExampleRobolectricTest {
         assertEquals(239.99, googleResult.price, 0.001)
         assertTrue(googleResult.isGoogleShoppingProductLink)
         assertEquals("Google Shopping", googleResult.linkType)
+
+        val fallbackResult = report.results.single { it.isGoogleShoppingSearchFallback }
+        assertEquals("Google Shopping", fallbackResult.storeName)
+        assertEquals(229.99, fallbackResult.price, 0.001)
+        assertTrue(fallbackResult.sourceUrl.contains("tbm=shop"))
         assertFalse(report.results.any { it.storeName == "Unsafe HTTP" })
 
         assertEquals(1, report.rejectedAsIrrelevant)
         assertEquals(1, report.rejectedForPriceOrCurrency)
-        assertEquals(1, report.rejectedForLink)
+        assertEquals(0, report.rejectedForLink)
         assertTrue(report.emptyResultMessage("Sony WH-1000XM5").isNotBlank())
     }
 

@@ -3848,7 +3848,7 @@ class WaybackPriceHistoryClient(
                 val enriched = buildArchivedIdentityTitle(expectedTitle, originalUrl, identity)
                 (enriched.isNotBlank() &&
                     isMatchingTitleForArchivedUrl(expectedTitle, enriched, originalUrl)) ||
-                    hasExactStructuredModelIdentifier(expectedTitle, originalUrl, identity)
+                    hasExactStructuredIdentityIdentifier(expectedTitle, originalUrl, identity)
             }
         }
 
@@ -4353,19 +4353,21 @@ class WaybackPriceHistoryClient(
         return true
     }
 
-    private fun hasExactStructuredModelIdentifier(
+    private fun hasExactStructuredIdentityIdentifier(
         expectedTitle: String,
         originalUrl: String,
         identity: ArchivedProductIdentityEvidence
     ): Boolean {
-        val model = identity.model?.takeIf { it.isNotBlank() } ?: return false
-        val compactModel = normalizeTitle(model).replace(Regex("""[^a-z0-9]"""), "")
-        if (compactModel.length < 5) return false
         val target = normalizeTitle(expectedTitle + " " + archivedUrlIdentityText(originalUrl))
             .replace(Regex("""[^a-z0-9]"""), "")
-        // A model code is strong evidence only if the selected title or its product URL contains
-        // that exact code. Capacity/colour conflicts have already been rejected above.
-        return target.contains(compactModel)
+        val identifiers = listOf(identity.model, identity.sku, identity.mpn, identity.gtin)
+            .filterNotNull().filter { it.isNotBlank() }
+            .map { normalizeTitle(it).replace(Regex("""[^a-z0-9]"""), "") }
+            .filter { it.length >= 5 }
+        // Manufacturer model codes and catalogue identifiers are strong evidence only when the
+        // selected title or its product URL contains the exact same value. Capacity/colour
+        // conflicts have already been rejected above.
+        return identifiers.any { identifier -> target.contains(identifier) }
     }
 
     private fun buildArchivedIdentityTitle(
@@ -4382,10 +4384,12 @@ class WaybackPriceHistoryClient(
         if (model != null && normalizeTitle(model).replace(Regex("""[^a-z0-9]"""), "")
                 .let { it.length >= 4 && target.replace(Regex("""[^a-z0-9]"""), "").contains(it) }
         ) values += model
-        val sku = identity.sku?.takeIf { it.isNotBlank() }
-        if (sku != null && normalizeTitle(sku).replace(Regex("""[^a-z0-9]"""), "")
-                .let { it.length >= 5 && target.replace(Regex("""[^a-z0-9]"""), "").contains(it) }
-        ) values += sku
+        listOf(identity.sku, identity.mpn, identity.gtin).filterNotNull().forEach { identifier ->
+            val compact = normalizeTitle(identifier).replace(Regex("""[^a-z0-9]"""), "")
+            if (compact.length >= 5 && target.replace(Regex("""[^a-z0-9]"""), "").contains(compact)) {
+                values += identifier
+            }
+        }
         identity.variantProperties.forEach { (key, value) ->
             if (Regex("""(?i)edition|configuration|colour|color|storage|capacity|memory|ram|rom|ssd""")
                     .containsMatchIn(key) && value.isNotBlank()

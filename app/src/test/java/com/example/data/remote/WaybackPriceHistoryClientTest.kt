@@ -4487,6 +4487,22 @@ class WaybackPriceHistoryClientTest {
             }
         }.build()
 
+        val diagnosticClient = WaybackPriceHistoryClient(context, http)
+        assertTrue(
+            "The sibling's direct URL should be an eligible retail product URL",
+            diagnosticClient.isEligibleDirectUrl(siblingUrl)
+        )
+        val siblingOfferUrls = diagnosticClient.jsonLdProductUrlsForOffer(
+            document = Jsoup.parse(siblingHtml),
+            productTitle = siblingTitle,
+            expectedPrice = 699.99,
+            expectedCurrency = "EUR",
+            pageUrl = primaryUrl
+        )
+        assertTrue(
+            "JSON-LD extraction should return the sibling's own product URL; got " + siblingOfferUrls,
+            siblingOfferUrls.any { it.contains("128gb-amarillo-libre") }
+        )
         val directSiblingQuotes = WaybackPriceHistoryClient(context, http)
             .parseArchivedPricesForKnownProducts(
                 document = Jsoup.parse(siblingHtml),

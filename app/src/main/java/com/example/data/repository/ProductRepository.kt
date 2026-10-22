@@ -674,15 +674,16 @@ class ProductRepository(
      */
     suspend fun ensureVisibleOnlineSearchProducts(
         results: List<SerpApiShoppingResult>,
-        searchQuery: String = ""
+        searchQuery: String = "",
+        allowAccessories: Boolean = false
     ): Int {
         startupCleanupCompleted.await()
         val visible = filterVisibleLiveSearchResults(results, searchQuery)
             .filterNot { it.isSecondHand || it.isFitmentUnverified || it.isCategoryUnverified }
-            .filterNot { it.isAccessoryOffer && !isAccessorySearchQuery(searchQuery) }
+            .filterNot { !allowAccessories && it.isAccessoryOffer && !isAccessorySearchQuery(searchQuery) }
             .filterNot {
-                isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
-                    isAccessoryListing(it.title)
+                !allowAccessories && isDeviceSearchQuery(searchQuery) &&
+                    !isAccessorySearchQuery(searchQuery) && isAccessoryListing(it.title)
             }
         if (visible.isEmpty()) return 0
 

@@ -2587,12 +2587,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         else -> WaybackTraceStatus.SKIPPED
                     }
                     val persistenceDetail = when {
-                        savedCount > 0 && stagedDiscoveryObservationsCount > 0 ->
+                        savedCount > 0 && stagedDiscoveryObservationsCount.get() > 0 ->
                             "Guardado completado: $savedCount punto(s) para el catálogo y ${stagedDiscoveryObservationsCount.get()} observación(es) secundarias en cuarentena."
                         savedCount > 0 ->
                             "Guardado completado: $savedCount punto(s) nuevo(s) en el histórico del catálogo."
-                        stagedDiscoveryObservationsCount > 0 ->
-                            "Radar de Descubrimientos: $stagedDiscoveryObservationsCount observación(es) de productos nuevos guardadas en cuarentena; siguen fuera del catálogo principal."
+                        stagedDiscoveryObservationsCount.get() > 0 ->
+                            "Radar de Descubrimientos: ${stagedDiscoveryObservationsCount.get()} observación(es) de productos nuevos guardadas en cuarentena; siguen fuera del catálogo principal."
                         foundCount > 0 ->
                             "Se verificaron $foundCount punto(s); no se añadieron duplicados porque los registros ya existían."
                         else ->
@@ -2757,8 +2757,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         }
                     }
                 }
-                val discoveryNotice = if (stagedDiscoveryObservationsCount > 0) {
-                    " Radar de Descubrimientos: $stagedDiscoveryObservationsCount observación(es) de productos nuevos quedaron en cuarentena, sin crear fichas en Mercado."
+                val discoveryNotice = if (stagedDiscoveryObservationsCount.get() > 0) {
+                    " Radar de Descubrimientos: ${stagedDiscoveryObservationsCount.get()} observación(es) de productos nuevos quedaron en cuarentena, sin crear fichas en Mercado."
                 } else ""
                 val noticeWithDiagnostics = if (diagnosticLabels.isNotEmpty() && skippedCount != candidates.size) {
                     "$notice$discoveryNotice\nDiagnóstico Wayback: ${diagnosticLabels.joinToString(" · ")}."
@@ -2766,17 +2766,17 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 appendArchiveNotice(query, provider, noticeWithDiagnostics, targetProductId)
                 if (diagnosticProductId != null) {
                     when {
-                        savedCount > 0 && stagedDiscoveryObservationsCount > 0 -> finishWaybackDiagnostic(
+                        savedCount > 0 && stagedDiscoveryObservationsCount.get() > 0 -> finishWaybackDiagnostic(
                             diagnosticProductId, WaybackTraceStatus.PASSED,
-                            "$savedCount precio(s) histórico(s) guardado(s) en el catálogo y $stagedDiscoveryObservationsCount observación(es) secundarias en Radar."
+                            "$savedCount precio(s) histórico(s) guardado(s) en el catálogo y ${stagedDiscoveryObservationsCount.get()} observación(es) secundarias en Radar."
                         )
                         savedCount > 0 -> finishWaybackDiagnostic(
                             diagnosticProductId, WaybackTraceStatus.PASSED,
                             "$savedCount precio(s) histórico(s) guardado(s) en la base de datos local."
                         )
-                        stagedDiscoveryObservationsCount > 0 -> finishWaybackDiagnostic(
+                        stagedDiscoveryObservationsCount.get() > 0 -> finishWaybackDiagnostic(
                             diagnosticProductId, WaybackTraceStatus.PASSED,
-                            "$stagedDiscoveryObservationsCount observación(es) de productos nuevos guardadas en el Radar; no se han añadido a Mercado automáticamente."
+                            "${stagedDiscoveryObservationsCount.get()} observación(es) de productos nuevos guardadas en el Radar; no se han añadido a Mercado automáticamente."
                         )
                         foundCount > 0 && selectedProductRefreshed -> finishWaybackDiagnostic(
                             diagnosticProductId, WaybackTraceStatus.PASSED,

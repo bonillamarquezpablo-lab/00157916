@@ -22,6 +22,7 @@ import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.isIrrelevantMultiProductBundle
+import com.example.data.remote.isAccessoryListingTitle
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.linkTypeForUrl
 import com.example.data.remote.isGoogleShoppingUrl
@@ -1234,9 +1235,7 @@ class ProductRepository(
     }
 
     private fun isAccessoryListing(title: String): Boolean =
-        Regex(
-            """(?i)\b(p[oó]ster(?:es|s)?|poster(?:es|s)?|fundas?|carcasas?|cristal\s+templado|mop\s+kit|recambios?|filtros?|protector(?:es)?|cargador(?:es)?|chargers?|charging|cables?|adaptador(?:es)?|hubs?|soportes?|repuestos?|replacement|screen\s+protector|tempered\s+glass|covers?|cases?)\b"""
-        ).containsMatchIn(normalizedProductTitle(title))
+        isAccessoryListingTitle(title)
 
     private fun explicitModelMarkers(text: String): Set<String> {
         val normalized = normalizedProductTitle(text)
@@ -1339,9 +1338,7 @@ class ProductRepository(
     }
 
     private fun isAccessorySearchQuery(query: String): Boolean =
-        Regex(
-            """\b(poster(?:es|s)?|funda|fundas|carcasa|carcasas|cristal templado|protector|protectores|protector de pantalla|screen protector|tempered glass|cable|cables|cargador|cargadores|charger|chargers|charging|adaptador|adaptadores|hub|hubs|mop kit|recambio|recambios|filtro|filtros|repuesto|repuestos|replacement|case|cases|cover|covers)\b"""
-        ).containsMatchIn(normalizedProductTitle(query))
+        com.example.data.remote.isAccessorySearchQuery(query)
 
     private fun isDeviceSearchQuery(query: String): Boolean {
         val normalized = normalizedProductTitle(query)

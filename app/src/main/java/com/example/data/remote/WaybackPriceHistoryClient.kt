@@ -4492,7 +4492,7 @@ class WaybackPriceHistoryClient(
         // their own independently verified route formats.
         if (expectedVariants.any { it != "plus" }) return false
         val variantSuffix = if ("plus" in expectedVariants) "-plus" else ""
-        val routePrefix = "/es/shop/buy-iphone/iphone-$" + "expectedModel$variantSuffix/"
+        val routePrefix = "/es/shop/buy-iphone/iphone-" + expectedModel + variantSuffix + "/"
         val path = uri.path.orEmpty().lowercase(Locale.ROOT)
         if (!path.contains(routePrefix)) return false
 
@@ -4507,7 +4507,7 @@ class WaybackPriceHistoryClient(
             else -> return false
         }
         val display = if ("plus" in expectedVariants) "6,7" else "6,1"
-        val expectedSkuPath = "pantalla-de-$display″-$" + "capacitygb-$colourSlug"
+        val expectedSkuPath = "pantalla-de-" + display + "″-" + capacity + "gb-" + colourSlug
         if (!path.contains(expectedSkuPath)) return false
 
         // Missing labels are acceptable only when the exact URL verifies the SKU.
@@ -4521,7 +4521,7 @@ class WaybackPriceHistoryClient(
         val archivedStorage = storagePattern.findAll(archived)
             .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }
             .toSet()
-        if (archivedStorage.isNotEmpty() && "${capacity}gb" !in archivedStorage) return false
+        if (archivedStorage.isNotEmpty() && capacity + "gb" !in archivedStorage) return false
         return true
     }
 

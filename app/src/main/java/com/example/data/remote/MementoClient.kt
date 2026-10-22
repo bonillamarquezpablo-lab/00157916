@@ -23,9 +23,25 @@ import java.util.concurrent.TimeUnit
 internal fun shouldAttemptMementoFallback(
     alreadyAttempted: Boolean,
     hasEligibleDirectUrl: Boolean,
-    hasVerifiedQuotes: Boolean,
+    hasSufficientHistory: Boolean,
     rateLimited: Boolean
-): Boolean = !alreadyAttempted && hasEligibleDirectUrl && !hasVerifiedQuotes && !rateLimited
+): Boolean = !alreadyAttempted && hasEligibleDirectUrl && !hasSufficientHistory && !rateLimited
+
+/**
+ * A single archived price proves that one capture is useful, but it is not yet a meaningful
+ * trend. Consult the independent archive when fewer than three distinct UTC dates are available.
+ */
+internal fun hasSufficientHistoricalCoverage(
+    quotes: Iterable<ArchivedPriceQuote>,
+    minimumDistinctDates: Int = 3
+): Boolean {
+    if (minimumDistinctDates <= 0) return true
+    return quotes.asSequence()
+        .map { Math.floorDiv(it.observedAt, WaybackPriceHistoryClient.DAY_MS) }
+        .distinct()
+        .take(minimumDistinctDates)
+        .count() >= minimumDistinctDates
+}
 
 /**
  * Independent history source for Arquivo.pt's native Memento TimeMap API.

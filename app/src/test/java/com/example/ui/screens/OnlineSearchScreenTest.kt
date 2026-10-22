@@ -399,7 +399,7 @@ class OnlineSearchScreenTest {
         // OFF + Todos: new shops and Amazon remain; Wallapop and Warehouse are hidden.
         assertVisibleText("Todas las ofertas")
         assertVisibleText("Solo Amazon")
-        assertEquals(14, results.size)
+        assertEquals(15, results.size)
         assertTrue(results.any { it.storeName == "Wallapop" && it.isSecondHand })
         assertTrue(results.any { it.storeName == "Amazon Warehouse" && it.isSecondHand })
         assertTrue(results.any { it.storeName == "Milanuncios" && it.isSecondHand })
@@ -435,14 +435,20 @@ class OnlineSearchScreenTest {
         assertVisibleText("Solo Amazon")
         assertVisibleText("3 tiendas · precio más bajo en Amazon.es")
         assertVisibleText("7 tiendas · precio más bajo en Wallapop")
-        assertEquals(4, results.count { it.isAccessoryOffer })
+        assertEquals(5, results.count { it.isAccessoryOffer })
         assertTrue(
             "Accessories are hidden from the main product list by default",
             composeRule.onAllNodesWithText("Póster Samsung Galaxy S26 Ultra 512 GB")
                 .fetchSemanticsNodes().isEmpty()
         )
-        clickFilter("Mostrar accesorios (4)")
+        assertTrue(
+            "Original replacement screens must not appear as phones by default",
+            composeRule.onAllNodesWithText("Original Screen for Samsung Galaxy S26 Ultra 512 GB")
+                .fetchSemanticsNodes().isEmpty()
+        )
+        clickFilter("Mostrar accesorios (5)")
         assertVisibleText("Póster Samsung Galaxy S26 Ultra 512 GB")
+        assertVisibleText("Original Screen for Samsung Galaxy S26 Ultra 512 GB")
         assertTrue(
             "The accessory badge is visible on the poster card",
             composeRule.onAllNodesWithText("Accesorio").fetchSemanticsNodes().isNotEmpty()
@@ -469,7 +475,8 @@ class OnlineSearchScreenTest {
                 {"title":"Póster Samsung Galaxy S26 Ultra 512 GB","price":"19,99 €","extracted_price":19.99,"product_link":"https://posterstore.example/s26","source":"Poster Store","second_hand_condition":"new"},
                 {"title":"Funda Samsung Galaxy S26 Ultra","price":"14,99 €","extracted_price":14.99,"product_link":"https://fundas.example/s26","source":"Tienda de fundas","second_hand_condition":"new"},
                 {"title":"Cargador Samsung Galaxy S26 Ultra 512 GB","price":"24,99 €","extracted_price":24.99,"product_link":"https://cargadores.example/s26","source":"Tienda de cargadores","second_hand_condition":"new"},
-                {"title":"Protector Samsung Galaxy S26 Ultra 512 GB","price":"9,99 €","extracted_price":9.99,"product_link":"https://protectores.example/s26","source":"Tienda de protectores","second_hand_condition":"new"}
+                {"title":"Protector Samsung Galaxy S26 Ultra 512 GB","price":"9,99 €","extracted_price":9.99,"product_link":"https://protectores.example/s26","source":"Tienda de protectores","second_hand_condition":"new"},
+                {"title":"Original Screen for Samsung Galaxy S26 Ultra 512 GB","price":"159,99 €","extracted_price":159.99,"product_link":"https://screens.example/samsung-s26-ultra","source":"Tienda de recambios","second_hand_condition":"new"}
               ]
             }
             """.trimIndent()

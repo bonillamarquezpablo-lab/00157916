@@ -62,6 +62,11 @@ class LiveSearchMarketPersistenceTest {
             val openedFicha = repository.awaitProductForOnlineIdentity(onlineProductIdentityKey(title))
             assertEquals("The same Room row must be resolvable when the result card is tapped", savedRow.id, openedFicha.id)
             assertFalse(openedFicha.isPriceVerified)
+            assertTrue(openedFicha.isUnverifiedLiveListing)
+            assertEquals(
+                com.example.data.model.PriceDisplayStatus.UNVERIFIED_LIVE_LISTING,
+                openedFicha.priceDisplayStatus
+            )
             assertTrue(openedFicha.priceHistory.isEmpty())
 
             assertEquals("Repeated rendering/tapping must not create duplicates", 0,

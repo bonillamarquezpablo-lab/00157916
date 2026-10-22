@@ -45,7 +45,11 @@ data class SerpApiQuote(
     val storeName: String,
     val sourceName: String = "SerpApi · Google Shopping España",
     val googleProductId: String? = null
-)
+) {
+    /** Search-result URLs are navigation aids, not verified destinations for a quoted price. */
+    val isSearchFallbackDestination: Boolean
+        get() = isUnverifiedSearchFallbackUrl(sourceUrl)
+}
 
 /** A historical point explicitly returned by Google's product-price insights. */
 data class SerpApiPriceInsight(
@@ -1072,18 +1076,21 @@ class SerpApiClient(
                 priceText.contains("EUR", ignoreCase = true)
             if (extractedPrice == null && !isEuroPrice) return@mapNotNull null
 
-            // Apply the same URL-routing policy used by the interactive offer cards.
+            // History/refresh quotes need a real product or seller destination. Unlike the
+            // interactive search UI, this path must never manufacture a search URL and treat its
+            // displayed price as a confirmed current-store quote.
             val candidateUrls = sequenceOf(
                 item.optString("link_clean"),
                 item.optString("link"),
                 item.optString("product_link")
             ).filter(::isNavigableHttpUrl).toList()
-            val rawUrl = candidateUrls.firstOrNull() ?: googleShoppingSearchUrl(title)
+            val rawUrl = candidateUrls.firstOrNull() ?: return@mapNotNull null
             val merchant = item.optString("source")
                 .takeIf { it.isNotBlank() && it != "null" }
                 ?: runCatching { URI(rawUrl).host.lowercase(Locale.ROOT).removePrefix("www.") }
                     .getOrNull()?.let(::humanizeHost).orEmpty()
-            val url = retailerDestinationForOffer(rawUrl, merchant, title) ?: rawUrl
+            val url = retailerDestinationForOffer(rawUrl, merchant, title) ?: return@mapNotNull null
+            if (isUnverifiedSearchFallbackUrl(url)) return@mapNotNull null
             val host = runCatching { URI(url).host.lowercase(Locale.ROOT).removePrefix("www.") }
                 .getOrNull().orEmpty()
 

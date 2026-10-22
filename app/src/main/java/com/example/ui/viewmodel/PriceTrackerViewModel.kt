@@ -1872,7 +1872,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         val rawResults = providerResults
                         val visible = repository.filterVisibleLiveSearchResults(rawResults, query)
                         val eligibleForHistory = repository.filterOnlineSearchResults(visible, query)
-                                    .filterNot { it.isSearchFallbackDestination }
+                            .filterNot { it.isSearchFallbackDestination }
                         val repositoryDiscarded = diagnoseLiveSearchHiddenOffers(rawResults, visible, query)
                         val rejected = (providerDiscardedOffers + repositoryDiscarded)
                             .distinctBy { "${it.provider}|${it.title}|${it.priceLabel}|${it.reason}" }

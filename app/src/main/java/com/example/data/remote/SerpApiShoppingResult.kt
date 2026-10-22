@@ -274,6 +274,14 @@ data class SerpApiShoppingResult(
     val isGoogleShoppingProductLink: Boolean
         get() = isGoogleShoppingUrl(sourceUrl)
 
+    /**
+     * True for a generic Google Shopping results page, not a specific catalog product or seller.
+     * Such links are useful for continuing a search, but their quoted price must not be saved as
+     * a verified current price or historical observation because no seller destination is known.
+     */
+    val isGoogleShoppingSearchFallback: Boolean
+        get() = isGenericGoogleShoppingSearchUrl(sourceUrl)
+
     val isSecondHand: Boolean
         get() {
             val listingText = "$title $storeName $sourceUrl $condition"
@@ -365,6 +373,25 @@ fun isGoogleShoppingUrl(sourceUrl: String): Boolean {
     // google.com.attacker.example, which otherwise pass a startsWith("google.") check.
     return Regex("(?i)^(?:[a-z0-9-]+\\.)*google\\.(?:com|es|[a-z]{2,3}(?:\\.[a-z]{2,3})?)$")
         .matches(host)
+}
+
+/** Identifies a query results page, rather than a specific Google catalog-product destination. */
+fun isGenericGoogleShoppingSearchUrl(sourceUrl: String): Boolean {
+    if (!isGoogleShoppingUrl(sourceUrl)) return false
+    val uri = runCatching { URI(sourceUrl) }.getOrNull() ?: return false
+    val path = uri.path.orEmpty()
+    if (path != "/search" && !path.startsWith("/search/")) return false
+
+    val params = uri.rawQuery.orEmpty().split('&').mapNotNull { part ->
+        val key = part.substringBefore('=')
+        val value = part.substringAfter('=', "")
+        runCatching {
+            URLDecoder.decode(key, "UTF-8").lowercase(Locale.ROOT) to
+                URLDecoder.decode(value, "UTF-8")
+        }.getOrNull()
+    }.toMap()
+    return params["tbm"] == "shop" && params["q"].orEmpty().isNotBlank() &&
+        extractGoogleShoppingProductId(sourceUrl) == null
 }
 
 /** True only when the provider identifies a GAME Spain offer by seller name or retailer host. */

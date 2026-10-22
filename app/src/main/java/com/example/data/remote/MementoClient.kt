@@ -17,12 +17,6 @@ import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
 /**
- * Independent history source for Arquivo.pt's native Memento TimeMap API.
- *
- * This client is a bounded fallback to Wayback, not a price provider on its own: every retrieved
- * page is parsed by WaybackPriceHistoryClient's existing strict title/variant/EUR-price validator.
- */
-/**
  * Memento should be tried as soon as Wayback has no verified prices, before slower broad
  * Wayback/domain recovery. A missing or rate-limited Wayback response is not a reason to skip it.
  */
@@ -33,6 +27,12 @@ internal fun shouldAttemptMementoFallback(
     rateLimited: Boolean
 ): Boolean = !alreadyAttempted && hasEligibleDirectUrl && !hasVerifiedQuotes && !rateLimited
 
+/**
+ * Independent history source for Arquivo.pt's native Memento TimeMap API.
+ *
+ * This client is a bounded fallback to Wayback, not a price provider on its own: every retrieved
+ * page is parsed by WaybackPriceHistoryClient's existing strict title/variant/EUR-price validator.
+ */
 class MementoClient(
     context: Context,
     private val priceParser: WaybackPriceHistoryClient = WaybackPriceHistoryClient(context),

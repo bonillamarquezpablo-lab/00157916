@@ -40,6 +40,11 @@ class MementoClientTest {
     }
 
     @Test
+    fun emptyHistoryIsNeverConsideredSufficientCoverage() {
+        assertFalse(hasSufficientHistoricalCoverage(emptyList()))
+    }
+
+    @Test
     fun historicalCoverageCountsDistinctUtcDatesInsteadOfDuplicateQuotes() {
         val day = WaybackPriceHistoryClient.DAY_MS
         fun quote(at: Long, price: Double) = ArchivedPriceQuote(

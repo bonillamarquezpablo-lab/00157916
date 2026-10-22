@@ -581,8 +581,17 @@ fun retailerDestinationForOffer(sourceUrl: String, storeName: String, productTit
     if ((genericGoogleSearch || insecureSource) && store?.supportsProductSearch == true) {
         return store.searchUrlFor(productTitle).takeIf(::isSecureRetailerDestination)
     }
-    // Unknown-seller offers must never fall back to a generic Google search page. If we
-    // cannot resolve a seller destination, let the caller disable the link rather than misdirect.
+    // A secure Google Shopping results URL with an explicit product query is a useful,
+    // honest fallback when the provider omits a direct seller page. Do not treat it as a
+    // verified retailer destination; it simply lets the user continue the same search.
+    val googleShoppingQuery = uri?.let {
+        genericGoogleSearch &&
+            it.scheme.equals("https", ignoreCase = true) &&
+            it.rawQuery.orEmpty().split('&').any { part -> part.substringBefore('=').equals("tbm") && part.substringAfter('=', "") == "shop" } &&
+            it.rawQuery.orEmpty().split('&').any { part -> part.substringBefore('=').equals("q") && part.substringAfter('=').isNotBlank() }
+    } == true
+    if (googleShoppingQuery && isSecureRetailerDestination(sourceUrl)) return sourceUrl
+    // Unknown-seller offers must never be redirected to an unrelated retailer.
     return sourceUrl.takeIf { !isGoogleShoppingUrl(it) && isSecureRetailerDestination(it) }
 }
 

@@ -528,8 +528,11 @@ class OnlineSearchScreenTest {
         assertFalse(offer("Xiaomi Mi 10 Pro 5G 8GB/256GB Gris").isAccessoryOffer)
         assertTrue(offer("Pantalla Original Xiaomi Mi 10 Pro Versión S").isAccessoryOffer)
         assertTrue(offer("Pantalla Completa con Marco para Google Pixel 10").isAccessoryOffer)
+        assertTrue(offer("Original Screen for Xiaomi Mi 10 Pro").isAccessoryOffer)
         assertTrue(offer("Google Pixel 10 Displayschutz & Schutzfolie – Crystal Advanced").isAccessoryOffer)
+        assertTrue(offer("Google Pixel 10 Schutzhülle").isAccessoryOffer)
         assertTrue(isAccessorySearchQuery("Pantalla Original Xiaomi Mi 10 Pro"))
+        assertTrue(isAccessorySearchQuery("Original Screen for Xiaomi Mi 10 Pro"))
         assertFalse(isAccessorySearchQuery("Xiaomi Mi 10 Pro"))
     }
 

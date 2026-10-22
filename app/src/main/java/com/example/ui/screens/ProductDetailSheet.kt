@@ -403,8 +403,8 @@ fun ProductDetailSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(180.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(16.dp))
+                    .clip(MaterialTheme.shapes.large)
+                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.28f), MaterialTheme.shapes.large)
             ) {
                 ProductImageView(
                     product = product,
@@ -435,8 +435,8 @@ fun ProductDetailSheet(
             if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.DEMONSTRATION) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.surfaceContainer
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
@@ -462,9 +462,9 @@ fun ProductDetailSheet(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(14.dp)),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                    .clip(MaterialTheme.shapes.medium)
+                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.28f), MaterialTheme.shapes.medium),
+                color = MaterialTheme.colorScheme.surfaceContainer
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     // Stack current and historical metrics vertically. Side-by-side weighted
@@ -684,7 +684,7 @@ fun ProductDetailSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                    .background(MaterialTheme.colorScheme.surfaceContainer)
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -753,10 +753,10 @@ fun ProductDetailSheet(
                             .fillMaxWidth()
                             .testTag("wayback_diagnostic_panel"),
                         shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         border = androidx.compose.foundation.BorderStroke(
                             1.dp,
-                            MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                            MaterialTheme.colorScheme.outline.copy(alpha = 0.32f)
                         )
                     ) {
                         Column(

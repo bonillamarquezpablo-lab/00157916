@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -207,6 +208,11 @@ fun PriceHistoryChart(
     val valid90dAverage = avg90dPrice.takeIf {
         selectedSeries == HistoryEvidenceSeries.LIVE && it.isFinite() && it > 0.0
     }
+    // Cache this summary for ordinary chip/selection recompositions; historical series can
+    // contain many observations but the average only changes when the filtered data changes.
+    val externalHistoricalAverage = remember(filteredPoints) {
+        filteredPoints.asSequence().map { it.price }.average().takeIf { it.isFinite() }
+    }
 
     // All labels and historical claims follow the currently selected range.
     val firstObservationLabel = remember(validHistory, historySummary, filteredPoints) {
@@ -249,9 +255,9 @@ fun PriceHistoryChart(
         modifier = modifier
             .fillMaxWidth()
             .clip(FloatingSurfaceShape)
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.32f))
-            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), FloatingSurfaceShape)
-            .padding(14.dp)
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.28f), FloatingSurfaceShape)
+            .padding(16.dp)
             .testTag("price_history_chart_container")
     ) {
         // Keep the title on a full-width line and put the metric chips in their own
@@ -295,7 +301,7 @@ fun PriceHistoryChart(
                 ) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
+                            .clip(RoundedCornerShape(9.dp))
                             .background(
                                 (if (historySummary.minimumObservedPoint != null) Color(0xFF10B981)
                                 else MaterialTheme.colorScheme.outline).copy(alpha = 0.15f)
@@ -323,7 +329,7 @@ fun PriceHistoryChart(
                             text = if (selectedSeries == HistoryEvidenceSeries.LIVE) {
                                 "Media 90 d: ${valid90dAverage?.let { formatChartPrice(it) + " €" } ?: "—"}"
                             } else {
-                                "Media histórica externa: ${filteredPoints.map { it.price }.average().let { formatChartPrice(it) + " €" }}"
+                                "Media histórica externa: ${externalHistoricalAverage?.let { formatChartPrice(it) + " €" } ?: "—"}"
                             },
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
@@ -349,7 +355,7 @@ fun PriceHistoryChart(
                             selectedPointIndex = -1
                         },
                         label = { Text(series.label, fontSize = 11.sp) },
-                        modifier = Modifier.height(30.dp)
+                        modifier = Modifier.heightIn(min = 36.dp)
                     )
                 }
             }
@@ -388,8 +394,8 @@ fun PriceHistoryChart(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 8.dp)
-                    .clip(RoundedCornerShape(8.dp)),
-                color = MaterialTheme.colorScheme.surface
+                    .clip(RoundedCornerShape(12.dp)),
+                color = MaterialTheme.colorScheme.surfaceContainer
             ) {
                 Row(
                     modifier = Modifier.padding(10.dp),

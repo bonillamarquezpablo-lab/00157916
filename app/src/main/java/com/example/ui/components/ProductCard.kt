@@ -99,11 +99,11 @@ fun ProductCard(
             .testTag("product_card_${product.id}"),
         colors = CardDefaults.cardColors(
             // Keep cards visually consistent; retailer colours belong in small metadata accents.
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Column(modifier = Modifier.padding(10.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp)) {
             // Top Section: Product Photo + Product Details
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -113,7 +113,7 @@ fun ProductCard(
                 ProductImageView(
                     product = product,
                     modifier = Modifier
-                        .size(80.dp)
+                        .size(84.dp)
                         .testTag("product_photo_${product.id}"),
                     showAthRibbon = product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isAtAth
                 )

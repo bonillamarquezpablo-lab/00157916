@@ -10,11 +10,11 @@ import androidx.compose.ui.unit.dp
  */
 val AppShapes = Shapes(
     small = RoundedCornerShape(10.dp),
-    medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(22.dp),
-    extraLarge = RoundedCornerShape(28.dp)
+    medium = RoundedCornerShape(14.dp),
+    large = RoundedCornerShape(20.dp),
+    extraLarge = RoundedCornerShape(26.dp)
 )
 
-val ProductCardShape = RoundedCornerShape(22.dp)
-val ProductImageShape = RoundedCornerShape(16.dp)
+val ProductCardShape = RoundedCornerShape(20.dp)
+val ProductImageShape = RoundedCornerShape(14.dp)
 val FloatingSurfaceShape = RoundedCornerShape(24.dp)

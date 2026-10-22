@@ -4101,10 +4101,7 @@ class WaybackPriceHistoryClient(
                         isMatchingTitleForArchivedUrl(savedTitle, archivedTitle, originalUrl)
                 val offerUrlConfirmsVariant = offerUrls.any { offerUrl ->
                     !hasExplicitVariantConflictInProductUrl(savedTitle, offerUrl) &&
-                        (
-                            isMatchingProductTitle(savedTitle, archivedTitle) ||
-                                matchesVariantDetailsConfirmedByUrl(savedTitle, archivedTitle, offerUrl)
-                            )
+                        matchesVariantDetailsConfirmedByUrl(savedTitle, archivedTitle, offerUrl)
                 }
                 // hasExplicitProductVariantConflict also flags a title that omits capacity.
                 // That is not proof of a mismatch when this exact JSON-LD offer has a URL that

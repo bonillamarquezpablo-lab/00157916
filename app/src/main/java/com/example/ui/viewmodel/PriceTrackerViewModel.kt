@@ -298,6 +298,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     /** Prevent a streaming callback and the final consolidation pass from scheduling the same staged write twice. */
     private val scheduledDiscoveryQuoteKeys =
         java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    /** Prevent duplicate current-price lookups when several archive candidates fail together. */
+    private val inFlightArchiveFailureFallbacks =
+        java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private var lastDisplayedSearchIdentity: String? = null
 
     private fun onlineSearchIdentity(provider: OnlineSearchProvider, query: String): String =
@@ -1437,8 +1440,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             )
             finishWaybackDiagnostic(
                 product.id, WaybackTraceStatus.SKIPPED,
-                "Reintento no enviado durante la pausa global. ${status}"
+                "Reintento de archivo no enviado durante la pausa global. Se intentará una búsqueda separada del precio actual si SerpApi tiene saldo. ${status}"
             )
+            viewModelScope.launch {
+                runLivePriceFallbackAfterArchiveFailure(
+                    product = product,
+                    archiveFailureReason = "Internet Archive está temporalmente limitado (HTTP 429)"
+                )
+            }
             return
         }
 
@@ -1554,7 +1563,15 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 freeHistoryStatus = "Mínimo no pudo identificar la tienda de esta oferta para buscar capturas gratuitas. No se ha gastado cuota de SerpApi.",
                 freeHistoryProductId = product.id
             )
-            finishWaybackDiagnostic(product.id, WaybackTraceStatus.FAILED, "No se generó ninguna URL de tienda válida.")
+            finishWaybackDiagnostic(product.id, WaybackTraceStatus.FAILED, "No se generó ninguna URL válida para consultar el archivo.")
+            // The historical archive has no safe URL, but the product title is still enough
+            // to attempt one separately budgeted live-price lookup. This does not call Wayback.
+            viewModelScope.launch {
+                runLivePriceFallbackAfterArchiveFailure(
+                    product = product,
+                    archiveFailureReason = "No se pudo identificar una URL archivada válida"
+                )
+            }
             return
         }
 
@@ -1572,7 +1589,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             query = product.title,
             provider = current.onlineSearchProvider,
             targetProductId = product.id,
-            forceRefresh = true
+            forceRefresh = true,
+            liveFallbackProduct = product
         )
     }
 
@@ -2131,7 +2149,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         query: String,
         provider: OnlineSearchProvider,
         targetProductId: String? = null,
-        forceRefresh: Boolean = false
+        forceRefresh: Boolean = false,
+        liveFallbackProduct: Product? = null
     ) {
         if (candidates.isEmpty()) {
             appendArchiveNotice(

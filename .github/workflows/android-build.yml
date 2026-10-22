@@ -30,6 +30,7 @@ concurrency:
   group: minimo-apk-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Keep signed APK publication tied to the exact tested main revision.
 jobs:
   build:
     # Signing material is only available for trusted code on main, never pull-request branches.

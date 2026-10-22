@@ -35,6 +35,8 @@ import com.example.data.model.PriceBadgeType
 import com.example.data.model.ProductCategory
 import com.example.data.model.Store
 import com.example.data.repository.ProductRepository
+import com.example.data.repository.ProductDiscoveryRepository
+import com.example.data.local.ProductDiscoveryEntity
 import com.example.notifications.PriceAlertScheduler
 import com.example.data.repository.UrlAnalysisResult
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -271,6 +273,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     }
 
     private val database = AppDatabase.getInstance(application)
+    private val productDiscoveryRepository = ProductDiscoveryRepository(database)
+    val pendingDiscoveries: StateFlow<List<ProductDiscoveryEntity>> =
+        productDiscoveryRepository.pendingDiscoveries.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000L),
+            emptyList()
+        )
     private val repository = ProductRepository(
         storeDao = database.storeDao(),
         productDao = database.productDao(),
@@ -1358,6 +1367,45 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
      * Search public Internet Archive captures only. This path never reads the SerpApi key,
      * checks quota, or spends a provider search credit.
      */
+    fun acceptDiscovery(discoveryId: String) {
+        if (discoveryId.isBlank()) return
+        viewModelScope.launch {
+            try {
+                val result = productDiscoveryRepository.accept(discoveryId)
+                val message = when {
+                    result == null ->
+                        "No se ha podido añadir el producto: la ficha puede haber desaparecido o su identidad ya no ser inequívoca."
+                    result.createdProduct ->
+                        "Producto añadido al catálogo. Se han importado ${result.savedObservations} punto(s) histórico(s); el precio actual sigue sin verificar."
+                    else ->
+                        "El producto ya existía. Se han incorporado ${result.savedObservations} punto(s) histórico(s) a su ficha."
+                }
+                showSnackbar(message)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                showSnackbar("No se ha podido añadir el descubrimiento. La cuarentena se conserva para volver a intentarlo.")
+            }
+        }
+    }
+
+    fun dismissDiscovery(discoveryId: String) {
+        if (discoveryId.isBlank()) return
+        viewModelScope.launch {
+            try {
+                val dismissed = productDiscoveryRepository.dismiss(discoveryId)
+                showSnackbar(
+                    if (dismissed) "Descubrimiento descartado; no se ha añadido al catálogo."
+                    else "El descubrimiento ya no está pendiente."
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                showSnackbar("No se ha podido descartar el descubrimiento.")
+            }
+        }
+    }
+
     fun searchFreeHistoricalPrices(product: Product) {
         val previousState = _uiState.value
         if (previousState.isSearchingFreeHistory) return
@@ -2062,6 +2110,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             try {
                 var savedCount = 0
+                var stagedDiscoveryObservationsCount = 0
                 var checkedCount = 0
                 var foundCount = 0
                 var capturesFoundCount = 0
@@ -2085,7 +2134,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         quote.originalUrl,
                         quote.observedAt.toString(),
                         quote.price.toString(),
-                        quote.currency.uppercase(Locale.ROOT)
+                        quote.currency.uppercase(Locale.ROOT),
+                        quote.productUrl.orEmpty(),
+                        quote.isDiscoveryCandidate.toString()
                     ).joinToString("|")
                 }
                 suspend fun persistCandidateQuotes(
@@ -2112,7 +2163,21 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     var persistenceCompleted = true
                     try {
                         for ((archiveUrl, urlQuotes) in toPersist.groupBy { it.originalUrl }) {
-                            val primaryQuotes = urlQuotes.filter {
+                            // Unknown secondary products stay quarantined. Only the user can
+                            // promote a discovery into products/price_observations.
+                            val discoveryQuotes = urlQuotes.filter { it.isDiscoveryCandidate }
+                            for (quote in discoveryQuotes) {
+                                if (productDiscoveryRepository.stageArchivedQuote(
+                                        quote = quote,
+                                        fallbackStoreName = candidate.storeName
+                                    )
+                                ) {
+                                    stagedDiscoveryObservationsCount++
+                                }
+                            }
+
+                            val knownProductQuotes = urlQuotes.filterNot { it.isDiscoveryCandidate }
+                            val primaryQuotes = knownProductQuotes.filter {
                                 it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId
                             }
                             if (primaryQuotes.isNotEmpty()) {
@@ -2124,7 +2189,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                     targetProductId = targetProductId
                                 )
                             }
-                            val secondaryQuotes = urlQuotes.filter {
+                            val secondaryQuotes = knownProductQuotes.filter {
                                 !it.targetProductId.isNullOrBlank() && it.targetProductId != targetProductId
                             }
                             for ((secondaryProductId, variantQuotes) in secondaryQuotes.groupBy { it.targetProductId!! }) {
@@ -2155,7 +2220,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         processedArchiveQuoteKeys.addAll(toPersist.map { archiveQuoteIdentity(candidate, it) })
                     }
                     val hasPrimaryProductQuote = uniqueQuotes.any {
-                        it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId
+                        !it.isDiscoveryCandidate &&
+                            (it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId)
                     }
                     if (hasPrimaryProductQuote) {
                         val targetIdentity = onlineProductIdentityKey(candidate.title)
@@ -2458,14 +2524,16 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
                 if (diagnosticProductId != null) {
                     val persistenceStatus = when {
-                        savedCount > 0 || foundCount > 0 -> WaybackTraceStatus.PASSED
+                        savedCount > 0 || foundCount > 0 || stagedDiscoveryObservationsCount > 0 -> WaybackTraceStatus.PASSED
                         else -> WaybackTraceStatus.SKIPPED
                     }
                     val persistenceDetail = when {
                         savedCount > 0 ->
-                            "Guardado completado: ${savedCount} nuevo(s) punto(s) de precio histórico en la base local."
+                            "Guardado completado: $savedCount punto(s) nuevo(s) en el histórico del catálogo."
+                        stagedDiscoveryObservationsCount > 0 ->
+                            "Radar de Descubrimientos: $stagedDiscoveryObservationsCount observación(es) de productos nuevos guardadas en cuarentena; siguen fuera del catálogo principal."
                         foundCount > 0 ->
-                            "Se verificaron ${foundCount} punto(s); no se añadieron duplicados porque los registros ya existían."
+                            "Se verificaron $foundCount punto(s); no se añadieron duplicados porque los registros ya existían."
                         else ->
                             "No se guardaron registros: ninguna captura produjo un precio verificado."
                     }
@@ -2627,15 +2695,22 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         }
                     }
                 }
+                val discoveryNotice = if (stagedDiscoveryObservationsCount > 0) {
+                    " Radar de Descubrimientos: $stagedDiscoveryObservationsCount observación(es) de productos nuevos quedaron en cuarentena, sin crear fichas en Mercado."
+                } else ""
                 val noticeWithDiagnostics = if (diagnosticLabels.isNotEmpty() && skippedCount != candidates.size) {
-                    "$notice\nDiagnóstico Wayback: ${diagnosticLabels.joinToString(" · ")}."
-                } else notice
+                    "$notice$discoveryNotice\nDiagnóstico Wayback: ${diagnosticLabels.joinToString(" · ")}."
+                } else "$notice$discoveryNotice"
                 appendArchiveNotice(query, provider, noticeWithDiagnostics, targetProductId)
                 if (diagnosticProductId != null) {
                     when {
                         savedCount > 0 -> finishWaybackDiagnostic(
                             diagnosticProductId, WaybackTraceStatus.PASSED,
                             "$savedCount precio(s) histórico(s) guardado(s) en la base de datos local."
+                        )
+                        stagedDiscoveryObservationsCount > 0 -> finishWaybackDiagnostic(
+                            diagnosticProductId, WaybackTraceStatus.PASSED,
+                            "$stagedDiscoveryObservationsCount observación(es) de productos nuevos guardadas en el Radar; no se han añadido a Mercado automáticamente."
                         )
                         foundCount > 0 && selectedProductRefreshed -> finishWaybackDiagnostic(
                             diagnosticProductId, WaybackTraceStatus.PASSED,

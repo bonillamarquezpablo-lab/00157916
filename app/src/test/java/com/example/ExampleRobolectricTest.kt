@@ -2622,6 +2622,30 @@ class ExampleRobolectricTest {
                 )
             )
 
+            val googleSearchOnlyOffer = results.first().copy(
+                price = 229.49,
+                storeName = "Google Shopping",
+                sourceUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=Sony+WH-1000XM5"
+            )
+            assertTrue(
+                "The Google Shopping fallback should remain visible for the user to continue the search",
+                repository.filterOnlineSearchResults(
+                    listOf(googleSearchOnlyOffer),
+                    "Sony WH-1000XM5"
+                ).single().isGoogleShoppingSearchFallback
+            )
+            assertEquals(
+                "A generic Shopping search is not proof of a seller quote and must not be persisted",
+                0,
+                repository.recordOnlineSearchResults(
+                    listOf(googleSearchOnlyOffer),
+                    sourceType = "GOOGLE_SHOPPING",
+                    searchQuery = "Sony WH-1000XM5"
+                )
+            )
+            assertTrue("An unlinked search fallback must not create a catalog product", database.productDao().getAllProductsSnapshot().isEmpty())
+            assertEquals(0, database.priceObservationDao().getVerifiedObservationCount())
+
             val suspiciousRedmi = com.example.data.remote.SerpApiShoppingResult(
                 title = "Xiaomi Redmi 17 5G 4GB 128GB Negro",
                 price = 9.90,

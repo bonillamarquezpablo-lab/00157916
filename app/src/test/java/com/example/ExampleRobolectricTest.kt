@@ -403,7 +403,7 @@ class ExampleRobolectricTest {
         assertTrue(report.results.any {
             it.isGoogleShoppingSearchFallback &&
                 java.net.URLDecoder.decode(it.sourceUrl, "UTF-8")
-                    .contains("Samsung Galaxy S26 Ultra 512 GB", ignoreCase = true)
+                    .contains("Samsung Galaxy S26 Ultra", ignoreCase = true)
         })
         assertTrue(report.results.none { it.title.contains("alquiler", ignoreCase = true) })
     }

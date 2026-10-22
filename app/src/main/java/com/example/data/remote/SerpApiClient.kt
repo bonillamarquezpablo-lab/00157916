@@ -1544,6 +1544,10 @@ class SerpApiClient(
     }.getOrDefault(false)
 
     private fun isPlausibleProductMatch(requested: String, returned: String): Boolean {
+        // Similar-looking Xiaomi names are not interchangeable: Mi 10 Pro is not
+        // Redmi Note 10 Pro, and Mi 10 Pro is not Mi 11 Pro.
+        if (hasXiaomiModelMismatch(requested, returned)) return false
+
         // "Teclado Hall"/"teclado efecto Hall" is a technology search, not a literal
         // two-word product name. Match Hall/HE/TMR keyboards without accepting "Hall of Fame".
         if (isHallEffectKeyboardSearch(requested)) return isHallEffectKeyboardResult(returned)

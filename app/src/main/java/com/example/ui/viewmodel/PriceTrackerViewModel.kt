@@ -1604,6 +1604,48 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         startOnlineSearch(current.onlineSearchProvider, bypassCache = true)
     }
 
+    /**
+     * Explain only results that are actually hidden from the live list.
+     *
+     * The repository's stricter diagnostics also identify offers that are visible but not suitable
+     * for trusted price history (e.g. a Google Shopping query fallback or a price above the
+     * historical ceiling). Those must not be misleadingly presented as discarded products.
+     */
+    private fun diagnoseLiveSearchHiddenOffers(
+        candidates: List<SerpApiShoppingResult>,
+        visibleResults: List<SerpApiShoppingResult>,
+        query: String
+    ): List<RejectedOnlineOffer> {
+        val repositoryRejected = repository.diagnoseOnlineSearchRejections(candidates, query)
+        fun parseDiagnosticPrice(label: String): Double? =
+            Regex("""\d+(?:[.,]\d+)?""").find(label)
+                ?.value
+                ?.replace(',', '.')
+                ?.toDoubleOrNull()
+
+        return repositoryRejected.filterNot { rejected ->
+            val rejectedPrice = parseDiagnosticPrice(rejected.priceLabel)
+            visibleResults.any { visible ->
+                visible.title.equals(rejected.title, ignoreCase = true) &&
+                    (rejectedPrice == null || kotlin.math.abs(visible.price - rejectedPrice) < 0.011)
+            }
+        }
+    }
+
+    /**
+     * Historical trust rules are intentionally stricter than live-search visibility. State this
+     * distinction plainly rather than implying the remaining priced offers disappeared.
+     */
+    private fun liveHistoryEligibilityNotice(
+        visibleCount: Int,
+        historyCandidateCount: Int
+    ): String =
+        if (visibleCount > historyCandidateCount) {
+            "$visibleCount ofertas se mantienen en la búsqueda en vivo; $historyCandidateCount pasan los filtros previos del histórico. Las demás siguen visibles y no se usan como precios históricos confirmados."
+        } else {
+            ""
+        }
+
     /** Ignore late results when the user edits the query during an in-flight request. */
     private fun isOnlineSearchStillCurrent(query: String, provider: OnlineSearchProvider): Boolean {
         val current = _uiState.value

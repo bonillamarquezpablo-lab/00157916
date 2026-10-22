@@ -637,6 +637,10 @@ class ProductRepository(
         // and wheel listings missing requested fitment dimensions stay visible in the search UI,
         // but are not added to Mercado or its price history.
         val eligible = filterOnlineSearchResults(results, searchQuery)
+            // A title-specific Google Shopping query is useful for opening the result, but it
+            // does not prove which seller offers that price. Show it in live search without
+            // inventing a verified store price or attaching it to persistent history.
+            .filterNot { it.isGoogleShoppingSearchFallback }
             .filterNot { it.isSecondHand || it.isFitmentUnverified || it.isCategoryUnverified }
             // Marketplace accessory matches remain visible for inspection, but must never be
             // persisted as the searched product. Explicit accessory searches are still supported.

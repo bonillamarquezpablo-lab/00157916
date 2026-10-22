@@ -1727,6 +1727,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 // seller URL or price evidence fails the stricter history policy.
                                 val visible = repository.filterVisibleLiveSearchResults(cachedResults, query)
                                 val historyCandidates = repository.filterOnlineSearchResults(visible, query)
+                                    .filterNot { it.isSearchFallbackDestination }
                                 val discarded = (cachedReport.discardedOffers +
                                     diagnoseLiveSearchHiddenOffers(cachedResults, visible, query))
                                     .distinctBy { it.provider + "|" + it.title + "|" + it.priceLabel + "|" + it.reason }
@@ -1871,6 +1872,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         val rawResults = providerResults
                         val visible = repository.filterVisibleLiveSearchResults(rawResults, query)
                         val eligibleForHistory = repository.filterOnlineSearchResults(visible, query)
+                                    .filterNot { it.isSearchFallbackDestination }
                         val repositoryDiscarded = diagnoseLiveSearchHiddenOffers(rawResults, visible, query)
                         val rejected = (providerDiscardedOffers + repositoryDiscarded)
                             .distinctBy { "${it.provider}|${it.title}|${it.priceLabel}|${it.reason}" }

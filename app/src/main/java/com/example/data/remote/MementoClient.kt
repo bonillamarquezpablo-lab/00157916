@@ -372,8 +372,8 @@ class MementoClient(
             .addQueryParameter("matchType", "exact")
             .addQueryParameter("from", formatter.format(Date(earliest)))
             .addQueryParameter("to", formatter.format(Date(now)))
-            .addQueryParameter("filter", "status:200")
-            .addQueryParameter("filter", "mime:text/html")
+            .addQueryParameter("filter", "statuscode:200")
+            .addQueryParameter("filter", "mimetype:text/html")
             .addQueryParameter("resolveRevisits", "true")
             .addQueryParameter("collapse", "timestamp:6")
             // Prefer recent indexed rows, then spread the bounded set over the requested history

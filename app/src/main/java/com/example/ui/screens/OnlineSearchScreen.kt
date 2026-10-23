@@ -718,6 +718,9 @@ fun OnlineSearchScreen(
                 } else {
                     filteredGroups
                 }
+                // Calculate family header counts once, not by rescanning every result for every
+                // family card. Broad Shopping responses can contain dozens of distinct families.
+                val familySizes = groupsToShow.groupingBy { it.familyKey }.eachCount()
                 if (showConsoleModelPicker && selectedBucket != null && selectedBucket.groups.isEmpty()) {
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -761,7 +764,7 @@ fun OnlineSearchScreen(
                     val previousFamily = groupsToShow.getOrNull(index - 1)?.familyKey
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (previousFamily != displayGroup.familyKey) {
-                            val familySize = groupsToShow.count { it.familyKey == displayGroup.familyKey }
+                            val familySize = familySizes[displayGroup.familyKey] ?: 1
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(14.dp),
@@ -863,9 +866,9 @@ private fun ShoppingResultCard(
         !it.isSuspiciousPrice && !it.isFitmentUnverified && !it.isCategoryUnverified
     }
     Card(
-        modifier = Modifier.fillMaxWidth().then(
-            if (onOpenProduct == null) Modifier else Modifier.clickable(onClick = onOpenProduct)
-        ),
+        modifier = Modifier.fillMaxWidth()
+            .testTag("online-search-product-card")
+            .then(if (onOpenProduct == null) Modifier else Modifier.clickable(onClick = onOpenProduct)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {

@@ -260,4 +260,7 @@ interface PriceObservationDao {
     @Query("SELECT COUNT(*) FROM price_observations WHERE productId = :productId")
     suspend fun getObservationCount(productId: String): Int
 
+    @Query("SELECT DISTINCT productId FROM price_observations")
+    suspend fun getAllProductIdsWithObservations(): List<String>
+
 }

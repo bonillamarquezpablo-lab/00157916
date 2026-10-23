@@ -20,6 +20,9 @@ interface TrackedProductDao {
     @Query("SELECT * FROM tracked_products WHERE productId = :productId LIMIT 1")
     suspend fun getById(productId: String): TrackedProductEntity?
 
+    @Query("SELECT productId FROM tracked_products")
+    suspend fun getAllTrackedProductIds(): List<String>
+
     @Query("UPDATE tracked_products SET targetAlertPrice = :targetPrice WHERE productId = :productId")
     suspend fun updateTargetPrice(productId: String, targetPrice: Double?)
 

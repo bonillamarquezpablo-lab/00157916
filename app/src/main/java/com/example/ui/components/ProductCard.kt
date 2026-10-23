@@ -136,7 +136,11 @@ fun ProductCard(
                                 .padding(horizontal = 10.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = if (product.isPriceVerified) product.currentStore.name else "Sin precio verificado",
+                                text = when {
+                                    product.isPriceVerified -> product.currentStore.name
+                                    product.isUnverifiedLiveListing -> "Listado sin confirmar"
+                                    else -> "Sin precio verificado"
+                                },
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp,
                                 maxLines = 1,
@@ -236,6 +240,7 @@ fun ProductCard(
                             com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT -> product.currentPrice
                             com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION ->
                                 if (!product.isPriceVerified) product.savedHistoricalPrice else product.currentPrice
+                            com.example.data.model.PriceDisplayStatus.UNVERIFIED_LIVE_LISTING -> product.currentPrice
                             com.example.data.model.PriceDisplayStatus.DEMONSTRATION -> null
                         }
                         Text(
@@ -293,13 +298,15 @@ fun ProductCard(
                             product.savedHistoricalPriceSource.ifBlank { "historial archivado" }
                         } else product.priceSource.ifBlank { "buscador online" }
                         Text(
-                            text = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION) {
-                                "Fuente guardada: $savedSource · precio no actual."
-                            } else {
-                                "Fuente: $savedSource · confirma precio final y stock."
+                            text = when (product.priceDisplayStatus) {
+                                com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION ->
+                                    "Fuente guardada: $savedSource · precio no actual."
+                                com.example.data.model.PriceDisplayStatus.UNVERIFIED_LIVE_LISTING ->
+                                    "Precio listado sin confirmar · vendedor, stock y envío pendientes."
+                                else -> "Fuente: $savedSource · confirma precio final y stock."
                             },
                             fontSize = 10.sp,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

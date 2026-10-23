@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -45,6 +46,42 @@ interface ProductDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(product: ProductEntity)
+
+    /** Inserts a live-search catalogue placeholder without overwriting a concurrently saved product. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(product: ProductEntity): Long
+
+    /**
+     * Atomically update a provisional search ficha only while it is still unverified,
+     * untracked and has no price observations. This closes the race between the earlier
+     * batched safety checks and a user saving/verifying the same product concurrently.
+     */
+    @Query(
+        "UPDATE products SET title = :title, brand = :brand, category = :category, " +
+            "currentPrice = :currentPrice, athMinPrice = :athMinPrice, athMinDate = :athMinDate, " +
+            "athMinStore = :athMinStore, athMaxPrice = :athMaxPrice, avg90dPrice = :avg90dPrice, " +
+            "currentStoreId = :currentStoreId, storeUrl = :storeUrl, imageUrl = :imageUrl, " +
+            "googleProductId = :googleProductId " +
+            "WHERE id = :productId AND isPriceVerified = 0 " +
+            "AND NOT EXISTS (SELECT 1 FROM tracked_products WHERE productId = :productId) " +
+            "AND NOT EXISTS (SELECT 1 FROM price_observations WHERE productId = :productId)"
+    )
+    suspend fun updateUnverifiedLiveSearchCandidate(
+        productId: String,
+        title: String,
+        brand: String,
+        category: String,
+        currentPrice: Double,
+        athMinPrice: Double,
+        athMinDate: String,
+        athMinStore: String,
+        athMaxPrice: Double,
+        avg90dPrice: Double,
+        currentStoreId: String,
+        storeUrl: String,
+        imageUrl: String?,
+        googleProductId: String?
+    ): Int
 
     @Query("UPDATE products SET currentPrice = :newPrice, athMinPrice = :athMin, athMinDate = :athDate, athMinStore = :athStore WHERE id = :productId")
     suspend fun updatePriceDrop(productId: String, newPrice: Double, athMin: Double, athDate: String, athStore: String)

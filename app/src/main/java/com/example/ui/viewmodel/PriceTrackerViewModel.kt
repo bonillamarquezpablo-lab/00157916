@@ -2,6 +2,7 @@ package com.example.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
@@ -558,7 +559,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 product.isPriceVerified ||
                     product.isTracked ||
                     product.priceHistory.isNotEmpty() ||
-                    product.savedHistoricalPrice != null
+                    product.savedHistoricalPrice != null ||
+                    product.isUnverifiedLiveListing
             }
             .filter { product ->
                 // Category filter
@@ -1353,6 +1355,26 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         if (identityKey.isBlank()) return
         viewModelScope.launch {
             try {
+                val current = _uiState.value
+                val selectedOffers = current.onlineSearchResults.filter { offer ->
+                    onlineProductIdentityKey(offer.title) == identityKey
+                }
+                if (selectedOffers.isNotEmpty()) {
+                    try {
+                        withContext(Dispatchers.IO) {
+                            repository.ensureVisibleOnlineSearchProducts(
+                                results = selectedOffers,
+                                searchQuery = selectedOffers.first().title,
+                                allowAccessories = true
+                            )
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        // A transient save failure must not prevent opening a ficha that already
+                        // exists in Room. The resolution below remains the source of truth.
+                    }
+                }
                 val product = withTimeout(10_000L) {
                     repository.awaitProductForOnlineIdentity(identityKey)
                 }
@@ -1911,6 +1933,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             ""
         }
 
+    private fun onlineCatalogueNotice(insertedProducts: Int): String =
+        if (insertedProducts > 0) {
+            "$insertedProducts ficha(s) de catálogo guardada(s) o recuperada(s) en Mercado. Los importes sin enlace directo quedan marcados como no verificados y no se añaden al histórico."
+        } else {
+            ""
+        }
+
     /** Ignore late results when the user edits the query during an in-flight request. */
     private fun isOnlineSearchStillCurrent(query: String, provider: OnlineSearchProvider): Boolean {
         val current = _uiState.value
@@ -2010,6 +2039,19 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 repository.recordOnlineSearchResults(cachedHistoryCandidates, provider.name, query)
                             }
                         } else 0
+                        val newCatalogueProducts = try {
+                            withContext(Dispatchers.IO) {
+                                repository.ensureVisibleOnlineSearchProducts(visibleCachedResults, query)
+                            }
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            Log.w("PriceTrackerViewModel", "Could not save online-search candidates from cache.", error)
+                            // The live result view must remain usable even if Room cannot save a candidate.
+                            // A card tap will retry the same safe, non-destructive persistence path.
+                            0
+                        }
+                        val catalogueNotice = onlineCatalogueNotice(newCatalogueProducts)
                         val historyNotice = if (cachedHistoryCandidates.isNotEmpty()) {
                             onlineHistoryNotice(savedObservations, cachedHistoryCandidates.size)
                         } else ""
@@ -2019,7 +2061,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         )
                         val filterNotice = onlineFilterNotice(cachedDiscarded)
                         val status = listOf(
-                            base, queryOptimizationNotice, cacheNotice, filterNotice, historyNotice, eligibilityNotice
+                            base, queryOptimizationNotice, cacheNotice, filterNotice,
+                            historyNotice, catalogueNotice, eligibilityNotice
                         ).map { it.trim() }.filter { it.isNotBlank() }.joinToString("\n\n")
                         if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
                         lastDisplayedSearchIdentity = onlineSearchIdentity(provider, query)
@@ -2149,6 +2192,18 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             repository.recordOnlineSearchResults(historyCandidates, provider.name, query)
                         }
                     } else 0
+                    val newCatalogueProducts = try {
+                        withContext(Dispatchers.IO) {
+                            repository.ensureVisibleOnlineSearchProducts(results, query)
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        Log.w("PriceTrackerViewModel", "Could not save online-search candidates from live results.", error)
+                        // Never discard valid live results just because catalogue persistence failed.
+                        // Tapping a visible result attempts to create/resume its ficha separately.
+                        0
+                    }
 
                     // Cache the merged snapshot only after the supplement succeeds. Otherwise retain
                     // the primary raw response so accepted/rejected offers can be reclassified.
@@ -2218,9 +2273,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     val historyNote = if (historyCandidates.isNotEmpty()) {
                         onlineHistoryNotice(savedObservations, historyCandidates.size)
                     } else ""
+                    val catalogueNote = onlineCatalogueNotice(newCatalogueProducts)
                     val eligibilityNotice = liveHistoryEligibilityNotice(results.size, historyCandidates.size)
                     val freshnessNote = "Búsqueda recién realizada; la antigüedad indica cuándo se capturaron estos resultados, no una comprobación en tiempo real del precio de la tienda."
-                    val message = listOf(base, queryOptimizationNotice, freshnessNote, coverageNote, quotaNote, gameSupplementNote, filterNote, historyNote, eligibilityNotice)
+                    val message = listOf(base, queryOptimizationNotice, freshnessNote, coverageNote, quotaNote, gameSupplementNote, filterNote, historyNote, catalogueNote, eligibilityNotice)
                         .map { it.trim() }
                         .filter { it.isNotBlank() }
                         .joinToString("\n\n")

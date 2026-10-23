@@ -715,11 +715,16 @@ class ProductRepository(
             // or a historical observation.
             val safeDirectOffer = filterOnlineSearchResults(group.offers, searchQuery)
                 .filterNot { it.isSuspiciousPrice || it.isSearchFallbackDestination }
-                .minByOrNull { it.price }
+                .filter { isPlausibleHistoryPrice(it.title, it.price / (it.wheelSetCount ?: 1)) }
+                .minByOrNull { it.price / (it.wheelSetCount ?: 1) }
             val fallbackDisplayOffer = group.offers
-                .filter { it.price.isFinite() && it.price > 0.0 && !it.isRentalOrMonthly }
-                .minByOrNull { it.price }
+                .filter {
+                    it.price.isFinite() && it.price > 0.0 && !it.isRentalOrMonthly &&
+                        isPlausibleHistoryPrice(it.title, it.price / (it.wheelSetCount ?: 1))
+                }
+                .minByOrNull { it.price / (it.wheelSetCount ?: 1) }
             val displayOffer = safeDirectOffer ?: fallbackDisplayOffer
+            val displayPrice = displayOffer?.let { it.price / (it.wheelSetCount ?: 1) }
             val navigationUrl = safeDirectOffer?.sourceUrl
                 ?: fallbackDisplayOffer?.takeIf { it.isSearchFallbackDestination }?.sourceUrl.orEmpty()
             val bestKnownStore = safeDirectOffer?.let {
@@ -734,7 +739,7 @@ class ProductRepository(
                     brand = inferProductBrand(group.title),
                     category = inferProductCategory(group.title, searchQuery).name,
                     // This is a listed amount only. No current-price observation is written below.
-                    currentPrice = displayOffer?.price ?: 0.0,
+                    currentPrice = displayPrice ?: 0.0,
                     athMinPrice = 0.0,
                     athMinDate = PENDING_VERIFICATION_DATE_LABEL,
                     athMinStore = "",
@@ -761,7 +766,7 @@ class ProductRepository(
                     category = if (existingProduct.category == ProductCategory.ALL.name) {
                         inferProductCategory(group.title, searchQuery).name
                     } else existingProduct.category,
-                    currentPrice = displayOffer?.price ?: existingProduct.currentPrice,
+                    currentPrice = displayPrice ?: existingProduct.currentPrice,
                     athMinPrice = 0.0,
                     athMinDate = PENDING_VERIFICATION_DATE_LABEL,
                     athMinStore = "",
@@ -789,11 +794,28 @@ class ProductRepository(
                     madeAvailable++
                 }
             } else {
-                // UPDATE preserves existing Room relations; REPLACE can delete/reinsert the row
-                // and trigger foreign-key cascades even though the product itself still exists.
-                productDao.update(candidate)
-                currentEntities[existingIndex] = candidate
-                madeAvailable++
+                // A conditional SQL update protects a row that became tracked, verified or observed
+                // after the batched snapshot was read above.
+                val changedRows = productDao.updateUnverifiedLiveSearchCandidate(
+                    productId = candidate.id,
+                    title = candidate.title,
+                    brand = candidate.brand,
+                    category = candidate.category,
+                    currentPrice = candidate.currentPrice,
+                    athMinPrice = candidate.athMinPrice,
+                    athMinDate = candidate.athMinDate,
+                    athMinStore = candidate.athMinStore,
+                    athMaxPrice = candidate.athMaxPrice,
+                    avg90dPrice = candidate.avg90dPrice,
+                    currentStoreId = candidate.currentStoreId,
+                    storeUrl = candidate.storeUrl,
+                    imageUrl = candidate.imageUrl,
+                    googleProductId = candidate.googleProductId
+                )
+                if (changedRows > 0) {
+                    currentEntities[existingIndex] = candidate
+                    madeAvailable++
+                }
             }
         }
         return madeAvailable

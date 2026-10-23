@@ -19,6 +19,29 @@ import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
 /**
+ * A single archived point proves that one capture is useful, but it is not yet a meaningful
+ * trend. Ask the independent archive for help when fewer than three distinct UTC dates exist.
+ */
+internal fun hasSufficientHistoricalCoverage(
+    quotes: Iterable<ArchivedPriceQuote>,
+    minimumDistinctDates: Int = 3
+): Boolean {
+    if (minimumDistinctDates <= 0) return true
+    return quotes.asSequence()
+        .map { Math.floorDiv(it.observedAt, WaybackPriceHistoryClient.DAY_MS) }
+        .distinct()
+        .take(minimumDistinctDates)
+        .count() >= minimumDistinctDates
+}
+
+internal fun shouldAttemptMementoFallback(
+    alreadyAttempted: Boolean,
+    hasEligibleDirectUrl: Boolean,
+    hasSufficientHistory: Boolean,
+    rateLimited: Boolean
+): Boolean = !alreadyAttempted && hasEligibleDirectUrl && !hasSufficientHistory && !rateLimited
+
+/**
  * Independent history source for Arquivo.pt's native Memento TimeMap API.
  *
  * This client is a bounded fallback to Wayback, not a price provider on its own: every retrieved

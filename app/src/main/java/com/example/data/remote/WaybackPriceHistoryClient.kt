@@ -4082,8 +4082,7 @@ class WaybackPriceHistoryClient(
                 // capacity and colour conflicts. Avoid a second parser with different normalization,
                 // which could reject an otherwise exact same-SKU Offer URL.
                 val pageConfirmsVariant =
-                    !hasExplicitVariantConflictInProductUrl(savedTitle, originalUrl) &&
-                        isMatchingTitleForArchivedUrl(savedTitle, archivedTitle, originalUrl)
+                    matchesVariantDetailsConfirmedByUrl(savedTitle, archivedTitle, originalUrl)
                 val offerUrlConfirmsVariant = offerUrls.any { offerUrl ->
                     !hasExplicitVariantConflictInProductUrl(savedTitle, offerUrl) &&
                         matchesVariantDetailsConfirmedByUrl(savedTitle, archivedTitle, offerUrl)

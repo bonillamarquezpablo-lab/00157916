@@ -783,10 +783,19 @@ private val TOY_LISTING_PATTERN = Regex(
 
 fun isToyListingTitle(title: String): Boolean = TOY_LISTING_PATTERN.containsMatchIn(title)
 
+private val REPLACEMENT_ACCESSORY_LISTING_PATTERN = Regex(
+    """(?i)\b(boquillas?|nozzles?|replacement\s+parts?|spare\s+parts?|difusores?|diffusers?|recambios?|repuestos?|cabezales?\s+de\s+repuesto|cepillos?\s+de\s+repuesto|filtros?\s+de\s+repuesto)\b"""
+)
+
+/** True when a listing is specifically a replacement part rather than the complete product. */
+fun isReplacementPartListingTitle(title: String): Boolean =
+    REPLACEMENT_PART_LISTING_PATTERN.containsMatchIn(title) ||
+        REPLACEMENT_ACCESSORY_LISTING_PATTERN.containsMatchIn(title)
+
 /** Shared classification keeps UI filtering, diagnostics and price-history rules consistent. */
 fun isAccessoryListingTitle(title: String): Boolean =
     ACCESSORY_LISTING_PATTERN.containsMatchIn(title) ||
-        REPLACEMENT_PART_LISTING_PATTERN.containsMatchIn(title)
+        isReplacementPartListingTitle(title)
 
 /** Accessory queries are intentional accessory searches and should not be re-labelled as accessories. */
 fun isAccessorySearchQuery(query: String): Boolean =

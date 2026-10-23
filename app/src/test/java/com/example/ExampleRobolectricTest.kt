@@ -467,7 +467,7 @@ class ExampleRobolectricTest {
                     .first { it.id == productId }
             }
             assertFalse("A generic Shopping listing must not verify the product price", product.isPriceVerified)
-            assertNull("An unverified listing must never be promoted to saved historical price", product.savedHistoricalPrice)
+            assertEquals("An unverified listing must never be promoted to saved historical price", null, product.savedHistoricalPrice)
             assertTrue("A listing quote must not enter the confirmed historical graph", product.priceHistory.isEmpty())
         } finally {
             database.close()

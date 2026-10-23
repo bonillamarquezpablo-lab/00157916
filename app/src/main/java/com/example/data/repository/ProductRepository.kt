@@ -688,6 +688,10 @@ class ProductRepository(
         if (visible.isEmpty()) return 0
 
         val currentEntities = productDao.getAllProductsSnapshot().toMutableList()
+        // Load these protections once per search. Doing a DAO query for every result card made
+        // large Shopping responses much slower on mid-range phones.
+        val trackedProductIds = trackedDao.getAllTrackedProductIds().toSet()
+        val productIdsWithObservations = priceObservationDao.getAllProductIdsWithObservations().toSet()
         var madeAvailable = 0
         for (group in groupOnlineShoppingResults(visible)) {
             val existingIndex = currentEntities.indexOfFirst {
@@ -699,8 +703,8 @@ class ProductRepository(
             // never replace their price, URL, identity, or history with a generic Shopping result.
             if (existingProduct != null) {
                 if (existingProduct.isPriceVerified ||
-                    trackedDao.getById(existingProduct.id) != null ||
-                    priceObservationDao.getObservationCount(existingProduct.id) > 0
+                    existingProduct.id in trackedProductIds ||
+                    existingProduct.id in productIdsWithObservations
                 ) continue
             }
 

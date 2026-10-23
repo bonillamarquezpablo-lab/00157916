@@ -47,4 +47,16 @@ class SerpApiProductMatchTest {
         assertFalse(isBroadDysonHairToolsQueryMatch("Dyson Corrale", "Dyson Airwrap i.d. Curly + Coily"))
         assertFalse(isBroadDysonHairToolsQueryMatch("iPhone 15", "Dyson Supersonic"))
     }
+
+    @Test
+    fun toyTitlesHandleAccentsAndCompleteHairToolsAreNotMisclassifiedAsSpareParts() {
+        assertTrue(isToyListingTitle("Secador Dyson de juguete para niños"))
+        assertTrue(isToyListingTitle("Figura de acción Dyson de imitación"))
+        assertTrue(isToyListingTitle("Juego de imitación de peluquería"))
+        assertFalse(isAccessoryListingTitle("Dyson Supersonic secador con boquilla y difusor incluidos"))
+        assertFalse(isReplacementPartListingTitle("Dyson Airwrap multistyler con accesorios incluidos"))
+        assertFalse(isAccessoryListingTitle("Dyson Corrale con accesorios incluidos"))
+        assertTrue(isReplacementPartListingTitle("Boquilla para secador Dyson Supersonic"))
+        assertTrue(isAccessoryListingTitle("Dyson Supersonic diffuser attachment"))
+    }
 }

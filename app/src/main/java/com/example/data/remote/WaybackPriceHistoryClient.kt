@@ -77,6 +77,24 @@ data class WaybackBackfillResult(
 )
 
 /**
+ * Avoid treating one successful archive capture as a complete historical lookup.
+ * A usable series requires at least three distinct UTC dates spanning 90 days; otherwise
+ * the caller should try bounded alternate URL routes while preserving any valid partial quotes.
+ */
+internal fun hasSufficientPrimaryWaybackSeries(
+    quotes: Iterable<ArchivedPriceQuote>
+): Boolean {
+    val distinctUtcDays = quotes.asSequence()
+        .filter { it.targetProductId.isNullOrBlank() && !it.isDiscoveryCandidate }
+        .map { it.observedAt / 86_400_000L }
+        .distinct()
+        .sorted()
+        .toList()
+    return distinctUtcDays.size >= 3 &&
+        distinctUtcDays.last() - distinctUtcDays.first() >= 90L
+}
+
+/**
  * A valid CDX time series followed by timeouts for every HTML download is a transport failure,
  * not evidence that the archive has no captures. Avoid broad Availability/CDX probes in the same
  * lookup; let the caller use the independent Memento source and retry Wayback after its cooldown.
@@ -472,16 +490,18 @@ class WaybackPriceHistoryClient(
                 )
                 return@serializedArchiveLookup exactResult
             }
-            // If exact URL already yields a usable series, avoid the more expensive prefix scan.
-            val exactHasPrimaryVerifiedPrice = exactResult.quotes.any {
-                it.targetProductId.isNullOrBlank() && !it.isDiscoveryCandidate
-            }
-            if (exactHasPrimaryVerifiedPrice) {
-                rememberAttempt(attempt, now, hasQuotes = true, failed = false)
-                // The exact CDX path already verified the requested product. The prefix scan
-                // is an expensive recovery path for missed slugs, not a reason to wait another
-                // 5–7 seconds after the selected product is already confirmed.
-                return@serializedArchiveLookup exactResult.copy(diagnosticCodes = emptySet())
+            // One verified price is useful, but it is not a historical series. Continue to
+            // the bounded prefix route until the exact URL has enough dated evidence to support
+            // a historical view. This is what lets alternate slashes/locale paths add missing
+            // dates instead of silently returning a single point as the complete result.
+            if (hasSufficientPrimaryWaybackSeries(exactResult.quotes)) {
+                rememberAttempt(
+                    attempt,
+                    now,
+                    hasQuotes = true,
+                    failed = false
+                )
+                return@serializedArchiveLookup exactResult
             }
 
             // Prefix matching is a fallback for alternate slashes, locale paths and canonical URL variants.
@@ -508,18 +528,18 @@ class WaybackPriceHistoryClient(
                 capturesFound = maxOf(exactResult.capturesFound, prefixResult.capturesFound),
                 capturesChecked = exactResult.capturesChecked + prefixResult.capturesChecked,
                 available = exactResult.available || prefixResult.available,
-                requestFailed = mergedQuotes.isEmpty() && (exactResult.requestFailed || prefixResult.requestFailed),
-                diagnosticCodes = if (mergedQuotes.isNotEmpty()) {
-                    emptySet()
-                } else {
-                    exactResult.diagnosticCodes + prefixResult.diagnosticCodes
-                }
+                // Keep usable partial quotes even when one request failed, but don't erase the
+                // transport failure: the UI needs it to explain why the series may be incomplete.
+                requestFailed = exactResult.requestFailed || prefixResult.requestFailed,
+                diagnosticCodes = exactResult.diagnosticCodes + prefixResult.diagnosticCodes
             )
+            val hasSufficientSeries = hasSufficientPrimaryWaybackSeries(merged.quotes)
+            val incompleteAfterTransportFailure = merged.requestFailed && !hasSufficientSeries
             rememberAttempt(
                 attempt,
                 now,
                 hasQuotes = merged.quotes.isNotEmpty(),
-                failed = merged.requestFailed,
+                failed = incompleteAfterTransportFailure || (merged.quotes.isEmpty() && merged.requestFailed),
                 rateLimited = merged.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
             )
             merged
@@ -2884,16 +2904,14 @@ class WaybackPriceHistoryClient(
         val hadQuotes = preferences.getBoolean("${key}_has_quotes", false)
         val failed = preferences.getBoolean("${key}_failed", false)
         val rateLimited = preferences.getBoolean("${key}_rate_limited", false)
-        // Failed lookups are cached briefly. For an explicit HTTP 429, the global Retry-After
-        // cooldown is authoritative; let the same product retry as soon as that pause expires.
-        if (failed && !hadQuotes && rateLimited) {
+        // An incomplete lookup may have returned one valid quote while its alternate route timed
+        // out. Failure takes precedence over "had quotes" so that partial history retries after
+        // the short failure cooldown instead of being cached as a complete series for 30 days.
+        if (failed && rateLimited) {
             return preferences.getLong(KEY_RATE_LIMIT_UNTIL, 0L) > now
         }
-        val retryInterval = when {
-            hadQuotes -> RETRY_INTERVAL_MS
-            failed -> FAILURE_RETRY_INTERVAL_MS
-            else -> NEGATIVE_RETRY_INTERVAL_MS
-        }
+        if (failed) return now - lastAttempt < FAILURE_RETRY_INTERVAL_MS
+        val retryInterval = if (hadQuotes) RETRY_INTERVAL_MS else NEGATIVE_RETRY_INTERVAL_MS
         return now - lastAttempt < retryInterval
     }
 

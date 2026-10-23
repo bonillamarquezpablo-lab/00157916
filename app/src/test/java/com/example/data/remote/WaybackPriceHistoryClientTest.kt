@@ -3894,8 +3894,8 @@ class WaybackPriceHistoryClientTest {
             client.computeRateLimitUntil("0", now)
         )
         assertEquals(
-            "Unreasonable Retry-After values are capped at 24 hours",
-            now + 24L * 60L * 60L * 1000L,
+            "Unreasonable Retry-After values are capped at six hours",
+            now + 6L * 60L * 60L * 1000L,
             client.computeRateLimitUntil("999999", now)
         )
         assertEquals(
@@ -3906,7 +3906,7 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun repeatedRateLimitsIncreaseCooldownAndRemainCappedAt24Hours() {
+    fun repeatedRateLimitsIncreaseCooldownAndRemainCappedAtSixHours() {
         val client = newClient()
         val now = 1_800_000_000_000L
         val minute = 60_000L
@@ -3921,8 +3921,8 @@ class WaybackPriceHistoryClientTest {
             client.computeAdaptiveRateLimitUntil("3600", now, 2)
         )
         assertEquals(
-            "Repeated HTTP 429 responses must never pause the app for more than 24 hours",
-            now + 24L * hour,
+            "Repeated HTTP 429 responses must never pause the app for more than six hours",
+            now + 6L * hour,
             client.computeAdaptiveRateLimitUntil(null, now, 99)
         )
     }

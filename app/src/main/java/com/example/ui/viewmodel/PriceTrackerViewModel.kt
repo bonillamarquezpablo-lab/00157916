@@ -2112,8 +2112,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             historyNotice, catalogueNotice, eligibilityNotice
                         ).map { it.trim() }.filter { it.isNotBlank() }.joinToString("\n\n")
                         if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
-                        lastDisplayedSearchIdentity = onlineSearchIdentity(provider, query)
                         val relatedMarketCandidates = findRelatedUnverifiedMarketCandidates(query, visibleCachedResults)
+                        if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
+                        lastDisplayedSearchIdentity = onlineSearchIdentity(provider, query)
                         _uiState.value = _uiState.value.copy(
                             onlineSearchResults = visibleCachedResults,
                             onlineSearchRelatedMarketCandidates = relatedMarketCandidates,
@@ -2330,8 +2331,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         .filter { it.isNotBlank() }
                         .joinToString("\n\n")
                     if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
-                    lastDisplayedSearchIdentity = onlineSearchIdentity(provider, query)
                     val relatedMarketCandidates = findRelatedUnverifiedMarketCandidates(query, results)
+                    if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
+                    lastDisplayedSearchIdentity = onlineSearchIdentity(provider, query)
                     _uiState.value = _uiState.value.copy(
                         onlineSearchResults = results,
                         onlineSearchRelatedMarketCandidates = relatedMarketCandidates,

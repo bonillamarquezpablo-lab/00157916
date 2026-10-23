@@ -1369,7 +1369,13 @@ class ProductRepository(
     }
 
     private fun inferProductCategory(title: String, query: String): ProductCategory {
-        val text = "${title.lowercase(Locale.ROOT)} ${query.lowercase(Locale.ROOT)}"
+        val titleText = title.lowercase(Locale.ROOT)
+        val text = "${titleText} ${query.lowercase(Locale.ROOT)}"
+        // Identify toys from the listing itself before consulting a broad search query. Searching
+        // for "Dyson" must not turn a Dyson toy into a hair appliance, or vice versa.
+        if (Regex("""\b(toys?|juguetes?|munec[oa]s?|figuras? de accion|playsets?|pretend play|juego de imitacion)\b""")
+                .containsMatchIn(titleText)
+        ) return ProductCategory.TOYS
         return when {
             Regex("""\b(iphone|redmi|poco|smartphone|movil|telefono|galaxy s|pixel)\b""").containsMatchIn(text) ->
                 ProductCategory.SMARTPHONES
@@ -1381,7 +1387,8 @@ class ProductRepository(
                 ProductCategory.TV_AUDIO
             Regex("""\b(aspiradora|vacuum|robot aspirador|cafetera|frigorifico|microondas|lavadora|mop kit)\b""").containsMatchIn(text) ->
                 ProductCategory.HOME_APPLIANCES
-            Regex("""\b(afeitadora|depiladora|secador|cepillo electrico)\b""").containsMatchIn(text) ->
+            Regex("""\b(airwrap|corrale|supersonic|planchas? de pelo|alisador(?:es)?|secador(?:es)?|styler|cepillo electrico|afeitadora|depiladora)\b""")
+                .containsMatchIn(titleText) || Regex("""\b(afeitadora|depiladora|secador|cepillo electrico)\b""").containsMatchIn(text) ->
                 ProductCategory.PERSONAL_CARE
             Regex("""\b(bicicleta|bicicletas|casco|running|deporte)\b""").containsMatchIn(text) ->
                 ProductCategory.SPORTS

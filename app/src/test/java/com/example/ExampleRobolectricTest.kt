@@ -409,6 +409,72 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun unverifiedGoogleShoppingListingCannotBecomeSavedHistoricalPrice() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val title = "Samsung Galaxy S26 Ultra 512 GB"
+            val productId = "provisional-google-shopping-history-test"
+            val genericShoppingUrl = "https://www.google.com/shopping/product/123456789"
+            database.productDao().insert(
+                ProductEntity(
+                    id = productId,
+                    title = title,
+                    brand = "Samsung",
+                    category = "SMARTPHONES",
+                    currentPrice = 0.0,
+                    athMinPrice = 0.0,
+                    athMinDate = "Pendiente de verificación",
+                    athMinStore = "",
+                    athMaxPrice = 0.0,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "unknown_store",
+                    storeUrl = genericShoppingUrl,
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = productId,
+                    storeId = "unknown_store",
+                    price = 999.99,
+                    currency = "EUR",
+                    observedAt = System.currentTimeMillis(),
+                    sourceUrl = genericShoppingUrl,
+                    sourceName = "Google Shopping",
+                    isVerified = false,
+                    verificationNote = "Listado sin confirmar; no es un precio de vendedor verificado.",
+                    productTitle = title,
+                    storeName = "Google Shopping",
+                    sourceType = "GOOGLE_SHOPPING",
+                    linkType = "Google Shopping"
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+
+            val product = withTimeout(10_000L) {
+                repository.allProductsStream.first { rows -> rows.any { it.id == productId } }
+                    .first { it.id == productId }
+            }
+            assertFalse("A generic Shopping listing must not verify the product price", product.isPriceVerified)
+            assertNull("An unverified listing must never be promoted to saved historical price", product.savedHistoricalPrice)
+            assertTrue("A listing quote must not enter the confirmed historical graph", product.priceHistory.isEmpty())
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun `positive sub-five-euro offer is kept but flagged below thirty percent of median`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)

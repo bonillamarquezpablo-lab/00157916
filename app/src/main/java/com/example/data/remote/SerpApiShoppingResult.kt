@@ -784,7 +784,7 @@ private val TOY_LISTING_PATTERN = Regex(
 fun isToyListingTitle(title: String): Boolean = TOY_LISTING_PATTERN.containsMatchIn(title)
 
 private val REPLACEMENT_ACCESSORY_LISTING_PATTERN = Regex(
-    """(?i)\b(boquillas?|nozzles?|replacement\s+parts?|spare\s+parts?|difusores?|diffusers?|recambios?|repuestos?|cabezales?\s+de\s+repuesto|cepillos?\s+de\s+repuesto|filtros?\s+de\s+repuesto)\b"""
+    """(?i)\b(boquillas?|nozzles?|replacement\s+parts?|spare\s+parts?|recambios?|repuestos?|cabezales?\s+de\s+repuesto|cepillos?\s+de\s+repuesto|filtros?\s+de\s+repuesto)\b"""
 )
 
 /** True when a listing is specifically a replacement part rather than the complete product. */

@@ -22,6 +22,7 @@ import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.isAccessorySearchQuery
 import com.example.data.remote.isAccessoryListingTitle
 import com.example.data.remote.isToyListingTitle
+import com.example.data.remote.isReplacementPartListingTitle
 import com.example.ui.viewmodel.OnlineSearchProvider
 import com.example.ui.viewmodel.optimizedOnlineShoppingQuery
 import com.example.ui.viewmodel.TrackerUiState
@@ -92,6 +93,9 @@ class OnlineSearchScreenTest {
     fun dysonSparePartsAreTaggedAsAccessoriesAndToysStaySeparate() {
         assertTrue(isAccessoryListingTitle("Boquilla para secador Dyson Supersonic"))
         assertTrue(isAccessoryListingTitle("Dyson Supersonic diffuser attachment"))
+        assertTrue(isReplacementPartListingTitle("Boquilla para secador Dyson Supersonic"))
+        assertTrue(isReplacementPartListingTitle("Recambio de cabezal Dyson"))
+        assertFalse(isReplacementPartListingTitle("Dyson Supersonic completo"))
         assertTrue(isToyListingTitle("Juguete Dyson secador de pelo para niños"))
         assertFalse(isAccessoryListingTitle("Juguete Dyson secador de pelo para niños"))
         assertFalse(isToyListingTitle("Boquilla para secador Dyson Supersonic"))

@@ -2088,6 +2088,113 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun secondaryArchivedOfferIsAssignedOnlyWhenItsOwnSkuUrlConfirmsSavedVariant() {
+        val client = newClient()
+        val primaryTitle = "Apple iPhone 15 Plus 256GB Amarillo Libre"
+        val primaryUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo-libre"
+        val siblingTitle = "Apple iPhone 15 Plus 128GB Amarillo Libre"
+        val siblingUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-128gb-amarillo-libre"
+        val snapshotUrl = "https://web.archive.org/web/20250124124812id_/$primaryUrl"
+        val htmlWithSiblingUrl = """
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@type":"Product",
+                "name":"$siblingTitle",
+                "url":"$siblingUrl",
+                "offers":{"@type":"Offer","price":"699.99","priceCurrency":"EUR"}
+              }
+              </script>
+            </head><body>Apple iPhone 15 Plus</body></html>
+        """.trimIndent()
+
+        val quotes = client.parseArchivedPricesForKnownProducts(
+            document = Jsoup.parse(htmlWithSiblingUrl),
+            primaryExpectedTitle = primaryTitle,
+            knownProductTitlesById = mapOf(
+                "selected-256" to primaryTitle,
+                "saved-128" to siblingTitle
+            ),
+            originalUrl = primaryUrl,
+            snapshotUrl = snapshotUrl,
+            observedAt = 1_737_000_000_000L
+        )
+
+        assertEquals("The sibling offer must resolve to exactly one saved variant", 1, quotes.size)
+        assertEquals("saved-128", quotes.single().targetProductId)
+        assertEquals(siblingTitle, quotes.single().productTitle)
+        assertEquals(siblingUrl, quotes.single().productUrl)
+        assertEquals(699.99, quotes.single().price, 0.001)
+    }
+
+    @Test
+    fun archivedSiblingWithoutItsOwnSkuUrlCannotBorrowPrimaryVariantIdentity() {
+        val client = newClient()
+        val primaryTitle = "Apple iPhone 15 Plus 256GB Amarillo Libre"
+        val primaryUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo-libre"
+        val siblingTitle = "Apple iPhone 15 Plus 128GB Amarillo Libre"
+        val snapshotUrl = "https://web.archive.org/web/20250124124812id_/$primaryUrl"
+        val htmlWithoutSiblingUrl = """
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@type":"Product",
+                "name":"$siblingTitle",
+                "offers":{"@type":"Offer","price":"699.99","priceCurrency":"EUR"}
+              }
+              </script>
+            </head><body>Apple iPhone 15 Plus</body></html>
+        """.trimIndent()
+
+        val quotes = client.parseArchivedPricesForKnownProducts(
+            document = Jsoup.parse(htmlWithoutSiblingUrl),
+            primaryExpectedTitle = primaryTitle,
+            knownProductTitlesById = mapOf("saved-128" to siblingTitle),
+            originalUrl = primaryUrl,
+            snapshotUrl = snapshotUrl,
+            observedAt = 1_737_000_000_000L
+        )
+
+        assertTrue("A 256 GB page must not confirm a 128 GB price with no independent offer URL", quotes.isEmpty())
+    }
+
+    @Test
+    fun archivedSiblingWithGenericFamilyUrlCannotBorrowPrimaryVariantIdentity() {
+        val client = newClient()
+        val primaryTitle = "Apple iPhone 15 Plus 256GB Amarillo Libre"
+        val primaryUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo-libre"
+        val siblingTitle = "Apple iPhone 15 Plus 128GB Amarillo Libre"
+        val genericUrl = "https://www.pccomponentes.com/apple-iphone-15-plus"
+        val snapshotUrl = "https://web.archive.org/web/20250124124812id_/$primaryUrl"
+        val htmlWithGenericSiblingUrl = """
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@type":"Product",
+                "name":"$siblingTitle",
+                "url":"$genericUrl",
+                "offers":{"@type":"Offer","price":"699.99","priceCurrency":"EUR"}
+              }
+              </script>
+            </head><body>Apple iPhone 15 Plus</body></html>
+        """.trimIndent()
+
+        val quotes = client.parseArchivedPricesForKnownProducts(
+            document = Jsoup.parse(htmlWithGenericSiblingUrl),
+            primaryExpectedTitle = primaryTitle,
+            knownProductTitlesById = mapOf("saved-128" to siblingTitle),
+            originalUrl = primaryUrl,
+            snapshotUrl = snapshotUrl,
+            observedAt = 1_737_000_000_000L
+        )
+
+        assertTrue("A generic family URL does not independently prove 128 GB", quotes.isEmpty())
+    }
+
+    @Test
     fun domainFallbackContinuesWhenFirstCaptureHasNoVerifiedPrice() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)

@@ -4990,50 +4990,15 @@ class WaybackPriceHistoryClient(
      * dense recent months from crowding older periods out of the chart. Every returned item is
      * still independently checked for product identity and price after its HTML is downloaded.
      */
-    internal fun sampleCaptures(captures: List<WaybackCapture>, max: Int): List<WaybackCapture> {
-        if (max <= 0 || captures.isEmpty()) return emptyList()
-        val chronological = captures
-            .distinctBy { it.rawTimestamp to it.originalUrl }
-            .sortedBy { it.timestamp }
-        val quarterly = chronological
-            .groupBy { capture ->
-                val utc = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"), Locale.ROOT)
-                utc.timeInMillis = capture.timestamp
-                utc.get(java.util.Calendar.YEAR) * 4 + utc.get(java.util.Calendar.MONTH) / 3
-            }
-            .toSortedMap()
-            .values
-            .map { quarterCaptures -> quarterCaptures[quarterCaptures.size / 2] }
-
-        // Preserve quarter coverage when the index spans many periods. If it found fewer
-        // quarters than the download budget allows, fill the spare slots with evenly spaced
-        // captures from those quarters instead of collapsing (for example) four May/June
-        // captures into a single historical price point.
-        if (quarterly.size >= max) {
-            if (max == 1) return listOf(quarterly.last())
-            return (0 until max).map { index ->
-                quarterly[(index.toDouble() * (quarterly.size - 1) / (max - 1)).toInt()]
-            }.distinctBy { it.rawTimestamp to it.originalUrl }
-        }
-        val selectedKeys = quarterly.map { it.rawTimestamp to it.originalUrl }.toSet()
-        val selectedTimestamps = quarterly.mapNotNull { it.rawTimestamp }.toSet()
-        // Extra HTML downloads should contribute a new historical date, not another merchant URL
-        // from a timestamp already represented by the quarterly sample. Besides reducing latency,
-        // this prevents one archived day from looking like several independent historical points.
-        val remaining = chronological.filterNot {
-            (it.rawTimestamp to it.originalUrl) in selectedKeys ||
-                it.rawTimestamp in selectedTimestamps
-        }
-        val slots = minOf(max - quarterly.size, remaining.size)
-        val extra = when {
-            slots <= 0 -> emptyList()
-            slots == 1 -> listOf(remaining[remaining.size / 2])
-            else -> (0 until slots).map { index ->
-                remaining[(index.toDouble() * (remaining.size - 1) / (slots - 1)).toInt()]
-            }
-        }
-        return (quarterly + extra).distinctBy { it.rawTimestamp to it.originalUrl }.sortedBy { it.timestamp }
-    }
+    internal fun sampleCaptures(
+        captures: List<WaybackCapture>,
+        max: Int
+    ): List<WaybackCapture> = sampleByQuarter(
+        items = captures,
+        max = max,
+        timestampOf = { it.timestamp },
+        keyOf = { it.rawTimestamp to it.originalUrl }
+    )
 
     /**
      * When exact-URL and prefix CDX results overlap, sample captures that have not already been

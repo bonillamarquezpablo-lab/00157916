@@ -2815,7 +2815,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     // when fewer than three distinct UTC dates were recovered for the selected
                     // product; sibling-variant quotes do not count toward its historical coverage.
                     val currentCandidateQuotes = attempts.flatMap { it.quotes }.filter {
-                        it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId
+                        !it.isDiscoveryCandidate &&
+                            (it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId)
                     }
                     val sufficientHistoricalCoverage =
                         hasSufficientHistoricalCoverage(currentCandidateQuotes)
@@ -2888,7 +2889,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     // merchant-wide fallback. If either source supplies only a sparse series, the
                     // bounded domain pass may still fill missing historical dates.
                     val quotesBeforeDomain = attempts.flatMap { it.quotes }.filter {
-                        it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId
+                        !it.isDiscoveryCandidate &&
+                            (it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId)
                     }
                     val hasSufficientHistoryBeforeDomain = hasSufficientHistoricalCoverage(quotesBeforeDomain)
                     val rateLimitedAtDirectStage =

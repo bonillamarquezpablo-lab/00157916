@@ -2,6 +2,7 @@ package com.example.data.remote
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -46,7 +47,7 @@ class MementoClientTest {
             lookbackDays = 365
         )
         assertNotNull(url)
-        val parsed = okhttp3.HttpUrl.get(url!!)
+        val parsed = url!!.toHttpUrl()
         assertEquals("arquivo.pt", parsed.host)
         assertEquals("/wayback/cdx", parsed.encodedPath)
         assertEquals("https://shop.example/product/item?sku=blue&size=256", parsed.queryParameter("url"))

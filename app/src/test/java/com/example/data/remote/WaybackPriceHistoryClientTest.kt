@@ -505,7 +505,7 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun exactDirectCdxVerifiedPrimaryQuoteSkipsPrefixAndNotifiesCallback() = runBlocking {
+    fun exactDirectCdxSufficientHistoricalSeriesSkipsPrefixAndNotifiesCallback() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
         preferences.edit()
@@ -522,6 +522,8 @@ class WaybackPriceHistoryClientTest {
         val cdxBody = """
             [
               ["timestamp","original","statuscode","mimetype"],
+              ["20240101120000","$originalUrl","200","text/html"],
+              ["20240701120000","$originalUrl","200","text/html"],
               ["20250101120000","$originalUrl","200","text/html"]
             ]
         """.trimIndent()
@@ -577,12 +579,119 @@ class WaybackPriceHistoryClientTest {
                 )
             }
 
-            assertEquals("Only the exact CDX query should run after a verified primary price", listOf("exact"), cdxMatchTypes.toList())
-            assertEquals(1, result.quotes.size)
-            assertEquals(79.99, result.quotes.single().price, 0.001)
-            assertEquals("The incremental callback must receive the verified primary quote", 1, callbackQuotes.size)
-            assertEquals(79.99, callbackQuotes.single().price, 0.001)
-            assertEquals(1, requestUrls.count { it.startsWith("web.archive.org/web/") })
+            assertEquals(
+                "Skip the prefix only after the exact URL provides enough dates for a historical series",
+                listOf("exact"),
+                cdxMatchTypes.toList()
+            )
+            assertEquals(3, result.quotes.map { it.observedAt / WaybackPriceHistoryClient.DAY_MS }.distinct().size)
+            assertTrue(result.quotes.all { kotlin.math.abs(it.price - 79.99) < 0.001 })
+            assertEquals("All verified points must be streamed to the incremental callback", 3, callbackQuotes.size)
+            assertEquals(3, requestUrls.count { it.startsWith("web.archive.org/web/") })
+        } finally {
+            preferences.edit()
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .remove("wayback_rate_limit_last_hit_at")
+                .remove("wayback_rate_limit_hit_count")
+                .commit()
+        }
+    }
+
+    @Test
+    fun oneExactCaptureDoesNotHideOlderDatesFoundByThePrefixRoute() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .remove("wayback_rate_limit_last_hit_at")
+            .remove("wayback_rate_limit_hit_count")
+            .commit()
+
+        val title = "Apple iPhone 15 Historical Series Prefix Regression ${System.currentTimeMillis()}"
+        val originalUrl = "https://shop.example/products/apple-iphone-15-historical-series"
+        val cdxMatchTypes = CopyOnWriteArrayList<String>()
+        val requestUrls = CopyOnWriteArrayList<String>()
+        val exactBody = """
+            [
+              ["timestamp","original","statuscode","mimetype"],
+              ["20250101120000","$originalUrl","200","text/html"]
+            ]
+        """.trimIndent()
+        val prefixBody = """
+            [
+              ["timestamp","original","statuscode","mimetype"],
+              ["20240101120000","$originalUrl","200","text/html"],
+              ["20250101120000","$originalUrl","200","text/html"],
+              ["20260101120000","$originalUrl","200","text/html"]
+            ]
+        """.trimIndent()
+        val archivedHtml = """
+            <html><head>
+              <script type="application/ld+json">
+                {"@type":"Product","name":"$title",
+                 "offers":{"@type":"Offer","price":"649.99","priceCurrency":"EUR"}}
+              </script>
+            </head><body></body></html>
+        """.trimIndent()
+
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            val hostAndPath = request.url.host + request.url.encodedPath
+            requestUrls += hostAndPath
+            when {
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    val matchType = request.url.queryParameter("matchType").orEmpty()
+                    cdxMatchTypes += matchType
+                    val body = if (matchType == "exact") exactBody else prefixBody
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(body.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/web/") -> {
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "text/html; charset=utf-8")
+                        .body(archivedHtml.toResponseBody("text/html; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                else -> throw AssertionError("Unexpected request during prefix-series test: $hostAndPath")
+            }
+        }.build()
+
+        try {
+            val result = withTimeout(15_000L) {
+                WaybackPriceHistoryClient(context, http).fetchHistory(
+                    originalUrl = originalUrl,
+                    expectedTitle = title,
+                    lookbackDays = 2_920
+                )
+            }
+            assertEquals(
+                "A single exact-URL point must continue to the bounded prefix query",
+                listOf("exact", "prefix"),
+                cdxMatchTypes.toList()
+            )
+            assertEquals(
+                "The prefix route must fill in valid distinct historical dates",
+                3,
+                result.quotes.map { it.observedAt / WaybackPriceHistoryClient.DAY_MS }.distinct().size
+            )
+            assertTrue(result.quotes.all { kotlin.math.abs(it.price - 649.99) < 0.001 })
+            assertFalse("A successful multi-date series should not be marked as a total request failure", result.requestFailed)
+            assertTrue("The exact point must be deduplicated when the prefix index overlaps it",
+                result.quotes.map { it.observedAt }.distinct().size == result.quotes.size)
         } finally {
             preferences.edit()
                 .remove("wayback_rate_limit_until")
@@ -3703,6 +3812,20 @@ class WaybackPriceHistoryClientTest {
             assertFalse(
                 "An empty search can be retried after six hours",
                 client.wasAttemptedRecently(key, lastAttempt + 7L * 60L * 60L * 1000L)
+            )
+
+            preferences.edit()
+                .putBoolean("${key}_has_quotes", true)
+                .putBoolean("${key}_failed", true)
+                .putBoolean("${key}_rate_limited", false)
+                .commit()
+            assertTrue(
+                "A partial history that failed an alternate route uses the short failure cooldown even if one quote was saved",
+                client.wasAttemptedRecently(key, lastAttempt + 60_000L)
+            )
+            assertFalse(
+                "Partial history can retry after the transient failure window instead of being cached as complete for thirty days",
+                client.wasAttemptedRecently(key, lastAttempt + 3L * 60L * 1000L)
             )
 
             preferences.edit()

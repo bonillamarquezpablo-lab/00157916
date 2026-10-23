@@ -30,6 +30,13 @@ class SerpApiProductMatchTest {
                 "Dyson Supersonic HD08"
             )
         )
+        assertFalse(
+            "HD07 must not match an HD070 prefix collision",
+            returnedTitleMatchesSpecificDysonHairToolModel(
+                "secador Dyson Supersonic HD07",
+                "Dyson Supersonic HD070"
+            )
+        )
         assertTrue(
             returnedTitleMatchesSpecificDysonHairToolModel(
                 "plancha Dyson",

@@ -5,6 +5,8 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.AppDatabase
 import com.example.data.local.ProductDiscoveryEntity
+import com.example.data.local.ProductEntity
+import com.example.data.model.PENDING_VERIFICATION_DATE_LABEL
 import com.example.data.remote.ArchivedPriceQuote
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -82,6 +84,50 @@ class ProductDiscoveryRepositoryTest {
                 ProductDiscoveryEntity.STATUS_ACCEPTED,
                 database.productDiscoveryDao().getById(pending.single().id)?.status
             )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun archiveDiscoveryCanQuarantineHistoryForAnUnverifiedLiveSearchPlaceholder() = runBlocking {
+        val database = newDatabase()
+        try {
+            val placeholder = ProductEntity(
+                id = "online_candidate_${"a".repeat(24)}",
+                title = "Sony WH-1000XM5 Auriculares Inalámbricos Negro",
+                brand = "Sony",
+                category = ProductCategory.TV_AUDIO.name,
+                currentPrice = 199.99,
+                athMinPrice = 0.0,
+                athMinDate = PENDING_VERIFICATION_DATE_LABEL,
+                athMinStore = "",
+                athMaxPrice = 0.0,
+                avg90dPrice = 0.0,
+                officialPvp = 0.0,
+                currentStoreId = "unknown_store",
+                storeUrl = "https://www.google.com/search?tbm=shop&q=Sony+WH-1000XM5",
+                ean = "",
+                isPriceVerified = false
+            )
+            database.productDao().insert(placeholder)
+            val discoveries = ProductDiscoveryRepository(database)
+
+            assertTrue(discoveries.stageArchivedQuote(quote(), "Tienda Ejemplo"))
+            val pending = database.productDiscoveryDao().observePending().first().single()
+            assertEquals(placeholder.title, pending.title)
+            assertEquals("The placeholder stays in Market until the user accepts the historic discovery",
+                1, database.productDao().getProductCount())
+            assertEquals(1, database.productDiscoveryDao().getObservations(pending.id).size)
+
+            val imported = discoveries.accept(pending.id)
+            assertNotNull(imported)
+            assertFalse(imported!!.createdProduct)
+            assertEquals(placeholder.id, imported.productId)
+            assertEquals(1, imported.savedObservations)
+            assertEquals(1, database.productDao().getProductCount())
+            assertEquals(1, database.priceObservationDao().getObservationCount(placeholder.id))
+            assertFalse(database.productDao().getProductById(placeholder.id)!!.isPriceVerified)
         } finally {
             database.close()
         }

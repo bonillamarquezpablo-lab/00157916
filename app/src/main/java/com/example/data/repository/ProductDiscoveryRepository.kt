@@ -371,7 +371,9 @@ class ProductDiscoveryRepository(private val database: AppDatabase) {
     private fun inferCategory(title: String): ProductCategory {
         val value = normalizeText(title)
         return when {
-            Regex("""\b(toys?|juguetes?|munec[oa]s?|figuras? de accion|playsets?|pretend play|juego de imitacion)\b""").containsMatchIn(value) -> ProductCategory.TOYS
+            isToyListingTitle(title) -> ProductCategory.TOYS
+            isReplacementPartListingTitle(title) -> ProductCategory.REPLACEMENT_PARTS
+            isAccessoryListingTitle(title) -> ProductCategory.ACCESSORIES
             Regex("""\b(airwrap|corrale|supersonic|planchas? de pelo|alisador(?:es)?|secador(?:es)?|styler|afeitadora|depiladora)\b""").containsMatchIn(value) -> ProductCategory.PERSONAL_CARE
             Regex("""\b(iphone|samsung galaxy|smartphone|telefono movil|redmi|pixel|ipad|tablet|oneplus|motorola edge)\b""").containsMatchIn(value) -> ProductCategory.SMARTPHONES
             Regex("""\b(laptop|portatil|notebook|thinkpad|macbook|chromebook|monitor|gpu|geforce|radeon|rtx|processor|procesador|ssd|ram|pc gaming|desktop)\b""").containsMatchIn(value) -> ProductCategory.COMPUTING

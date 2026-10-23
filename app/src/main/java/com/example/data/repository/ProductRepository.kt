@@ -26,6 +26,7 @@ import com.example.data.remote.isIrrelevantMultiProductBundle
 import com.example.data.remote.hasXiaomiModelMismatch
 import com.example.data.remote.isAccessoryListingTitle
 import com.example.data.remote.isToyListingTitle
+import com.example.data.remote.isReplacementPartListingTitle
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.linkTypeForUrl
 import com.example.data.remote.isGoogleShoppingUrl
@@ -1375,6 +1376,7 @@ class ProductRepository(
         // Identify toys from the listing itself before consulting a broad search query. Searching
         // for "Dyson" must not turn a Dyson toy into a hair appliance, or vice versa.
         if (isToyListingTitle(title)) return ProductCategory.TOYS
+        if (isReplacementPartListingTitle(title)) return ProductCategory.REPLACEMENT_PARTS
         if (isAccessoryListingTitle(title)) return ProductCategory.ACCESSORIES
         return when {
             Regex("""\b(iphone|redmi|poco|smartphone|movil|telefono|galaxy s|pixel)\b""").containsMatchIn(text) ->

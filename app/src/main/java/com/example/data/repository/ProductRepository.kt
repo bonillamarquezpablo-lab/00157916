@@ -873,7 +873,9 @@ class ProductRepository(
             // Never let a group made only of suspicious offers replace the merchant URL or
             // current-store identity of an existing product. Such links could later be reused
             // by the free-history action and attach a capture from the wrong listing.
-            val bestOffer = group.cheapestOffer
+            val bestOffer = trustedOffers.minByOrNull { offer ->
+                offer.price / (offer.wheelSetCount ?: 1)
+            } ?: group.cheapestOffer
             val existingProduct = currentEntities.firstOrNull {
                 onlineProductIdentityKey(it.title) == group.identityKey
             }
@@ -968,8 +970,18 @@ class ProductRepository(
                 .groupBy { offer -> canonicalStoreId(offer.storeName, offer.sourceUrl) }
                 .values
                 .mapNotNull { offers ->
-                    offers.filterNot { it.isSuspiciousPrice }.minByOrNull { it.price }
-                        ?: offers.minByOrNull { it.price }
+                    // If one merchant group contains both a direct seller result and a Google
+                    // catalog intermediary, prefer the seller URL. Retain the intermediary only
+                    // when no direct, non-suspicious offer exists for that merchant.
+                    val directOffers = offers.filter {
+                        !it.isSuspiciousPrice &&
+                            !it.isSearchFallbackDestination &&
+                            !it.isGoogleShoppingProductLink
+                    }
+                    directOffers.minByOrNull { it.price / (it.wheelSetCount ?: 1) }
+                        ?: offers.filterNot { it.isSuspiciousPrice }
+                            .minByOrNull { it.price / (it.wheelSetCount ?: 1) }
+                        ?: offers.minByOrNull { it.price / (it.wheelSetCount ?: 1) }
                 }
             for (result in bestOfferPerStore) {
                 val offerStoreId = canonicalStoreId(result.storeName, result.sourceUrl)

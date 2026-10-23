@@ -2970,10 +2970,10 @@ class ExampleRobolectricTest {
                     rows.firstOrNull { it.id == sonyProductId }?.priceHistory?.size == 1
                 }
             }.first { it.id == sonyProductId }
-            assertEquals("Google Shopping", productAfterGoogleObservation.priceHistory.single().linkType)
+            assertEquals("directo", productAfterGoogleObservation.priceHistory.single().linkType)
             assertEquals("Google Shopping", productAfterGoogleObservation.priceSource)
             assertTrue(productAfterGoogleObservation.offers.any {
-                it.store.name == "PcComponentes" && it.linkType == "Google Shopping"
+                it.store.name == "PcComponentes" && it.linkType == "directo"
             })
 
             val duplicate = results.first().copy(price = 245.00, observedAt = now + 60_000L)

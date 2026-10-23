@@ -2950,7 +2950,7 @@ class WaybackPriceHistoryClient(
      * Escalates the local pause after repeated HTTP 429 responses within one day. Some archive
      * limits are imposed upstream without a useful Retry-After header, so retrying after the same
      * five-minute default can reproduce the same block. The pause honours a longer server-provided
-     * Retry-After, never exceeds six hours, and does not probe Wayback to test whether it expired.
+     * Retry-After, never exceeds 24 hours, and does not probe Wayback to test whether it expired.
      */
     internal fun computeAdaptiveRateLimitUntil(
         retryAfter: String?,

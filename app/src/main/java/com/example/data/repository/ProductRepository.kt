@@ -685,29 +685,29 @@ class ProductRepository(
             "Amazon.es", "Google Shopping" -> sourceType
             else -> return 0
         }
-        // Suspicious prices remain visible as unverified Room observations. Second-hand offers
-        // and wheel listings missing requested fitment dimensions stay visible in the search UI,
-        // but are not added to Mercado or its price history.
-        val eligible = filterOnlineSearchResults(results, searchQuery)
-            // A title-specific Google Shopping query is useful for opening the result, but it
-            // does not prove which seller offers that price. Show it in live search without
-            // inventing a verified store price or attaching it to persistent history.
-            .filterNot { it.isSearchFallbackDestination }
-            .filterNot { it.isSecondHand || it.isFitmentUnverified || it.isCategoryUnverified }
-            // Marketplace accessory matches remain visible for inspection, but must never be
-            // persisted as the searched product. Explicit accessory searches are still supported.
-            .filterNot { it.isAccessoryOffer && !isAccessorySearchQuery(searchQuery) }
-            .filterNot {
-                isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
-                    isAccessoryListing(it.title)
-            }
+        // Persist every offer that passed the live-visibility checks so a visible card can
+        // always open a Room-backed detail sheet. These are catalog records, not automatically
+        // trusted prices: fallback links, used items, ambiguous fitment/category and accessories
+        // mixed into a device search are stored as UNVERIFIED observations only.
+        // Strict history eligibility is applied separately below before an observation is marked
+        // verified or allowed to update a product's current-price status.
+        val eligible = filterVisibleLiveSearchResults(results, searchQuery)
         if (eligible.isEmpty()) return 0
 
         var inserted = 0
         val currentEntities = productDao.getAllProductsSnapshot().toMutableList()
         val groups = groupOnlineShoppingResults(eligible)
         for (group in groups) {
-            val trustedOffers = group.offers.filterNot { it.isSuspiciousPrice }
+            val trustedOffers = group.offers.filterNot { offer ->
+                offer.isSuspiciousPrice ||
+                    offer.isSearchFallbackDestination ||
+                    offer.isSecondHand ||
+                    offer.isFitmentUnverified ||
+                    offer.isCategoryUnverified ||
+                    (offer.isAccessoryOffer && !isAccessorySearchQuery(searchQuery)) ||
+                    (isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
+                        isAccessoryListing(offer.title))
+            }
             val hasTrustedOffer = trustedOffers.isNotEmpty()
             // Never let a group made only of suspicious offers replace the merchant URL or
             // current-store identity of an existing product. Such links could later be reused
@@ -730,7 +730,10 @@ class ProductRepository(
                 // valid offers. Use the trusted set and normalize wheel sets before comparing.
                 trustedOffers.minOf { offer -> offer.price / (offer.wheelSetCount ?: 1) }
             } else {
-                existingProduct?.currentPrice ?: 0.0
+                // Preserve a visible quote for a new unverified product card, but keep the
+                // verification flag false and never let this value enter verified history.
+                existingProduct?.currentPrice?.takeIf { it > 0.0 }
+                    ?: bestOffer.price / (bestOffer.wheelSetCount ?: 1)
             }
             val trustedHighestToday = trustedOffers.maxOfOrNull { offer ->
                 offer.price / (offer.wheelSetCount ?: 1)
@@ -817,11 +820,25 @@ class ProductRepository(
                     observedAt = result.observedAt,
                     sourceUrl = result.sourceUrl,
                     sourceName = normalizedSource,
-                    isVerified = !result.isSuspiciousPrice,
-                    verificationNote = if (result.isSuspiciousPrice) {
-                        "Precio sospechoso: inferior al 30 % de la mediana de la búsqueda. Conservado como observación sin verificar y excluido del mejor precio."
-                    } else {
-                        "Resultado online válido en euros; precio y disponibilidad pendientes de confirmación en la tienda."
+                    isVerified = trustedOffers.any { trusted ->
+                        trusted.title.equals(result.title, ignoreCase = true) &&
+                            trusted.storeName.equals(result.storeName, ignoreCase = true) &&
+                            kotlin.math.abs(trusted.price - result.price) < 0.011 &&
+                            trusted.sourceUrl == result.sourceUrl
+                    },
+                    verificationNote = when {
+                        result.isSuspiciousPrice ->
+                            "Precio sospechoso. Conservado como observación sin verificar y excluido del mejor precio."
+                        result.isSearchFallbackDestination ->
+                            "Precio publicado por Google Shopping sin enlace directo verificable del vendedor. Ficha conservada; no cuenta como precio actual verificado."
+                        result.isSecondHand ->
+                            "Oferta de segunda mano o reacondicionada. Conservada para consulta, separada de los precios nuevos y sin verificación del precio actual."
+                        result.isFitmentUnverified || result.isCategoryUnverified ->
+                            "Producto visible con variante/compatibilidad pendiente de confirmar. No se considera precio actual verificado."
+                        result.isAccessoryOffer && !isAccessorySearchQuery(searchQuery) ->
+                            "Accesorio relacionado detectado en una búsqueda de dispositivo. Conservado como ficha no verificada, sin atribuirlo al precio del dispositivo."
+                        else ->
+                            "Oferta de búsqueda en vivo; el precio y la disponibilidad deben confirmarse en la tienda."
                     },
                     productTitle = result.title,
                     storeName = result.storeName,

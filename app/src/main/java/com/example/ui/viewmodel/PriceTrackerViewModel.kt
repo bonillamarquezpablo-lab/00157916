@@ -2,6 +2,7 @@ package com.example.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
@@ -2045,6 +2046,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         } catch (cancelled: CancellationException) {
                             throw cancelled
                         } catch (error: Exception) {
+                            Log.w("PriceTrackerViewModel", "Could not save online-search candidates from cache.", error)
                             // The live result view must remain usable even if Room cannot save a candidate.
                             // A card tap will retry the same safe, non-destructive persistence path.
                             0
@@ -2197,6 +2199,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (error: Exception) {
+                        Log.w("PriceTrackerViewModel", "Could not save online-search candidates from live results.", error)
                         // Never discard valid live results just because catalogue persistence failed.
                         // Tapping a visible result attempts to create/resume its ficha separately.
                         0

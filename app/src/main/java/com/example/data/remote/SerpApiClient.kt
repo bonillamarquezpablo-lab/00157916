@@ -21,6 +21,12 @@ import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 import kotlin.math.ceil
 
+/** A named Dyson model makes the query specific; don't widen it to sibling products. */
+internal fun queryNamesSpecificDysonHairToolModel(query: String): Boolean =
+    Regex(
+        """(?i)\b(corrale|airwrap|supersonic|airstrait|airblade|v\d{1,2}|hd\d{2,3}|hs\d{2,3}|tp\d{2,3}|hp\d{2,3}|id\s*\.?\s*curly)\b"""
+    ).containsMatchIn(query)
+
 data class SerpApiRequestProduct(
     val id: String,
     val title: String,
@@ -1637,7 +1643,9 @@ class SerpApiClient(
 
         // "plancha Dyson" is a family search: show related models and matching parts even when
         // retailers use family names such as Airwrap or Styler instead of "plancha".
-        if (isBroadDysonHairToolsQueryMatch(requested, returned)) return true
+        if (isBroadDysonHairToolsQueryMatch(requested, returned) &&
+            !queryNamesSpecificDysonHairToolModel(requested)
+        ) return true
 
         val orderedWanted = normalize(requested)
             .replace(Regex("(\\d+)\\s?(gb|tb|mb)\\b"), "$1 $2")

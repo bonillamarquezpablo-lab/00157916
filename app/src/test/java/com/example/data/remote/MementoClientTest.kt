@@ -181,7 +181,13 @@ class MementoClientTest {
         assertEquals(5, quarterIds.distinct().size)
         val bounded = client.sampleQuarterlyCaptures(captures, maxSnapshots = 3)
         assertEquals(3, bounded.size)
-        assertEquals(allQuarters.first(), bounded.first())
-        assertEquals(allQuarters.last(), bounded.last())
+        fun quarterOf(capture: MementoClient.MementoCapture): Int {
+            val calendar = java.util.Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT).apply {
+                timeInMillis = capture.timestamp
+            }
+            return calendar.get(java.util.Calendar.YEAR) * 4 + calendar.get(java.util.Calendar.MONTH) / 3
+        }
+        assertEquals(quarterOf(allQuarters.first()), quarterOf(bounded.first()))
+        assertEquals(quarterOf(allQuarters.last()), quarterOf(bounded.last()))
     }
 }

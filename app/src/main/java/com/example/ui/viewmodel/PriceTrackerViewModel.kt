@@ -2917,11 +2917,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         attempts.any { it.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") }
                     val allDirectSnapshotsTimedOut =
                         shouldSkipDomainFallbackAfterSnapshotTimeout(attempts)
-                    val shouldTryDomainFallback = candidate.merchantDomain != null &&
+                    val merchantDomainForFallback = candidate.merchantDomain
+                    val shouldTryDomainFallback = merchantDomainForFallback != null &&
                         !hasSufficientHistoryBeforeDomain &&
                         !rateLimitedAtDirectStage &&
                         !allDirectSnapshotsTimedOut
-                    if (shouldTryDomainFallback) {
+                    if (shouldTryDomainFallback && merchantDomainForFallback != null) {
                         if (diagnosticProductId != null) {
                             reportWaybackDiagnostic(
                                 diagnosticProductId, 7, WaybackTraceStatus.RUNNING,
@@ -2930,7 +2931,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         }
                         val domainResult = withTimeoutOrNull(MAX_ARCHIVE_DOMAIN_FALLBACK_MS) {
                             waybackPriceHistoryClient.fetchHistoryByMerchantDomain(
-                                domain = candidate.merchantDomain,
+                                domain = merchantDomainForFallback,
                                 expectedTitle = candidate.title,
                                 preferredUrl = candidate.directUrl,
                                 // The direct URL's prefix-CDX lookup ran just above. Avoid

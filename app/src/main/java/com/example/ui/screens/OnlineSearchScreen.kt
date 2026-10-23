@@ -71,6 +71,8 @@ import com.example.data.remote.extractDirectRetailerUrl
 import com.example.data.remote.formatOnlineSnapshotAge
 import com.example.data.remote.onlineProductRelevanceScore
 import com.example.data.remote.isAccessorySearchQuery
+import com.example.data.remote.isReplacementPartListingTitle
+import com.example.data.remote.isToyListingTitle
 import com.example.data.remote.isWheelFitmentQuery
 import com.example.data.remote.isGoogleShoppingUrl
 import com.example.data.remote.onlineOfferSizeAudienceKey
@@ -862,6 +864,9 @@ private fun ShoppingResultCard(
     val fitmentUnverified = group.offers.all { it.isFitmentUnverified }
     val categoryUnverified = group.offers.all { it.isCategoryUnverified }
     val wheelSetCount = group.wheelSetCount
+    val toyListing = group.offers.all { isToyListingTitle(it.title) }
+    val replacementPartListing = group.offers.all { isReplacementPartListingTitle(it.title) }
+    val allAccessoryListings = group.offers.all { it.isAccessoryOffer }
     val hasTrustedPrice = group.offers.any {
         !it.isSuspiciousPrice && !it.isFitmentUnverified && !it.isCategoryUnverified
     }
@@ -874,14 +879,19 @@ private fun ShoppingResultCard(
     ) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             if (group.offers.all { it.isSecondHand } ||
-                group.offers.all { it.isAccessoryOffer } || fitmentUnverified ||
-                categoryUnverified || wheelSetCount != null
+                allAccessoryListings || toyListing || replacementPartListing ||
+                fitmentUnverified || categoryUnverified || wheelSetCount != null
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (group.offers.all { it.isSecondHand }) {
                         ResultKindBadge("Segunda mano", accessory = false)
                     }
-                    if (group.offers.all { it.isAccessoryOffer }) {
+                    if (toyListing) {
+                        ResultKindBadge("Juguete", accessory = false)
+                    }
+                    if (replacementPartListing) {
+                        ResultKindBadge("Recambio", accessory = true)
+                    } else if (allAccessoryListings) {
                         ResultKindBadge("Accesorio", accessory = true)
                     }
                     if (wheelSetCount != null) {

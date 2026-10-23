@@ -79,11 +79,15 @@ class ProductDiscoveryRepository(private val database: AppDatabase) {
         val savedProducts = database.productDao().getAllProductsSnapshot()
         val trackedProductIds = database.trackedProductDao().getAllTrackedProductIds().toSet()
         val productIdsWithObservations = database.priceObservationDao().getAllProductIdsWithObservations().toSet()
-        val existingTrustedMatch = savedProducts.any { saved ->
-            isSameProductIdentity(title, productUrl, saved.title, saved.storeUrl) &&
-                (!isUnverifiedLiveSearchPlaceholder(saved) ||
-                    saved.id in trackedProductIds ||
-                    saved.id in productIdsWithObservations)
+        val identityMatches = savedProducts.filter { saved ->
+            isSameProductIdentity(title, productUrl, saved.title, saved.storeUrl)
+        }
+        // If more than one local row matches, the historical offer cannot be assigned safely.
+        if (identityMatches.size > 1) return@withTransaction false
+        val existingTrustedMatch = identityMatches.any { saved ->
+            !isUnverifiedLiveSearchPlaceholder(saved) ||
+                saved.id in trackedProductIds ||
+                saved.id in productIdsWithObservations
         }
         if (existingTrustedMatch) {
             // Historical data for a trusted, tracked, or observed row is handled by its normal

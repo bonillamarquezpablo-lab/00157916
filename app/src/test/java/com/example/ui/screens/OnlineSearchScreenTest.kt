@@ -575,12 +575,13 @@ class OnlineSearchScreenTest {
                 .fetchSemanticsNodes().isEmpty()
         )
         clickFilter("Mostrar accesorios (5)")
+        searchList.performScrollToNode(hasText("Póster Samsung Galaxy S26 Ultra 512 GB"))
         assertVisibleText("Póster Samsung Galaxy S26 Ultra 512 GB")
-        assertVisibleText("Original Screen for Samsung Galaxy S26 Ultra 512 GB")
         assertTrue(
-            "The accessory badge is visible on the poster card",
+            "The accessory badge is visible on the poster card before scrolling to another item",
             composeRule.onAllNodesWithText("Accesorio").fetchSemanticsNodes().isNotEmpty()
         )
+        assertVisibleText("Original Screen for Samsung Galaxy S26 Ultra 512 GB")
         assertEquals("Changing either filter must not start another SerpApi search", 0, searchInvocations)
     }
 

@@ -299,7 +299,7 @@ data class SerpApiShoppingResult(
 
     /** True for accessories and replacement parts that should not be mixed into the main product results. */
     val isAccessoryOffer: Boolean
-        get() = !isBicycleTireListing(title) && isAccessoryListingTitle(title)
+        get() = !isToyListingTitle(title) && !isBicycleTireListing(title) && isAccessoryListingTitle(title)
 
     val isRentalOrMonthly: Boolean
         get() = Regex(
@@ -769,12 +769,19 @@ internal fun isBicycleDrivetrainComponentTitle(title: String): Boolean {
 }
 
 private val ACCESSORY_LISTING_PATTERN = Regex(
-    """(?i)\b(p[oó]ster(?:es)?|poster(?:s)?|funda(?:s)?|carcasa(?:s)?|cases?|covers?|cargador(?:es)?|chargers?|charging|mop\s+kit|protectores?|protector(?:es)?|screen\s+protector|protector\s+de\s+pantalla|cristal(?:es)?\s+templado|cables?|adaptadores?|hubs?|filtros?|recambios?|repuestos?|soportes?|displayschutz|schutzfolie(?:n)?|schutzglas|panzerfolie|schutzhülle|schutzhuelle|schutzhulle|h[uü]llen?)\b"""
+    """(?i)\b(p[oó]ster(?:es)?|poster(?:s)?|funda(?:s)?|carcasa(?:s)?|cases?|covers?|cargador(?:es)?|chargers?|charging|mop\s+kit|protectores?|protector(?:es)?|screen\s+protector|protector\s+de\s+pantalla|cristal(?:es)?\s+templado|cables?|adaptadores?|hubs?|filtros?|recambios?|repuestos?|replacement\s+parts?|boquillas?|nozzles?|attachments?|difusores?|diffusers?|cabezales?\s+de\s+repuesto|soportes?|displayschutz|schutzfolie(?:n)?|schutzglas|panzerfolie|schutzhülle|schutzhuelle|schutzhulle|h[uü]llen?)\b"""
 )
 
 private val REPLACEMENT_PART_LISTING_PATTERN = Regex(
     """(?i)(?:^\s*original(?:e|es)?\s+(?:screens?|displays?|pantallas?)\b|^\s*(?:pantallas?|displays?|screens?)\s+(?:original(?:es)?|complet[oa]s?|de\s+repuesto|de\s+reemplazo|replacement|assembly|(?:google\s+pixel|xiaomi|redmi|iphone|samsung\s+galaxy|galaxy)\b)|\b(?:pantalla|display|screen)\s+(?:original(?:es)?|completa|completo|de\s+repuesto|de\s+reemplazo|replacement|assembly|para\s+(?:google|xiaomi|redmi|samsung|iphone))\b|\b(?:replacement|repuesto|recambio)\s+(?:screen|pantalla|display|lcd|amoled)\b|\b(?:digitizer|digitalizador|digitizador|flex\s+de\s+pantalla|conector\s+de\s+carga|charging\s+port|placa\s+base|mainboard|pantalla\s+con\s+marco|screen\s+assembly|display\s+assembly)\b)"""
 )
+
+/** Identifies toys by the listing itself so a brand query does not misclassify them as appliances. */
+private val TOY_LISTING_PATTERN = Regex(
+    """(?i)\b(toys?|juguetes?|muñec[oa]s?|dolls?|figuras?\s+de\s+accion|playsets?|pretend\s+play|juego\s+de\s+imitacion)\b"""
+)
+
+fun isToyListingTitle(title: String): Boolean = TOY_LISTING_PATTERN.containsMatchIn(title)
 
 /** Shared classification keeps UI filtering, diagnostics and price-history rules consistent. */
 fun isAccessoryListingTitle(title: String): Boolean =

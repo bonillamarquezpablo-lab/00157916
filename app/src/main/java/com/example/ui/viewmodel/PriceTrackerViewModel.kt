@@ -259,6 +259,7 @@ data class TrackerUiState(
 
 class PriceTrackerViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
+        const val MAX_RELATED_UNVERIFIED_MARKET_CANDIDATES = 8
         // Keep all sampled snapshot labels (ordinal/date/route/host) visible across overlapping
         // exact, prefix and merchant-domain probes. Ordinary diagnostic stages remain concise.
         const val MAX_CAPTURE_DIAGNOSTIC_LINES = 120

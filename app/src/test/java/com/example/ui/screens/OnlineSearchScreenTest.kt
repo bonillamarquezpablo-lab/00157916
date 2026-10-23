@@ -153,6 +153,9 @@ class OnlineSearchScreenTest {
     fun dysonSparePartsAreTaggedAsAccessoriesAndToysStaySeparate() {
         assertTrue(isAccessoryListingTitle("Boquilla para secador Dyson Supersonic"))
         assertTrue(isAccessoryListingTitle("Dyson Supersonic diffuser attachment"))
+        assertTrue(isAccessoryListingTitle("Accesorio peluquería para Dyson Airwrap Origin Hairstyler"))
+        assertTrue(isAccessoryListingTitle("Hair accessories for Dyson Airwrap"))
+        assertFalse(isReplacementPartListingTitle("Accesorio peluquería para Dyson Airwrap Origin Hairstyler"))
         assertTrue(isReplacementPartListingTitle("Boquilla para secador Dyson Supersonic"))
         assertTrue(isReplacementPartListingTitle("Recambio de cabezal Dyson"))
         assertFalse(isReplacementPartListingTitle("Dyson Supersonic completo"))

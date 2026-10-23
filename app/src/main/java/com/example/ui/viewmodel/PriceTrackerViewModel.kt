@@ -20,6 +20,8 @@ import com.example.data.remote.WaybackTraceStatus
 import com.example.data.remote.isGoogleShoppingUrl
 import com.example.data.remote.extractDirectRetailerUrl
 import com.example.data.remote.onlineProductIdentityKey
+import com.example.data.remote.onlineProductRelevanceScore
+import com.example.data.remote.isBroadDysonHairToolsQueryMatch
 import com.example.data.remote.isGameSpainOffer
 import com.example.data.remote.mergeGoogleShoppingWithGameSupplement
 import com.example.data.remote.shouldSearchGameSupplement
@@ -231,6 +233,8 @@ data class TrackerUiState(
     val priceRefreshStatus: String? = null,
     val onlineSearchQuery: String = "",
     val onlineSearchResults: List<SerpApiShoppingResult> = emptyList(),
+    /** Existing provisional catalogue rows related to the active live-search query. */
+    val onlineSearchRelatedMarketCandidates: List<Product> = emptyList(),
     val onlineSearchDiscardedOffers: List<RejectedOnlineOffer> = emptyList(),
     val showOnlineSearchDiscarded: Boolean = false,
     val isOnlineSearching: Boolean = false,
@@ -1330,6 +1334,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(
             onlineSearchQuery = query,
             onlineSearchResults = emptyList(),
+            onlineSearchRelatedMarketCandidates = emptyList(),
             onlineSearchDiscardedOffers = emptyList(),
             showOnlineSearchDiscarded = false,
             onlineSearchStatus = null
@@ -1940,6 +1945,46 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             ""
         }
 
+    /**
+     * Return provisional market fichas relevant to this search but absent from the provider result
+     * set. A broad brand lookup may surface related products; an exact multi-word/model lookup must
+     * share enough identity terms to avoid mixing in a different variant of the same brand.
+     */
+    private suspend fun findRelatedUnverifiedMarketCandidates(
+        query: String,
+        visibleOffers: List<SerpApiShoppingResult>
+    ): List<Product> = withContext(Dispatchers.IO) {
+        val queryText = query.trim()
+        if (queryText.length < 2) return@withContext emptyList()
+        val representedIdentityKeys = visibleOffers
+            .map { onlineProductIdentityKey(it.title) }
+            .toSet()
+        val significantTokens = queryText.lowercase(Locale.ROOT)
+            .replace(Regex("""[^a-z0-9]+"""), " ")
+            .split(Regex("""\s+"""))
+            .filter { it.length > 1 && it !in setOf("de", "del", "la", "el", "para", "con", "and", "the") }
+        val minimumScore = if (significantTokens.size <= 1) 5 else 10
+
+        repository.allProductsStream.first()
+            .asSequence()
+            .filter { it.isUnverifiedLiveListing }
+            .filter { onlineProductIdentityKey(it.title) !in representedIdentityKeys }
+            .mapNotNull { product ->
+                val broadDysonMatch = isBroadDysonHairToolsQueryMatch(queryText, product.title)
+                val score = onlineProductRelevanceScore(queryText, product.title)
+                if (broadDysonMatch || score >= minimumScore) {
+                    (product to if (broadDysonMatch) score + 1000 else score)
+                } else {
+                    null
+                }
+            }
+            .sortedByDescending { it.second }
+            .map { it.first }
+            .distinctBy { onlineProductIdentityKey(it.title) }
+            .take(MAX_RELATED_UNVERIFIED_MARKET_CANDIDATES)
+            .toList()
+    }
+
     /** Ignore late results when the user edits the query during an in-flight request. */
     private fun isOnlineSearchStillCurrent(query: String, provider: OnlineSearchProvider): Boolean {
         val current = _uiState.value
@@ -1973,6 +2018,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             isOnlineSearching = true,
             onlineSearchStatus = searchingMessage,
             onlineSearchResults = if (keepPreviousSnapshot) current.onlineSearchResults else emptyList(),
+            onlineSearchRelatedMarketCandidates = if (keepPreviousSnapshot) current.onlineSearchRelatedMarketCandidates else emptyList(),
             onlineSearchDiscardedOffers = if (keepPreviousSnapshot) current.onlineSearchDiscardedOffers else emptyList(),
             showOnlineSearchDiscarded = false,
             onlineSearchProvider = provider,
@@ -2066,8 +2112,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         ).map { it.trim() }.filter { it.isNotBlank() }.joinToString("\n\n")
                         if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
                         lastDisplayedSearchIdentity = onlineSearchIdentity(provider, query)
+                        val relatedMarketCandidates = findRelatedUnverifiedMarketCandidates(query, visibleCachedResults)
                         _uiState.value = _uiState.value.copy(
                             onlineSearchResults = visibleCachedResults,
+                            onlineSearchRelatedMarketCandidates = relatedMarketCandidates,
                             onlineSearchDiscardedOffers = cachedDiscarded,
                             showOnlineSearchDiscarded = false,
                             onlineSearchStatus = status
@@ -2282,8 +2330,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         .joinToString("\n\n")
                     if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
                     lastDisplayedSearchIdentity = onlineSearchIdentity(provider, query)
+                    val relatedMarketCandidates = findRelatedUnverifiedMarketCandidates(query, results)
                     _uiState.value = _uiState.value.copy(
                         onlineSearchResults = results,
+                        onlineSearchRelatedMarketCandidates = relatedMarketCandidates,
                         onlineSearchDiscardedOffers = discarded,
                         showOnlineSearchDiscarded = false,
                         onlineSearchStatus = message

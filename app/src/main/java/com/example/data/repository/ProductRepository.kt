@@ -842,14 +842,14 @@ class ProductRepository(
             "Amazon.es", "Google Shopping" -> sourceType
             else -> return 0
         }
-        // Suspicious prices remain visible as unverified Room observations. Second-hand offers
+        // Suspicious prices and Google Shopping catalog-page quotes remain visible as unverified Room observations. Second-hand offers
         // and wheel listings missing requested fitment dimensions stay visible in the search UI,
         // but are not added to Mercado or its price history.
         val eligible = filterOnlineSearchResults(results, searchQuery)
             // A title-specific Google Shopping query is useful for opening the result, but it
             // does not prove which seller offers that price. Show it in live search without
             // inventing a verified store price or attaching it to persistent history.
-            .filterNot { it.isSearchFallbackDestination || it.isGoogleShoppingProductLink }
+            .filterNot { it.isSearchFallbackDestination }
             .filterNot { it.isSecondHand || it.isFitmentUnverified || it.isCategoryUnverified }
             // Marketplace accessory matches remain visible for inspection, but must never be
             // persisted as the searched product. Explicit accessory searches are still supported.
@@ -864,7 +864,11 @@ class ProductRepository(
         val currentEntities = productDao.getAllProductsSnapshot().toMutableList()
         val groups = groupOnlineShoppingResults(eligible)
         for (group in groups) {
-            val trustedOffers = group.offers.filterNot { it.isSuspiciousPrice }
+            val trustedOffers = group.offers.filter {
+                !it.isSuspiciousPrice &&
+                    !it.isSearchFallbackDestination &&
+                    !it.isGoogleShoppingProductLink
+            }
             val hasTrustedOffer = trustedOffers.isNotEmpty()
             // Never let a group made only of suspicious offers replace the merchant URL or
             // current-store identity of an existing product. Such links could later be reused
@@ -977,7 +981,7 @@ class ProductRepository(
                     observedAt = result.observedAt,
                     sourceUrl = result.sourceUrl,
                     sourceName = normalizedSource,
-                    isVerified = !result.isSuspiciousPrice,
+                    isVerified = !result.isSuspiciousPrice && !result.isSearchFallbackDestination && !result.isGoogleShoppingProductLink,
                     verificationNote = if (result.isSuspiciousPrice) {
                         "Precio sospechoso: inferior al 30 % de la mediana de la búsqueda. Conservado como observación sin verificar y excluido del mejor precio."
                     } else {

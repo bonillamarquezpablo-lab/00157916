@@ -7,6 +7,7 @@ import com.example.data.local.AppDatabase
 import com.example.data.local.ProductDiscoveryEntity
 import com.example.data.local.ProductEntity
 import com.example.data.model.PENDING_VERIFICATION_DATE_LABEL
+import com.example.data.model.ProductCategory
 import com.example.data.remote.ArchivedPriceQuote
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking

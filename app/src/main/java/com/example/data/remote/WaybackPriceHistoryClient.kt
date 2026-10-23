@@ -4976,11 +4976,27 @@ class WaybackPriceHistoryClient(
             .values
             .map { quarterCaptures -> quarterCaptures[quarterCaptures.size / 2] }
 
-        if (quarterly.size <= max) return quarterly
-        if (max == 1) return listOf(quarterly.last())
-        return (0 until max).map { index ->
-            quarterly[(index.toDouble() * (quarterly.size - 1) / (max - 1)).toInt()]
-        }.distinctBy { it.rawTimestamp to it.originalUrl }
+        // Preserve quarter coverage when the index spans many periods. If it found fewer
+        // quarters than the download budget allows, fill the spare slots with evenly spaced
+        // captures from those quarters instead of collapsing (for example) four May/June
+        // captures into a single historical price point.
+        if (quarterly.size >= max) {
+            if (max == 1) return listOf(quarterly.last())
+            return (0 until max).map { index ->
+                quarterly[(index.toDouble() * (quarterly.size - 1) / (max - 1)).toInt()]
+            }.distinctBy { it.rawTimestamp to it.originalUrl }
+        }
+        val selectedKeys = quarterly.map { it.rawTimestamp to it.originalUrl }.toSet()
+        val remaining = chronological.filterNot { (it.rawTimestamp to it.originalUrl) in selectedKeys }
+        val slots = minOf(max - quarterly.size, remaining.size)
+        val extra = when {
+            slots <= 0 -> emptyList()
+            slots == 1 -> listOf(remaining[remaining.size / 2])
+            else -> (0 until slots).map { index ->
+                remaining[(index.toDouble() * (remaining.size - 1) / (slots - 1)).toInt()]
+            }
+        }
+        return (quarterly + extra).distinctBy { it.rawTimestamp to it.originalUrl }.sortedBy { it.timestamp }
     }
 
     /**

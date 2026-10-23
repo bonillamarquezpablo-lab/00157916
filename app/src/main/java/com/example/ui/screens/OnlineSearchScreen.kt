@@ -71,6 +71,7 @@ import com.example.data.remote.extractDirectRetailerUrl
 import com.example.data.remote.formatOnlineSnapshotAge
 import com.example.data.remote.onlineProductRelevanceScore
 import com.example.data.remote.isAccessorySearchQuery
+import com.example.data.remote.isReplacementPartListingTitle
 import com.example.data.remote.isWheelFitmentQuery
 import com.example.data.remote.isGoogleShoppingUrl
 import com.example.data.remote.onlineOfferSizeAudienceKey
@@ -882,7 +883,9 @@ private fun ShoppingResultCard(
                     if (group.offers.all { it.isSecondHand }) {
                         ResultKindBadge("Segunda mano", accessory = false)
                     }
-                    if (group.offers.all { it.isAccessoryOffer }) {
+                    if (group.offers.all { isReplacementPartListingTitle(it.title) }) {
+                        ResultKindBadge("Recambio", accessory = true)
+                    } else if (group.offers.all { it.isAccessoryOffer }) {
                         ResultKindBadge("Accesorio", accessory = true)
                     }
                     if (wheelSetCount != null) {

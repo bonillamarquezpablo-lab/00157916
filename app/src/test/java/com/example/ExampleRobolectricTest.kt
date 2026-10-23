@@ -1807,7 +1807,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun fitmentUnconfirmedWheelCandidatesAreNotSavedToMercadoOrHistory() = runBlocking<Unit> {
+    fun fitmentUnconfirmedWheelCandidatesAreSavedForDetailsButRemainUnverified() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,
@@ -1838,7 +1838,7 @@ class ExampleRobolectricTest {
             )
 
             assertEquals(0, saved)
-            assertTrue(database.productDao().getAllProductsSnapshot().isEmpty())
+            assertEquals(1, database.productDao().getAllProductsSnapshot().size)
             assertEquals(0, database.priceObservationDao().getVerifiedObservationCount())
 
             // The Google Product API comparison path must enforce the same fitment gate;
@@ -2651,15 +2651,15 @@ class ExampleRobolectricTest {
                 ).single().isGoogleShoppingSearchFallback
             )
             assertEquals(
-                "A generic Shopping search is not proof of a seller quote and must not be persisted",
-                0,
+                "A generic Shopping search must be kept as an unverified product/observation, not trusted as a seller quote",
+                1,
                 repository.recordOnlineSearchResults(
                     listOf(googleSearchOnlyOffer),
                     sourceType = "GOOGLE_SHOPPING",
                     searchQuery = "Sony WH-1000XM5"
                 )
             )
-            assertTrue("An unlinked search fallback must not create a catalog product", database.productDao().getAllProductsSnapshot().isEmpty())
+            assertEquals("A visible fallback result must create a detail-capable catalog entry", 1, database.productDao().getAllProductsSnapshot().size)
             assertEquals(0, database.priceObservationDao().getVerifiedObservationCount())
 
             val retailerSearchFallback = results.first().copy(
@@ -2675,8 +2675,8 @@ class ExampleRobolectricTest {
                 ).single().isSearchFallbackDestination
             )
             assertEquals(
-                "A retailer's generic search URL is not a verified offer and must not be persisted",
-                0,
+                "A retailer's generic search URL must be kept as an unverified observation",
+                1,
                 repository.recordOnlineSearchResults(
                     listOf(retailerSearchFallback),
                     sourceType = "GOOGLE_SHOPPING",

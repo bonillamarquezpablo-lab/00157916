@@ -36,8 +36,12 @@ internal fun returnedTitleMatchesSpecificDysonHairToolModel(query: String, title
         .distinct()
         .toList()
     if (requestedModels.isEmpty()) return true
-    val compactTitle = title.filter(Char::isLetterOrDigit).lowercase(Locale.ROOT)
-    return requestedModels.all { model -> compactTitle.contains(model) }
+    val returnedModels = SPECIFIC_DYSON_HAIR_TOOL_MODEL_PATTERN.findAll(title)
+        .map { it.value.filter(Char::isLetterOrDigit).lowercase(Locale.ROOT) }
+        .toSet()
+    // Avoid prefix collisions such as HD07 matching HD070. A named family or model in the
+    // request must appear as the same extracted token in the returned listing.
+    return requestedModels.all { model -> model in returnedModels }
 }
 
 data class SerpApiRequestProduct(

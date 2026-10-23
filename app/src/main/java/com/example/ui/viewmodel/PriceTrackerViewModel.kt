@@ -2000,6 +2000,24 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             .toList()
     }
 
+    /**
+     * Matching saved unverified fichas is auxiliary UI enrichment. It must not hide live offers
+     * or consume the whole search timeout if Room is slow or fails.
+     */
+    private suspend fun safeRelatedMarketCandidates(
+        query: String,
+        visibleOffers: List<SerpApiShoppingResult>
+    ): List<Product> = try {
+        withTimeoutOrNull(3_000L) {
+            findRelatedUnverifiedMarketCandidates(query, visibleOffers)
+        } ?: emptyList()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Exception) {
+        Log.w("PriceTrackerViewModel", "Could not load related provisional Mercado fichas.", error)
+        emptyList()
+    }
+
     /** Ignore late results when the user edits the query during an in-flight request. */
     private fun isOnlineSearchStillCurrent(query: String, provider: OnlineSearchProvider): Boolean {
         val current = _uiState.value
@@ -2126,7 +2144,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             historyNotice, catalogueNotice, eligibilityNotice
                         ).map { it.trim() }.filter { it.isNotBlank() }.joinToString("\n\n")
                         if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
-                        val relatedMarketCandidates = findRelatedUnverifiedMarketCandidates(query, visibleCachedResults)
+                        val relatedMarketCandidates = safeRelatedMarketCandidates(query, visibleCachedResults)
                         if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
                         lastDisplayedSearchIdentity = onlineSearchIdentity(provider, query)
                         _uiState.value = _uiState.value.copy(
@@ -2345,7 +2363,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         .filter { it.isNotBlank() }
                         .joinToString("\n\n")
                     if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
-                    val relatedMarketCandidates = findRelatedUnverifiedMarketCandidates(query, results)
+                    val relatedMarketCandidates = safeRelatedMarketCandidates(query, results)
                     if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
                     lastDisplayedSearchIdentity = onlineSearchIdentity(provider, query)
                     _uiState.value = _uiState.value.copy(
@@ -2855,7 +2873,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             if (diagnosticProductId != null) {
                                 reportWaybackDiagnostic(
                                     diagnosticProductId, 7, WaybackTraceStatus.FAILED,
-                                    "La alternativa Memento superó su límite de 25 segundos; las capturas no se han dado por válidas."
+                                    "La alternativa Memento superó su límite de 25 segundos; solo cuentan las capturas verificadas y guardadas antes del límite."
                                 )
                             }
                         } else {
@@ -2888,7 +2906,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     // Prefer the direct URL and the independent Memento index before the slower
                     // merchant-wide fallback. If either source supplies only a sparse series, the
                     // bounded domain pass may still fill missing historical dates.
-                    val quotesBeforeDomain = attempts.flatMap { it.quotes }.filter {
+                    val quotesBeforeDomain = (
+                        attempts.flatMap { it.quotes } + candidateQuotesObserved.values
+                    ).distinctBy { archiveQuoteIdentity(candidate, it) }.filter {
                         !it.isDiscoveryCandidate &&
                             (it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId)
                     }
@@ -2897,11 +2917,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         attempts.any { it.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") }
                     val allDirectSnapshotsTimedOut =
                         shouldSkipDomainFallbackAfterSnapshotTimeout(attempts)
-                    if (candidate.merchantDomain != null &&
+                    val shouldTryDomainFallback = candidate.merchantDomain != null &&
                         !hasSufficientHistoryBeforeDomain &&
                         !rateLimitedAtDirectStage &&
                         !allDirectSnapshotsTimedOut
-                    ) {
+                    if (shouldTryDomainFallback) {
                         if (diagnosticProductId != null) {
                             reportWaybackDiagnostic(
                                 diagnosticProductId, 7, WaybackTraceStatus.RUNNING,

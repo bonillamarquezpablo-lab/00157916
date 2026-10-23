@@ -4988,10 +4988,13 @@ class WaybackPriceHistoryClient(
         }
         val selectedKeys = quarterly.map { it.rawTimestamp to it.originalUrl }.toSet()
         val selectedTimestamps = quarterly.mapNotNull { it.rawTimestamp }.toSet()
-        // Prefer additional dates not represented by the quarterly sample. Only reuse a timestamp
-        // when the bounded budget still has room after distinct dates have been considered.
-        val remaining = chronological.filterNot { (it.rawTimestamp to it.originalUrl) in selectedKeys }
-            .sortedBy { it.rawTimestamp in selectedTimestamps }
+        // Extra HTML downloads should contribute a new historical date, not another merchant URL
+        // from a timestamp already represented by the quarterly sample. Besides reducing latency,
+        // this prevents one archived day from looking like several independent historical points.
+        val remaining = chronological.filterNot {
+            (it.rawTimestamp to it.originalUrl) in selectedKeys ||
+                it.rawTimestamp in selectedTimestamps
+        }
         val slots = minOf(max - quarterly.size, remaining.size)
         val extra = when {
             slots <= 0 -> emptyList()

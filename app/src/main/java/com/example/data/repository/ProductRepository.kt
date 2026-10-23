@@ -11,6 +11,7 @@ import com.example.data.local.TrackedProductEntity
 import com.example.data.model.PricePoint
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
+import com.example.data.model.PENDING_VERIFICATION_DATE_LABEL
 import com.example.data.model.StoreOffer
 import com.example.data.remote.ArchivedPriceQuote
 import com.example.data.remote.WaybackPriceHistoryClient
@@ -735,7 +736,7 @@ class ProductRepository(
                     // This is a listed amount only. No current-price observation is written below.
                     currentPrice = displayOffer?.price ?: 0.0,
                     athMinPrice = 0.0,
-                    athMinDate = "Pendiente de verificación",
+                    athMinDate = PENDING_VERIFICATION_DATE_LABEL,
                     athMinStore = "",
                     athMaxPrice = 0.0,
                     avg90dPrice = 0.0,
@@ -762,7 +763,7 @@ class ProductRepository(
                     } else existingProduct.category,
                     currentPrice = displayOffer?.price ?: existingProduct.currentPrice,
                     athMinPrice = 0.0,
-                    athMinDate = "Pendiente de verificación",
+                    athMinDate = PENDING_VERIFICATION_DATE_LABEL,
                     athMinStore = "",
                     athMaxPrice = 0.0,
                     avg90dPrice = 0.0,
@@ -892,7 +893,7 @@ class ProductRepository(
                     athMinPrice = if (hasTrustedOffer && existingProduct.athMinPrice <= 0.0) currentMinimum else existingProduct.athMinPrice,
                     athMinDate = if (hasTrustedOffer) {
                         existingProduct.athMinDate
-                            .takeUnless { it.isBlank() || it.equals("Pendiente de verificación", ignoreCase = true) }
+                            .takeUnless { it.isBlank() || it.equals(PENDING_VERIFICATION_DATE_LABEL, ignoreCase = true) }
                             ?: "Historial en construcción"
                     } else existingProduct.athMinDate,
                     athMinStore = safeMinStore,
@@ -1946,8 +1947,8 @@ class ProductRepository(
             athMinPrice = lowest,
             athMinDate = when {
                 hasSufficientHistory -> dateFormatter.format(Date(minObservation!!.observedAt))
-                !priceIsVerified && this.athMinDate.equals("Pendiente de verificación", ignoreCase = true) ->
-                    "Pendiente de verificación"
+                !priceIsVerified && this.athMinDate.equals(PENDING_VERIFICATION_DATE_LABEL, ignoreCase = true) ->
+                    PENDING_VERIFICATION_DATE_LABEL
                 else -> "Historial en construcción"
             },
             athMinStore = if (hasSufficientHistory) observationStore(minObservation!!, stores).name else "",

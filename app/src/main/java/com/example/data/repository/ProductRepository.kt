@@ -688,14 +688,24 @@ class ProductRepository(
         if (visible.isEmpty()) return 0
 
         val currentEntities = productDao.getAllProductsSnapshot().toMutableList()
-        var inserted = 0
+        var madeAvailable = 0
         for (group in groupOnlineShoppingResults(visible)) {
-            // Never replace a saved product with a search-only placeholder. Existing trusted
-            // products are updated by recordOnlineSearchResults() before this helper is called.
-            if (currentEntities.any { onlineProductIdentityKey(it.title) == group.identityKey }) continue
+            val existingIndex = currentEntities.indexOfFirst {
+                onlineProductIdentityKey(it.title) == group.identityKey
+            }
+            val existingProduct = currentEntities.getOrNull(existingIndex)
+
+            // Existing trusted/tracked rows or any row with stored observations belong to the user:
+            // never replace their price, URL, identity, or history with a generic Shopping result.
+            if (existingProduct != null) {
+                if (existingProduct.isPriceVerified ||
+                    trackedDao.getById(existingProduct.id) != null ||
+                    priceObservationDao.getObservationCount(existingProduct.id) > 0
+                ) continue
+            }
 
             // Trusted direct URLs are preferred for store and history actions. When the provider
-            // only supplied a generic Shopping-search URL, retain that URL solely for the explicit
+            // only supplied a generic Shopping-search URL, retain it solely for the explicit
             // "Abrir en Google Shopping" action in the detail sheet; it never becomes a seller quote
             // or a historical observation.
             val safeDirectOffer = filterOnlineSearchResults(group.offers, searchQuery)
@@ -705,41 +715,77 @@ class ProductRepository(
                 .filter { it.price.isFinite() && it.price > 0.0 && !it.isRentalOrMonthly }
                 .minByOrNull { it.price }
             val displayOffer = safeDirectOffer ?: fallbackDisplayOffer
-            val directUrl = safeDirectOffer?.sourceUrl
+            val navigationUrl = safeDirectOffer?.sourceUrl
                 ?: fallbackDisplayOffer?.takeIf { it.isSearchFallbackDestination }?.sourceUrl.orEmpty()
-            val candidate = ProductEntity(
-                id = stableOnlineId("online_candidate_", group.identityKey),
-                title = group.title,
-                brand = inferProductBrand(group.title),
-                category = inferProductCategory(group.title, searchQuery).name,
-                // This is the observed catalogue listing amount, not a confirmed current price.
-                // Product.priceDisplayStatus intentionally keeps it out of verified price claims.
-                currentPrice = displayOffer?.price ?: 0.0,
-                athMinPrice = 0.0,
-                athMinDate = "Pendiente de verificación",
-                athMinStore = "",
-                athMaxPrice = 0.0,
-                avg90dPrice = 0.0,
-                officialPvp = 0.0,
-                currentStoreId = safeDirectOffer?.let {
-                    canonicalStoreId(it.storeName, it.sourceUrl)
-                } ?: "unknown_store",
-                storeUrl = directUrl,
-                ean = "",
-                imageUrl = group.representativeImageUrl.takeIf { it.isNotBlank() },
-                rating = 0.0,
-                reviewCount = 0,
-                isPriceVerified = false,
-                googleProductId = group.offers.firstNotNullOfOrNull { it.googleProductId }
-            )
-            // IGNORE handles a concurrent search safely: never replace a trusted row inserted
-            // for the same stable identity between the snapshot and this insert.
-            if (productDao.insertIfAbsent(candidate) != -1L) {
-                currentEntities += candidate
-                inserted++
+            val bestKnownStore = safeDirectOffer?.let {
+                canonicalStoreId(it.storeName, it.sourceUrl)
+            } ?: "unknown_store"
+            val productId = existingProduct?.id ?: stableOnlineId("online_candidate_", group.identityKey)
+
+            val candidate = if (existingProduct == null) {
+                ProductEntity(
+                    id = productId,
+                    title = group.title,
+                    brand = inferProductBrand(group.title),
+                    category = inferProductCategory(group.title, searchQuery).name,
+                    // This is a listed amount only. No current-price observation is written below.
+                    currentPrice = displayOffer?.price ?: 0.0,
+                    athMinPrice = 0.0,
+                    athMinDate = "Pendiente de verificación",
+                    athMinStore = "",
+                    athMaxPrice = 0.0,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = bestKnownStore,
+                    storeUrl = navigationUrl,
+                    ean = "",
+                    imageUrl = group.representativeImageUrl.takeIf { it.isNotBlank() },
+                    rating = 0.0,
+                    reviewCount = 0,
+                    isPriceVerified = false,
+                    googleProductId = group.offers.firstNotNullOfOrNull { it.googleProductId }
+                )
+            } else {
+                // A legacy/demo shell with no observation and no tracking can become the real
+                // unverified live-search ficha in place. Preserve its database ID and any separately
+                // verified metadata; replace only unverified placeholder price/store fields.
+                existingProduct.copy(
+                    title = group.title,
+                    brand = existingProduct.brand.takeIf { it.isNotBlank() && it != "Sin marca" }
+                        ?: inferProductBrand(group.title),
+                    category = if (existingProduct.category == ProductCategory.ALL.name) {
+                        inferProductCategory(group.title, searchQuery).name
+                    } else existingProduct.category,
+                    currentPrice = displayOffer?.price ?: existingProduct.currentPrice,
+                    athMinPrice = 0.0,
+                    athMinDate = "Pendiente de verificación",
+                    athMinStore = "",
+                    athMaxPrice = 0.0,
+                    avg90dPrice = 0.0,
+                    currentStoreId = bestKnownStore,
+                    storeUrl = navigationUrl,
+                    imageUrl = group.representativeImageUrl.takeIf { it.isNotBlank() }
+                        ?: existingProduct.imageUrl,
+                    isPriceVerified = false,
+                    googleProductId = group.offers.firstNotNullOfOrNull { it.googleProductId }
+                        ?: existingProduct.googleProductId
+                )
+            }
+
+            if (existingProduct == null) {
+                // IGNORE handles a concurrent search safely: never replace a trusted row inserted
+                // for the same stable identity between the snapshot and this insert.
+                if (productDao.insertIfAbsent(candidate) != -1L) {
+                    currentEntities += candidate
+                    madeAvailable++
+                }
+            } else {
+                productDao.insert(candidate)
+                currentEntities[existingIndex] = candidate
+                madeAvailable++
             }
         }
-        return inserted
+        return madeAvailable
     }
 
     /**

@@ -78,9 +78,9 @@ class ProductDiscoveryRepository(private val database: AppDatabase) {
         val productIdsWithObservations = database.priceObservationDao().getAllProductIdsWithObservations().toSet()
         val existingTrustedMatch = savedProducts.any { saved ->
             isSameProductIdentity(title, productUrl, saved.title, saved.storeUrl) &&
-                !isUnverifiedLiveSearchPlaceholder(saved) &&
-                saved.id !in trackedProductIds &&
-                saved.id !in productIdsWithObservations
+                (!isUnverifiedLiveSearchPlaceholder(saved) ||
+                    saved.id in trackedProductIds ||
+                    saved.id in productIdsWithObservations)
         }
         if (existingTrustedMatch) {
             // Historical data for a trusted, tracked, or observed row is handled by its normal

@@ -62,6 +62,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.example.data.model.Product
 import com.example.data.model.Store
 import com.example.data.remote.retailerDestinationForOffer
 import com.example.data.remote.OnlineProductGroup
@@ -70,6 +71,7 @@ import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.extractDirectRetailerUrl
 import com.example.data.remote.formatOnlineSnapshotAge
 import com.example.data.remote.onlineProductRelevanceScore
+import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.isAccessorySearchQuery
 import com.example.data.remote.isReplacementPartListingTitle
 import com.example.data.remote.isWheelFitmentQuery
@@ -610,15 +612,21 @@ fun OnlineSearchScreen(
                 }
             }
         }
-        if (state.onlineSearchResults.isNotEmpty()) {
+        if (state.onlineSearchResults.isNotEmpty() || state.onlineSearchRelatedMarketCandidates.isNotEmpty()) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        if (state.onlineSearchProvider == OnlineSearchProvider.AMAZON) "Resultados de Amazon.es" else "Resultados de Google Shopping",
+                        when {
+                            state.onlineSearchResults.isEmpty() -> "Fichas guardadas en Mercado relacionadas"
+                            state.onlineSearchProvider == OnlineSearchProvider.AMAZON -> "Resultados de Amazon.es"
+                            else -> "Resultados de Google Shopping"
+                        },
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold
                     )
-                    if (state.onlineSearchProvider == OnlineSearchProvider.GOOGLE_SHOPPING) {
+                    if (state.onlineSearchResults.isNotEmpty() &&
+                        state.onlineSearchProvider == OnlineSearchProvider.GOOGLE_SHOPPING
+                    ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilterChip(
                                 selected = !state.onlineSearchAmazonOnly,
@@ -748,7 +756,9 @@ fun OnlineSearchScreen(
                 } else if (groupsToShow.isEmpty()) {
                     item {
                         Text(
-                            if (selectedStoreKey.value != null)
+                            if (state.onlineSearchRelatedMarketCandidates.isNotEmpty())
+                                "No se han recibido ofertas nuevas de la tienda. Abajo aparecen fichas de Mercado que coinciden con la consulta; sus importes siguen sin confirmar."
+                            else if (selectedStoreKey.value != null)
                                 "No hay ofertas de esa tienda para esta versión en los resultados devueltos por el proveedor. Selecciona «Todas las tiendas» para quitar el filtro. Mínimo no inventa precios."
                             else if (accessoryResultCount > 0 && !showAccessoryResults.value)
                                 "No se ha identificado el producto principal. Solo hay accesorios relacionados; usa «Mostrar accesorios» para revisarlos sin confundirlos con el artículo buscado."
@@ -802,6 +812,74 @@ fun OnlineSearchScreen(
                             onOpenOffer = ::openOffer,
                             onOpenBestOffer = { openOffer(group.bestPurchaseOffer) }
                         )
+                    }
+                }
+            }
+            if (state.onlineSearchRelatedMarketCandidates.isNotEmpty()) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            "También en tu Mercado",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "Fichas ya guardadas que coinciden con la búsqueda. Se muestran aparte para no confundirlas con nuevas ofertas; el vendedor y el precio siguen sin verificar.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                items(
+                    items = state.onlineSearchRelatedMarketCandidates,
+                    key = { candidate -> "related-market-${candidate.id}" }
+                ) { candidate ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                if (candidate.imageUrl.isNotBlank()) {
+                                    AsyncImage(
+                                        model = candidate.imageUrl,
+                                        contentDescription = "Imagen de ${candidate.title}",
+                                        modifier = Modifier.size(78.dp).clip(RoundedCornerShape(12.dp)),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Text(candidate.title, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        NumberFormat.getCurrencyInstance(Locale("es", "ES")).format(candidate.currentPrice),
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        "PRECIO NO VERIFICADO · Ya existe en Mercado",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            OutlinedButton(
+                                onClick = { onOpenProduct(onlineProductIdentityKey(candidate.title)) },
+                                modifier = Modifier.fillMaxWidth().testTag("open-related-market-${candidate.id}")
+                            ) {
+                                Text("Ver ficha e historial")
+                            }
+                        }
                     }
                 }
             }

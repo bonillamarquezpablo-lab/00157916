@@ -28,6 +28,7 @@ internal fun hasSufficientHistoricalCoverage(
 ): Boolean {
     if (minimumDistinctDates <= 0) return true
     return quotes.asSequence()
+        .filterNot { it.isDiscoveryCandidate }
         .map { Math.floorDiv(it.observedAt, WaybackPriceHistoryClient.DAY_MS) }
         .distinct()
         .take(minimumDistinctDates)

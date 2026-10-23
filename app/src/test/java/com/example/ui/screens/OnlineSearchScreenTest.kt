@@ -74,6 +74,8 @@ class OnlineSearchScreenTest {
             }
         }
 
+        val searchList = composeRule.onNodeWithTag("online-search-list")
+        searchList.performScrollToNode(hasText(title))
         composeRule.onNodeWithTag("online-search-product-card").assertIsDisplayed().performClick()
         assertEquals(
             "A product card with a fallback seller link must still open its Room-backed ficha",

@@ -1635,6 +1635,10 @@ class SerpApiClient(
         // in the strict persistence/history filters and in the selected-model search.
         if (isBroadFamilyOverviewQuery(requested, returned)) return true
 
+        // "plancha Dyson" is a family search: show related models and matching parts even when
+        // retailers use family names such as Airwrap or Styler instead of "plancha".
+        if (isBroadDysonHairToolsQueryMatch(requested, returned)) return true
+
         val orderedWanted = normalize(requested)
             .replace(Regex("(\\d+)\\s?(gb|tb|mb)\\b"), "$1 $2")
             .split(' ')
@@ -1924,4 +1928,29 @@ class SerpApiClient(
             "para", "con", "por", "nuevo", "nueva", "original", "oficial", "gb", "tb", "mb"
         )
     }
+}
+
+/**
+ * Broad, brand-specific Dyson hair-tool searches intentionally include related hair tools and spares.
+ * Exact Dyson model searches still use the stricter variant checks before this helper is reached.
+ */
+internal fun isBroadDysonHairToolsQueryMatch(requested: String, returned: String): Boolean {
+    fun words(value: String): Set<String> = value.lowercase(Locale.ROOT)
+        .replace(Regex("""[^a-z0-9]+"""), " ")
+        .trim()
+        .split(Regex("""\s+"""))
+        .filter { it.isNotBlank() }
+        .toSet()
+
+    val query = words(requested)
+    val title = words(returned)
+    if ("dyson" !in query || "dyson" !in title) return false
+    val genericHairQuery = setOf("plancha", "planchas", "secador", "secadores", "alisador", "alisadores", "pelo", "hair")
+    val hairToolOrPart = setOf(
+        "airwrap", "corrale", "supersonic", "styler", "plancha", "planchas",
+        "secador", "secadores", "alisador", "alisadores", "pelo", "hair",
+        "boquilla", "boquillas", "nozzle", "nozzles", "difusor", "difusores",
+        "diffuser", "diffusers", "attachment", "attachments", "accesorio", "accesorios"
+    )
+    return query.any { it in genericHairQuery } && title.any { it in hairToolOrPart }
 }

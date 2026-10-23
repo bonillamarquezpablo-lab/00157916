@@ -8,6 +8,9 @@ enum class ProductCategory(val displayName: String, val iconName: String) {
     TV_AUDIO("TV & Sonido", "Tv"),
     HOME_APPLIANCES("Hogar & Cocina", "Kitchen"),
     PERSONAL_CARE("Cuidado & Salud", "Spa"),
+    ACCESSORIES("Accesorios", "Build"),
+    REPLACEMENT_PARTS("Recambios", "Construction"),
+    TOYS("Juguetes", "Toys"),
     SPORTS("Deporte", "FitnessCenter"),
     OTHER("Otros", "Category")
 }

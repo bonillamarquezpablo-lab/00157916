@@ -1975,7 +1975,7 @@ class ProductRepository(
                 // revalidation, but it must never promote it into verified history or current price.
                 // In particular, provisional Shopping/search-page rows are excluded even if their
                 // title and amount look plausible.
-                valLegacyQuoteCanBeShownAsPending(observation, sourceUri, sourceHost) &&
+                valLegacyQuoteCanBeShownAsPending(observation, sourceUri, sourceHost, title) &&
                     observation.currency.trim().equals("EUR", ignoreCase = true) &&
                     observation.price.isFinite() &&
                     observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
@@ -2057,7 +2057,8 @@ class ProductRepository(
     private fun valLegacyQuoteCanBeShownAsPending(
         observation: PriceObservationEntity,
         sourceUri: URI?,
-        sourceHost: String
+        sourceHost: String,
+        catalogTitle: String
     ): Boolean {
         if (observation.isVerified) return true
         if (!isLiveObservation(observation) || sourceUri == null ||
@@ -2070,7 +2071,10 @@ class ProductRepository(
         ) return false
         return observation.storeName.isNotBlank() &&
             isEligibleSeller(observation.storeName, observation.sourceUrl) &&
-            isSafeCatalogTitleMatch(observation.productTitle, observation.productTitle)
+            isEligibleHistoryTitle(observation.productTitle) &&
+            isSafeCatalogTitleMatch(observation.productTitle, catalogTitle) &&
+            isPlausibleHistoryPrice(observation.productTitle, observation.price) &&
+            !isPromotionalBulkListing(observation.productTitle, "")
     }
 
     /**

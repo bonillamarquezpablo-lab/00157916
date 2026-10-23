@@ -46,6 +46,20 @@ class SerpApiProductMatchTest {
     }
 
     @Test
+    fun explicitStorageCapacityMustMatchAndVacuumSparesStayOutOfDysonHairSearch() {
+        assertTrue(hasMatchingExplicitStorageCapacity("iPhone 15 128 GB", "Apple iPhone 15 128GB Negro"))
+        assertFalse(hasMatchingExplicitStorageCapacity("iPhone 15 128 GB", "Apple iPhone 15 256GB Negro"))
+        assertFalse(hasMatchingExplicitStorageCapacity("iPhone 15 128 GB", "Apple iPhone 15 Negro"))
+        assertTrue(hasMatchingExplicitStorageCapacity("plancha Dyson", "Dyson Corrale"))
+        assertFalse(
+            isBroadDysonHairToolsQueryMatch(
+                "plancha Dyson",
+                "Boquilla para aspiradora Dyson V11 Detect"
+            )
+        )
+    }
+
+    @Test
     fun broadDysonHairToolSearchIncludesRelatedHairModelsButNotUnrelatedAppliances() {
         assertTrue(isBroadDysonHairToolsQueryMatch("plancha Dyson", "Dyson Airwrap i.d. Curly + Coily Amber Silk"))
         assertTrue(isBroadDysonHairToolsQueryMatch("plancha Dyson", "Promoción Boquilla para Plancha de Pelo Dyson Supersonic"))

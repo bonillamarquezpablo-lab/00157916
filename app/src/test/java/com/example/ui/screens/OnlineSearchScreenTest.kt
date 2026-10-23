@@ -75,7 +75,7 @@ class OnlineSearchScreenTest {
             }
         }
 
-        composeRule.onNode(hasText(title) and hasClickAction()).assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("online-search-product-card").assertIsDisplayed().performClick()
         assertEquals(
             "A product card with a fallback seller link must still open its Room-backed ficha",
             com.example.data.remote.onlineProductIdentityKey(title),

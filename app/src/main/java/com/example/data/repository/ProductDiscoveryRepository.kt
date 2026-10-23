@@ -12,6 +12,9 @@ import com.example.data.model.ProductCategory
 import com.example.data.model.Store
 import com.example.data.remote.ArchivedPriceQuote
 import com.example.data.remote.onlineProductIdentityKey
+import com.example.data.remote.isAccessoryListingTitle
+import com.example.data.remote.isReplacementPartListingTitle
+import com.example.data.remote.isToyListingTitle
 import kotlinx.coroutines.flow.Flow
 import java.net.URI
 import java.security.MessageDigest
@@ -359,13 +362,17 @@ class ProductDiscoveryRepository(private val database: AppDatabase) {
 
     private fun inferCategory(title: String): ProductCategory {
         val value = normalizeText(title)
+        // Match title-specific kinds first, so "Cefa set plancha Dyson" is a toy rather than an appliance.
         return when {
+            isToyListingTitle(title) -> ProductCategory.TOYS
+            isReplacementPartListingTitle(title) -> ProductCategory.REPLACEMENT_PARTS
+            isAccessoryListingTitle(title) -> ProductCategory.ACCESSORIES
             Regex("""\b(iphone|samsung galaxy|smartphone|telefono movil|redmi|pixel|ipad|tablet|oneplus|motorola edge)\b""").containsMatchIn(value) -> ProductCategory.SMARTPHONES
             Regex("""\b(laptop|portatil|notebook|thinkpad|macbook|chromebook|monitor|gpu|geforce|radeon|rtx|processor|procesador|ssd|ram|pc gaming|desktop)\b""").containsMatchIn(value) -> ProductCategory.COMPUTING
             Regex("""\b(playstation|ps5|ps4|xbox|nintendo switch|steam deck|rog ally|console|consola|joy con)\b""").containsMatchIn(value) -> ProductCategory.GAMING
             Regex("""\b(television|tv|oled|qled|bravia|soundbar|barra de sonido|headphones|auriculares|speaker|altavoz)\b""").containsMatchIn(value) -> ProductCategory.TV_AUDIO
             Regex("""\b(lavadora|frigorifico|lavavajillas|cafetera|aspiradora|air fryer|freidora|horno|microondas|batidora|secadora)\b""").containsMatchIn(value) -> ProductCategory.HOME_APPLIANCES
-            Regex("""\b(afeitadora|depiladora|secador de pelo|cepillo electrico|oral b|oneblade)\b""").containsMatchIn(value) -> ProductCategory.PERSONAL_CARE
+            Regex("""\b(afeitadora|depiladora|plancha|planchas|alisador|rizador|airwrap|corrale|supersonic|secador de pelo|cepillo electrico|oral b|oneblade)\b""").containsMatchIn(value) -> ProductCategory.PERSONAL_CARE
             Regex("""\b(bicicleta|shimano|zapatillas|running|futbol|ciclismo|pesas|fitness|raqueta|camping)\b""").containsMatchIn(value) -> ProductCategory.SPORTS
             else -> ProductCategory.OTHER
         }

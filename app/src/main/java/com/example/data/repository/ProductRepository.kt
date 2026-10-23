@@ -730,7 +730,7 @@ class ProductRepository(
             val storeId = if (hasTrustedOffer) {
                 canonicalStoreId(bestOffer.storeName, bestOffer.sourceUrl)
             } else {
-                existingProduct?.currentStoreId ?: "unknown_store"
+                existingProduct?.currentStoreId ?: canonicalStoreId(bestOffer.storeName, bestOffer.sourceUrl)
             }
             val productId = existingProduct?.id
                 ?: stableOnlineId("online_product_", group.identityKey)
@@ -752,7 +752,7 @@ class ProductRepository(
             val highestToday = trustedHighestToday
                 ?: existingProduct?.athMaxPrice
                 ?: currentMinimum
-            val safeStoreId = if (hasTrustedOffer) storeId else existingProduct?.currentStoreId ?: "unknown_store"
+            val safeStoreId = if (hasTrustedOffer) storeId else existingProduct?.currentStoreId ?: storeId
             val safeStoreUrl = if (hasTrustedOffer) bestOffer.sourceUrl else existingProduct?.storeUrl.orEmpty()
             val safeMinStore = if (hasTrustedOffer) bestOffer.storeName else existingProduct?.athMinStore.orEmpty()
             val safeGoogleProductId = if (hasTrustedOffer) {

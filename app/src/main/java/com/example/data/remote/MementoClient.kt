@@ -144,6 +144,11 @@ class MementoClient(
             captureCandidates = cdx.captures
             cdxAvailable = cdx.available
             cdxRequestFailed = cdx.requestFailed
+            if (captureCandidates.isNotEmpty()) {
+                // A working CDX fallback recovered captures; don't report the old TimeMap 404
+                // as if the whole archive lookup had failed.
+                diagnostics.remove("MEMENTO_TIMEMAP_HTTP_404")
+            }
         }
 
         val captures = sampleQuarterlyCaptures(
@@ -418,10 +423,18 @@ class MementoClient(
 
     private fun isValidArchiveSnapshotUrl(value: String): Boolean {
         val uri = runCatching { URI(value) }.getOrNull() ?: return false
-        return uri.scheme.equals("https", true) &&
-            normalizeHost(uri.host.orEmpty()) == ARCHIVE_HOST &&
-            uri.userInfo == null &&
-            Regex("""^/wayback/\\d{14}/https?://""").containsMatchIn(uri.rawPath.orEmpty())
+        if (!uri.scheme.equals("https", true) ||
+            normalizeHost(uri.host.orEmpty()) != ARCHIVE_HOST ||
+            uri.userInfo != null
+        ) return false
+        val path = uri.rawPath.orEmpty()
+        val prefix = "/wayback/"
+        if (!path.startsWith(prefix)) return false
+        val rest = path.removePrefix(prefix)
+        val timestamp = rest.take(14)
+        return timestamp.length == 14 &&
+            timestamp.all(Char::isDigit) &&
+            rest.drop(14).startsWith("/https://")
     }
 
     private data class CdxCaptureResult(

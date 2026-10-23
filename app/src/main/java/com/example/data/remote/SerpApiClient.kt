@@ -22,10 +22,23 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.ceil
 
 /** A named Dyson model makes the query specific; don't widen it to sibling products. */
+private val SPECIFIC_DYSON_HAIR_TOOL_MODEL_PATTERN = Regex(
+    """(?i)\b(corrale|airwrap|supersonic|airstrait|airblade|v\d{1,2}|hd\d{2,3}|hs\d{2,3}|tp\d{2,3}|hp\d{2,3}|i\s*\.?\s*d\s*\.?\s*curly)\b"""
+)
+
 internal fun queryNamesSpecificDysonHairToolModel(query: String): Boolean =
-    Regex(
-        """(?i)\b(corrale|airwrap|supersonic|airstrait|airblade|v\d{1,2}|hd\d{2,3}|hs\d{2,3}|tp\d{2,3}|hp\d{2,3}|id\s*\.?\s*curly)\b"""
-    ).containsMatchIn(query)
+    SPECIFIC_DYSON_HAIR_TOOL_MODEL_PATTERN.containsMatchIn(query)
+
+/** Refuse sibling Dyson models whenever the request includes an explicit family/model token. */
+internal fun returnedTitleMatchesSpecificDysonHairToolModel(query: String, title: String): Boolean {
+    val requestedModels = SPECIFIC_DYSON_HAIR_TOOL_MODEL_PATTERN.findAll(query)
+        .map { it.value.filter(Char::isLetterOrDigit).lowercase(Locale.ROOT) }
+        .distinct()
+        .toList()
+    if (requestedModels.isEmpty()) return true
+    val compactTitle = title.filter(Char::isLetterOrDigit).lowercase(Locale.ROOT)
+    return requestedModels.all(compactTitle::contains)
+}
 
 data class SerpApiRequestProduct(
     val id: String,
@@ -1644,7 +1657,7 @@ class SerpApiClient(
         // "plancha Dyson" is a family search: show related models and matching parts even when
         // retailers use family names such as Airwrap or Styler instead of "plancha".
         if (isBroadDysonHairToolsQueryMatch(requested, returned) &&
-            !queryNamesSpecificDysonHairToolModel(requested)
+            returnedTitleMatchesSpecificDysonHairToolModel(requested, returned)
         ) return true
 
         val orderedWanted = normalize(requested)

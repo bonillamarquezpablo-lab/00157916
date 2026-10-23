@@ -2492,6 +2492,32 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun cdxSamplerDoesNotUseMultipleUrlsForOneCaptureTimestamp() {
+        val client = newClient()
+        val formatter = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {
+            isLenient = false
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }
+        fun capture(raw: String, url: String) = WaybackPriceHistoryClient.WaybackCapture(
+            rawTimestamp = raw,
+            timestamp = formatter.parse(raw)!!.time,
+            originalUrl = url
+        )
+        val captures = listOf(
+            capture("20260501000000", "https://shop.example/product/item"),
+            capture("20260515000000", "https://shop.example/product/item"),
+            capture("20260515000000", "https://shop.example/product/item?alternate=1"),
+            capture("20260601000000", "https://shop.example/product/item"),
+            capture("20260615000000", "https://shop.example/product/item")
+        )
+
+        val sampled = client.sampleCaptures(captures, max = 4)
+
+        assertEquals("The sampler must not emit multiple points for one capture timestamp", sampled.size,
+            sampled.map { it.timestamp }.distinct().size)
+    }
+
+    @Test
     fun domainDiscoveryChoosesDistinctProductUrlsBeforeExactHistoryQueries() {
         val client = newClient()
         val body = """

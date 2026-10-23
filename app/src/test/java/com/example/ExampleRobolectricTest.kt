@@ -424,10 +424,10 @@ class ExampleRobolectricTest {
             val timestamp = System.currentTimeMillis()
             val results = listOf(
                 SerpApiShoppingResult("Anker Power Bank 20000mAh", 1.99, "Tienda barata", "https://www.google.com/shopping/product/cheap", observedAt = timestamp),
-                SerpApiShoppingResult("Anker Power Bank 20000mAh", 39.99, "Tienda 2", "https://www.google.com/shopping/product/p2", observedAt = timestamp),
-                SerpApiShoppingResult("Anker Power Bank 20000mAh", 42.99, "Tienda 3", "https://www.google.com/shopping/product/p3", observedAt = timestamp),
-                SerpApiShoppingResult("Anker Power Bank 20000mAh", 44.99, "Tienda 4", "https://www.google.com/shopping/product/p4", observedAt = timestamp),
-                SerpApiShoppingResult("Anker Power Bank 20000mAh", 49.99, "Tienda 5", "https://www.google.com/shopping/product/p5", observedAt = timestamp)
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 39.99, "Amazon.es", "https://www.amazon.es/dp/ANKERPOWERBANK2", observedAt = timestamp),
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 42.99, "PcComponentes", "https://www.pccomponentes.com/anker-power-bank-20000mah", observedAt = timestamp),
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 44.99, "MediaMarkt", "https://www.mediamarkt.es/anker-power-bank-20000mah", observedAt = timestamp),
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 49.99, "Fnac España", "https://www.fnac.es/anker-power-bank-20000mah", observedAt = timestamp)
             )
             val filtered = repository.filterOnlineSearchResults(results, "Anker Power Bank 20000mAh")
             assertEquals("Suspicious offers remain visible instead of being discarded", 5, filtered.size)
@@ -2624,7 +2624,7 @@ class ExampleRobolectricTest {
                     title = "Sony WH-1000XM5 Wireless Headphones",
                     price = 229.99,
                     storeName = "PcComponentes",
-                    sourceUrl = "https://www.google.com/shopping/product/SONYWH1000XM5",
+                    sourceUrl = "https://www.pccomponentes.com/sony-wh-1000xm5",
                     observedAt = now
                 ),
                 com.example.data.remote.SerpApiShoppingResult(
@@ -2894,9 +2894,9 @@ class ExampleRobolectricTest {
             assertTrue("Searched products must be marked as source-verified", persistedProduct?.isPriceVerified == true)
             assertTrue(stored.all { it.currency == "EUR" && it.sourceType == "Google Shopping" })
             assertEquals(3, database.priceObservationDao().getObservationCount(sonyProductId))
-            val savedGoogleOffer = stored.single { it.storeName == "PcComponentes" }
-            assertTrue(savedGoogleOffer.sourceUrl.contains("google.com/shopping/product"))
-            assertEquals("Google Shopping", savedGoogleOffer.linkType)
+            val savedPcComponentesOffer = stored.single { it.storeName == "PcComponentes" }
+            assertTrue(savedPcComponentesOffer.sourceUrl.startsWith("https://www.pccomponentes.com/"))
+            assertEquals("directo", savedPcComponentesOffer.linkType)
             assertEquals("directo", stored.single { it.storeName == "Amazon.es" }.linkType)
 
             val productAfterGoogleObservation = withTimeout<List<Product>>(10_000) {

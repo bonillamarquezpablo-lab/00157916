@@ -12,6 +12,30 @@ class SerpApiProductMatchTest {
         assertTrue(queryNamesSpecificDysonHairToolModel("Dyson Airwrap i.d. Curly"))
         assertFalse(queryNamesSpecificDysonHairToolModel("plancha Dyson"))
         assertFalse(queryNamesSpecificDysonHairToolModel("herramientas de pelo Dyson"))
+        assertFalse(
+            returnedTitleMatchesSpecificDysonHairToolModel(
+                "plancha Dyson Corrale",
+                "Dyson Airwrap i.d. Curly + Coily Amber Silk"
+            )
+        )
+        assertTrue(
+            returnedTitleMatchesSpecificDysonHairToolModel(
+                "plancha Dyson Corrale",
+                "Dyson Corrale CoolShine"
+            )
+        )
+        assertFalse(
+            returnedTitleMatchesSpecificDysonHairToolModel(
+                "secador Dyson Supersonic HD07",
+                "Dyson Supersonic HD08"
+            )
+        )
+        assertTrue(
+            returnedTitleMatchesSpecificDysonHairToolModel(
+                "plancha Dyson",
+                "Dyson Airwrap i.d. Curly"
+            )
+        )
     }
 
     @Test

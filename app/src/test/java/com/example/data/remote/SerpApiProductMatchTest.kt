@@ -6,6 +6,15 @@ import org.junit.Test
 
 class SerpApiProductMatchTest {
     @Test
+    fun specificDysonModelIntentIsNotTreatedAsABroadFamilyQuery() {
+        assertTrue(queryNamesSpecificDysonHairToolModel("plancha Dyson Corrale"))
+        assertTrue(queryNamesSpecificDysonHairToolModel("secador Dyson Supersonic HD07"))
+        assertTrue(queryNamesSpecificDysonHairToolModel("Dyson Airwrap i.d. Curly"))
+        assertFalse(queryNamesSpecificDysonHairToolModel("plancha Dyson"))
+        assertFalse(queryNamesSpecificDysonHairToolModel("herramientas de pelo Dyson"))
+    }
+
+    @Test
     fun broadDysonHairToolSearchIncludesRelatedHairModelsButNotUnrelatedAppliances() {
         assertTrue(isBroadDysonHairToolsQueryMatch("plancha Dyson", "Dyson Airwrap i.d. Curly + Coily Amber Silk"))
         assertTrue(isBroadDysonHairToolsQueryMatch("plancha Dyson", "Promoción Boquilla para Plancha de Pelo Dyson Supersonic"))

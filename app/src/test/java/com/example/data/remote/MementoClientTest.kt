@@ -34,6 +34,61 @@ class MementoClientTest {
     }
 
     @Test
+    fun buildCdxUrlUsesBoundedExactUrlHtmlCaptureQuery() {
+        val client = newClient()
+        val now = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.parse("20261021000000")!!.time
+        val url = client.buildCdxUrl(
+            originalUrl = "https://shop.example/product/item?sku=blue&size=256",
+            now = now,
+            lookbackDays = 365
+        )
+        assertNotNull(url)
+        val parsed = okhttp3.HttpUrl.get(url!!)
+        assertEquals("arquivo.pt", parsed.host)
+        assertEquals("/wayback/cdx", parsed.encodedPath)
+        assertEquals("https://shop.example/product/item?sku=blue&size=256", parsed.queryParameter("url"))
+        assertEquals("exact", parsed.queryParameter("matchType"))
+        assertEquals("json", parsed.queryParameter("output"))
+        assertEquals("=status:200", parsed.queryParameterValues("filter")?.getOrNull(0))
+        assertEquals("=mime:text/html", parsed.queryParameterValues("filter")?.getOrNull(1))
+        assertEquals("100", parsed.queryParameter("limit"))
+        assertNull(client.buildCdxUrl("https://www.google.com/search?q=phone", now, 365))
+    }
+
+    @Test
+    fun parseCdxNdjsonKeepsOnlyMatchingHtmlCaptureDatesInsideWindow() {
+        val client = newClient()
+        val now = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.parse("20261021000000")!!.time
+        val target = "https://shop.example/product/item?sku=blue"
+        val body = """
+            {"timestamp":"20260701000000","url":"$target","mime":"text/html","status":"200"}
+            {"timestamp":"20260101000000","url":"$target","mime":"text/html","status":"200"}
+            {"timestamp":"20200101000000","url":"$target","mime":"text/html","status":"200"}
+            {"timestamp":"20260501000000","url":"https://other.example/product/item","mime":"text/html","status":"200"}
+            {"timestamp":"20260601000000","url":"$target","mime":"text/html","status":"404"}
+            {"timestamp":"20260602000000","url":"$target","mime":"image/jpeg","status":"200"}
+            {"timestamp":"20260603000000","url":"$target","mime":"warc/revisit","status":"200"}
+        """.trimIndent()
+
+        val captures = client.parseCdxJsonLines(
+            body = body,
+            originalUrl = target,
+            now = now,
+            lookbackDays = 365
+        )
+
+        assertEquals(listOf("20260101000000", "20260701000000"), captures.map { it.rawTimestamp })
+        assertTrue(captures.all { it.snapshotUrl.startsWith("https://arquivo.pt/wayback/") })
+        assertTrue(captures.all { it.originalUrl == target })
+    }
+
+    @Test
     fun parseTimeMapExtractsOnlyTargetMatchedMementosInsideWindow() {
         val client = newClient()
         val formatter = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {

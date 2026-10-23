@@ -559,7 +559,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     product.isTracked ||
                     product.priceHistory.isNotEmpty() ||
                     product.savedHistoricalPrice != null ||
-                    product.id.startsWith("online_candidate_")
+                    product.isUnverifiedLiveListing
             }
             .filter { product ->
                 // Category filter
@@ -1927,7 +1927,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     private fun onlineCatalogueNotice(insertedProducts: Int): String =
         if (insertedProducts > 0) {
-            "$insertedProducts ficha(s) nueva(s) guardada(s) en Mercado. Los productos sin enlace de vendedor quedan pendientes de verificación y no se añaden al histórico como precios confirmados."
+            "$insertedProducts ficha(s) de catálogo guardada(s) o recuperada(s) en Mercado. Los importes sin enlace directo quedan marcados como no verificados y no se añaden al histórico."
         } else {
             ""
         }

@@ -30,6 +30,38 @@ import java.util.concurrent.CopyOnWriteArrayList
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class WaybackPriceHistoryClientTest {
+
+    @Test
+    fun historicalSeriesRequiresThreeDistinctDatesSpanningNinetyDays() {
+        val base = 1_700_000_000_000L
+        fun quote(days: Long, targetProductId: String? = null, discovery: Boolean = false) =
+            ArchivedPriceQuote(
+                observedAt = base + days * WaybackPriceHistoryClient.DAY_MS,
+                price = 199.99,
+                currency = "EUR",
+                productTitle = "Sony WH-1000XM5",
+                originalUrl = "https://shop.example/products/sony-wh-1000xm5",
+                snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/products/sony-wh-1000xm5",
+                targetProductId = targetProductId,
+                isDiscoveryCandidate = discovery
+            )
+
+        assertFalse(hasSufficientPrimaryWaybackSeries(emptyList()))
+        assertFalse("One valid archived price is not a historical series",
+            hasSufficientPrimaryWaybackSeries(listOf(quote(0))))
+        assertFalse("Two dates are not enough to establish a series",
+            hasSufficientPrimaryWaybackSeries(listOf(quote(0), quote(180))))
+        assertFalse("Three nearby dates do not establish a 90-day series",
+            hasSufficientPrimaryWaybackSeries(listOf(quote(0), quote(10), quote(30))))
+        assertTrue("Three dates spread across 90 days qualify",
+            hasSufficientPrimaryWaybackSeries(listOf(quote(0), quote(45), quote(100))))
+        assertFalse("A different product's quote must not qualify the selected product's series",
+            hasSufficientPrimaryWaybackSeries(listOf(
+                quote(0), quote(45, targetProductId = "other-product"),
+                quote(100, discovery = true)
+            )))
+    }
+
     @Test
     fun repeatedWaybackAttemptsCannotDowngradeAnAlreadyExecutedDiagnosticStage() {
         assertEquals(

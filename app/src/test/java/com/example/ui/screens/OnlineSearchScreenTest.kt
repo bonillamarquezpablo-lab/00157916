@@ -56,7 +56,7 @@ class OnlineSearchScreenTest {
             MaterialTheme {
                 OnlineSearchScreen(
                     state = TrackerUiState(
-                        onlineSearchQuery = title,
+                        onlineSearchQuery = "wireless headphones",
                         onlineSearchResults = listOf(fallback),
                         onlineSearchProvider = OnlineSearchProvider.GOOGLE_SHOPPING
                     ),

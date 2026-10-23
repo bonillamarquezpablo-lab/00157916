@@ -372,11 +372,13 @@ class MementoClient(
             .addQueryParameter("matchType", "exact")
             .addQueryParameter("from", formatter.format(Date(earliest)))
             .addQueryParameter("to", formatter.format(Date(now)))
-            .addQueryParameter("filter", "=status:200")
-            .addQueryParameter("filter", "=mime:text/html")
+            .addQueryParameter("filter", "status:200")
+            .addQueryParameter("filter", "mime:text/html")
             .addQueryParameter("resolveRevisits", "true")
-            .addQueryParameter("collapseTime", "6")
-            .addQueryParameter("limit", MAX_CDX_LINES.toString())
+            .addQueryParameter("collapse", "timestamp:6")
+            // Prefer recent indexed rows, then spread the bounded set over the requested history
+            // window. Positive limits can return only the oldest rows and hide later captures.
+            .addQueryParameter("limit", "-$MAX_CDX_LINES")
             .addQueryParameter("output", "json")
             .build()
             .toString()

@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.AppDatabase
 import com.example.data.local.ProductEntity
+import com.example.data.model.ProductCategory
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.repository.ProductRepository
@@ -78,6 +79,64 @@ class LiveSearchMarketPersistenceTest {
                 repository.ensureVisibleOnlineSearchProducts(listOf(fallback), title))
             assertEquals(1, database.productDao().getProductCount())
             assertEquals(0, database.priceObservationDao().getObservationCount(savedRow.id))
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun liveSearchClassifiesDysonToyAndReplacementNozzleWithoutVerifyingTheirPrices() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val now = System.currentTimeMillis()
+            val toy = SerpApiShoppingResult(
+                title = "Cefa Set Plancha De Pelo Dyson Corrale Juguete",
+                price = 31.99,
+                storeName = "Google Shopping",
+                sourceUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=Cefa+Dyson+Corrale+Juguete",
+                observedAt = now,
+                condition = "new"
+            )
+            val nozzle = SerpApiShoppingResult(
+                title = "Boquilla de recambio para Dyson Supersonic",
+                price = 23.66,
+                storeName = "Google Shopping",
+                sourceUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=Boquilla+Dyson+Supersonic",
+                observedAt = now,
+                condition = "new"
+            )
+
+            assertEquals(
+                "Both relevant offers should get a ficha, even when Shopping lacks a direct seller link",
+                2,
+                repository.ensureVisibleOnlineSearchProducts(
+                    results = listOf(toy, nozzle),
+                    searchQuery = "plancha dyson",
+                    allowAccessories = true
+                )
+            )
+
+            val saved = database.productDao().getAllProductsSnapshot()
+            assertEquals(2, saved.size)
+            val savedToy = saved.single { it.title.contains("Cefa", ignoreCase = true) }
+            val savedNozzle = saved.single { it.title.contains("Boquilla", ignoreCase = true) }
+            assertEquals(ProductCategory.TOYS.name, savedToy.category)
+            assertEquals(ProductCategory.REPLACEMENT_PARTS.name, savedNozzle.category)
+            assertFalse("A toy found in public Shopping is not a verified price", savedToy.isPriceVerified)
+            assertFalse("A replacement part found in public Shopping is not a verified price", savedNozzle.isPriceVerified)
+            assertEquals(0, database.priceObservationDao().getObservationCount(savedToy.id))
+            assertEquals(0, database.priceObservationDao().getObservationCount(savedNozzle.id))
         } finally {
             database.close()
         }

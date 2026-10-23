@@ -4697,7 +4697,7 @@ class WaybackPriceHistoryClient(
      * explicitly names every missing detail. The model and edition must still match exactly.
      * This supports retailer pages whose visible heading is generic but whose URL targets a SKU.
      */
-    private fun matchesVariantDetailsConfirmedByUrl(
+    internal fun matchesVariantDetailsConfirmedByUrl(
         expectedTitle: String,
         archivedTitle: String,
         originalUrl: String
@@ -4754,8 +4754,6 @@ class WaybackPriceHistoryClient(
         // unknown. The selected product must request the colour that the URL proves.
         if (expectedColour == null && archivedColour != null) return false
         if (missingColour && urlColour != expectedColour) return false
-        if (!missingStorage && !missingColour) return false
-
         fun coreIdentity(value: String): String =
             onlineProductIdentityKey(canonicalizeArchiveTitle(value)).split('|')
                 .filterNot {
@@ -4764,6 +4762,37 @@ class WaybackPriceHistoryClient(
                         it.startsWith("specs:")
                 }
                 .joinToString("|")
+
+        if (!missingStorage && !missingColour) {
+            // When the archived page URL points at the primary SKU, a sibling offer needs its
+            // own URL to independently prove its model, capacity, colour and edition.
+            val expectedModel = Regex(
+                """\b(iphone|ipad|pixel|redmi|poco|galaxy\s+s|galaxy\s+a|galaxy\s+z)\s*(\d{1,3})\b"""
+            ).find(expected)
+            val urlModel = Regex(
+                """\b(iphone|ipad|pixel|redmi|poco|galaxy\s+s|galaxy\s+a|galaxy\s+z)\s*(\d{1,3})\b"""
+            ).find(urlTitle)
+            if (expectedModel != null &&
+                (urlModel == null ||
+                    expectedModel.groupValues[1].replace(Regex("""\s+"""), "") !=
+                        urlModel.groupValues[1].replace(Regex("""\s+"""), "") ||
+                    expectedModel.groupValues[2] != urlModel.groupValues[2])
+            ) return false
+
+            val expectedVariants = productModelVariantTokens(expected)
+            val urlVariants = productModelVariantTokens(urlTitle)
+            if (!urlVariants.containsAll(expectedVariants)) return false
+            if (expectedStorage.isNotEmpty() && !urlStorage.containsAll(expectedStorage)) return false
+            if (expectedColour != null && urlColour != expectedColour) return false
+
+            // A generic family URL cannot independently validate a sibling SKU.
+            val hasSkuEvidence = expectedStorage.isNotEmpty() ||
+                expectedColour != null ||
+                expectedVariants.isNotEmpty() ||
+                expectedModel != null
+            if (!hasSkuEvidence) return false
+            return coreIdentity(expected) == coreIdentity(archived)
+        }
 
         return coreIdentity(expected) == coreIdentity(archived)
     }

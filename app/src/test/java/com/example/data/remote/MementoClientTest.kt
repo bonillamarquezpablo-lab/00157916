@@ -143,7 +143,12 @@ class MementoClientTest {
                 snapshotUrl = "https://arquivo.pt/wayback/$raw/https://shop.example/product",
                 originalUrl = "https://shop.example/product"
             )
-        }
+        } + MementoClient.MementoCapture(
+            rawTimestamp = rawDates[1],
+            timestamp = formatter.parse(rawDates[1])!!.time,
+            snapshotUrl = "https://arquivo.pt/wayback/${rawDates[1]}/https://shop.example/product?alternate=1",
+            originalUrl = "https://shop.example/product?alternate=1"
+        )
 
         val sampled = client.sampleQuarterlyCaptures(captures, maxSnapshots = 3)
 

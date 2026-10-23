@@ -25,6 +25,7 @@ import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.isIrrelevantMultiProductBundle
 import com.example.data.remote.hasXiaomiModelMismatch
 import com.example.data.remote.isAccessoryListingTitle
+import com.example.data.remote.isToyListingTitle
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.linkTypeForUrl
 import com.example.data.remote.isGoogleShoppingUrl
@@ -1373,9 +1374,7 @@ class ProductRepository(
         val text = "${titleText} ${query.lowercase(Locale.ROOT)}"
         // Identify toys from the listing itself before consulting a broad search query. Searching
         // for "Dyson" must not turn a Dyson toy into a hair appliance, or vice versa.
-        if (Regex("""\b(toys?|juguetes?|munec[oa]s?|figuras? de accion|playsets?|pretend play|juego de imitacion)\b""")
-                .containsMatchIn(titleText)
-        ) return ProductCategory.TOYS
+        if (isToyListingTitle(title)) return ProductCategory.TOYS
         return when {
             Regex("""\b(iphone|redmi|poco|smartphone|movil|telefono|galaxy s|pixel)\b""").containsMatchIn(text) ->
                 ProductCategory.SMARTPHONES

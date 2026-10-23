@@ -37,7 +37,7 @@ internal fun returnedTitleMatchesSpecificDysonHairToolModel(query: String, title
         .toList()
     if (requestedModels.isEmpty()) return true
     val compactTitle = title.filter(Char::isLetterOrDigit).lowercase(Locale.ROOT)
-    return requestedModels.all(compactTitle::contains)
+    return requestedModels.all { model -> compactTitle.contains(model) }
 }
 
 data class SerpApiRequestProduct(

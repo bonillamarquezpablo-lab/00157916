@@ -4039,7 +4039,6 @@ class WaybackPriceHistoryClient(
         for ((archivedTitle, price, rawCurrency) in extractJsonLdProductOffers(document)) {
             val currency = rawCurrency.uppercase(Locale.ROOT)
             if (currency !in allowedCurrencies || price !in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE) continue
-            if (isMatchingTitleForArchivedUrl(primaryExpectedTitle, archivedTitle, originalUrl)) continue
 
             // Resolve the URL once for this exact structured offer. Never use the page URL as a
             // substitute for a related product's own URL; it could be a different SKU.
@@ -4051,9 +4050,33 @@ class WaybackPriceHistoryClient(
                 pageUrl = originalUrl
             ).distinctBy { it.trimEnd('/').lowercase(Locale.ROOT) }
             val matches = knownProductTitlesById.entries.mapNotNull { (productId, savedTitle) ->
-                if (productId.isBlank() || savedTitle.isBlank() ||
-                    isMatchingTitleForArchivedUrl(primaryExpectedTitle, savedTitle, originalUrl)
-                ) return@mapNotNull null
+                if (productId.isBlank() || savedTitle.isBlank()) return@mapNotNull null
+                // Exclude the selected product as a secondary only when its known SKU actually
+                // matches the archived page. A broad retailer URL for 256 GB must not cause a
+                // distinct 128 GB saved product to be discarded before its own Offer URL is checked.
+                val primaryNormalizedTitle = normalizeTitle(primaryExpectedTitle)
+                val savedNormalizedTitle = normalizeTitle(savedTitle)
+                val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+                val primaryStorage = storagePattern.findAll(primaryNormalizedTitle)
+                    .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
+                val savedStorage = storagePattern.findAll(savedNormalizedTitle)
+                    .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
+                val explicitStorageConflict = primaryStorage.isNotEmpty() &&
+                    savedStorage.isNotEmpty() && primaryStorage != savedStorage
+                val primaryColour = productColourFamily(primaryNormalizedTitle)
+                val savedColour = productColourFamily(savedNormalizedTitle)
+                val explicitColourConflict = primaryColour != null && savedColour != null &&
+                    primaryColour != savedColour
+                val explicitModelVariantConflict =
+                    productModelVariantTokens(primaryNormalizedTitle) !=
+                        productModelVariantTokens(savedNormalizedTitle)
+                val isPrimarySavedProduct = !explicitStorageConflict &&
+                    !explicitColourConflict && !explicitModelVariantConflict && (
+                        isMatchingProductTitle(primaryExpectedTitle, savedTitle) ||
+                            (isMatchingTitleForArchivedUrl(primaryExpectedTitle, savedTitle, originalUrl) &&
+                                !hasExplicitVariantConflictInProductUrl(primaryExpectedTitle, originalUrl))
+                    )
+                if (isPrimarySavedProduct) return@mapNotNull null
 
                 val urlExplicitlyContradictsSavedSku = offerUrls.any { offerUrl ->
                     val uri = runCatching { URI(offerUrl) }.getOrNull()

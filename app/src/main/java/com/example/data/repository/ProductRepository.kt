@@ -776,6 +776,10 @@ class ProductRepository(
                 )
             }
 
+            // An identical candidate is already present and usable. Treat this operation as
+            // idempotent: avoid a redundant Room write and don't report it as a newly recovered ficha.
+            if (existingProduct != null && candidate == existingProduct) continue
+
             if (existingProduct == null) {
                 // IGNORE handles a concurrent search safely: never replace a trusted row inserted
                 // for the same stable identity between the snapshot and this insert.

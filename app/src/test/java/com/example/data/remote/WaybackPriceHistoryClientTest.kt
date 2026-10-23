@@ -3787,8 +3787,8 @@ class WaybackPriceHistoryClientTest {
             client.computeRateLimitUntil("0", now)
         )
         assertEquals(
-            "Unreasonable Retry-After values are capped at six hours",
-            now + 6L * 60L * 60L * 1000L,
+            "Unreasonable Retry-After values are capped at 24 hours",
+            now + 24L * 60L * 60L * 1000L,
             client.computeRateLimitUntil("999999", now)
         )
         assertEquals(

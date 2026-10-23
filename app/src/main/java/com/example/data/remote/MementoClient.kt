@@ -146,9 +146,9 @@ class MementoClient(
             captureCandidates = cdx.captures
             cdxAvailable = cdx.available
             cdxRequestFailed = cdx.requestFailed
-            if (captureCandidates.isNotEmpty()) {
-                // A working CDX fallback recovered captures; don't report the old TimeMap 404
-                // as if the whole archive lookup had failed.
+            if (cdx.available && !cdx.requestFailed) {
+                // The CDX index responded correctly even when it had no rows. Report that as an
+                // empty historical index, not as a still-failed TimeMap request.
                 diagnostics.remove("MEMENTO_TIMEMAP_HTTP_404")
             }
         }
@@ -413,7 +413,14 @@ class MementoClient(
             if (status != 200 || mime !in setOf("text/html", "application/xhtml+xml")) continue
             val archivedOriginal = item.optString("url").trim()
             if (!sameOriginalUrl(archivedOriginal, originalUrl)) continue
-            val snapshotUrl = "https://$ARCHIVE_HOST/wayback/$canonicalTimestamp/$archivedOriginal"
+            // The captured URL is a suffix inside the archive replay path. Encode its query
+            // separators there instead of accidentally sending them as query parameters to arquivo.pt.
+            val replayTarget = archivedOriginal
+                .replace("?", "%3F")
+                .replace("&", "%26")
+                .replace("#", "%23")
+                .replace(" ", "%20")
+            val snapshotUrl = "https://$ARCHIVE_HOST/wayback/$canonicalTimestamp/$replayTarget"
             if (!isValidArchiveSnapshotUrl(snapshotUrl)) continue
             captures += MementoCapture(
                 rawTimestamp = canonicalTimestamp,

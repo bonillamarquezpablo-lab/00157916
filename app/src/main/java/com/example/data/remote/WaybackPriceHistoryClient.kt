@@ -4730,6 +4730,9 @@ class WaybackPriceHistoryClient(
         // Do not attach a colour-specific archived offer to a saved product whose colour is
         // unknown. Neither the archived title nor its own URL may silently introduce a colour.
         if (expectedColour == null && (archivedColour != null || urlColour != null)) return false
+        // An offer URL must not silently assign a capacity to a saved product whose
+        // storage is unknown; keep those records separate until identity is explicit.
+        if (expectedStorage.isEmpty() && urlStorage.isNotEmpty()) return false
         if (missingColour && urlColour != expectedColour) return false
         fun coreIdentity(value: String): String =
             onlineProductIdentityKey(canonicalizeArchiveTitle(value)).split('|')
@@ -4762,12 +4765,9 @@ class WaybackPriceHistoryClient(
             if (expectedStorage.isNotEmpty() && !urlStorage.containsAll(expectedStorage)) return false
             if (expectedColour != null && urlColour != expectedColour) return false
 
-            // A generic family URL cannot independently validate a sibling SKU.
-            val hasSkuEvidence = expectedStorage.isNotEmpty() ||
-                expectedColour != null ||
-                expectedVariants.isNotEmpty() ||
-                expectedModel != null
-            if (!hasSkuEvidence) return false
+            // Exact product identity can validate a secondary offer even when the saved
+            // title has no SKU fields. Any capacity, colour or model found in its URL was
+            // checked above and cannot introduce a conflicting variant.
             return coreIdentity(expected) == coreIdentity(archived)
         }
 

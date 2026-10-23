@@ -23,6 +23,37 @@ class MementoClientTest {
     private fun newClient() = MementoClient(ApplicationProvider.getApplicationContext<Context>())
 
     @Test
+    fun mementoFallbackRunsForSparseHistoryAndStopsAtThreeDistinctDates() {
+        val base = 1_700_000_000_000L
+        fun quote(at: Long) = ArchivedPriceQuote(
+            observedAt = at,
+            price = 199.99,
+            currency = "EUR",
+            productTitle = "Sony WH-1000XM5",
+            originalUrl = "https://shop.example/sony-wh-1000xm5",
+            snapshotUrl = "https://web.archive.org/web/20230101000000/https://shop.example/sony-wh-1000xm5"
+        )
+
+        val oneDate = listOf(quote(base))
+        assertFalse(hasSufficientHistoricalCoverage(oneDate))
+        assertTrue(shouldAttemptMementoFallback(false, true, false, false))
+        assertFalse(shouldAttemptMementoFallback(true, true, false, false))
+        assertFalse(shouldAttemptMementoFallback(false, false, false, false))
+        assertFalse(shouldAttemptMementoFallback(false, true, false, true))
+
+        val duplicateSameDay = listOf(quote(base), quote(base + 60L * 60L * 1000L))
+        assertFalse("Two captures from the same day count as one date", hasSufficientHistoricalCoverage(duplicateSameDay))
+
+        val threeDates = listOf(
+            quote(base),
+            quote(base + WaybackPriceHistoryClient.DAY_MS),
+            quote(base + 2L * WaybackPriceHistoryClient.DAY_MS)
+        )
+        assertTrue(hasSufficientHistoricalCoverage(threeDates))
+        assertFalse(shouldAttemptMementoFallback(false, true, true, false))
+    }
+
+    @Test
     fun buildTimeMapUrlRejectsSearchEnginesAndEncodesNestedQuerySeparators() {
         val client = newClient()
         val url = client.buildTimeMapUrl("https://shop.example/product/item?sku=blue&size=256#offer")

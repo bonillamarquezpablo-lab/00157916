@@ -19,6 +19,52 @@ import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
 /**
+ * Shared bounded quarterly sampler for archived captures. It preserves coverage across years,
+ * then uses spare slots for distinct capture timestamps only; alternate retailer URLs for the
+ * same snapshot timestamp must not consume extra downloads or create duplicate chart points.
+ */
+internal fun <T> sampleByQuarter(
+    items: List<T>,
+    max: Int,
+    timestampOf: (T) -> Long,
+    keyOf: (T) -> Any
+): List<T> {
+    if (max <= 0 || items.isEmpty()) return emptyList()
+    val chronological = items.distinctBy(keyOf).sortedBy(timestampOf)
+    val quarterly = chronological
+        .groupBy { item ->
+            val utc = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT)
+            utc.timeInMillis = timestampOf(item)
+            utc.get(Calendar.YEAR) * 4 + utc.get(Calendar.MONTH) / 3
+        }
+        .toSortedMap()
+        .values
+        .map { it[it.size / 2] }
+
+    if (quarterly.size >= max) {
+        if (max == 1) return listOf(quarterly.last())
+        return (0 until max)
+            .map { index -> quarterly[(index.toDouble() * (quarterly.size - 1) / (max - 1)).toInt()] }
+            .distinctBy(timestampOf)
+    }
+
+    val selectedKeys = quarterly.map(keyOf).toSet()
+    val selectedTimestamps = quarterly.map(timestampOf).toSet()
+    val remaining = chronological
+        .filterNot { keyOf(it) in selectedKeys || timestampOf(it) in selectedTimestamps }
+        .distinctBy(timestampOf)
+    val slots = minOf(max - quarterly.size, remaining.size)
+    val extra = when {
+        slots <= 0 -> emptyList()
+        slots == 1 -> listOf(remaining[remaining.size / 2])
+        else -> (0 until slots).map { index ->
+            remaining[(index.toDouble() * (remaining.size - 1) / (slots - 1)).toInt()]
+        }
+    }
+    return (quarterly + extra).distinctBy(timestampOf).sortedBy(timestampOf)
+}
+
+/**
  * A single archived point proves that one capture is useful, but it is not yet a meaningful
  * trend. Ask the independent archive for help when fewer than three distinct UTC dates exist.
  */
@@ -536,42 +582,12 @@ class MementoClient(
     internal fun sampleQuarterlyCaptures(
         captures: List<MementoCapture>,
         maxSnapshots: Int
-    ): List<MementoCapture> {
-        if (maxSnapshots <= 0 || captures.isEmpty()) return emptyList()
-        val chronological = captures
-            .distinctBy { it.rawTimestamp to it.snapshotUrl }
-            .sortedBy { it.timestamp }
-        val quarterly = chronological
-            .groupBy { capture ->
-                val calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT)
-                calendar.timeInMillis = capture.timestamp
-                calendar.get(Calendar.YEAR) * 4 + calendar.get(Calendar.MONTH) / 3
-            }
-            .toSortedMap()
-            .values
-            .map { it[it.size / 2] }
-
-        // Keep one representative per quarter when the archive spans many quarters. If fewer
-        // quarters exist than the bounded download budget, use remaining slots for other dates
-        // instead of losing all but one capture from a dense quarter.
-        if (quarterly.size >= maxSnapshots) {
-            if (maxSnapshots == 1) return listOf(quarterly.last())
-            return (0 until maxSnapshots).map { index ->
-                quarterly[(index.toDouble() * (quarterly.size - 1) / (maxSnapshots - 1)).toInt()]
-            }.distinctBy { it.rawTimestamp to it.snapshotUrl }
-        }
-        val selectedKeys = quarterly.map { it.rawTimestamp to it.snapshotUrl }.toSet()
-        val remaining = chronological.filterNot { (it.rawTimestamp to it.snapshotUrl) in selectedKeys }
-        val slots = minOf(maxSnapshots - quarterly.size, remaining.size)
-        val extra = when {
-            slots <= 0 -> emptyList()
-            slots == 1 -> listOf(remaining[remaining.size / 2])
-            else -> (0 until slots).map { index ->
-                remaining[(index.toDouble() * (remaining.size - 1) / (slots - 1)).toInt()]
-            }
-        }
-        return (quarterly + extra).distinctBy { it.rawTimestamp to it.snapshotUrl }.sortedBy { it.timestamp }
-    }
+    ): List<MementoCapture> = sampleByQuarter(
+        items = captures,
+        max = maxSnapshots,
+        timestampOf = { it.timestamp },
+        keyOf = { it.rawTimestamp to it.snapshotUrl }
+    )
 
     private fun sameOriginalUrl(first: String, second: String): Boolean {
         val a = parseHttpUri(first) ?: return false

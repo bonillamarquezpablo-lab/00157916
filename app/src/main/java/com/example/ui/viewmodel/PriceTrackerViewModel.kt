@@ -2005,12 +2005,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             onlineSearchResultMessage(visibleCachedResults, provider, query)
                         }
                         val cacheNotice = "Resultados recuperados de caché: consulta capturada ${formatOnlineSnapshotAge(cached.savedAt)}. No se ha consumido otra búsqueda; los precios pueden haber cambiado."
-                        val savedObservations = if (cachedHistoryCandidates.isNotEmpty()) {
+                        val savedObservations = if (visibleCachedResults.isNotEmpty()) {
                             withContext(Dispatchers.IO) {
-                                repository.recordOnlineSearchResults(cachedHistoryCandidates, provider.name, query)
+                                repository.recordOnlineSearchResults(visibleCachedResults, provider.name, query)
                             }
                         } else 0
-                        val historyNotice = if (cachedHistoryCandidates.isNotEmpty()) {
+                        val historyNotice = if (visibleCachedResults.isNotEmpty()) {
                             onlineHistoryNotice(savedObservations, cachedHistoryCandidates.size)
                         } else ""
                         val eligibilityNotice = liveHistoryEligibilityNotice(
@@ -2144,9 +2144,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         Triple(visible, eligibleForHistory, rejected)
                     }
                     onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = discarded
-                    val savedObservations = if (historyCandidates.isNotEmpty()) {
+                    val savedObservations = if (results.isNotEmpty()) {
                         withContext(Dispatchers.IO) {
-                            repository.recordOnlineSearchResults(historyCandidates, provider.name, query)
+                            repository.recordOnlineSearchResults(results, provider.name, query)
                         }
                     } else 0
 
@@ -2215,7 +2215,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         ""
                     }
                     val filterNote = onlineFilterNotice(discarded)
-                    val historyNote = if (historyCandidates.isNotEmpty()) {
+                    val historyNote = if (results.isNotEmpty()) {
                         onlineHistoryNotice(savedObservations, historyCandidates.size)
                     } else ""
                     val eligibilityNotice = liveHistoryEligibilityNotice(results.size, historyCandidates.size)
@@ -3281,9 +3281,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     private fun onlineHistoryNotice(saved: Int, resultCount: Int): String =
         if (saved > 0) {
-            "Precios de esta búsqueda: $saved observaciones nuevas guardadas en Mercado. Son precios observados ahora, no un historial anterior a la búsqueda. Para buscar precios anteriores gratis, abre la ficha y pulsa «Buscar histórico gratis · Internet Archive»; solo aparecerán si hay capturas con precios verificables."
+            "Precios de esta búsqueda: $saved observaciones nuevas guardadas en Mercado. Las fichas de los productos que coinciden también quedan guardadas aunque su precio todavía no esté verificado. Estas observaciones son de hoy, no un historial anterior. Para buscar precios anteriores gratis, abre la ficha y pulsa «Buscar histórico gratis · Internet Archive»."
         } else {
-            "Precios de esta búsqueda: no se añadieron observaciones nuevas porque ya estaban registradas hoy o no pasaron los filtros ($resultCount resultados revisados). El historial anterior se muestra por separado cuando existen fechas verificables."
+            "Precios de esta búsqueda: no se añadieron observaciones nuevas ($resultCount resultados aptos para revisar el historial); podían estar ya registradas hoy o no superar los filtros. Las fichas de productos relevantes se guardan igualmente en Mercado, con el precio pendiente de verificar cuando no hay un enlace fiable al vendedor."
         }
 
     private fun onlineSearchResultMessage(

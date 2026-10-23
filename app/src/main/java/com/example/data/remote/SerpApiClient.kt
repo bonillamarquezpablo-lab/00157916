@@ -30,6 +30,20 @@ internal fun queryNamesSpecificDysonHairToolModel(query: String): Boolean =
     SPECIFIC_DYSON_HAIR_TOOL_MODEL_PATTERN.containsMatchIn(query)
 
 /** Refuse sibling Dyson models whenever the request includes an explicit family/model token. */
+/** Require an explicitly requested storage capacity to exist in the candidate title. */
+private val EXPLICIT_STORAGE_CAPACITY_PATTERN =
+    Regex("""(?i)\\b(\\d+(?:[.,]\\d+)?)\\s*(gb|tb)\\b""")
+
+internal fun hasMatchingExplicitStorageCapacity(query: String, title: String): Boolean {
+    fun capacities(value: String): Set<String> =
+        EXPLICIT_STORAGE_CAPACITY_PATTERN.findAll(value).map { match ->
+            match.groupValues[1].replace(',', '.').removeSuffix(".") +
+                match.groupValues[2].lowercase(Locale.ROOT)
+        }.toSet()
+    val requested = capacities(query)
+    return requested.isEmpty() || requested.all { it in capacities(title) }
+}
+
 internal fun returnedTitleMatchesSpecificDysonHairToolModel(query: String, title: String): Boolean {
     val requestedModels = SPECIFIC_DYSON_HAIR_TOOL_MODEL_PATTERN.findAll(query)
         .map { it.value.filter(Char::isLetterOrDigit).lowercase(Locale.ROOT) }
@@ -1660,7 +1674,8 @@ class SerpApiClient(
 
         // "plancha Dyson" is a family search: show related models and matching parts even when
         // retailers use family names such as Airwrap or Styler instead of "plancha".
-        if (isBroadDysonHairToolsQueryMatch(requested, returned) &&
+        if (!queryNamesSpecificDysonHairToolModel(requested) &&
+            isBroadDysonHairToolsQueryMatch(requested, returned) &&
             returnedTitleMatchesSpecificDysonHairToolModel(requested, returned)
         ) return true
 
@@ -1970,6 +1985,11 @@ internal fun isBroadDysonHairToolsQueryMatch(requested: String, returned: String
     val query = words(requested)
     val title = words(returned)
     if ("dyson" !in query || "dyson" !in title) return false
+    // A vacuum/air purifier accessory must not leak into a hair-tool search just because its
+    // title contains "nozzle" or "attachment".
+    if (Regex("""(?i)\\b(aspiradora(?:s)?|vacuum(?:s)?|robot\\s+aspirador|cordless\\s+cleaner|gen5detect|washg1|big\\s+ball)\\b""")
+            .containsMatchIn(returned)
+    ) return false
     val genericHairQuery = setOf("plancha", "planchas", "secador", "secadores", "alisador", "alisadores", "pelo", "hair")
     val hairToolOrPart = setOf(
         "airwrap", "corrale", "supersonic", "styler", "plancha", "planchas",

@@ -505,7 +505,10 @@ class MementoClient(
         maxSnapshots: Int
     ): List<MementoCapture> {
         if (maxSnapshots <= 0 || captures.isEmpty()) return emptyList()
-        val quarterly = captures.sortedBy { it.timestamp }
+        val chronological = captures
+            .distinctBy { it.rawTimestamp to it.snapshotUrl }
+            .sortedBy { it.timestamp }
+        val quarterly = chronological
             .groupBy { capture ->
                 val calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT)
                 calendar.timeInMillis = capture.timestamp
@@ -514,11 +517,27 @@ class MementoClient(
             .toSortedMap()
             .values
             .map { it[it.size / 2] }
-        if (quarterly.size <= maxSnapshots) return quarterly
-        if (maxSnapshots == 1) return listOf(quarterly.last())
-        return (0 until maxSnapshots).map { index ->
-            quarterly[(index.toDouble() * (quarterly.size - 1) / (maxSnapshots - 1)).toInt()]
+
+        // Keep one representative per quarter when the archive spans many quarters. If fewer
+        // quarters exist than the bounded download budget, use remaining slots for other dates
+        // instead of losing all but one capture from a dense quarter.
+        if (quarterly.size >= maxSnapshots) {
+            if (maxSnapshots == 1) return listOf(quarterly.last())
+            return (0 until maxSnapshots).map { index ->
+                quarterly[(index.toDouble() * (quarterly.size - 1) / (maxSnapshots - 1)).toInt()]
+            }.distinctBy { it.rawTimestamp to it.snapshotUrl }
         }
+        val selectedKeys = quarterly.map { it.rawTimestamp to it.snapshotUrl }.toSet()
+        val remaining = chronological.filterNot { (it.rawTimestamp to it.snapshotUrl) in selectedKeys }
+        val slots = minOf(maxSnapshots - quarterly.size, remaining.size)
+        val extra = when {
+            slots <= 0 -> emptyList()
+            slots == 1 -> listOf(remaining[remaining.size / 2])
+            else -> (0 until slots).map { index ->
+                remaining[(index.toDouble() * (remaining.size - 1) / (slots - 1)).toInt()]
+            }
+        }
+        return (quarterly + extra).distinctBy { it.rawTimestamp to it.snapshotUrl }.sortedBy { it.timestamp }
     }
 
     private fun sameOriginalUrl(first: String, second: String): Boolean {

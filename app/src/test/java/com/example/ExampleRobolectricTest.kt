@@ -1755,6 +1755,62 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun googleShoppingSearchFallbackCreatesUnverifiedFichaWithoutSavingItsQuotedPrice() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val title = "Apple iPhone 16"
+            val fallback = SerpApiShoppingResult(
+                title = title,
+                price = 574.99,
+                storeName = "Google Shopping",
+                sourceUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=Apple+iPhone+16",
+                observedAt = System.currentTimeMillis(),
+                condition = "new"
+            )
+            assertTrue("The test must exercise a generic Shopping search link", fallback.isSearchFallbackDestination)
+
+            val newObservations = repository.recordOnlineSearchResults(
+                results = listOf(fallback),
+                sourceType = "GOOGLE_SHOPPING",
+                searchQuery = "iphone 16"
+            )
+
+            assertEquals("A generic search result must not become a seller-price observation", 0, newObservations)
+            val savedRows = database.productDao().getAllProductsSnapshot()
+            assertEquals("The product still needs a local ficha so the card can open", 1, savedRows.size)
+            val savedRow = savedRows.single()
+            assertEquals(title, savedRow.title)
+            assertEquals(0.0, savedRow.currentPrice, 0.001)
+            assertFalse("The quoted fallback price must remain unverified", savedRow.isPriceVerified)
+            assertEquals("No generic Google search URL should be stored as a seller page", "", savedRow.storeUrl)
+            assertEquals("unknown_store", savedRow.currentStoreId)
+            assertTrue(
+                "A search-page quote must not enter verified price history",
+                database.priceObservationDao().observeVerifiedHistory(savedRow.id).first().isEmpty()
+            )
+
+            val ficha = withTimeout(1_500L) {
+                repository.awaitProductForOnlineIdentity(
+                    com.example.data.remote.onlineProductIdentityKey(title)
+                )
+            }
+            assertEquals("Tapping the visible result must resolve its ficha immediately", title, ficha.title)
+            assertFalse(ficha.isPriceVerified)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun accessoryOffersForAnkerPrimeRemainVisibleButAreNotSavedAsTheMainBattery() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)

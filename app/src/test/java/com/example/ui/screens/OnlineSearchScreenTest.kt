@@ -20,6 +20,8 @@ import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.isAccessorySearchQuery
+import com.example.data.remote.isAccessoryListingTitle
+import com.example.data.remote.isToyListingTitle
 import com.example.ui.viewmodel.OnlineSearchProvider
 import com.example.ui.viewmodel.optimizedOnlineShoppingQuery
 import com.example.ui.viewmodel.TrackerUiState
@@ -76,12 +78,23 @@ class OnlineSearchScreenTest {
 
         val searchList = composeRule.onNodeWithTag("online-search-list")
         searchList.performScrollToNode(hasText(title))
-        composeRule.onNodeWithTag("online-search-product-card").assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("online-search-product-card").assertIsDisplayed()
+        composeRule.onNodeWithText("Precio no verificado").assertIsDisplayed()
+        composeRule.onNodeWithTag("open-online-product-ficha").assertIsDisplayed().performClick()
         assertEquals(
             "A product card with a fallback seller link must still open its Room-backed ficha",
             com.example.data.remote.onlineProductIdentityKey(title),
             openedIdentity
         )
+    }
+
+    @Test
+    fun dysonSparePartsAreTaggedAsAccessoriesAndToysStaySeparate() {
+        assertTrue(isAccessoryListingTitle("Boquilla para secador Dyson Supersonic"))
+        assertTrue(isAccessoryListingTitle("Dyson Supersonic diffuser attachment"))
+        assertTrue(isToyListingTitle("Juguete Dyson secador de pelo para niños"))
+        assertFalse(isAccessoryListingTitle("Juguete Dyson secador de pelo para niños"))
+        assertFalse(isToyListingTitle("Boquilla para secador Dyson Supersonic"))
     }
 
     @Test

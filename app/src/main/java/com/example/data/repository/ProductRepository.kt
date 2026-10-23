@@ -685,6 +685,52 @@ class ProductRepository(
             "Amazon.es", "Google Shopping" -> sourceType
             else -> return 0
         }
+        // Every relevant result that the search UI shows needs a local product row so its
+        // card can open a ficha and the user can find it in Mercado. This catalog row is only an
+        // identity shell: it does not turn a Shopping search-page price into a seller quote.
+        // Trusted prices and observations are still handled by the stricter block below.
+        val catalogCandidates = filterVisibleLiveSearchResults(results, searchQuery)
+            .filterNot { it.isSecondHand || it.isFitmentUnverified || it.isCategoryUnverified }
+            .filterNot { it.isAccessoryOffer && !isAccessorySearchQuery(searchQuery) }
+            .filterNot {
+                isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
+                    isAccessoryListing(it.title)
+            }
+        if (catalogCandidates.isNotEmpty()) {
+            val existingRows = productDao.getAllProductsSnapshot().toMutableList()
+            for (group in groupOnlineShoppingResults(catalogCandidates)) {
+                val alreadySaved = existingRows.any {
+                    onlineProductIdentityKey(it.title) == group.identityKey
+                }
+                if (!alreadySaved) {
+                    val title = group.title
+                    val shell = ProductEntity(
+                        id = stableOnlineId("online_product_", group.identityKey),
+                        title = title,
+                        brand = inferProductBrand(title),
+                        category = inferProductCategory(title, searchQuery).name,
+                        currentPrice = 0.0,
+                        athMinPrice = 0.0,
+                        athMinDate = "Pendiente de verificar",
+                        athMinStore = "",
+                        athMaxPrice = 0.0,
+                        avg90dPrice = 0.0,
+                        officialPvp = 0.0,
+                        currentStoreId = "unknown_store",
+                        storeUrl = "",
+                        ean = "",
+                        imageUrl = group.representativeImageUrl.takeIf { it.isNotBlank() },
+                        rating = 0.0,
+                        reviewCount = 0,
+                        isPriceVerified = false,
+                        googleProductId = group.offers.firstNotNullOfOrNull { it.googleProductId }
+                    )
+                    productDao.insert(shell)
+                    existingRows += shell
+                }
+            }
+        }
+
         // Suspicious prices remain visible as unverified Room observations. Second-hand offers
         // and wheel listings missing requested fitment dimensions stay visible in the search UI,
         // but are not added to Mercado or its price history.

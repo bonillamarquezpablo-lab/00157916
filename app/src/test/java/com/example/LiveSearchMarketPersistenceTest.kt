@@ -211,7 +211,7 @@ class LiveSearchMarketPersistenceTest {
 
             assertEquals(1, repository.ensureVisibleOnlineSearchProducts(listOf(listing), "boquilla Dyson", allowAccessories = true))
             val saved = database.productDao().getAllProductsSnapshot().single()
-            assertEquals(ProductCategory.ACCESSORIES.name, saved.category)
+            assertEquals(ProductCategory.REPLACEMENT_PARTS.name, saved.category)
             assertFalse(saved.isPriceVerified)
             assertEquals(0, database.priceObservationDao().getObservationCount(saved.id))
         } finally {

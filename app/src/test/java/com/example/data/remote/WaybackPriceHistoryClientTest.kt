@@ -282,7 +282,8 @@ class WaybackPriceHistoryClientTest {
             val result = results.first { it.quotes.isNotEmpty() }
 
             assertEquals("The batched lookup should verify the archived EUR price", 1, result.quotes.size)
-            assertEquals(79.99, result.quotes.single().price, 0.001)
+            assertTrue("At least one verified quote must be recovered", result.quotes.isNotEmpty())
+            assertTrue("Every recovered quote must retain the verified EUR price", result.quotes.all { kotlin.math.abs(it.price - 79.99) < 0.001 })
             assertEquals("EUR", result.quotes.single().currency)
             assertEquals("Availability must not issue per-date HTTP requests", 0, requests.count { it.startsWith("archive.org/wayback/available") })
             assertEquals("Concurrent duplicate lookups must share one CDX request", 1, requests.count { it.startsWith("web.archive.org/cdx/search/cdx") })

@@ -11,6 +11,9 @@ import com.example.data.remote.formatOnlineSnapshotAge
 import com.example.data.remote.OnlineSearchQuotaGuard
 import com.example.data.remote.ArchivedPriceQuote
 import com.example.data.remote.MementoClient
+import com.example.data.remote.hasSufficientHistoricalCoverage
+import com.example.data.remote.shouldAttemptMementoFallback
+import com.example.data.remote.hasMatchingExplicitStorageCapacity
 import com.example.data.remote.shouldSkipDomainFallbackAfterSnapshotTimeout
 import com.example.data.remote.WaybackPriceHistoryClient
 import com.example.data.remote.diagnosticIndexForWaybackTrace
@@ -1973,6 +1976,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             .filter { it.isUnverifiedLiveListing }
             .filter { onlineProductIdentityKey(it.title) !in representedIdentityKeys }
             .mapNotNull { product ->
+                // An explicit capacity in the query is a hard discriminator. Do not
+                // show a sibling device whose title omits or contradicts that storage option.
+                if (!hasMatchingExplicitStorageCapacity(queryText, product.title)) return@mapNotNull null
                 // Exact Dyson model searches must not pull sibling models from Mercado just
                 // because the live result set happens to be empty for that model.
                 if (queryNamesSpecificDysonHairToolModel(queryText) &&
@@ -2921,19 +2927,33 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             "CDX encontró capturas, pero todas las descargas HTML agotaron el tiempo; no se repite Availability en esta ejecución para evitar solicitudes duplicadas."
                         )
                     }
-                    // Independent archive fallback: Wayback can be empty or rate-limited while
-                    // Arquivo.pt still has snapshots. Run Memento at most once, only for a verified
-                    // direct retailer URL, and reuse the exact same product-identity parser/guards.
-                    if (!mementoAttempted &&
-                        candidate.directUrl != null &&
-                        attempts.none { it.quotes.isNotEmpty() } &&
-                        attempts.none { it.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") }
+                    // A single historical point is useful but not a trend. Use Memento once
+                    // when fewer than three distinct UTC dates were recovered for the selected
+                    // product; sibling-variant quotes do not count toward its historical coverage.
+                    val currentCandidateQuotes = attempts.flatMap { it.quotes }.filter {
+                        it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId
+                    }
+                    val sufficientHistoricalCoverage =
+                        hasSufficientHistoricalCoverage(currentCandidateQuotes)
+                    if (shouldAttemptMementoFallback(
+                            alreadyAttempted = mementoAttempted,
+                            hasEligibleDirectUrl = candidate.directUrl != null,
+                            hasSufficientHistory = sufficientHistoricalCoverage,
+                            rateLimited = attempts.any { it.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") }
+                        )
                     ) {
                         mementoAttempted = true
                         if (diagnosticProductId != null) {
+                            val dateCount = currentCandidateQuotes
+                                .map { Math.floorDiv(it.observedAt, WaybackPriceHistoryClient.DAY_MS) }
+                                .distinct().size
                             reportWaybackDiagnostic(
                                 diagnosticProductId, 7, WaybackTraceStatus.RUNNING,
-                                "Wayback no proporcionó un precio verificable; se prueba una fuente de archivo independiente (Memento) una sola vez."
+                                if (dateCount > 0) {
+                                    "Wayback recuperó $dateCount fecha(s) histórica(s); se consulta Arquivo.pt para intentar completar la serie."
+                                } else {
+                                    "Wayback no proporcionó un precio verificable; se prueba una fuente de archivo independiente (Memento)."
+                                }
                             )
                         }
                         val mementoResult = withTimeoutOrNull(MAX_ARCHIVE_MEMENTO_FALLBACK_MS) {

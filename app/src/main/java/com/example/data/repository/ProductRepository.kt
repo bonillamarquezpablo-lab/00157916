@@ -1375,6 +1375,7 @@ class ProductRepository(
         // Identify toys from the listing itself before consulting a broad search query. Searching
         // for "Dyson" must not turn a Dyson toy into a hair appliance, or vice versa.
         if (isToyListingTitle(title)) return ProductCategory.TOYS
+        if (isAccessoryListingTitle(title)) return ProductCategory.ACCESSORIES
         return when {
             Regex("""\b(iphone|redmi|poco|smartphone|movil|telefono|galaxy s|pixel)\b""").containsMatchIn(text) ->
                 ProductCategory.SMARTPHONES

@@ -65,6 +65,8 @@ class SerpApiProductMatchTest {
         assertTrue(isBroadDysonHairToolsQueryMatch("plancha Dyson", "Promoción Boquilla para Plancha de Pelo Dyson Supersonic"))
         assertTrue(isBroadDysonHairToolsQueryMatch("secador Dyson", "Juguete Dyson secador de pelo para niños"))
         assertFalse(isBroadDysonHairToolsQueryMatch("plancha Dyson", "Dyson V15 Detect Absolute Aspiradora"))
+        assertFalse(isBroadDysonHairToolsQueryMatch("plancha Dyson", "Cabezal accesorios Dyson V10 Fluffy"))
+        assertFalse(isBroadDysonHairToolsQueryMatch("plancha Dyson", "Accesorios aspiradora Dyson SV12"))
         assertFalse(isBroadDysonHairToolsQueryMatch("Dyson Corrale", "Dyson Airwrap i.d. Curly + Coily"))
         assertFalse(isBroadDysonHairToolsQueryMatch("iPhone 15", "Dyson Supersonic"))
     }
@@ -77,6 +79,11 @@ class SerpApiProductMatchTest {
         assertFalse(isAccessoryListingTitle("Dyson Supersonic secador con boquilla y difusor incluidos"))
         assertFalse(isReplacementPartListingTitle("Dyson Airwrap multistyler con accesorios incluidos"))
         assertFalse(isAccessoryListingTitle("Dyson Corrale con accesorios incluidos"))
+        assertFalse(isAccessoryListingTitle("Dron DJI con accesorios"))
+        assertFalse(isAccessoryListingTitle("Nintendo Switch con accesorios"))
+        assertFalse(isAccessoryListingTitle("Cámara Sony con accesorios"))
+        assertTrue(isAccessoryListingTitle("Boquilla con difusor para secador Dyson Supersonic"))
+        assertTrue(isReplacementPartListingTitle("Boquilla con difusor para secador Dyson Supersonic"))
         assertTrue(isReplacementPartListingTitle("Boquilla para secador Dyson Supersonic"))
         assertTrue(isAccessoryListingTitle("Dyson Supersonic diffuser attachment"))
     }

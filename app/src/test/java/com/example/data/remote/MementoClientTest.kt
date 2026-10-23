@@ -54,8 +54,8 @@ class MementoClientTest {
         assertEquals("exact", parsed.queryParameter("matchType"))
         assertEquals("json", parsed.queryParameter("output"))
         assertEquals("timestamp:6", parsed.queryParameter("collapse"))
-        assertEquals("status:200", parsed.queryParameterValues("filter")?.getOrNull(0))
-        assertEquals("mime:text/html", parsed.queryParameterValues("filter")?.getOrNull(1))
+        assertEquals("statuscode:200", parsed.queryParameterValues("filter")?.getOrNull(0))
+        assertEquals("mimetype:text/html", parsed.queryParameterValues("filter")?.getOrNull(1))
         assertEquals("-100", parsed.queryParameter("limit"))
         assertNull(client.buildCdxUrl("https://www.google.com/search?q=phone", now, 365))
     }

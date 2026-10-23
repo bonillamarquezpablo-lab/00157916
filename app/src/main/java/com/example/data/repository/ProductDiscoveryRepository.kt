@@ -9,6 +9,7 @@ import com.example.data.local.ProductDiscoveryEntity
 import com.example.data.local.ProductEntity
 import com.example.data.local.StoreEntity
 import com.example.data.model.ProductCategory
+import com.example.data.model.PENDING_VERIFICATION_DATE_LABEL
 import com.example.data.model.Store
 import com.example.data.remote.ArchivedPriceQuote
 import com.example.data.remote.onlineProductIdentityKey
@@ -73,8 +74,18 @@ class ProductDiscoveryRepository(private val database: AppDatabase) {
         if (identityKey.isBlank()) return@withTransaction false
 
         val savedProducts = database.productDao().getAllProductsSnapshot()
-        if (savedProducts.any { isSameProductIdentity(title, productUrl, it.title, it.storeUrl) }) {
-            // Exact or safely equivalent saved products are handled by the main-history path.
+        val trackedProductIds = database.trackedProductDao().getAllTrackedProductIds().toSet()
+        val productIdsWithObservations = database.priceObservationDao().getAllProductIdsWithObservations().toSet()
+        val existingTrustedMatch = savedProducts.any { saved ->
+            isSameProductIdentity(title, productUrl, saved.title, saved.storeUrl) &&
+                !isUnverifiedLiveSearchPlaceholder(saved) &&
+                saved.id !in trackedProductIds &&
+                saved.id !in productIdsWithObservations
+        }
+        if (existingTrustedMatch) {
+            // Historical data for a trusted, tracked, or observed row is handled by its normal
+            // product-history path. A live-search placeholder is different: it is not verified
+            // history and must not suppress a discovery from an archived page.
             return@withTransaction false
         }
 
@@ -360,6 +371,8 @@ class ProductDiscoveryRepository(private val database: AppDatabase) {
     private fun inferCategory(title: String): ProductCategory {
         val value = normalizeText(title)
         return when {
+            Regex("""\b(toys?|juguetes?|munec[oa]s?|figuras? de accion|playsets?|pretend play|juego de imitacion)\b""").containsMatchIn(value) -> ProductCategory.TOYS
+            Regex("""\b(airwrap|corrale|supersonic|planchas? de pelo|alisador(?:es)?|secador(?:es)?|styler|afeitadora|depiladora)\b""").containsMatchIn(value) -> ProductCategory.PERSONAL_CARE
             Regex("""\b(iphone|samsung galaxy|smartphone|telefono movil|redmi|pixel|ipad|tablet|oneplus|motorola edge)\b""").containsMatchIn(value) -> ProductCategory.SMARTPHONES
             Regex("""\b(laptop|portatil|notebook|thinkpad|macbook|chromebook|monitor|gpu|geforce|radeon|rtx|processor|procesador|ssd|ram|pc gaming|desktop)\b""").containsMatchIn(value) -> ProductCategory.COMPUTING
             Regex("""\b(playstation|ps5|ps4|xbox|nintendo switch|steam deck|rog ally|console|consola|joy con)\b""").containsMatchIn(value) -> ProductCategory.GAMING
@@ -370,6 +383,11 @@ class ProductDiscoveryRepository(private val database: AppDatabase) {
             else -> ProductCategory.OTHER
         }
     }
+
+    private fun isUnverifiedLiveSearchPlaceholder(product: ProductEntity): Boolean =
+        !product.isPriceVerified &&
+            (product.id.startsWith("online_candidate_") ||
+                product.athMinDate.equals(PENDING_VERIFICATION_DATE_LABEL, ignoreCase = true))
 
     private fun discoveryIdentityKey(title: String, productUrl: String): String {
         val normalizedTitle = normalizeText(title)

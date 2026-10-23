@@ -692,6 +692,14 @@ class ProductRepository(
         // Strict history eligibility is applied separately below before an observation is marked
         // verified or allowed to update a product's current-price status.
         val eligible = filterVisibleLiveSearchResults(results, searchQuery)
+            // A related case/screen/cable from a phone query is not the phone itself. It can
+            // remain visible in the optional accessory section, but is persisted only when the
+            // user actually searched for an accessory.
+            .filterNot { it.isAccessoryOffer && !isAccessorySearchQuery(searchQuery) }
+            .filterNot {
+                isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
+                    isAccessoryListing(it.title)
+            }
         if (eligible.isEmpty()) return 0
 
         var inserted = 0

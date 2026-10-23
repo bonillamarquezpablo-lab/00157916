@@ -697,16 +697,27 @@ class ProductRepository(
         var inserted = 0
         val currentEntities = productDao.getAllProductsSnapshot().toMutableList()
         val groups = groupOnlineShoppingResults(eligible)
+        // Reuse the full trust policy for prices written as verified. Visibility is broader by
+        // design, but it must not weaken seller, model, price-plausibility or history checks.
+        val strictCandidates = filterOnlineSearchResults(results, searchQuery).filterNot { offer ->
+            offer.isSearchFallbackDestination ||
+                offer.isSecondHand ||
+                offer.isFitmentUnverified ||
+                offer.isCategoryUnverified ||
+                (offer.isAccessoryOffer && !isAccessorySearchQuery(searchQuery)) ||
+                (isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
+                    isAccessoryListing(offer.title))
+        }
+        fun sameOffer(left: SerpApiShoppingResult, right: SerpApiShoppingResult): Boolean =
+            left.title.equals(right.title, ignoreCase = true) &&
+                left.storeName.equals(right.storeName, ignoreCase = true) &&
+                kotlin.math.abs(left.price - right.price) < 0.011 &&
+                left.sourceUrl == right.sourceUrl
         for (group in groups) {
-            val trustedOffers = group.offers.filterNot { offer ->
-                offer.isSuspiciousPrice ||
-                    offer.isSearchFallbackDestination ||
-                    offer.isSecondHand ||
-                    offer.isFitmentUnverified ||
-                    offer.isCategoryUnverified ||
-                    (offer.isAccessoryOffer && !isAccessorySearchQuery(searchQuery)) ||
-                    (isDeviceSearchQuery(searchQuery) && !isAccessorySearchQuery(searchQuery) &&
-                        isAccessoryListing(offer.title))
+            val trustedOffers = group.offers.filter { visibleOffer ->
+                strictCandidates.any { strictOffer ->
+                    sameOffer(visibleOffer, strictOffer) && !strictOffer.isSuspiciousPrice
+                }
             }
             val hasTrustedOffer = trustedOffers.isNotEmpty()
             // Never let a group made only of suspicious offers replace the merchant URL or

@@ -12,6 +12,9 @@ import com.example.data.model.ProductCategory
 import com.example.data.model.PENDING_VERIFICATION_DATE_LABEL
 import com.example.data.model.Store
 import com.example.data.remote.ArchivedPriceQuote
+import com.example.data.remote.isAccessoryListingTitle
+import com.example.data.remote.isReplacementPartListingTitle
+import com.example.data.remote.isToyListingTitle
 import com.example.data.remote.onlineProductIdentityKey
 import kotlinx.coroutines.flow.Flow
 import java.net.URI

@@ -2313,7 +2313,7 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun cdxSamplerKeepsOneRepresentativePerQuarterAndHonorsDownloadCap() {
+    fun cdxSamplerKeepsQuarterCoverageAndUsesUnusedSlotsForDenseQuarters() {
         val client = newClient()
         val formatter = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {
             isLenient = false
@@ -2338,19 +2338,48 @@ class WaybackPriceHistoryClientTest {
         }
 
         val fullQuarterSeries = client.sampleCaptures(captures, max = 16)
-        assertEquals("Two years of monthly CDX rows should yield one point for each of 8 quarters", 8, fullQuarterSeries.size)
+        assertEquals("The sampler should use the full download budget when extra dated captures exist", 16, fullQuarterSeries.size)
         val quarters = fullQuarterSeries.map { capture ->
             val calendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
                 timeInMillis = capture.timestamp
             }
             calendar.get(java.util.Calendar.YEAR) * 4 + calendar.get(java.util.Calendar.MONTH) / 3
         }
-        assertEquals("Sampling must not return two captures from the same quarter", quarters.size, quarters.distinct().size)
+        assertEquals("Every archived quarter should remain represented", 8, quarters.distinct().size)
 
         val boundedSeries = client.sampleCaptures(captures, max = 4)
         assertEquals("The HTTP/download budget remains a hard upper bound", 4, boundedSeries.size)
-        assertEquals("The oldest selected period should remain represented", fullQuarterSeries.first(), boundedSeries.first())
-        assertEquals("The newest selected period should remain represented", fullQuarterSeries.last(), boundedSeries.last())
+        val quarterOf: (WaybackPriceHistoryClient.WaybackCapture) -> Int = { capture ->
+            val calendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
+                timeInMillis = capture.timestamp
+            }
+            calendar.get(java.util.Calendar.YEAR) * 4 + calendar.get(java.util.Calendar.MONTH) / 3
+        }
+        assertEquals("The oldest quarter should remain represented", quarterOf(fullQuarterSeries.first()), quarterOf(boundedSeries.first()))
+        assertEquals("The newest quarter should remain represented", quarterOf(fullQuarterSeries.last()), quarterOf(boundedSeries.last()))
+    }
+
+    @Test
+    fun cdxSamplerKeepsMultipleDatesWhenAllCapturesFallWithinOneQuarter() {
+        val client = newClient()
+        val formatter = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {
+            isLenient = false
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }
+        val captures = listOf(
+            "20260501000000", "20260515000000", "20260601000000", "20260615000000"
+        ).map { raw ->
+            WaybackPriceHistoryClient.WaybackCapture(
+                rawTimestamp = raw,
+                timestamp = formatter.parse(raw)!!.time,
+                originalUrl = "https://shop.example/product/item"
+            )
+        }
+
+        val sampled = client.sampleCaptures(captures, max = 4)
+
+        assertEquals("Do not collapse several dated captures to one point when budget remains", 4, sampled.size)
+        assertEquals(captures.map { it.rawTimestamp }, sampled.map { it.rawTimestamp })
     }
 
     @Test

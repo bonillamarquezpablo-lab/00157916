@@ -769,17 +769,35 @@ internal fun isBicycleDrivetrainComponentTitle(title: String): Boolean {
 }
 
 private val ACCESSORY_LISTING_PATTERN = Regex(
-    """(?i)\b(p[oó]ster(?:es)?|poster(?:s)?|funda(?:s)?|carcasa(?:s)?|cases?|covers?|cargador(?:es)?|chargers?|charging|mop\s+kit|protectores?|protector(?:es)?|screen\s+protector|protector\s+de\s+pantalla|cristal(?:es)?\s+templado|cables?|adaptadores?|hubs?|filtros?|recambios?|repuestos?|soportes?|displayschutz|schutzfolie(?:n)?|schutzglas|panzerfolie|schutzhülle|schutzhuelle|schutzhulle|h[uü]llen?)\b"""
+    """(?i)\b(p[oó]ster(?:es)?|poster(?:s)?|funda(?:s)?|carcasa(?:s)?|cases?|covers?|cargador(?:es)?|chargers?|charging|mop\s+kit|protectores?|protector(?:es)?|screen\s+protector|protector\s+de\s+pantalla|cristal(?:es)?\s+templado|cables?|adaptadores?|hubs?|filtros?|recambios?|repuestos?|soportes?|boquillas?|difusores?|nozzles?|attachments?|cabezales?|cuchillas?|displayschutz|schutzfolie(?:n)?|schutzglas|panzerfolie|schutzhülle|schutzhuelle|schutzhulle|h[uü]llen?)\b"""
 )
 
 private val REPLACEMENT_PART_LISTING_PATTERN = Regex(
     """(?i)(?:^\s*original(?:e|es)?\s+(?:screens?|displays?|pantallas?)\b|^\s*(?:pantallas?|displays?|screens?)\s+(?:original(?:es)?|complet[oa]s?|de\s+repuesto|de\s+reemplazo|replacement|assembly|(?:google\s+pixel|xiaomi|redmi|iphone|samsung\s+galaxy|galaxy)\b)|\b(?:pantalla|display|screen)\s+(?:original(?:es)?|completa|completo|de\s+repuesto|de\s+reemplazo|replacement|assembly|para\s+(?:google|xiaomi|redmi|samsung|iphone))\b|\b(?:replacement|repuesto|recambio)\s+(?:screen|pantalla|display|lcd|amoled)\b|\b(?:digitizer|digitalizador|digitizador|flex\s+de\s+pantalla|conector\s+de\s+carga|charging\s+port|placa\s+base|mainboard|pantalla\s+con\s+marco|screen\s+assembly|display\s+assembly)\b)"""
 )
 
+private val REPLACEMENT_PART_KIND_PATTERN = Regex(
+    """(?i)\b(recambios?|repuestos?|replacement\s+parts?|spare\s+parts?|boquillas?|difusores?|nozzles?|attachments?|cabezales?|cuchillas?|piezas?\s+(?:de\s+repuesto|de\s+recambio))\b"""
+)
+
+private val TOY_LISTING_PATTERN = Regex(
+    """(?i)\b(toys?|juguetes?|munecas?|munecos?|playsets?|play\s+set|juego\s+infantil|cefa)\b"""
+)
+
+/** Shared classification keeps UI filtering, diagnostics and price-history rules consistent. */
+fun isToyListingTitle(title: String): Boolean =
+    TOY_LISTING_PATTERN.containsMatchIn(normalizeOnlineSearchText(title))
+
+/** Distinguishes replacement pieces from a complete appliance or product. */
+fun isReplacementPartListingTitle(title: String): Boolean =
+    REPLACEMENT_PART_KIND_PATTERN.containsMatchIn(normalizeOnlineSearchText(title)) ||
+        REPLACEMENT_PART_LISTING_PATTERN.containsMatchIn(title)
+
 /** Shared classification keeps UI filtering, diagnostics and price-history rules consistent. */
 fun isAccessoryListingTitle(title: String): Boolean =
     ACCESSORY_LISTING_PATTERN.containsMatchIn(title) ||
-        REPLACEMENT_PART_LISTING_PATTERN.containsMatchIn(title)
+        REPLACEMENT_PART_LISTING_PATTERN.containsMatchIn(title) ||
+        REPLACEMENT_PART_KIND_PATTERN.containsMatchIn(normalizeOnlineSearchText(title))
 
 /** Accessory queries are intentional accessory searches and should not be re-labelled as accessories. */
 fun isAccessorySearchQuery(query: String): Boolean =

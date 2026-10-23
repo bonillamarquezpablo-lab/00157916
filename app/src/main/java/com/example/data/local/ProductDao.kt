@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -49,6 +50,10 @@ interface ProductDao {
     /** Inserts a live-search catalogue placeholder without overwriting a concurrently saved product. */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertIfAbsent(product: ProductEntity): Long
+
+    /** Updates an existing unverified row without REPLACE/delete semantics that may affect relations. */
+    @Update
+    suspend fun update(product: ProductEntity)
 
     @Query("UPDATE products SET currentPrice = :newPrice, athMinPrice = :athMin, athMinDate = :athDate, athMinStore = :athStore WHERE id = :productId")
     suspend fun updatePriceDrop(productId: String, newPrice: Double, athMin: Double, athDate: String, athStore: String)

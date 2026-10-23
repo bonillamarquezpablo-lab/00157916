@@ -185,6 +185,41 @@ class LiveSearchMarketPersistenceTest {
     }
 
     @Test
+    fun liveSearchClassifiesAVisibleDysonSparePartAsAccessoriesWithoutVerifyingItsPrice() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val title = "Boquilla de repuesto para secador Dyson Supersonic"
+            val listing = SerpApiShoppingResult(
+                title = title,
+                price = 19.99,
+                storeName = "Repuestos Ejemplo",
+                sourceUrl = "https://repuestos.example/dyson/supersonic/boquilla",
+                observedAt = System.currentTimeMillis(),
+                condition = "new"
+            )
+
+            assertEquals(1, repository.ensureVisibleOnlineSearchProducts(listOf(listing), "boquilla Dyson", allowAccessories = true))
+            val saved = database.productDao().getAllProductsSnapshot().single()
+            assertEquals(ProductCategory.ACCESSORIES.name, saved.category)
+            assertFalse(saved.isPriceVerified)
+            assertEquals(0, database.priceObservationDao().getObservationCount(saved.id))
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun catalogueFallbackDoesNotOverwriteAnAlreadySavedTrustedProduct() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(

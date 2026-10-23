@@ -884,8 +884,11 @@ class ProductRepository(
                     } else existingProduct.category,
                     currentPrice = currentMinimum,
                     athMinPrice = if (hasTrustedOffer && existingProduct.athMinPrice <= 0.0) currentMinimum else existingProduct.athMinPrice,
-                    athMinDate = if (hasTrustedOffer) existingProduct.athMinDate.ifBlank { "Historial en construcción" }
-                        else existingProduct.athMinDate,
+                    athMinDate = if (hasTrustedOffer) {
+                        existingProduct.athMinDate
+                            .takeUnless { it.isBlank() || it.equals("Pendiente de verificación", ignoreCase = true) }
+                            ?: "Historial en construcción"
+                    } else existingProduct.athMinDate,
                     athMinStore = safeMinStore,
                     athMaxPrice = if (hasTrustedOffer) maxOf(existingProduct.athMaxPrice, trustedHighestToday ?: currentMinimum)
                         else existingProduct.athMaxPrice,

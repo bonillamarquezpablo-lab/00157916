@@ -1359,12 +1359,19 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     onlineProductIdentityKey(offer.title) == identityKey
                 }
                 if (selectedOffers.isNotEmpty()) {
-                    withContext(Dispatchers.IO) {
-                        repository.ensureVisibleOnlineSearchProducts(
-                            results = selectedOffers,
-                            searchQuery = selectedOffers.first().title,
-                            allowAccessories = true
-                        )
+                    try {
+                        withContext(Dispatchers.IO) {
+                            repository.ensureVisibleOnlineSearchProducts(
+                                results = selectedOffers,
+                                searchQuery = selectedOffers.first().title,
+                                allowAccessories = true
+                            )
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        // A transient save failure must not prevent opening a ficha that already
+                        // exists in Room. The resolution below remains the source of truth.
                     }
                 }
                 val product = withTimeout(10_000L) {

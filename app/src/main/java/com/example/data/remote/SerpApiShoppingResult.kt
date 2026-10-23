@@ -769,7 +769,7 @@ internal fun isBicycleDrivetrainComponentTitle(title: String): Boolean {
 }
 
 private val ACCESSORY_LISTING_PATTERN = Regex(
-    """(?i)\b(accesorios?|accessor(?:y|ies)|complementos?|p[oó]ster(?:es)?|poster(?:s)?|funda(?:s)?|carcasa(?:s)?|cases?|covers?|cargador(?:es)?|chargers?|mop\s+kit|protectores?|protector(?:es)?|screen\s+protector|protector\s+de\s+pantalla|cristal(?:es)?\s+templado|cables?|adaptadores?|hubs?|filtros?|recambios?|repuestos?|replacement\s+parts?|boquillas?|nozzles?|attachments?|difusores?|diffusers?|cabezales?\s+de\s+repuesto|soportes?|displayschutz|schutzfolie(?:n)?|schutzglas|panzerfolie|schutzhülle|schutzhuelle|schutzhulle|h[uü]llen?)\b"""
+    """(?i)\b(accesorios?|accessor(?:y|ies)|complementos?|p[oó]ster(?:es)?|poster(?:s)?|funda(?:s)?|carcasa(?:s)?|cases?|covers?|cargador(?:es)?|chargers?|mop\s+kit|protectores?|protector(?:es)?|screen\s+protector|protector\s+de\s+pantalla|cristal(?:es)?\s+templado|cables?|adaptadores?|hubs?|filtros?|recambios?|repuestos?|replacement\s+parts?|boquillas?|nozzles?|attachments?|difusor(?:es)?|diffusers?|cabezales?\s+de\s+repuesto|soportes?|displayschutz|schutzfolie(?:n)?|schutzglas|panzerfolie|schutzhülle|schutzhuelle|schutzhulle|h[uü]llen?)\b"""
 )
 
 private val REPLACEMENT_PART_LISTING_PATTERN = Regex(

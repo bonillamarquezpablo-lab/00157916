@@ -534,12 +534,16 @@ class WaybackPriceHistoryClient(
                 diagnosticCodes = exactResult.diagnosticCodes + prefixResult.diagnosticCodes
             )
             val hasSufficientSeries = hasSufficientPrimaryWaybackSeries(merged.quotes)
+            val partialSeries = merged.quotes.isNotEmpty() && !hasSufficientSeries
             val incompleteAfterTransportFailure = merged.requestFailed && !hasSufficientSeries
             rememberAttempt(
                 attempt,
                 now,
                 hasQuotes = merged.quotes.isNotEmpty(),
-                failed = incompleteAfterTransportFailure || (merged.quotes.isEmpty() && merged.requestFailed),
+                // An undersized history is not a completed result: let it retry after the brief
+                // failure cooldown rather than freezing one date in the long positive cache.
+                failed = partialSeries || incompleteAfterTransportFailure ||
+                    (merged.quotes.isEmpty() && merged.requestFailed),
                 rateLimited = merged.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
             )
             merged

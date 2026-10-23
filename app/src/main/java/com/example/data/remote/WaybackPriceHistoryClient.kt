@@ -4145,6 +4145,12 @@ class WaybackPriceHistoryClient(
                 continue
             }
 
+            // An offer whose normalized title already belongs to a saved product is not a
+            // "new product discovery". If its own URL cannot prove that saved SKU, reject it
+            // rather than attaching it to the wrong history or creating a duplicate discovery.
+            if (knownProductTitlesById.values.any { normalizeTitle(it) == normalizeTitle(archivedTitle) }) {
+                continue
+            }
             // Unknown secondary products may be staged only with a specific same-merchant URL,
             // a non-generic title and no accessory/promotional markers. The stage itself performs
             // the catalogue, URL, price, seller and snapshot checks again before saving anything.

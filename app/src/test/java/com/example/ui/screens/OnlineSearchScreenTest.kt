@@ -7,6 +7,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -74,7 +75,7 @@ class OnlineSearchScreenTest {
             }
         }
 
-        composeRule.onNodeWithText(title).assertIsDisplayed().performClick()
+        composeRule.onNode(hasText(title) and hasClickAction()).assertIsDisplayed().performClick()
         assertEquals(
             "A product card with a fallback seller link must still open its Room-backed ficha",
             com.example.data.remote.onlineProductIdentityKey(title),

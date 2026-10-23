@@ -790,11 +790,10 @@ fun OnlineSearchScreen(
                         }
                         ShoppingResultCard(
                             group = group,
-                            onOpenProduct = if (group.offers.all { it.isFitmentUnverified || it.isCategoryUnverified }) {
-                                null
-                            } else {
-                                { onOpenProduct(group.identityKey) }
-                            },
+                            // Every visible offer group has a persisted Room identity, including
+                            // fallback-link and not-yet-confirmed variants. Open its detail sheet
+                            // so the user can inspect it instead of silently disabling card taps.
+                            onOpenProduct = { onOpenProduct(group.identityKey) },
                             onOpenOffer = ::openOffer,
                             onOpenBestOffer = { openOffer(group.bestPurchaseOffer) }
                         )

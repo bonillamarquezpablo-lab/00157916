@@ -1938,7 +1938,12 @@ class ProductRepository(
             category = ProductCategory.values().firstOrNull { it.name == category } ?: ProductCategory.ALL,
             currentPrice = current,
             athMinPrice = lowest,
-            athMinDate = if (hasSufficientHistory) dateFormatter.format(Date(minObservation!!.observedAt)) else "Historial en construcción",
+            athMinDate = when {
+                hasSufficientHistory -> dateFormatter.format(Date(minObservation!!.observedAt))
+                !priceIsVerified && this.athMinDate.equals("Pendiente de verificación", ignoreCase = true) ->
+                    "Pendiente de verificación"
+                else -> "Historial en construcción"
+            },
             athMinStore = if (hasSufficientHistory) observationStore(minObservation!!, stores).name else "",
             athMaxPrice = highest,
             avg90dPrice = average,

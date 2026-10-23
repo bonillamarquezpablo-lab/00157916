@@ -778,7 +778,7 @@ private val REPLACEMENT_PART_LISTING_PATTERN = Regex(
 
 /** Identifies toys by the listing itself so a brand query does not misclassify them as appliances. */
 private val TOY_LISTING_PATTERN = Regex(
-    """(?i)\b(toys?|juguetes?|muñec[oa]s?|dolls?|figuras?\s+de\s+accion|playsets?|pretend\s+play|juego\s+de\s+imitacion)\b"""
+    """(?i)\b(toys?|juguetes?|muñec[oa]s?|dolls?|figuras?\s+de\s+acci[oó]n|playsets?|pretend\s+play|juego\s+de\s+imitaci[oó]n)\b"""
 )
 
 fun isToyListingTitle(title: String): Boolean = TOY_LISTING_PATTERN.containsMatchIn(title)
@@ -787,15 +787,26 @@ private val REPLACEMENT_ACCESSORY_LISTING_PATTERN = Regex(
     """(?i)\b(boquillas?|nozzles?|replacement\s+parts?|spare\s+parts?|recambios?|repuestos?|cabezales?\s+de\s+repuesto|cepillos?\s+de\s+repuesto|filtros?\s+de\s+repuesto)\b"""
 )
 
+/** Avoid labelling a complete appliance as a spare part just because included contents are named. */
+private val COMPLETE_PRODUCT_WITH_INCLUDED_ACCESSORIES_PATTERN = Regex(
+    """(?i)\\b(?:with|including|includes|incluye|incluido(?:s|as)?|con)\\b.*\\b(?:accessories|accesorios|attachments?|difusores?|boquillas?|nozzles?)\\b"""
+)
+
+private fun isCompleteProductWithIncludedAccessories(title: String): Boolean =
+    COMPLETE_PRODUCT_WITH_INCLUDED_ACCESSORIES_PATTERN.containsMatchIn(title) &&
+        Regex("""(?i)\\b(?:secador(?:es)?|hair\\s+dryer|supersonic|airwrap|plancha\\s+de\\s+pelo|corrale|vacuum|aspiradora|purifier)\\b""")
+            .containsMatchIn(title)
+
 /** True when a listing is specifically a replacement part rather than the complete product. */
 fun isReplacementPartListingTitle(title: String): Boolean =
-    REPLACEMENT_PART_LISTING_PATTERN.containsMatchIn(title) ||
-        REPLACEMENT_ACCESSORY_LISTING_PATTERN.containsMatchIn(title)
+    !isCompleteProductWithIncludedAccessories(title) &&
+        (REPLACEMENT_PART_LISTING_PATTERN.containsMatchIn(title) ||
+            REPLACEMENT_ACCESSORY_LISTING_PATTERN.containsMatchIn(title))
 
 /** Shared classification keeps UI filtering, diagnostics and price-history rules consistent. */
 fun isAccessoryListingTitle(title: String): Boolean =
-    ACCESSORY_LISTING_PATTERN.containsMatchIn(title) ||
-        isReplacementPartListingTitle(title)
+    !isCompleteProductWithIncludedAccessories(title) &&
+        (ACCESSORY_LISTING_PATTERN.containsMatchIn(title) || isReplacementPartListingTitle(title))
 
 /** Accessory queries are intentional accessory searches and should not be re-labelled as accessories. */
 fun isAccessorySearchQuery(query: String): Boolean =

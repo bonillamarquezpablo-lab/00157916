@@ -5115,9 +5115,9 @@ class WaybackPriceHistoryClient(
         private const val KEY_LAST_AVAILABILITY_REQUEST_AT = "wayback_last_availability_request_at"
         private const val MIN_RATE_LIMIT_COOLDOWN_MS = 60L * 1000L
         private const val DEFAULT_RATE_LIMIT_COOLDOWN_MS = 5L * 60L * 1000L
-        private const val MAX_RATE_LIMIT_COOLDOWN_MS = 6L * 60L * 60L * 1000L
+        private const val MAX_RATE_LIMIT_COOLDOWN_MS = 24L * 60L * 60L * 1000L
         private const val RATE_LIMIT_ESCALATION_WINDOW_MS = 24L * 60L * 60L * 1000L
-        private const val MAX_RATE_LIMIT_HITS = 8
+        private const val MAX_RATE_LIMIT_HITS = 10
         private const val KEY_RATE_LIMIT_UNTIL = "wayback_rate_limit_until"
         private const val KEY_RATE_LIMIT_LAST_HIT_AT = "wayback_rate_limit_last_hit_at"
         private const val KEY_RATE_LIMIT_HIT_COUNT = "wayback_rate_limit_hit_count"

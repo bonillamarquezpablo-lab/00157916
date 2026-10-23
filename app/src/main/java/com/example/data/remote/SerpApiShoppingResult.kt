@@ -787,15 +787,23 @@ private val REPLACEMENT_ACCESSORY_LISTING_PATTERN = Regex(
     """(?i)\b(boquillas?|nozzles?|replacement\s+parts?|spare\s+parts?|recambios?|repuestos?|cabezales?\s+de\s+repuesto|cepillos?\s+de\s+repuesto|filtros?\s+de\s+repuesto)\b"""
 )
 
-/** Avoid labelling a complete appliance as a spare part just because included contents are named. */
+/** Detect titles that describe the complete product and explicitly say accessories are included. */
 private val COMPLETE_PRODUCT_WITH_INCLUDED_ACCESSORIES_PATTERN = Regex(
     """(?i)\b(?:with|including|includes|incluye|incluido(?:s|as)?|con)\b.*\b(?:accessories|accesorios|attachments?|difusores?|boquillas?|nozzles?)\b"""
 )
 
+private val COMPONENT_FIRST_LISTING_PATTERN = Regex(
+    """(?i)^\s*(?:boquillas?|nozzles?|difusores?|diffusers?|filtros?|filters?|cepillos?|brush(?:es)?|cabezales?|heads?|repuestos?|recambios?|replacement\s+parts?|spare\s+parts?|pantallas?|screens?|displays?|cables?|cargadores?|chargers?|bater[ií]as?|batteries|fundas?|cases?|accesorios?|accessor(?:y|ies))\b"""
+)
+
+private val COMPONENT_FOR_PRODUCT_PATTERN = Regex(
+    """(?i)\b(?:boquillas?|nozzles?|difusores?|diffusers?|filtros?|filters?|cepillos?|brush(?:es)?|cabezales?|replacement\s+parts?|spare\s+parts?)\b.*\b(?:para|for|compatible\s+con|compatible\s+with)\b.*\b(?:secadores?|hair\s+dryers?|aspiradoras?|vacuum(?:s)?|pelo|hair)\b"""
+)
+
 private fun isCompleteProductWithIncludedAccessories(title: String): Boolean =
     COMPLETE_PRODUCT_WITH_INCLUDED_ACCESSORIES_PATTERN.containsMatchIn(title) &&
-        Regex("""(?i)\b(?:secador(?:es)?|hair\s+dryer|supersonic|airwrap|plancha\s+de\s+pelo|corrale|vacuum|aspiradora|purifier)\b""")
-            .containsMatchIn(title)
+        !COMPONENT_FIRST_LISTING_PATTERN.containsMatchIn(title) &&
+        !COMPONENT_FOR_PRODUCT_PATTERN.containsMatchIn(title)
 
 /** True when a listing is specifically a replacement part rather than the complete product. */
 fun isReplacementPartListingTitle(title: String): Boolean =

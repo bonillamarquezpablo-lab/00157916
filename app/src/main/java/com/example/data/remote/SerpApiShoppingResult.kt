@@ -789,12 +789,12 @@ private val REPLACEMENT_ACCESSORY_LISTING_PATTERN = Regex(
 
 /** Avoid labelling a complete appliance as a spare part just because included contents are named. */
 private val COMPLETE_PRODUCT_WITH_INCLUDED_ACCESSORIES_PATTERN = Regex(
-    """(?i)\\b(?:with|including|includes|incluye|incluido(?:s|as)?|con)\\b.*\\b(?:accessories|accesorios|attachments?|difusores?|boquillas?|nozzles?)\\b"""
+    """(?i)\b(?:with|including|includes|incluye|incluido(?:s|as)?|con)\b.*\b(?:accessories|accesorios|attachments?|difusores?|boquillas?|nozzles?)\b"""
 )
 
 private fun isCompleteProductWithIncludedAccessories(title: String): Boolean =
     COMPLETE_PRODUCT_WITH_INCLUDED_ACCESSORIES_PATTERN.containsMatchIn(title) &&
-        Regex("""(?i)\\b(?:secador(?:es)?|hair\\s+dryer|supersonic|airwrap|plancha\\s+de\\s+pelo|corrale|vacuum|aspiradora|purifier)\\b""")
+        Regex("""(?i)\b(?:secador(?:es)?|hair\s+dryer|supersonic|airwrap|plancha\s+de\s+pelo|corrale|vacuum|aspiradora|purifier)\b""")
             .containsMatchIn(title)
 
 /** True when a listing is specifically a replacement part rather than the complete product. */

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.AppDatabase
+import com.example.data.local.ProductEntity
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.repository.ProductRepository
@@ -77,6 +78,71 @@ class LiveSearchMarketPersistenceTest {
                 repository.ensureVisibleOnlineSearchProducts(listOf(fallback), title))
             assertEquals(1, database.productDao().getProductCount())
             assertEquals(0, database.priceObservationDao().getObservationCount(savedRow.id))
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun liveSearchRecoversAnUnverifiedLegacyCatalogueShellWithoutCreatingADuplicate() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val title = "Victoria Hyde New English Bandolera Mujer"
+            val legacyShell = ProductEntity(
+                id = "legacy-victoria-hyde-shell",
+                title = title,
+                brand = "Victoria Hyde",
+                category = "ACCESSORIES",
+                currentPrice = 0.0,
+                athMinPrice = 0.0,
+                athMinDate = "Historial en construcción",
+                athMinStore = "",
+                athMaxPrice = 0.0,
+                avg90dPrice = 0.0,
+                officialPvp = 0.0,
+                currentStoreId = "unknown_store",
+                storeUrl = "",
+                ean = "",
+                isPriceVerified = false
+            )
+            database.productDao().insert(legacyShell)
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val fallback = SerpApiShoppingResult(
+                title = title,
+                price = 49.95,
+                storeName = "Google Shopping",
+                sourceUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=Victoria+Hyde+New+English+Bandolera+Mujer",
+                observedAt = System.currentTimeMillis(),
+                condition = "new"
+            )
+
+            assertEquals(1, repository.ensureVisibleOnlineSearchProducts(listOf(fallback), title))
+            val updated = database.productDao().getProductById(legacyShell.id)!!
+            assertEquals("The existing Room identity must be reused", legacyShell.id, updated.id)
+            assertEquals(49.95, updated.currentPrice, 0.001)
+            assertEquals("Pendiente de verificación", updated.athMinDate)
+            assertEquals(fallback.sourceUrl, updated.storeUrl)
+            assertFalse(updated.isPriceVerified)
+            assertEquals(1, database.productDao().getProductCount())
+            assertEquals(0, database.priceObservationDao().getObservationCount(updated.id))
+
+            val ficha = repository.awaitProductForOnlineIdentity(onlineProductIdentityKey(title))
+            assertEquals(legacyShell.id, ficha.id)
+            assertTrue(ficha.isUnverifiedLiveListing)
+            assertEquals(
+                com.example.data.model.PriceDisplayStatus.UNVERIFIED_LIVE_LISTING,
+                ficha.priceDisplayStatus
+            )
         } finally {
             database.close()
         }

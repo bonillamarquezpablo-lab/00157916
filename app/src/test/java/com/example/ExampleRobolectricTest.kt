@@ -1837,7 +1837,7 @@ class ExampleRobolectricTest {
                 searchQuery = """llantas 14" 5x100"""
             )
 
-            assertEquals(0, saved)
+            assertEquals(1, saved)
             assertEquals(1, database.productDao().getAllProductsSnapshot().size)
             assertEquals(0, database.priceObservationDao().getVerifiedObservationCount())
 

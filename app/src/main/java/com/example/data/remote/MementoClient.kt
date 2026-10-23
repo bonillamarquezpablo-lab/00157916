@@ -129,12 +129,14 @@ class MementoClient(
             .orEmpty()
         var cdxAvailable = false
         var cdxRequestFailed = false
+        var usedCdxFallback = false
         // Some valid product URLs return 404 from the Link-format TimeMap endpoint even though
         // Arquivo.pt's CDX index still contains dated captures. Query its official bounded JSON
         // index only for that case or a valid empty TimeMap; never repeat the request after HTTP 429.
         val shouldTryCdx = "MEMENTO_RATE_LIMITED" !in diagnostics &&
             (timeMapBody != null || diagnostics.contains("MEMENTO_TIMEMAP_HTTP_404"))
         if (captureCandidates.isEmpty() && shouldTryCdx) {
+            usedCdxFallback = true
             val cdx = fetchCdxCaptures(
                 originalUrl = originalUrl,
                 now = now,
@@ -153,7 +155,9 @@ class MementoClient(
 
         val captures = sampleQuarterlyCaptures(
             captures = captureCandidates,
-            maxSnapshots = maxSnapshots
+            // The fallback spends an extra bounded index request. Three snapshots keep the
+            // whole lookup within the independent ViewModel timeout while still sampling dates.
+            maxSnapshots = if (usedCdxFallback) minOf(maxSnapshots, MAX_CDX_FALLBACK_SNAPSHOTS) else maxSnapshots
         )
         if (captures.isEmpty()) {
             val noCaptureResult = captureCandidates.isEmpty() &&
@@ -581,6 +585,7 @@ class MementoClient(
         const val SNAPSHOT_TIMEOUT_SECONDS = 4L
         const val MAX_TIMEMAP_BYTES = 512 * 1024
         const val MAX_CDX_LINES = 100
+        const val MAX_CDX_FALLBACK_SNAPSHOTS = 3
         const val MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
         const val USER_AGENT = "MinimoPriceHistory/1.0 (Memento historical lookup)"
     }

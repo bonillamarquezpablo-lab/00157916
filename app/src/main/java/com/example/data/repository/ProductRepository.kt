@@ -784,7 +784,9 @@ class ProductRepository(
                     madeAvailable++
                 }
             } else {
-                productDao.insert(candidate)
+                // UPDATE preserves existing Room relations; REPLACE can delete/reinsert the row
+                // and trigger foreign-key cascades even though the product itself still exists.
+                productDao.update(candidate)
                 currentEntities[existingIndex] = candidate
                 madeAvailable++
             }

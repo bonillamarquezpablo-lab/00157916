@@ -11,6 +11,9 @@ enum class PriceDisplayStatus {
     DEMONSTRATION
 }
 
+/** Shared label for live-search listings whose seller price has not been verified. */
+const val PENDING_VERIFICATION_DATE_LABEL = "Pendiente de verificación"
+
 data class Product(
     val id: String,
     val title: String,
@@ -140,7 +143,7 @@ data class Product(
     val isUnverifiedLiveListing: Boolean
         get() = !isPriceVerified &&
             (id.startsWith("online_candidate_") ||
-                athMinDate.equals("Pendiente de verificación", ignoreCase = true)) &&
+                athMinDate.equals(PENDING_VERIFICATION_DATE_LABEL, ignoreCase = true)) &&
             currentPrice.isFinite() && currentPrice > 0.0 &&
             savedHistoricalPrice == null
 

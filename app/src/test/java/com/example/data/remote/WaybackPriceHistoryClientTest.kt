@@ -283,7 +283,8 @@ class WaybackPriceHistoryClientTest {
 
             assertEquals("The batched lookup should verify the archived EUR price", 1, result.quotes.size)
             assertTrue("At least one verified quote must be recovered", result.quotes.isNotEmpty())
-            assertTrue("Every recovered quote must retain the verified EUR price", result.quotes.all { kotlin.math.abs(it.price - 79.99) < 0.001 })
+            assertEquals("The repeated timestamp must not create a second historical point", 1, result.quotes.size)
+            assertEquals(79.99, result.quotes.single().price, 0.001)
             assertEquals("EUR", result.quotes.single().currency)
             assertEquals("Availability must not issue per-date HTTP requests", 0, requests.count { it.startsWith("archive.org/wayback/available") })
             assertEquals("Concurrent duplicate lookups must share one CDX request", 1, requests.count { it.startsWith("web.archive.org/cdx/search/cdx") })
@@ -2129,9 +2130,9 @@ class WaybackPriceHistoryClientTest {
                     val originalUrl = request.url.queryParameter("url")
                         ?: throw AssertionError("Availability request has no product URL")
                     availabilityUrls += originalUrl
-                    // The quarterly sampler deliberately keeps only one capture per quarter.
-                    // Use two independent quarters so the cookie-wall capture and the later valid
-                    // capture both survive sampling and the parser is tested for real.
+                    // The sampler keeps one representative per quarter and spends extra slots only on
+                    // distinct capture dates, not alternate URLs for an already represented day.
+                    // Use two quarters so the cookie wall and later valid capture both survive.
                     val snapshotTimestamp = if (availabilityUrls.size == 1) {
                         "20250101120000"
                     } else {

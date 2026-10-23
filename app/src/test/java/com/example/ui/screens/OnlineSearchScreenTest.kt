@@ -159,6 +159,8 @@ class OnlineSearchScreenTest {
         assertTrue(isReplacementPartListingTitle("Boquilla para secador Dyson Supersonic"))
         assertTrue(isReplacementPartListingTitle("Recambio de cabezal Dyson"))
         assertFalse(isReplacementPartListingTitle("Dyson Supersonic completo"))
+        assertFalse(isReplacementPartListingTitle("Difusor para Dyson Airwrap"))
+        assertTrue(isAccessoryListingTitle("Difusor para Dyson Airwrap"))
         assertTrue(isToyListingTitle("Juguete Dyson secador de pelo para niños"))
         assertFalse(isAccessoryListingTitle("Juguete Dyson secador de pelo para niños"))
         assertFalse(isToyListingTitle("Boquilla para secador Dyson Supersonic"))

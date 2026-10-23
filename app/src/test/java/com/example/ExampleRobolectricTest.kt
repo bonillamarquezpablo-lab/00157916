@@ -1785,6 +1785,18 @@ class ExampleRobolectricTest {
                 condition = "new"
             )
             assertTrue("The cheap case must be recognized as an accessory", accessory.isAccessoryOffer)
+            val phoneWithChargingFeature = SerpApiShoppingResult(
+                title = "Samsung Galaxy S26 Ultra 512 GB Fast Charging",
+                price = 1_299.0,
+                storeName = "Tienda de móviles",
+                sourceUrl = "https://shop.example.test/samsung-galaxy-s26-ultra",
+                observedAt = timestamp,
+                condition = "new"
+            )
+            assertFalse(
+                "The word 'charging' in a phone description must not classify the whole phone as an accessory",
+                phoneWithChargingFeature.isAccessoryOffer
+            )
 
             val saved = repository.recordOnlineSearchResults(
                 results = listOf(battery, accessory),

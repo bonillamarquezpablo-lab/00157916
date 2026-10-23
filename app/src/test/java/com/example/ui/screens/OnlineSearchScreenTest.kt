@@ -16,6 +16,9 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.platform.testTag
+import com.example.data.model.Product
+import com.example.data.model.ProductCategory
+import com.example.data.model.Store
 import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiShoppingResult
@@ -87,6 +90,63 @@ class OnlineSearchScreenTest {
             com.example.data.remote.onlineProductIdentityKey(title),
             openedIdentity
         )
+    }
+
+    @Test
+    fun relatedMarketPlaceholderAppearsInSearchAndItsFichaButtonOpensTheSameIdentity() {
+        val title = "Dyson Airwrap i.d. Curly + Coily Amber Silk"
+        val candidate = Product(
+            id = "online_candidate_market_test",
+            title = title,
+            brand = "Dyson",
+            category = ProductCategory.PERSONAL_CARE,
+            currentPrice = 249.99,
+            athMinPrice = 0.0,
+            athMinDate = "Pendiente de verificación",
+            athMinStore = "",
+            athMaxPrice = 0.0,
+            avg90dPrice = 0.0,
+            officialPvp = 0.0,
+            currentStore = Store.ALL_STORES.first(),
+            storeUrl = "https://www.google.com/search?tbm=shop&q=Dyson+Airwrap",
+            ean = "",
+            priceHistory = emptyList(),
+            offers = emptyList(),
+            isPriceVerified = false
+        )
+        var openedIdentity: String? = null
+
+        composeRule.setContent {
+            MaterialTheme {
+                OnlineSearchScreen(
+                    state = TrackerUiState(
+                        onlineSearchQuery = "plancha Dyson",
+                        onlineSearchRelatedMarketCandidates = listOf(candidate),
+                        onlineSearchProvider = OnlineSearchProvider.GOOGLE_SHOPPING
+                    ),
+                    onQueryChange = {},
+                    onSearch = {},
+                    onAmazonSearch = {},
+                    onForceRefresh = {},
+                    onAmazonOnlyChange = {},
+                    onShowSecondHandChange = {},
+                    onToggleDiscarded = {},
+                    onOpenSettings = {},
+                    onOpenProduct = { openedIdentity = it },
+                    modifier = Modifier.testTag("online-search-list")
+                )
+            }
+        }
+
+        val searchList = composeRule.onNodeWithTag("online-search-list")
+        searchList.performScrollToNode(hasText("También en tu Mercado"))
+        searchList.performScrollToNode(hasText(title))
+        composeRule.onNodeWithText("También en tu Mercado").assertIsDisplayed()
+        composeRule.onNodeWithText("PRECIO NO VERIFICADO · Ya existe en Mercado").assertIsDisplayed()
+        composeRule.onNodeWithTag("open-related-market-online_candidate_market_test")
+            .assertIsDisplayed()
+            .performClick()
+        assertEquals(com.example.data.remote.onlineProductIdentityKey(title), openedIdentity)
     }
 
     @Test

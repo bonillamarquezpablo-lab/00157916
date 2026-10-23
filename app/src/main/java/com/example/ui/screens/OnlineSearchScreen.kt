@@ -866,9 +866,9 @@ private fun ShoppingResultCard(
         !it.isSuspiciousPrice && !it.isFitmentUnverified && !it.isCategoryUnverified
     }
     Card(
-        modifier = Modifier.fillMaxWidth().then(
-            if (onOpenProduct == null) Modifier else Modifier.clickable(onClick = onOpenProduct)
-        ),
+        modifier = Modifier.fillMaxWidth()
+            .testTag("online-search-product-card")
+            .then(if (onOpenProduct == null) Modifier else Modifier.clickable(onClick = onOpenProduct)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {

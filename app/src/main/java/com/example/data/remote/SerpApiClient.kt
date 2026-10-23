@@ -1987,8 +1987,12 @@ internal fun isBroadDysonHairToolsQueryMatch(requested: String, returned: String
     if (queryNamesSpecificDysonHairToolModel(requested)) return false
     // A vacuum/air-purifier spare part must not leak into a hair-tool search just because its
     // title contains "nozzle" or "attachment".
-    if (Regex("""(?i)\b(aspiradoras?|vacuum(?:s)?|robot\s+aspirador|cordless\s+cleaner|gen5detect|washg1|big\s+ball|v\d{1,2}\s+(?:detect|absolute|animal|motorhead))\b""")
-            .containsMatchIn(returned)
+    if (Regex("""(?i)\b(aspiradoras?|vacuum(?:s)?|robot\s+aspirador|cordless\s+cleaner|gen5detect|washg1|big\s+ball)\b""")
+            .containsMatchIn(returned) ||
+        // Dyson vacuum generations use V/SV/DC codes; hair tools use HS/HD/Airwrap/Corrale
+        // families. Reject the vacuum model code even when its suffix (Fluffy/Absolute/etc.)
+        // is omitted by the seller title.
+        Regex("""(?i)\b(?:v|sv|dc)\s*\d{1,3}\b""").containsMatchIn(returned)
     ) return false
     val genericHairQuery = setOf("plancha", "planchas", "secador", "secadores", "alisador", "alisadores", "pelo", "hair")
     val hairToolOrPart = setOf(

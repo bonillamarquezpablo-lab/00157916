@@ -2005,13 +2005,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             onlineSearchResultMessage(visibleCachedResults, provider, query)
                         }
                         val cacheNotice = "Resultados recuperados de caché: consulta capturada ${formatOnlineSnapshotAge(cached.savedAt)}. No se ha consumido otra búsqueda; los precios pueden haber cambiado."
-                        val savedObservations = if (cachedHistoryCandidates.isNotEmpty()) {
+                        val savedObservations = if (visibleCachedResults.isNotEmpty()) {
                             withContext(Dispatchers.IO) {
                                 repository.recordOnlineSearchResults(visibleCachedResults, provider.name, query)
                             }
                         } else 0
-                        val historyNotice = if (cachedHistoryCandidates.isNotEmpty()) {
-                            onlineHistoryNotice(savedObservations, cachedHistoryCandidates.size)
+                        val historyNotice = if (visibleCachedResults.isNotEmpty()) {
+                            onlineHistoryNotice(savedObservations, visibleCachedResults.size)
                         } else ""
                         val eligibilityNotice = liveHistoryEligibilityNotice(
                             visibleCachedResults.size,
@@ -2144,7 +2144,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         Triple(visible, eligibleForHistory, rejected)
                     }
                     onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = discarded
-                    val savedObservations = if (historyCandidates.isNotEmpty()) {
+                    val savedObservations = if (results.isNotEmpty()) {
                         withContext(Dispatchers.IO) {
                             repository.recordOnlineSearchResults(results, provider.name, query)
                         }
@@ -2215,8 +2215,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         ""
                     }
                     val filterNote = onlineFilterNotice(discarded)
-                    val historyNote = if (historyCandidates.isNotEmpty()) {
-                        onlineHistoryNotice(savedObservations, historyCandidates.size)
+                    val historyNote = if (results.isNotEmpty()) {
+                        onlineHistoryNotice(savedObservations, results.size)
                     } else ""
                     val eligibilityNotice = liveHistoryEligibilityNotice(results.size, historyCandidates.size)
                     val freshnessNote = "Búsqueda recién realizada; la antigüedad indica cuándo se capturaron estos resultados, no una comprobación en tiempo real del precio de la tienda."

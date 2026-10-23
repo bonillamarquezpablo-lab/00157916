@@ -66,7 +66,7 @@ class MementoClientTest {
             isLenient = false
             timeZone = TimeZone.getTimeZone("UTC")
         }.parse("20261021000000")!!.time
-        val target = "https://shop.example/product/item?sku=blue"
+        val target = "https://shop.example/product/item?sku=blue&size=256"
         val body = """
             {"timestamp":"20260701000000","url":"$target","mime":"text/html","status":"200"}
             {"timestamp":"20260101000000","url":"$target","mime":"text/html","status":"200"}
@@ -86,7 +86,8 @@ class MementoClientTest {
 
         assertEquals(listOf("20260101000000", "20260701000000"), captures.map { it.rawTimestamp })
         assertTrue(captures.all { it.snapshotUrl.startsWith("https://arquivo.pt/wayback/") })
-        assertTrue(captures.all { it.originalUrl == target })
+        assertTrue(captures.all { it.snapshotUrl.contains("/item%3Fsku=blue%26size=256") })
+        assertTrue(captures.all { it.originalUrl == target }
     }
 
     @Test

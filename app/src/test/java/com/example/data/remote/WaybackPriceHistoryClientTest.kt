@@ -282,6 +282,8 @@ class WaybackPriceHistoryClientTest {
             val result = results.first { it.quotes.isNotEmpty() }
 
             assertEquals("The batched lookup should verify the archived EUR price", 1, result.quotes.size)
+            assertTrue("At least one verified quote must be recovered", result.quotes.isNotEmpty())
+            assertEquals("The repeated timestamp must not create a second historical point", 1, result.quotes.size)
             assertEquals(79.99, result.quotes.single().price, 0.001)
             assertEquals("EUR", result.quotes.single().currency)
             assertEquals("Availability must not issue per-date HTTP requests", 0, requests.count { it.startsWith("archive.org/wayback/available") })
@@ -2086,6 +2088,113 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun secondaryArchivedOfferIsAssignedOnlyWhenItsOwnSkuUrlConfirmsSavedVariant() {
+        val client = newClient()
+        val primaryTitle = "Apple iPhone 15 Plus 256GB Amarillo Libre"
+        val primaryUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo-libre"
+        val siblingTitle = "Apple iPhone 15 Plus 128GB Amarillo Libre"
+        val siblingUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-128gb-amarillo-libre"
+        val snapshotUrl = "https://web.archive.org/web/20250124124812id_/$primaryUrl"
+        val htmlWithSiblingUrl = """
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@type":"Product",
+                "name":"$siblingTitle",
+                "url":"$siblingUrl",
+                "offers":{"@type":"Offer","price":"699.99","priceCurrency":"EUR"}
+              }
+              </script>
+            </head><body>Apple iPhone 15 Plus</body></html>
+        """.trimIndent()
+
+        val quotes = client.parseArchivedPricesForKnownProducts(
+            document = Jsoup.parse(htmlWithSiblingUrl),
+            primaryExpectedTitle = primaryTitle,
+            knownProductTitlesById = mapOf(
+                "selected-256" to primaryTitle,
+                "saved-128" to siblingTitle
+            ),
+            originalUrl = primaryUrl,
+            snapshotUrl = snapshotUrl,
+            observedAt = 1_737_000_000_000L
+        )
+
+        assertEquals("The sibling offer must resolve to exactly one saved variant", 1, quotes.size)
+        assertEquals("saved-128", quotes.single().targetProductId)
+        assertEquals(siblingTitle, quotes.single().productTitle)
+        assertEquals(siblingUrl, quotes.single().productUrl)
+        assertEquals(699.99, quotes.single().price, 0.001)
+    }
+
+    @Test
+    fun archivedSiblingWithoutItsOwnSkuUrlCannotBorrowPrimaryVariantIdentity() {
+        val client = newClient()
+        val primaryTitle = "Apple iPhone 15 Plus 256GB Amarillo Libre"
+        val primaryUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo-libre"
+        val siblingTitle = "Apple iPhone 15 Plus 128GB Amarillo Libre"
+        val snapshotUrl = "https://web.archive.org/web/20250124124812id_/$primaryUrl"
+        val htmlWithoutSiblingUrl = """
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@type":"Product",
+                "name":"$siblingTitle",
+                "offers":{"@type":"Offer","price":"699.99","priceCurrency":"EUR"}
+              }
+              </script>
+            </head><body>Apple iPhone 15 Plus</body></html>
+        """.trimIndent()
+
+        val quotes = client.parseArchivedPricesForKnownProducts(
+            document = Jsoup.parse(htmlWithoutSiblingUrl),
+            primaryExpectedTitle = primaryTitle,
+            knownProductTitlesById = mapOf("saved-128" to siblingTitle),
+            originalUrl = primaryUrl,
+            snapshotUrl = snapshotUrl,
+            observedAt = 1_737_000_000_000L
+        )
+
+        assertTrue("A 256 GB page must not confirm a 128 GB price with no independent offer URL", quotes.isEmpty())
+    }
+
+    @Test
+    fun archivedSiblingWithGenericFamilyUrlCannotBorrowPrimaryVariantIdentity() {
+        val client = newClient()
+        val primaryTitle = "Apple iPhone 15 Plus 256GB Amarillo Libre"
+        val primaryUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo-libre"
+        val siblingTitle = "Apple iPhone 15 Plus 128GB Amarillo Libre"
+        val genericUrl = "https://www.pccomponentes.com/apple-iphone-15-plus"
+        val snapshotUrl = "https://web.archive.org/web/20250124124812id_/$primaryUrl"
+        val htmlWithGenericSiblingUrl = """
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@type":"Product",
+                "name":"$siblingTitle",
+                "url":"$genericUrl",
+                "offers":{"@type":"Offer","price":"699.99","priceCurrency":"EUR"}
+              }
+              </script>
+            </head><body>Apple iPhone 15 Plus</body></html>
+        """.trimIndent()
+
+        val quotes = client.parseArchivedPricesForKnownProducts(
+            document = Jsoup.parse(htmlWithGenericSiblingUrl),
+            primaryExpectedTitle = primaryTitle,
+            knownProductTitlesById = mapOf("saved-128" to siblingTitle),
+            originalUrl = primaryUrl,
+            snapshotUrl = snapshotUrl,
+            observedAt = 1_737_000_000_000L
+        )
+
+        assertTrue("A generic family URL does not independently prove 128 GB", quotes.isEmpty())
+    }
+
+    @Test
     fun domainFallbackContinuesWhenFirstCaptureHasNoVerifiedPrice() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
@@ -2128,9 +2237,9 @@ class WaybackPriceHistoryClientTest {
                     val originalUrl = request.url.queryParameter("url")
                         ?: throw AssertionError("Availability request has no product URL")
                     availabilityUrls += originalUrl
-                    // The quarterly sampler deliberately keeps only one capture per quarter.
-                    // Use two independent quarters so the cookie-wall capture and the later valid
-                    // capture both survive sampling and the parser is tested for real.
+                    // The sampler keeps one representative per quarter and spends extra slots only on
+                    // distinct capture dates, not alternate URLs for an already represented day.
+                    // Use two quarters so the cookie wall and later valid capture both survive.
                     val snapshotTimestamp = if (availabilityUrls.size == 1) {
                         "20250101120000"
                     } else {
@@ -2313,7 +2422,7 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun cdxSamplerKeepsOneRepresentativePerQuarterAndHonorsDownloadCap() {
+    fun cdxSamplerKeepsQuarterCoverageAndUsesUnusedSlotsForDenseQuarters() {
         val client = newClient()
         val formatter = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {
             isLenient = false
@@ -2338,19 +2447,74 @@ class WaybackPriceHistoryClientTest {
         }
 
         val fullQuarterSeries = client.sampleCaptures(captures, max = 16)
-        assertEquals("Two years of monthly CDX rows should yield one point for each of 8 quarters", 8, fullQuarterSeries.size)
+        assertEquals("The sampler should use the full download budget when extra dated captures exist", 16, fullQuarterSeries.size)
         val quarters = fullQuarterSeries.map { capture ->
             val calendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
                 timeInMillis = capture.timestamp
             }
             calendar.get(java.util.Calendar.YEAR) * 4 + calendar.get(java.util.Calendar.MONTH) / 3
         }
-        assertEquals("Sampling must not return two captures from the same quarter", quarters.size, quarters.distinct().size)
+        assertEquals("Every archived quarter should remain represented", 8, quarters.distinct().size)
 
         val boundedSeries = client.sampleCaptures(captures, max = 4)
         assertEquals("The HTTP/download budget remains a hard upper bound", 4, boundedSeries.size)
-        assertEquals("The oldest selected period should remain represented", fullQuarterSeries.first(), boundedSeries.first())
-        assertEquals("The newest selected period should remain represented", fullQuarterSeries.last(), boundedSeries.last())
+        val quarterOf: (WaybackPriceHistoryClient.WaybackCapture) -> Int = { capture ->
+            val calendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
+                timeInMillis = capture.timestamp
+            }
+            calendar.get(java.util.Calendar.YEAR) * 4 + calendar.get(java.util.Calendar.MONTH) / 3
+        }
+        assertEquals("The oldest quarter should remain represented", quarterOf(fullQuarterSeries.first()), quarterOf(boundedSeries.first()))
+        assertEquals("The newest quarter should remain represented", quarterOf(fullQuarterSeries.last()), quarterOf(boundedSeries.last()))
+    }
+
+    @Test
+    fun cdxSamplerKeepsMultipleDatesWhenAllCapturesFallWithinOneQuarter() {
+        val client = newClient()
+        val formatter = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {
+            isLenient = false
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }
+        val captures = listOf(
+            "20260501000000", "20260515000000", "20260601000000", "20260615000000"
+        ).map { raw ->
+            WaybackPriceHistoryClient.WaybackCapture(
+                rawTimestamp = raw,
+                timestamp = formatter.parse(raw)!!.time,
+                originalUrl = "https://shop.example/product/item"
+            )
+        }
+
+        val sampled = client.sampleCaptures(captures, max = 4)
+
+        assertEquals("Do not collapse several dated captures to one point when budget remains", 4, sampled.size)
+        assertEquals(captures.map { it.rawTimestamp }, sampled.map { it.rawTimestamp })
+    }
+
+    @Test
+    fun cdxSamplerDoesNotUseMultipleUrlsForOneCaptureTimestamp() {
+        val client = newClient()
+        val formatter = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {
+            isLenient = false
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }
+        fun capture(raw: String, url: String) = WaybackPriceHistoryClient.WaybackCapture(
+            rawTimestamp = raw,
+            timestamp = formatter.parse(raw)!!.time,
+            originalUrl = url
+        )
+        val captures = listOf(
+            capture("20260501000000", "https://shop.example/product/item"),
+            capture("20260515000000", "https://shop.example/product/item"),
+            capture("20260515000000", "https://shop.example/product/item?alternate=1"),
+            capture("20260601000000", "https://shop.example/product/item"),
+            capture("20260615000000", "https://shop.example/product/item")
+        )
+
+        val sampled = client.sampleCaptures(captures, max = 4)
+
+        assertEquals("The sampler must not emit multiple points for one capture timestamp", sampled.size,
+            sampled.map { it.timestamp }.distinct().size)
     }
 
     @Test
@@ -3756,8 +3920,8 @@ class WaybackPriceHistoryClientTest {
             client.computeRateLimitUntil("0", now)
         )
         assertEquals(
-            "Unreasonable Retry-After values are capped at six hours",
-            now + 6L * 60L * 60L * 1000L,
+            "Unreasonable Retry-After values are capped at 24 hours",
+            now + 24L * 60L * 60L * 1000L,
             client.computeRateLimitUntil("999999", now)
         )
         assertEquals(
@@ -3768,7 +3932,7 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun repeatedRateLimitsIncreaseCooldownAndRemainCappedAtSixHours() {
+    fun repeatedRateLimitsIncreaseCooldownAndRemainCappedAt24Hours() {
         val client = newClient()
         val now = 1_800_000_000_000L
         val minute = 60_000L
@@ -3783,8 +3947,8 @@ class WaybackPriceHistoryClientTest {
             client.computeAdaptiveRateLimitUntil("3600", now, 2)
         )
         assertEquals(
-            "Repeated HTTP 429 responses must never pause the app for more than six hours",
-            now + 6L * hour,
+            "Repeated HTTP 429 responses must never pause the app for more than 24 hours",
+            now + 24L * hour,
             client.computeAdaptiveRateLimitUntil(null, now, 99)
         )
     }

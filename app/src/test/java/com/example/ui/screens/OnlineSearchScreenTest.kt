@@ -16,10 +16,16 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.platform.testTag
+import com.example.data.model.Product
+import com.example.data.model.ProductCategory
+import com.example.data.model.Store
 import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.isAccessorySearchQuery
+import com.example.data.remote.isAccessoryListingTitle
+import com.example.data.remote.isToyListingTitle
+import com.example.data.remote.isReplacementPartListingTitle
 import com.example.ui.viewmodel.OnlineSearchProvider
 import com.example.ui.viewmodel.optimizedOnlineShoppingQuery
 import com.example.ui.viewmodel.TrackerUiState
@@ -76,12 +82,90 @@ class OnlineSearchScreenTest {
 
         val searchList = composeRule.onNodeWithTag("online-search-list")
         searchList.performScrollToNode(hasText(title))
-        composeRule.onNodeWithTag("online-search-product-card").assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("online-search-product-card").assertIsDisplayed()
+        composeRule.onNode(hasText("Precio no verificado", substring = true)).assertIsDisplayed()
+        composeRule.onNodeWithTag("open-online-product-ficha").performScrollTo().assertIsDisplayed().performClick()
         assertEquals(
             "A product card with a fallback seller link must still open its Room-backed ficha",
             com.example.data.remote.onlineProductIdentityKey(title),
             openedIdentity
         )
+    }
+
+    @Test
+    fun relatedMarketPlaceholderAppearsInSearchAndItsFichaButtonOpensTheSameIdentity() {
+        val title = "Dyson Airwrap i.d. Curly + Coily Amber Silk"
+        val candidate = Product(
+            id = "online_candidate_market_test",
+            title = title,
+            brand = "Dyson",
+            category = ProductCategory.PERSONAL_CARE,
+            currentPrice = 249.99,
+            athMinPrice = 0.0,
+            athMinDate = "Pendiente de verificación",
+            athMinStore = "",
+            athMaxPrice = 0.0,
+            avg90dPrice = 0.0,
+            officialPvp = 0.0,
+            currentStore = Store.ALL_STORES.first(),
+            storeUrl = "https://www.google.com/search?tbm=shop&q=Dyson+Airwrap",
+            ean = "",
+            priceHistory = emptyList(),
+            offers = emptyList(),
+            isPriceVerified = false
+        )
+        var openedIdentity: String? = null
+
+        composeRule.setContent {
+            MaterialTheme {
+                OnlineSearchScreen(
+                    state = TrackerUiState(
+                        onlineSearchQuery = "plancha Dyson",
+                        onlineSearchRelatedMarketCandidates = listOf(candidate),
+                        onlineSearchProvider = OnlineSearchProvider.GOOGLE_SHOPPING
+                    ),
+                    onQueryChange = {},
+                    onSearch = {},
+                    onAmazonSearch = {},
+                    onForceRefresh = {},
+                    onAmazonOnlyChange = {},
+                    onShowSecondHandChange = {},
+                    onToggleDiscarded = {},
+                    onOpenSettings = {},
+                    onOpenProduct = { openedIdentity = it },
+                    modifier = Modifier.testTag("online-search-list")
+                )
+            }
+        }
+
+        val searchList = composeRule.onNodeWithTag("online-search-list")
+        searchList.performScrollToNode(hasText("También en tu Mercado"))
+        searchList.performScrollToNode(hasText(title))
+        composeRule.onNodeWithText("También en tu Mercado").assertIsDisplayed()
+        composeRule.onNodeWithText("PRECIO NO VERIFICADO · Ya existe en Mercado").assertIsDisplayed()
+        composeRule.onNodeWithTag("open-related-market-online_candidate_market_test")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        assertEquals(com.example.data.remote.onlineProductIdentityKey(title), openedIdentity)
+    }
+
+    @Test
+    fun dysonSparePartsAreTaggedAsAccessoriesAndToysStaySeparate() {
+        assertTrue(isAccessoryListingTitle("Boquilla para secador Dyson Supersonic"))
+        assertTrue(isAccessoryListingTitle("Dyson Supersonic diffuser attachment"))
+        assertTrue(isAccessoryListingTitle("Accesorio peluquería para Dyson Airwrap Origin Hairstyler"))
+        assertTrue(isAccessoryListingTitle("Hair accessories for Dyson Airwrap"))
+        assertFalse(isReplacementPartListingTitle("Accesorio peluquería para Dyson Airwrap Origin Hairstyler"))
+        assertTrue(isReplacementPartListingTitle("Boquilla para secador Dyson Supersonic"))
+        assertTrue(isReplacementPartListingTitle("Recambio de cabezal Dyson"))
+        assertFalse(isReplacementPartListingTitle("Dyson Supersonic completo"))
+        assertFalse(isReplacementPartListingTitle("Difusor para Dyson Airwrap"))
+        assertTrue(isAccessoryListingTitle("Difusor para Dyson Airwrap"))
+        assertTrue(isAccessoryListingTitle("Difusores para Dyson Airwrap"))
+        assertTrue(isToyListingTitle("Juguete Dyson secador de pelo para niños"))
+        assertFalse(isAccessoryListingTitle("Juguete Dyson secador de pelo para niños"))
+        assertFalse(isToyListingTitle("Boquilla para secador Dyson Supersonic"))
     }
 
     @Test
@@ -492,12 +576,13 @@ class OnlineSearchScreenTest {
                 .fetchSemanticsNodes().isEmpty()
         )
         clickFilter("Mostrar accesorios (5)")
+        searchList.performScrollToNode(hasText("Póster Samsung Galaxy S26 Ultra 512 GB"))
         assertVisibleText("Póster Samsung Galaxy S26 Ultra 512 GB")
-        assertVisibleText("Original Screen for Samsung Galaxy S26 Ultra 512 GB")
         assertTrue(
-            "The accessory badge is visible on the poster card",
+            "The accessory badge is visible on the poster card before scrolling to another item",
             composeRule.onAllNodesWithText("Accesorio").fetchSemanticsNodes().isNotEmpty()
         )
+        assertVisibleText("Original Screen for Samsung Galaxy S26 Ultra 512 GB")
         assertEquals("Changing either filter must not start another SerpApi search", 0, searchInvocations)
     }
 

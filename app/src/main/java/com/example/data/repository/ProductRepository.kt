@@ -25,6 +25,8 @@ import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.isIrrelevantMultiProductBundle
 import com.example.data.remote.hasXiaomiModelMismatch
 import com.example.data.remote.isAccessoryListingTitle
+import com.example.data.remote.isToyListingTitle
+import com.example.data.remote.isReplacementPartListingTitle
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.linkTypeForUrl
 import com.example.data.remote.isGoogleShoppingUrl
@@ -840,7 +842,7 @@ class ProductRepository(
             "Amazon.es", "Google Shopping" -> sourceType
             else -> return 0
         }
-        // Suspicious prices remain visible as unverified Room observations. Second-hand offers
+        // Suspicious prices and Google Shopping catalog-page quotes remain visible as unverified Room observations. Second-hand offers
         // and wheel listings missing requested fitment dimensions stay visible in the search UI,
         // but are not added to Mercado or its price history.
         val eligible = filterOnlineSearchResults(results, searchQuery)
@@ -862,12 +864,18 @@ class ProductRepository(
         val currentEntities = productDao.getAllProductsSnapshot().toMutableList()
         val groups = groupOnlineShoppingResults(eligible)
         for (group in groups) {
-            val trustedOffers = group.offers.filterNot { it.isSuspiciousPrice }
+            val trustedOffers = group.offers.filter {
+                !it.isSuspiciousPrice &&
+                    !it.isSearchFallbackDestination &&
+                    !it.isGoogleShoppingProductLink
+            }
             val hasTrustedOffer = trustedOffers.isNotEmpty()
             // Never let a group made only of suspicious offers replace the merchant URL or
             // current-store identity of an existing product. Such links could later be reused
             // by the free-history action and attach a capture from the wrong listing.
-            val bestOffer = group.cheapestOffer
+            val bestOffer = trustedOffers.minByOrNull { offer ->
+                offer.price / (offer.wheelSetCount ?: 1)
+            } ?: group.cheapestOffer
             val existingProduct = currentEntities.firstOrNull {
                 onlineProductIdentityKey(it.title) == group.identityKey
             }
@@ -962,8 +970,18 @@ class ProductRepository(
                 .groupBy { offer -> canonicalStoreId(offer.storeName, offer.sourceUrl) }
                 .values
                 .mapNotNull { offers ->
-                    offers.filterNot { it.isSuspiciousPrice }.minByOrNull { it.price }
-                        ?: offers.minByOrNull { it.price }
+                    // If one merchant group contains both a direct seller result and a Google
+                    // catalog intermediary, prefer the seller URL. Retain the intermediary only
+                    // when no direct, non-suspicious offer exists for that merchant.
+                    val directOffers = offers.filter {
+                        !it.isSuspiciousPrice &&
+                            !it.isSearchFallbackDestination &&
+                            !it.isGoogleShoppingProductLink
+                    }
+                    directOffers.minByOrNull { it.price / (it.wheelSetCount ?: 1) }
+                        ?: offers.filterNot { it.isSuspiciousPrice }
+                            .minByOrNull { it.price / (it.wheelSetCount ?: 1) }
+                        ?: offers.minByOrNull { it.price / (it.wheelSetCount ?: 1) }
                 }
             for (result in bestOfferPerStore) {
                 val offerStoreId = canonicalStoreId(result.storeName, result.sourceUrl)
@@ -975,7 +993,7 @@ class ProductRepository(
                     observedAt = result.observedAt,
                     sourceUrl = result.sourceUrl,
                     sourceName = normalizedSource,
-                    isVerified = !result.isSuspiciousPrice,
+                    isVerified = !result.isSuspiciousPrice && !result.isSearchFallbackDestination && !result.isGoogleShoppingProductLink,
                     verificationNote = if (result.isSuspiciousPrice) {
                         "Precio sospechoso: inferior al 30 % de la mediana de la búsqueda. Conservado como observación sin verificar y excluido del mejor precio."
                     } else {
@@ -1369,7 +1387,13 @@ class ProductRepository(
     }
 
     private fun inferProductCategory(title: String, query: String): ProductCategory {
-        val text = "${title.lowercase(Locale.ROOT)} ${query.lowercase(Locale.ROOT)}"
+        val titleText = normalizedProductTitle(title)
+        val text = "${titleText} ${normalizedProductTitle(query)}"
+        // Identify toys from the listing itself before consulting a broad search query. Searching
+        // for "Dyson" must not turn a Dyson toy into a hair appliance, or vice versa.
+        if (isToyListingTitle(title)) return ProductCategory.TOYS
+        if (isReplacementPartListingTitle(title)) return ProductCategory.REPLACEMENT_PARTS
+        if (isAccessoryListingTitle(title)) return ProductCategory.ACCESSORIES
         return when {
             Regex("""\b(iphone|redmi|poco|smartphone|movil|telefono|galaxy s|pixel)\b""").containsMatchIn(text) ->
                 ProductCategory.SMARTPHONES
@@ -1381,7 +1405,8 @@ class ProductRepository(
                 ProductCategory.TV_AUDIO
             Regex("""\b(aspiradora|vacuum|robot aspirador|cafetera|frigorifico|microondas|lavadora|mop kit)\b""").containsMatchIn(text) ->
                 ProductCategory.HOME_APPLIANCES
-            Regex("""\b(afeitadora|depiladora|secador|cepillo electrico)\b""").containsMatchIn(text) ->
+            Regex("""\b(airwrap|corrale|supersonic|planchas? de pelo|alisador(?:es)?|secador(?:es)?|styler|cepillo electrico|afeitadora|depiladora)\b""")
+                .containsMatchIn(titleText) || Regex("""\b(afeitadora|depiladora|secador|cepillo electrico)\b""").containsMatchIn(text) ->
                 ProductCategory.PERSONAL_CARE
             Regex("""\b(bicicleta|bicicletas|casco|running|deporte)\b""").containsMatchIn(text) ->
                 ProductCategory.SPORTS
@@ -1944,7 +1969,14 @@ class ProductRepository(
             val verifiedArchived = snapshotHistory.filter(::isHistoricalDisplayObservation)
             val savedLegacyLive = verifiedObservations.filter(::isPrePolicySavedLiveObservation)
             val recoverableStoredRows = allObservations.filter { observation ->
-                observation.currency.trim().equals("EUR", ignoreCase = true) &&
+                val sourceUri = parseHttpUri(observation.sourceUrl)
+                val sourceHost = sourceUri?.host.orEmpty().lowercase(Locale.ROOT)
+                // This fallback may show a legacy direct-retailer quote as pending
+                // revalidation, but it must never promote it into verified history or current price.
+                // In particular, provisional Shopping/search-page rows are excluded even if their
+                // title and amount look plausible.
+                valLegacyQuoteCanBeShownAsPending(observation, sourceUri, sourceHost, title) &&
+                    observation.currency.trim().equals("EUR", ignoreCase = true) &&
                     observation.price.isFinite() &&
                     observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
                     observation.observedAt in 1L..System.currentTimeMillis() &&
@@ -1953,7 +1985,11 @@ class ProductRepository(
                     isSafeCatalogTitleMatch(observation.productTitle, title) &&
                     !isPromotionalBulkListing(observation.productTitle, "") &&
                     isPlausibleHistoryPrice(observation.productTitle, observation.price) &&
-                    parseHttpUri(observation.sourceUrl) != null &&
+                    sourceUri != null &&
+                    sourceHost != "google.com" && !sourceHost.endsWith(".google.com") &&
+                    !isGoogleShoppingUrl(observation.sourceUrl) &&
+                    !sourceHost.contains("web.archive.org") &&
+                    !sourceHost.contains("arquivo.pt") &&
                     !observation.sourceUrl.contains("google.com/search", ignoreCase = true) &&
                     !observation.sourceUrl.contains("web.archive.org", ignoreCase = true)
             }
@@ -2010,6 +2046,35 @@ class ProductRepository(
                 ?.let { it.sourceType.ifBlank { it.sourceName } }
                 .orEmpty()
         )
+    }
+
+    /**
+     * A saved legacy seller quote can be displayed as pending verification only when it is a
+     * direct HTTPS retailer listing with matching product identity. It never joins priceHistory,
+     * currentPrice, or verified deal calculations unless it independently passes the verified
+     * observation path above.
+     */
+    private fun valLegacyQuoteCanBeShownAsPending(
+        observation: PriceObservationEntity,
+        sourceUri: URI?,
+        sourceHost: String,
+        catalogTitle: String
+    ): Boolean {
+        if (observation.isVerified) return true
+        if (!isLiveObservation(observation) || sourceUri == null ||
+            !sourceUri.scheme.equals("https", ignoreCase = true)
+        ) return false
+        if (sourceHost == "google.com" || sourceHost.endsWith(".google.com") ||
+            sourceHost.contains("web.archive.org") || sourceHost.contains("arquivo.pt") ||
+            isGoogleShoppingUrl(observation.sourceUrl) ||
+            observation.sourceUrl.contains("google.com/search", ignoreCase = true)
+        ) return false
+        return observation.storeName.isNotBlank() &&
+            isEligibleSeller(observation.storeName, observation.sourceUrl) &&
+            isEligibleHistoryTitle(observation.productTitle) &&
+            isSafeCatalogTitleMatch(observation.productTitle, catalogTitle) &&
+            isPlausibleHistoryPrice(observation.productTitle, observation.price) &&
+            !isPromotionalBulkListing(observation.productTitle, "")
     }
 
     /**

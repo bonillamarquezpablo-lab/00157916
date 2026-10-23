@@ -7,6 +7,8 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.ResponseBody
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.net.URI
 import java.text.SimpleDateFormat
@@ -15,6 +17,76 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.TimeUnit
+
+/**
+ * Shared bounded quarterly sampler for archived captures. It preserves coverage across years,
+ * then uses spare slots for distinct capture timestamps only; alternate retailer URLs for the
+ * same snapshot timestamp must not consume extra downloads or create duplicate chart points.
+ */
+internal fun <T> sampleByQuarter(
+    items: List<T>,
+    max: Int,
+    timestampOf: (T) -> Long,
+    keyOf: (T) -> Any
+): List<T> {
+    if (max <= 0 || items.isEmpty()) return emptyList()
+    val chronological = items.distinctBy(keyOf).sortedBy(timestampOf)
+    val quarterly = chronological
+        .groupBy { item ->
+            val utc = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT)
+            utc.timeInMillis = timestampOf(item)
+            utc.get(Calendar.YEAR) * 4 + utc.get(Calendar.MONTH) / 3
+        }
+        .toSortedMap()
+        .values
+        .map { it[it.size / 2] }
+
+    if (quarterly.size >= max) {
+        if (max == 1) return listOf(quarterly.last())
+        return (0 until max)
+            .map { index -> quarterly[(index.toDouble() * (quarterly.size - 1) / (max - 1)).toInt()] }
+            .distinctBy(timestampOf)
+    }
+
+    val selectedKeys = quarterly.map(keyOf).toSet()
+    val selectedTimestamps = quarterly.map(timestampOf).toSet()
+    val remaining = chronological
+        .filterNot { keyOf(it) in selectedKeys || timestampOf(it) in selectedTimestamps }
+        .distinctBy(timestampOf)
+    val slots = minOf(max - quarterly.size, remaining.size)
+    val extra = when {
+        slots <= 0 -> emptyList()
+        slots == 1 -> listOf(remaining[remaining.size / 2])
+        else -> (0 until slots).map { index ->
+            remaining[(index.toDouble() * (remaining.size - 1) / (slots - 1)).toInt()]
+        }
+    }
+    return (quarterly + extra).distinctBy(timestampOf).sortedBy(timestampOf)
+}
+
+/**
+ * A single archived point proves that one capture is useful, but it is not yet a meaningful
+ * trend. Ask the independent archive for help when fewer than three distinct UTC dates exist.
+ */
+internal fun hasSufficientHistoricalCoverage(
+    quotes: Iterable<ArchivedPriceQuote>,
+    minimumDistinctDates: Int = 3
+): Boolean {
+    if (minimumDistinctDates <= 0) return true
+    return quotes.asSequence()
+        .filterNot { it.isDiscoveryCandidate }
+        .map { Math.floorDiv(it.observedAt, WaybackPriceHistoryClient.DAY_MS) }
+        .distinct()
+        .take(minimumDistinctDates)
+        .count() >= minimumDistinctDates
+}
+
+internal fun shouldAttemptMementoFallback(
+    alreadyAttempted: Boolean,
+    hasEligibleDirectUrl: Boolean,
+    hasSufficientHistory: Boolean,
+    rateLimited: Boolean
+): Boolean = !alreadyAttempted && hasEligibleDirectUrl && !hasSufficientHistory && !rateLimited
 
 /**
  * Independent history source for Arquivo.pt's native Memento TimeMap API.
@@ -121,23 +193,53 @@ class MementoClient(
             diagnostics += "MEMENTO_TIMEMAP_NETWORK_ERROR"
             null
         }
-        if (timeMapBody == null) {
-            return@withContext WaybackBackfillResult(
-                requestFailed = true,
-                diagnosticCodes = diagnostics.ifEmpty { setOf("MEMENTO_TIMEMAP_FAILED") }
+
+        var captureCandidates = timeMapBody
+            ?.let { parseTimeMap(it, originalUrl, now, lookbackDays) }
+            .orEmpty()
+        var cdxAvailable = false
+        var cdxRequestFailed = false
+        var usedCdxFallback = false
+        // Some valid product URLs return 404 from the Link-format TimeMap endpoint even though
+        // Arquivo.pt's CDX index still contains dated captures. Query its official bounded JSON
+        // index only for that case or a valid empty TimeMap; never repeat the request after HTTP 429.
+        val shouldTryCdx = "MEMENTO_RATE_LIMITED" !in diagnostics &&
+            (timeMapBody != null || diagnostics.contains("MEMENTO_TIMEMAP_HTTP_404"))
+        if (captureCandidates.isEmpty() && shouldTryCdx) {
+            usedCdxFallback = true
+            val cdx = fetchCdxCaptures(
+                originalUrl = originalUrl,
+                now = now,
+                lookbackDays = lookbackDays
             )
+            diagnostics += cdx.diagnosticCodes
+            captureCandidates = cdx.captures
+            cdxAvailable = cdx.available
+            cdxRequestFailed = cdx.requestFailed
+            if (cdx.available && !cdx.requestFailed) {
+                // The CDX index responded correctly even when it had no rows. Report that as an
+                // empty historical index, not as a still-failed TimeMap request.
+                diagnostics.remove("MEMENTO_TIMEMAP_HTTP_404")
+            }
         }
 
         val captures = sampleQuarterlyCaptures(
-            captures = parseTimeMap(timeMapBody, originalUrl, now, lookbackDays),
-            maxSnapshots = maxSnapshots
+            captures = captureCandidates,
+            // The fallback spends an extra bounded index request. Three snapshots keep the
+            // whole lookup within the independent ViewModel timeout while still sampling dates.
+            maxSnapshots = if (usedCdxFallback) minOf(maxSnapshots, MAX_CDX_FALLBACK_SNAPSHOTS) else maxSnapshots
         )
         if (captures.isEmpty()) {
+            val noCaptureResult = captureCandidates.isEmpty() &&
+                (timeMapBody != null || cdxAvailable) &&
+                !cdxRequestFailed && "MEMENTO_RATE_LIMITED" !in diagnostics
+            if (noCaptureResult) diagnostics += "MEMENTO_NO_CAPTURES"
             return@withContext WaybackBackfillResult(
-                available = true,
+                available = timeMapBody != null || cdxAvailable,
                 capturesFound = 0,
-                requestFailed = false,
-                diagnosticCodes = setOf("MEMENTO_NO_CAPTURES")
+                capturesChecked = 0,
+                requestFailed = cdxRequestFailed || (!noCaptureResult && "MEMENTO_RATE_LIMITED" !in diagnostics),
+                diagnosticCodes = diagnostics.ifEmpty { setOf("MEMENTO_TIMEMAP_FAILED") }
             )
         }
 
@@ -249,6 +351,182 @@ class MementoClient(
         )
     }
 
+    /**
+     * Query Arquivo.pt's native CDX index when the Link-format TimeMap is missing or empty.
+     * The index is metadata only: every snapshot still passes the same archived product-title
+     * and EUR-price parser used by the normal Memento path.
+     */
+    private suspend fun fetchCdxCaptures(
+        originalUrl: String,
+        now: Long,
+        lookbackDays: Int
+    ): CdxCaptureResult {
+        val cdxUrl = buildCdxUrl(originalUrl, now, lookbackDays)
+            ?: return CdxCaptureResult(requestFailed = true, diagnosticCodes = setOf("MEMENTO_CDX_URL_INVALID"))
+        return try {
+            http.newBuilder()
+                .callTimeout(TIMEMAP_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .readTimeout(TIMEMAP_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .build()
+                .newCall(
+                    Request.Builder()
+                        .url(cdxUrl)
+                        .header("Accept", "text/x-ndjson")
+                        .header("User-Agent", USER_AGENT)
+                        .get()
+                        .build()
+                ).execute().use { response ->
+                    when {
+                        response.code == 429 -> {
+                            activateRateLimit(System.currentTimeMillis())
+                            CdxCaptureResult(
+                                requestFailed = true,
+                                diagnosticCodes = setOf("MEMENTO_RATE_LIMITED")
+                            )
+                        }
+                        !response.isSuccessful -> CdxCaptureResult(
+                            requestFailed = true,
+                            diagnosticCodes = setOf("MEMENTO_CDX_HTTP_${response.code}")
+                        )
+                        else -> {
+                            val body = readBodyLimited(response.body, MAX_TIMEMAP_BYTES)
+                            if (body == null) {
+                                CdxCaptureResult(
+                                    available = true,
+                                    requestFailed = true,
+                                    diagnosticCodes = setOf("MEMENTO_CDX_BODY_EMPTY_OR_LIMIT")
+                                )
+                            } else {
+                                val captures = parseCdxJsonLines(body, originalUrl, now, lookbackDays)
+                                CdxCaptureResult(
+                                    captures = captures,
+                                    available = true,
+                                    diagnosticCodes = if (captures.isEmpty()) {
+                                        setOf("MEMENTO_CDX_NO_CAPTURES")
+                                    } else {
+                                        setOf("MEMENTO_CDX_CAPTURE_INDEX")
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            CdxCaptureResult(
+                requestFailed = true,
+                diagnosticCodes = setOf(
+                    if (error is java.net.SocketTimeoutException) "MEMENTO_CDX_TIMEOUT"
+                    else "MEMENTO_CDX_NETWORK_ERROR"
+                )
+            )
+        }
+    }
+
+    /** Builds a bounded, exact-URL CDX query; no merchant-wide index scan is performed. */
+    internal fun buildCdxUrl(
+        originalUrl: String,
+        now: Long = System.currentTimeMillis(),
+        lookbackDays: Int = WaybackPriceHistoryClient.DEFAULT_LOOKBACK_DAYS
+    ): String? {
+        val uri = parseHttpUri(originalUrl) ?: return null
+        if (!uri.scheme.equals("https", true) || isArchiveOrSearchHost(uri.host.orEmpty())) return null
+        val formatter = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val earliest = archiveHistoryWindowStartTimestampUtc(now, lookbackDays)
+        return "https://$ARCHIVE_HOST/wayback/cdx".toHttpUrl().newBuilder()
+            .addQueryParameter("url", originalUrl)
+            .addQueryParameter("matchType", "exact")
+            .addQueryParameter("from", formatter.format(Date(earliest)))
+            .addQueryParameter("to", formatter.format(Date(now)))
+            .addQueryParameter("filter", "status:200")
+            .addQueryParameter("filter", "mime:text/html")
+            .addQueryParameter("resolveRevisits", "true")
+            .addQueryParameter("collapseTime", "6")
+            // Keep the index request bounded. The parser validates the returned timestamp window
+            // and deduplicates captures before downloading any archived HTML.
+            .addQueryParameter("limit", MAX_CDX_LINES.toString())
+            .addQueryParameter("output", "json")
+            .build()
+            .toString()
+    }
+
+    /** Parses bounded Arquivo.pt CDX NDJSON, requiring a successful HTML capture of this URL. */
+    internal fun parseCdxJsonLines(
+        body: String,
+        originalUrl: String,
+        now: Long = System.currentTimeMillis(),
+        lookbackDays: Int = WaybackPriceHistoryClient.DEFAULT_LOOKBACK_DAYS
+    ): List<MementoCapture> {
+        if (body.isBlank()) return emptyList()
+        val target = parseHttpUri(originalUrl) ?: return emptyList()
+        if (!target.scheme.equals("https", true) || isArchiveOrSearchHost(target.host.orEmpty())) {
+            return emptyList()
+        }
+        val earliest = archiveHistoryWindowStartTimestampUtc(now, lookbackDays)
+        val formatter = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val captures = mutableListOf<MementoCapture>()
+        for (line in body.lineSequence().take(MAX_CDX_LINES)) {
+            if (line.isBlank()) continue
+            val item = runCatching { JSONObject(line) }.getOrNull() ?: continue
+            val timestampText = item.optString("timestamp").trim()
+            if (timestampText.length !in 4..14 || !timestampText.all(Char::isDigit)) continue
+            val canonicalTimestamp = timestampText.padEnd(14, '0')
+            val timestamp = runCatching { formatter.parse(canonicalTimestamp)?.time }.getOrNull() ?: continue
+            if (timestamp !in earliest..now) continue
+            val status = item.optString("status").toIntOrNull()
+            val mime = item.optString("mime").substringBefore(';').trim().lowercase(Locale.ROOT)
+            if (status != 200 || mime !in setOf("text/html", "application/xhtml+xml")) continue
+            val archivedOriginal = item.optString("url").trim()
+            if (!sameOriginalUrl(archivedOriginal, originalUrl)) continue
+            // The captured URL is a suffix inside the archive replay path. Encode its query
+            // separators there instead of accidentally sending them as query parameters to arquivo.pt.
+            val replayTarget = archivedOriginal
+                .replace("?", "%3F")
+                .replace("&", "%26")
+                .replace("#", "%23")
+                .replace(" ", "%20")
+            val snapshotUrl = "https://$ARCHIVE_HOST/wayback/$canonicalTimestamp/$replayTarget"
+            if (!isValidArchiveSnapshotUrl(snapshotUrl)) continue
+            captures += MementoCapture(
+                rawTimestamp = canonicalTimestamp,
+                timestamp = timestamp,
+                snapshotUrl = snapshotUrl,
+                originalUrl = target.toString()
+            )
+        }
+        return captures.distinctBy { it.rawTimestamp to it.snapshotUrl }.sortedBy { it.timestamp }
+    }
+
+    private fun isValidArchiveSnapshotUrl(value: String): Boolean {
+        val uri = runCatching { URI(value) }.getOrNull() ?: return false
+        if (!uri.scheme.equals("https", true) ||
+            normalizeHost(uri.host.orEmpty()) != ARCHIVE_HOST ||
+            uri.userInfo != null
+        ) return false
+        val path = uri.rawPath.orEmpty()
+        val prefix = "/wayback/"
+        if (!path.startsWith(prefix)) return false
+        val rest = path.removePrefix(prefix)
+        val timestamp = rest.take(14)
+        return timestamp.length == 14 &&
+            timestamp.all(Char::isDigit) &&
+            rest.drop(14).startsWith("/https://")
+    }
+
+    private data class CdxCaptureResult(
+        val captures: List<MementoCapture> = emptyList(),
+        val available: Boolean = false,
+        val requestFailed: Boolean = false,
+        val diagnosticCodes: Set<String> = emptySet()
+    )
+
     internal fun buildTimeMapUrl(originalUrl: String): String? {
         val uri = parseHttpUri(originalUrl) ?: return null
         if (!uri.scheme.equals("https", true) || isArchiveOrSearchHost(uri.host.orEmpty())) return null
@@ -304,23 +582,12 @@ class MementoClient(
     internal fun sampleQuarterlyCaptures(
         captures: List<MementoCapture>,
         maxSnapshots: Int
-    ): List<MementoCapture> {
-        if (maxSnapshots <= 0 || captures.isEmpty()) return emptyList()
-        val quarterly = captures.sortedBy { it.timestamp }
-            .groupBy { capture ->
-                val calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT)
-                calendar.timeInMillis = capture.timestamp
-                calendar.get(Calendar.YEAR) * 4 + calendar.get(Calendar.MONTH) / 3
-            }
-            .toSortedMap()
-            .values
-            .map { it[it.size / 2] }
-        if (quarterly.size <= maxSnapshots) return quarterly
-        if (maxSnapshots == 1) return listOf(quarterly.last())
-        return (0 until maxSnapshots).map { index ->
-            quarterly[(index.toDouble() * (quarterly.size - 1) / (maxSnapshots - 1)).toInt()]
-        }
-    }
+    ): List<MementoCapture> = sampleByQuarter(
+        items = captures,
+        max = maxSnapshots,
+        timestampOf = { it.timestamp },
+        keyOf = { it.rawTimestamp to it.snapshotUrl }
+    )
 
     private fun sameOriginalUrl(first: String, second: String): Boolean {
         val a = parseHttpUri(first) ?: return false
@@ -385,6 +652,8 @@ class MementoClient(
         const val KEY_COOLDOWN_UNTIL = "memento_cooldown_until"
         const val SNAPSHOT_TIMEOUT_SECONDS = 4L
         const val MAX_TIMEMAP_BYTES = 512 * 1024
+        const val MAX_CDX_LINES = 100
+        const val MAX_CDX_FALLBACK_SNAPSHOTS = 3
         const val MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
         const val USER_AGENT = "MinimoPriceHistory/1.0 (Memento historical lookup)"
     }

@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.AppDatabase
 import com.example.data.local.ProductEntity
+import com.example.data.model.ProductCategory
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.repository.ProductRepository
@@ -143,6 +144,76 @@ class LiveSearchMarketPersistenceTest {
                 com.example.data.model.PriceDisplayStatus.UNVERIFIED_LIVE_LISTING,
                 ficha.priceDisplayStatus
             )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun liveSearchClassifiesAToyByItsTitleInsteadOfTheGenericDysonQuery() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val title = "Juguete Dyson Supersonic secador de pelo para niños"
+            val listing = SerpApiShoppingResult(
+                title = title,
+                price = 24.99,
+                storeName = "Juguetes Ejemplo",
+                sourceUrl = "https://juguetes.example/producto/juguete-dyson-supersonic",
+                observedAt = System.currentTimeMillis(),
+                condition = "new"
+            )
+
+            assertEquals(1, repository.ensureVisibleOnlineSearchProducts(listOf(listing), "Dyson"))
+            val saved = database.productDao().getAllProductsSnapshot().single()
+            assertEquals(ProductCategory.TOYS.name, saved.category)
+            assertFalse(saved.isPriceVerified)
+            assertEquals(0, database.priceObservationDao().getObservationCount(saved.id))
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun liveSearchClassifiesAVisibleDysonSparePartAsAccessoriesWithoutVerifyingItsPrice() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val title = "Boquilla de repuesto para secador Dyson Supersonic"
+            val listing = SerpApiShoppingResult(
+                title = title,
+                price = 19.99,
+                storeName = "Repuestos Ejemplo",
+                sourceUrl = "https://repuestos.example/dyson/supersonic/boquilla",
+                observedAt = System.currentTimeMillis(),
+                condition = "new"
+            )
+
+            assertEquals(1, repository.ensureVisibleOnlineSearchProducts(listOf(listing), "boquilla Dyson", allowAccessories = true))
+            val saved = database.productDao().getAllProductsSnapshot().single()
+            assertEquals(ProductCategory.REPLACEMENT_PARTS.name, saved.category)
+            assertFalse(saved.isPriceVerified)
+            assertEquals(0, database.priceObservationDao().getObservationCount(saved.id))
         } finally {
             database.close()
         }

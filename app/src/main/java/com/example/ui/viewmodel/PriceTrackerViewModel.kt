@@ -11,6 +11,9 @@ import com.example.data.remote.formatOnlineSnapshotAge
 import com.example.data.remote.OnlineSearchQuotaGuard
 import com.example.data.remote.ArchivedPriceQuote
 import com.example.data.remote.MementoClient
+import com.example.data.remote.hasSufficientHistoricalCoverage
+import com.example.data.remote.shouldAttemptMementoFallback
+import com.example.data.remote.hasMatchingExplicitStorageCapacity
 import com.example.data.remote.shouldSkipDomainFallbackAfterSnapshotTimeout
 import com.example.data.remote.WaybackPriceHistoryClient
 import com.example.data.remote.diagnosticIndexForWaybackTrace
@@ -20,6 +23,10 @@ import com.example.data.remote.WaybackTraceStatus
 import com.example.data.remote.isGoogleShoppingUrl
 import com.example.data.remote.extractDirectRetailerUrl
 import com.example.data.remote.onlineProductIdentityKey
+import com.example.data.remote.queryNamesSpecificDysonHairToolModel
+import com.example.data.remote.returnedTitleMatchesSpecificDysonHairToolModel
+import com.example.data.remote.onlineProductRelevanceScore
+import com.example.data.remote.isBroadDysonHairToolsQueryMatch
 import com.example.data.remote.isGameSpainOffer
 import com.example.data.remote.mergeGoogleShoppingWithGameSupplement
 import com.example.data.remote.shouldSearchGameSupplement
@@ -231,6 +238,8 @@ data class TrackerUiState(
     val priceRefreshStatus: String? = null,
     val onlineSearchQuery: String = "",
     val onlineSearchResults: List<SerpApiShoppingResult> = emptyList(),
+    /** Existing provisional catalogue rows related to the active live-search query. */
+    val onlineSearchRelatedMarketCandidates: List<Product> = emptyList(),
     val onlineSearchDiscardedOffers: List<RejectedOnlineOffer> = emptyList(),
     val showOnlineSearchDiscarded: Boolean = false,
     val isOnlineSearching: Boolean = false,
@@ -255,6 +264,7 @@ data class TrackerUiState(
 
 class PriceTrackerViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
+        const val MAX_RELATED_UNVERIFIED_MARKET_CANDIDATES = 8
         // Keep all sampled snapshot labels (ordinal/date/route/host) visible across overlapping
         // exact, prefix and merchant-domain probes. Ordinary diagnostic stages remain concise.
         const val MAX_CAPTURE_DIAGNOSTIC_LINES = 120
@@ -1330,6 +1340,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(
             onlineSearchQuery = query,
             onlineSearchResults = emptyList(),
+            onlineSearchRelatedMarketCandidates = emptyList(),
             onlineSearchDiscardedOffers = emptyList(),
             showOnlineSearchDiscarded = false,
             onlineSearchStatus = null
@@ -1940,6 +1951,73 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             ""
         }
 
+    /**
+     * Return provisional market fichas relevant to this search but absent from the provider result
+     * set. A broad brand lookup may surface related products; an exact multi-word/model lookup must
+     * share enough identity terms to avoid mixing in a different variant of the same brand.
+     */
+    private suspend fun findRelatedUnverifiedMarketCandidates(
+        query: String,
+        visibleOffers: List<SerpApiShoppingResult>
+    ): List<Product> = withContext(Dispatchers.IO) {
+        val queryText = query.trim()
+        if (queryText.length < 2) return@withContext emptyList()
+        val representedIdentityKeys = visibleOffers
+            .map { onlineProductIdentityKey(it.title) }
+            .toSet()
+        val significantTokens = queryText.lowercase(Locale.ROOT)
+            .replace(Regex("""[^a-z0-9]+"""), " ")
+            .split(Regex("""\s+"""))
+            .filter { it.length > 1 && it !in setOf("de", "del", "la", "el", "para", "con", "and", "the") }
+        val minimumScore = if (significantTokens.size <= 1) 5 else 10
+
+        repository.allProductsStream.first()
+            .asSequence()
+            .filter { it.isUnverifiedLiveListing }
+            .filter { onlineProductIdentityKey(it.title) !in representedIdentityKeys }
+            .mapNotNull { product ->
+                // An explicit capacity in the query is a hard discriminator. Do not
+                // show a sibling device whose title omits or contradicts that storage option.
+                if (!hasMatchingExplicitStorageCapacity(queryText, product.title)) return@mapNotNull null
+                // Exact Dyson model searches must not pull sibling models from Mercado just
+                // because the live result set happens to be empty for that model.
+                if (queryNamesSpecificDysonHairToolModel(queryText) &&
+                    !returnedTitleMatchesSpecificDysonHairToolModel(queryText, product.title)
+                ) return@mapNotNull null
+                val broadDysonMatch = isBroadDysonHairToolsQueryMatch(queryText, product.title) &&
+                    returnedTitleMatchesSpecificDysonHairToolModel(queryText, product.title)
+                val score = onlineProductRelevanceScore(queryText, product.title)
+                if (broadDysonMatch || score >= minimumScore) {
+                    (product to if (broadDysonMatch) score + 1000 else score)
+                } else {
+                    null
+                }
+            }
+            .sortedByDescending { it.second }
+            .map { it.first }
+            .distinctBy { onlineProductIdentityKey(it.title) }
+            .take(MAX_RELATED_UNVERIFIED_MARKET_CANDIDATES)
+            .toList()
+    }
+
+    /**
+     * Matching saved unverified fichas is auxiliary UI enrichment. It must not hide live offers
+     * or consume the whole search timeout if Room is slow or fails.
+     */
+    private suspend fun safeRelatedMarketCandidates(
+        query: String,
+        visibleOffers: List<SerpApiShoppingResult>
+    ): List<Product> = try {
+        withTimeoutOrNull(3_000L) {
+            findRelatedUnverifiedMarketCandidates(query, visibleOffers)
+        } ?: emptyList()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Exception) {
+        Log.w("PriceTrackerViewModel", "Could not load related provisional Mercado fichas.", error)
+        emptyList()
+    }
+
     /** Ignore late results when the user edits the query during an in-flight request. */
     private fun isOnlineSearchStillCurrent(query: String, provider: OnlineSearchProvider): Boolean {
         val current = _uiState.value
@@ -1973,6 +2051,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             isOnlineSearching = true,
             onlineSearchStatus = searchingMessage,
             onlineSearchResults = if (keepPreviousSnapshot) current.onlineSearchResults else emptyList(),
+            onlineSearchRelatedMarketCandidates = if (keepPreviousSnapshot) current.onlineSearchRelatedMarketCandidates else emptyList(),
             onlineSearchDiscardedOffers = if (keepPreviousSnapshot) current.onlineSearchDiscardedOffers else emptyList(),
             showOnlineSearchDiscarded = false,
             onlineSearchProvider = provider,
@@ -2065,9 +2144,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             historyNotice, catalogueNotice, eligibilityNotice
                         ).map { it.trim() }.filter { it.isNotBlank() }.joinToString("\n\n")
                         if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
+                        val relatedMarketCandidates = safeRelatedMarketCandidates(query, visibleCachedResults)
+                        if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
                         lastDisplayedSearchIdentity = onlineSearchIdentity(provider, query)
                         _uiState.value = _uiState.value.copy(
                             onlineSearchResults = visibleCachedResults,
+                            onlineSearchRelatedMarketCandidates = relatedMarketCandidates,
                             onlineSearchDiscardedOffers = cachedDiscarded,
                             showOnlineSearchDiscarded = false,
                             onlineSearchStatus = status
@@ -2281,9 +2363,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         .filter { it.isNotBlank() }
                         .joinToString("\n\n")
                     if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
+                    val relatedMarketCandidates = safeRelatedMarketCandidates(query, results)
+                    if (!isOnlineSearchStillCurrent(query, provider)) return@withTimeout
                     lastDisplayedSearchIdentity = onlineSearchIdentity(provider, query)
                     _uiState.value = _uiState.value.copy(
                         onlineSearchResults = results,
+                        onlineSearchRelatedMarketCandidates = relatedMarketCandidates,
                         onlineSearchDiscardedOffers = discarded,
                         showOnlineSearchDiscarded = false,
                         onlineSearchStatus = message
@@ -2744,17 +2829,100 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             attempts += direct
                         }
                     }
-                    // Try the broad fallback only if exact lookup did not find verified prices.
-                    // Its shorter independent timeout leaves time for result rendering and other stores.
+                    // A single historical point is useful but not a trend. Use Memento once
+                    // when fewer than three distinct UTC dates were recovered for the selected
+                    // product; sibling-variant quotes do not count toward its historical coverage.
+                    val currentCandidateQuotes = attempts.flatMap { it.quotes }.filter {
+                        !it.isDiscoveryCandidate &&
+                            (it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId)
+                    }
+                    val sufficientHistoricalCoverage =
+                        hasSufficientHistoricalCoverage(currentCandidateQuotes)
+                    if (candidate.directUrl != null && shouldAttemptMementoFallback(
+                            alreadyAttempted = mementoAttempted,
+                            hasEligibleDirectUrl = true,
+                            hasSufficientHistory = sufficientHistoricalCoverage,
+                            rateLimited = attempts.any { it.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") }
+                        )
+                    ) {
+                        mementoAttempted = true
+                        if (diagnosticProductId != null) {
+                            val dateCount = currentCandidateQuotes
+                                .map { Math.floorDiv(it.observedAt, WaybackPriceHistoryClient.DAY_MS) }
+                                .distinct().size
+                            reportWaybackDiagnostic(
+                                diagnosticProductId, 7, WaybackTraceStatus.RUNNING,
+                                if (dateCount > 0) {
+                                    "Wayback recuperó $dateCount fecha(s) histórica(s); se consulta Arquivo.pt para intentar completar la serie."
+                                } else {
+                                    "Wayback no proporcionó un precio verificable; se prueba una fuente de archivo independiente (Memento)."
+                                }
+                            )
+                        }
+                        val mementoResult = withTimeoutOrNull(MAX_ARCHIVE_MEMENTO_FALLBACK_MS) {
+                            mementoClient.fetchHistory(
+                                originalUrl = candidate.directUrl,
+                                expectedTitle = candidate.title,
+                                knownProductTitlesById = knownProductTitlesById,
+                                maxSnapshots = 4,
+                                onVerifiedQuotes = persistQuotesAsTheyArrive
+                            )
+                        }
+                        if (mementoResult == null) {
+                            diagnosticCodes.add("MEMENTO_LOOKUP_TIMEOUT")
+                            if (diagnosticProductId != null) {
+                                reportWaybackDiagnostic(
+                                    diagnosticProductId, 7, WaybackTraceStatus.FAILED,
+                                    "La alternativa Memento superó su límite de 25 segundos; solo cuentan las capturas verificadas y guardadas antes del límite."
+                                )
+                            }
+                        } else {
+                            attempts += mementoResult
+                            diagnosticCodes.addAll(mementoResult.diagnosticCodes)
+                            if (diagnosticProductId != null) {
+                                val mementoStatus = when {
+                                    mementoResult.quotes.isNotEmpty() -> WaybackTraceStatus.PASSED
+                                    mementoResult.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") -> WaybackTraceStatus.SKIPPED
+                                    mementoResult.capturesFound == 0 && !mementoResult.requestFailed -> WaybackTraceStatus.FAILED
+                                    else -> WaybackTraceStatus.FAILED
+                                }
+                                reportWaybackDiagnostic(
+                                    diagnosticProductId, 7, mementoStatus,
+                                    when {
+                                        mementoResult.quotes.isNotEmpty() ->
+                                            "Memento recuperó ${mementoResult.quotes.size} precio(s) archivado(s) que aún deben guardarse en su ficha exacta."
+                                        mementoResult.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") ->
+                                            "Arquivo.pt pidió limitar las consultas; Mínimo detuvo el respaldo Memento."
+                                        mementoResult.capturesFound == 0 && !mementoResult.requestFailed ->
+                                            "Memento respondió correctamente, pero no encontró capturas para esta URL."
+                                        else ->
+                                            "Memento no pudo recuperar un precio verificable: ${mementoResult.diagnosticCodes.joinToString(", ").take(180)}."
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // Prefer the direct URL and the independent Memento index before the slower
+                    // merchant-wide fallback. If either source supplies only a sparse series, the
+                    // bounded domain pass may still fill missing historical dates.
+                    val quotesBeforeDomain = (
+                        attempts.flatMap { it.quotes } + candidateQuotesObserved.values
+                    ).distinctBy { archiveQuoteIdentity(candidate, it) }.filter {
+                        !it.isDiscoveryCandidate &&
+                            (it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId)
+                    }
+                    val hasSufficientHistoryBeforeDomain = hasSufficientHistoricalCoverage(quotesBeforeDomain)
                     val rateLimitedAtDirectStage =
                         attempts.any { it.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") }
                     val allDirectSnapshotsTimedOut =
                         shouldSkipDomainFallbackAfterSnapshotTimeout(attempts)
-                    if (candidate.merchantDomain != null &&
-                        attempts.none { it.quotes.isNotEmpty() } &&
+                    val merchantDomainForFallback = candidate.merchantDomain
+                    val shouldTryDomainFallback = merchantDomainForFallback != null &&
+                        !hasSufficientHistoryBeforeDomain &&
                         !rateLimitedAtDirectStage &&
                         !allDirectSnapshotsTimedOut
-                    ) {
+                    if (shouldTryDomainFallback && merchantDomainForFallback != null) {
                         if (diagnosticProductId != null) {
                             reportWaybackDiagnostic(
                                 diagnosticProductId, 7, WaybackTraceStatus.RUNNING,
@@ -2763,7 +2931,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         }
                         val domainResult = withTimeoutOrNull(MAX_ARCHIVE_DOMAIN_FALLBACK_MS) {
                             waybackPriceHistoryClient.fetchHistoryByMerchantDomain(
-                                domain = candidate.merchantDomain,
+                                domain = merchantDomainForFallback,
                                 expectedTitle = candidate.title,
                                 preferredUrl = candidate.directUrl,
                                 // The direct URL's prefix-CDX lookup ran just above. Avoid
@@ -2859,64 +3027,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             diagnosticProductId, 7, WaybackTraceStatus.SKIPPED,
                             "CDX encontró capturas, pero todas las descargas HTML agotaron el tiempo; no se repite Availability en esta ejecución para evitar solicitudes duplicadas."
                         )
-                    }
-                    // Independent archive fallback: Wayback can be empty or rate-limited while
-                    // Arquivo.pt still has snapshots. Run Memento at most once, only for a verified
-                    // direct retailer URL, and reuse the exact same product-identity parser/guards.
-                    if (!mementoAttempted &&
-                        candidate.directUrl != null &&
-                        attempts.none { it.quotes.isNotEmpty() } &&
-                        attempts.none { it.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") }
-                    ) {
-                        mementoAttempted = true
-                        if (diagnosticProductId != null) {
-                            reportWaybackDiagnostic(
-                                diagnosticProductId, 7, WaybackTraceStatus.RUNNING,
-                                "Wayback no proporcionó un precio verificable; se prueba una fuente de archivo independiente (Memento) una sola vez."
-                            )
-                        }
-                        val mementoResult = withTimeoutOrNull(MAX_ARCHIVE_MEMENTO_FALLBACK_MS) {
-                            mementoClient.fetchHistory(
-                                originalUrl = candidate.directUrl,
-                                expectedTitle = candidate.title,
-                                knownProductTitlesById = knownProductTitlesById,
-                                maxSnapshots = 4,
-                                onVerifiedQuotes = persistQuotesAsTheyArrive
-                            )
-                        }
-                        if (mementoResult == null) {
-                            diagnosticCodes.add("MEMENTO_LOOKUP_TIMEOUT")
-                            if (diagnosticProductId != null) {
-                                reportWaybackDiagnostic(
-                                    diagnosticProductId, 7, WaybackTraceStatus.FAILED,
-                                    "La alternativa Memento superó su límite de 25 segundos; las capturas no se han dado por válidas."
-                                )
-                            }
-                        } else {
-                            attempts += mementoResult
-                            diagnosticCodes.addAll(mementoResult.diagnosticCodes)
-                            if (diagnosticProductId != null) {
-                                val mementoStatus = when {
-                                    mementoResult.quotes.isNotEmpty() -> WaybackTraceStatus.PASSED
-                                    mementoResult.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") -> WaybackTraceStatus.SKIPPED
-                                    mementoResult.capturesFound == 0 && !mementoResult.requestFailed -> WaybackTraceStatus.FAILED
-                                    else -> WaybackTraceStatus.FAILED
-                                }
-                                reportWaybackDiagnostic(
-                                    diagnosticProductId, 7, mementoStatus,
-                                    when {
-                                        mementoResult.quotes.isNotEmpty() ->
-                                            "Memento recuperó ${mementoResult.quotes.size} precio(s) archivado(s) que aún deben guardarse en su ficha exacta."
-                                        mementoResult.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") ->
-                                            "Arquivo.pt pidió limitar las consultas; Mínimo detuvo el respaldo Memento."
-                                        mementoResult.capturesFound == 0 && !mementoResult.requestFailed ->
-                                            "Memento respondió correctamente, pero no encontró capturas para esta URL."
-                                        else ->
-                                            "Memento no pudo recuperar un precio verificable: ${mementoResult.diagnosticCodes.joinToString(", ").take(180)}."
-                                    }
-                                )
-                            }
-                        }
                     }
 
                     if (candidateTimedOut && attempts.isEmpty()) {

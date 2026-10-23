@@ -409,6 +409,72 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun unverifiedGoogleShoppingListingCannotBecomeSavedHistoricalPrice() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val title = "Samsung Galaxy S26 Ultra 512 GB"
+            val productId = "provisional-google-shopping-history-test"
+            val genericShoppingUrl = "https://www.google.com/shopping/product/123456789"
+            database.productDao().insert(
+                ProductEntity(
+                    id = productId,
+                    title = title,
+                    brand = "Samsung",
+                    category = "SMARTPHONES",
+                    currentPrice = 0.0,
+                    athMinPrice = 0.0,
+                    athMinDate = "Pendiente de verificación",
+                    athMinStore = "",
+                    athMaxPrice = 0.0,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "unknown_store",
+                    storeUrl = genericShoppingUrl,
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = productId,
+                    storeId = "unknown_store",
+                    price = 999.99,
+                    currency = "EUR",
+                    observedAt = System.currentTimeMillis(),
+                    sourceUrl = genericShoppingUrl,
+                    sourceName = "Google Shopping",
+                    isVerified = false,
+                    verificationNote = "Listado sin confirmar; no es un precio de vendedor verificado.",
+                    productTitle = title,
+                    storeName = "Google Shopping",
+                    sourceType = "GOOGLE_SHOPPING",
+                    linkType = "Google Shopping"
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+
+            val product = withTimeout(10_000L) {
+                repository.allProductsStream.first { rows -> rows.any { it.id == productId } }
+                    .first { it.id == productId }
+            }
+            assertFalse("A generic Shopping listing must not verify the product price", product.isPriceVerified)
+            assertEquals("An unverified listing must never be promoted to saved historical price", null, product.savedHistoricalPrice)
+            assertTrue("A listing quote must not enter the confirmed historical graph", product.priceHistory.isEmpty())
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun `positive sub-five-euro offer is kept but flagged below thirty percent of median`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
@@ -424,10 +490,10 @@ class ExampleRobolectricTest {
             val timestamp = System.currentTimeMillis()
             val results = listOf(
                 SerpApiShoppingResult("Anker Power Bank 20000mAh", 1.99, "Tienda barata", "https://www.google.com/shopping/product/cheap", observedAt = timestamp),
-                SerpApiShoppingResult("Anker Power Bank 20000mAh", 39.99, "Tienda 2", "https://www.google.com/shopping/product/p2", observedAt = timestamp),
-                SerpApiShoppingResult("Anker Power Bank 20000mAh", 42.99, "Tienda 3", "https://www.google.com/shopping/product/p3", observedAt = timestamp),
-                SerpApiShoppingResult("Anker Power Bank 20000mAh", 44.99, "Tienda 4", "https://www.google.com/shopping/product/p4", observedAt = timestamp),
-                SerpApiShoppingResult("Anker Power Bank 20000mAh", 49.99, "Tienda 5", "https://www.google.com/shopping/product/p5", observedAt = timestamp)
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 39.99, "Amazon.es", "https://www.amazon.es/dp/ANKERPOWERBANK2", observedAt = timestamp),
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 42.99, "PcComponentes", "https://www.pccomponentes.com/anker-power-bank-20000mah", observedAt = timestamp),
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 44.99, "MediaMarkt", "https://www.mediamarkt.es/anker-power-bank-20000mah", observedAt = timestamp),
+                SerpApiShoppingResult("Anker Power Bank 20000mAh", 49.99, "Fnac España", "https://www.fnac.es/anker-power-bank-20000mah", observedAt = timestamp)
             )
             val filtered = repository.filterOnlineSearchResults(results, "Anker Power Bank 20000mAh")
             assertEquals("Suspicious offers remain visible instead of being discarded", 5, filtered.size)
@@ -1785,6 +1851,18 @@ class ExampleRobolectricTest {
                 condition = "new"
             )
             assertTrue("The cheap case must be recognized as an accessory", accessory.isAccessoryOffer)
+            val phoneWithChargingFeature = SerpApiShoppingResult(
+                title = "Samsung Galaxy S26 Ultra 512 GB Fast Charging",
+                price = 1_299.0,
+                storeName = "Tienda de móviles",
+                sourceUrl = "https://shop.example.test/samsung-galaxy-s26-ultra",
+                observedAt = timestamp,
+                condition = "new"
+            )
+            assertFalse(
+                "The word 'charging' in a phone description must not classify the whole phone as an accessory",
+                phoneWithChargingFeature.isAccessoryOffer
+            )
 
             val saved = repository.recordOnlineSearchResults(
                 results = listOf(battery, accessory),
@@ -2612,7 +2690,7 @@ class ExampleRobolectricTest {
                     title = "Sony WH-1000XM5 Wireless Headphones",
                     price = 229.99,
                     storeName = "PcComponentes",
-                    sourceUrl = "https://www.google.com/shopping/product/SONYWH1000XM5",
+                    sourceUrl = "https://www.pccomponentes.com/sony-wh-1000xm5",
                     observedAt = now
                 ),
                 com.example.data.remote.SerpApiShoppingResult(
@@ -2882,9 +2960,9 @@ class ExampleRobolectricTest {
             assertTrue("Searched products must be marked as source-verified", persistedProduct?.isPriceVerified == true)
             assertTrue(stored.all { it.currency == "EUR" && it.sourceType == "Google Shopping" })
             assertEquals(3, database.priceObservationDao().getObservationCount(sonyProductId))
-            val savedGoogleOffer = stored.single { it.storeName == "PcComponentes" }
-            assertTrue(savedGoogleOffer.sourceUrl.contains("google.com/shopping/product"))
-            assertEquals("Google Shopping", savedGoogleOffer.linkType)
+            val savedPcComponentesOffer = stored.single { it.storeName == "PcComponentes" }
+            assertTrue(savedPcComponentesOffer.sourceUrl.startsWith("https://www.pccomponentes.com/"))
+            assertEquals("directo", savedPcComponentesOffer.linkType)
             assertEquals("directo", stored.single { it.storeName == "Amazon.es" }.linkType)
 
             val productAfterGoogleObservation = withTimeout<List<Product>>(10_000) {
@@ -2892,10 +2970,10 @@ class ExampleRobolectricTest {
                     rows.firstOrNull { it.id == sonyProductId }?.priceHistory?.size == 1
                 }
             }.first { it.id == sonyProductId }
-            assertEquals("Google Shopping", productAfterGoogleObservation.priceHistory.single().linkType)
+            assertEquals("directo", productAfterGoogleObservation.priceHistory.single().linkType)
             assertEquals("Google Shopping", productAfterGoogleObservation.priceSource)
             assertTrue(productAfterGoogleObservation.offers.any {
-                it.store.name == "PcComponentes" && it.linkType == "Google Shopping"
+                it.store.name == "PcComponentes" && it.linkType == "directo"
             })
 
             val duplicate = results.first().copy(price = 245.00, observedAt = now + 60_000L)

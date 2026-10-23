@@ -2950,7 +2950,7 @@ class WaybackPriceHistoryClient(
      * Escalates the local pause after repeated HTTP 429 responses within one day. Some archive
      * limits are imposed upstream without a useful Retry-After header, so retrying after the same
      * five-minute default can reproduce the same block. The pause honours a longer server-provided
-     * Retry-After, never exceeds six hours, and does not probe Wayback to test whether it expired.
+     * Retry-After, never exceeds 24 hours, and does not probe Wayback to test whether it expired.
      */
     internal fun computeAdaptiveRateLimitUntil(
         retryAfter: String?,
@@ -4039,7 +4039,6 @@ class WaybackPriceHistoryClient(
         for ((archivedTitle, price, rawCurrency) in extractJsonLdProductOffers(document)) {
             val currency = rawCurrency.uppercase(Locale.ROOT)
             if (currency !in allowedCurrencies || price !in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE) continue
-            if (isMatchingTitleForArchivedUrl(primaryExpectedTitle, archivedTitle, originalUrl)) continue
 
             // Resolve the URL once for this exact structured offer. Never use the page URL as a
             // substitute for a related product's own URL; it could be a different SKU.
@@ -4051,44 +4050,39 @@ class WaybackPriceHistoryClient(
                 pageUrl = originalUrl
             ).distinctBy { it.trimEnd('/').lowercase(Locale.ROOT) }
             val matches = knownProductTitlesById.entries.mapNotNull { (productId, savedTitle) ->
-                if (productId.isBlank() || savedTitle.isBlank() ||
-                    isMatchingTitleForArchivedUrl(primaryExpectedTitle, savedTitle, originalUrl)
-                ) return@mapNotNull null
-
-                val urlExplicitlyContradictsSavedSku = offerUrls.any { offerUrl ->
-                    val uri = runCatching { URI(offerUrl) }.getOrNull()
-                    val urlIdentityText = normalizeTitle(
-                        decodePathUrlComponent(uri?.rawPath.orEmpty()) + " " +
-                            uri?.rawQuery.orEmpty().split('&').mapNotNull { parameter ->
-                                val key = decodeQueryUrlComponent(parameter.substringBefore('='))
-                                    .lowercase(Locale.ROOT)
-                                val value = decodeQueryUrlComponent(parameter.substringAfter('=', ""))
-                                if (key in setOf(
-                                        "sku", "skuid", "variant", "variantid", "variant_id",
-                                        "capacity", "storage", "color", "colour", "model", "gtin", "ean"
-                                    )
-                                ) value else null
-                            }.joinToString(" ")
+                if (productId.isBlank() || savedTitle.isBlank()) return@mapNotNull null
+                // Exclude the selected product as a secondary only when its known SKU actually
+                // matches the archived page. A broad retailer URL for 256 GB must not cause a
+                // distinct 128 GB saved product to be discarded before its own Offer URL is checked.
+                val primaryNormalizedTitle = normalizeTitle(primaryExpectedTitle)
+                val savedNormalizedTitle = normalizeTitle(savedTitle)
+                val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+                val primaryStorage = storagePattern.findAll(primaryNormalizedTitle)
+                    .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
+                val savedStorage = storagePattern.findAll(savedNormalizedTitle)
+                    .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
+                val explicitStorageConflict = primaryStorage.isNotEmpty() &&
+                    savedStorage.isNotEmpty() && primaryStorage != savedStorage
+                val primaryColour = productColourFamily(primaryNormalizedTitle)
+                val savedColour = productColourFamily(savedNormalizedTitle)
+                val explicitColourConflict = primaryColour != null && savedColour != null &&
+                    primaryColour != savedColour
+                val explicitModelVariantConflict =
+                    productModelVariantTokens(primaryNormalizedTitle) !=
+                        productModelVariantTokens(savedNormalizedTitle)
+                val isPrimarySavedProduct = !explicitStorageConflict &&
+                    !explicitColourConflict && !explicitModelVariantConflict && (
+                        isMatchingProductTitle(primaryExpectedTitle, savedTitle) ||
+                            (isMatchingTitleForArchivedUrl(primaryExpectedTitle, savedTitle, originalUrl) &&
+                                !hasExplicitVariantConflictInProductUrl(primaryExpectedTitle, originalUrl))
                     )
-                    val expectedStorage = Regex("""\b\d+\s*(?:gb|tb)\b""")
-                        .findAll(normalizeTitle(savedTitle))
-                        .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }
-                        .toSet()
-                    val urlStorage = Regex("""\b\d+\s*(?:gb|tb)\b""")
-                        .findAll(urlIdentityText)
-                        .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }
-                        .toSet()
-                    val expectedColour = productColourFamily(savedTitle)
-                    val urlColour = productColourFamily(urlIdentityText)
-                    hasExplicitVariantConflictInProductUrl(savedTitle, offerUrl) ||
-                        (urlStorage.isNotEmpty() &&
-                            (expectedStorage.isEmpty() || urlStorage.any { it !in expectedStorage })) ||
-                        (urlColour != null && (expectedColour == null || expectedColour != urlColour))
-                }
-                if (urlExplicitlyContradictsSavedSku) return@mapNotNull null
+                if (isPrimarySavedProduct) return@mapNotNull null
 
+                // The shared URL validator below already checks explicit model, edition,
+                // capacity and colour conflicts. Avoid a second parser with different normalization,
+                // which could reject an otherwise exact same-SKU Offer URL.
                 val pageConfirmsVariant =
-                    isMatchingTitleForArchivedUrl(savedTitle, archivedTitle, originalUrl)
+                    matchesVariantDetailsConfirmedByUrl(savedTitle, archivedTitle, originalUrl)
                 val offerUrlConfirmsVariant = offerUrls.any { offerUrl ->
                     !hasExplicitVariantConflictInProductUrl(savedTitle, offerUrl) &&
                         matchesVariantDetailsConfirmedByUrl(savedTitle, archivedTitle, offerUrl)
@@ -4122,6 +4116,12 @@ class WaybackPriceHistoryClient(
                 continue
             }
 
+            // An offer whose normalized title already belongs to a saved product is not a
+            // "new product discovery". If its own URL cannot prove that saved SKU, reject it
+            // rather than attaching it to the wrong history or creating a duplicate discovery.
+            if (knownProductTitlesById.values.any { normalizeTitle(it) == normalizeTitle(archivedTitle) }) {
+                continue
+            }
             // Unknown secondary products may be staged only with a specific same-merchant URL,
             // a non-generic title and no accessory/promotional markers. The stage itself performs
             // the catalogue, URL, price, seller and snapshot checks again before saving anything.
@@ -4674,7 +4674,7 @@ class WaybackPriceHistoryClient(
      * explicitly names every missing detail. The model and edition must still match exactly.
      * This supports retailer pages whose visible heading is generic but whose URL targets a SKU.
      */
-    private fun matchesVariantDetailsConfirmedByUrl(
+    internal fun matchesVariantDetailsConfirmedByUrl(
         expectedTitle: String,
         archivedTitle: String,
         originalUrl: String
@@ -4728,11 +4728,12 @@ class WaybackPriceHistoryClient(
         val urlColour = productColourFamily(urlTitle)
         val missingColour = expectedColour != null && archivedColour == null
         // Do not attach a colour-specific archived offer to a saved product whose colour is
-        // unknown. The selected product must request the colour that the URL proves.
-        if (expectedColour == null && archivedColour != null) return false
+        // unknown. Neither the archived title nor its own URL may silently introduce a colour.
+        if (expectedColour == null && (archivedColour != null || urlColour != null)) return false
+        // An offer URL must not silently assign a capacity to a saved product whose
+        // storage is unknown; keep those records separate until identity is explicit.
+        if (expectedStorage.isEmpty() && urlStorage.isNotEmpty()) return false
         if (missingColour && urlColour != expectedColour) return false
-        if (!missingStorage && !missingColour) return false
-
         fun coreIdentity(value: String): String =
             onlineProductIdentityKey(canonicalizeArchiveTitle(value)).split('|')
                 .filterNot {
@@ -4741,6 +4742,34 @@ class WaybackPriceHistoryClient(
                         it.startsWith("specs:")
                 }
                 .joinToString("|")
+
+        if (!missingStorage && !missingColour) {
+            // When the archived page URL points at the primary SKU, a sibling offer needs its
+            // own URL to independently prove its model, capacity, colour and edition.
+            val expectedModel = Regex(
+                """\b(iphone|ipad|pixel|redmi|poco|galaxy\s+s|galaxy\s+a|galaxy\s+z)\s*(\d{1,3})\b"""
+            ).find(expected)
+            val urlModel = Regex(
+                """\b(iphone|ipad|pixel|redmi|poco|galaxy\s+s|galaxy\s+a|galaxy\s+z)\s*(\d{1,3})\b"""
+            ).find(urlTitle)
+            if (expectedModel != null &&
+                (urlModel == null ||
+                    expectedModel.groupValues[1].replace(Regex("""\s+"""), "") !=
+                        urlModel.groupValues[1].replace(Regex("""\s+"""), "") ||
+                    expectedModel.groupValues[2] != urlModel.groupValues[2])
+            ) return false
+
+            val expectedVariants = productModelVariantTokens(expected)
+            val urlVariants = productModelVariantTokens(urlTitle)
+            if (!urlVariants.containsAll(expectedVariants)) return false
+            if (expectedStorage.isNotEmpty() && !urlStorage.containsAll(expectedStorage)) return false
+            if (expectedColour != null && urlColour != expectedColour) return false
+
+            // Exact product identity can validate a secondary offer even when the saved
+            // title has no SKU fields. Any capacity, colour or model found in its URL was
+            // checked above and cannot introduce a conflicting variant.
+            return coreIdentity(expected) == coreIdentity(archived)
+        }
 
         return coreIdentity(expected) == coreIdentity(archived)
     }
@@ -4961,27 +4990,15 @@ class WaybackPriceHistoryClient(
      * dense recent months from crowding older periods out of the chart. Every returned item is
      * still independently checked for product identity and price after its HTML is downloaded.
      */
-    internal fun sampleCaptures(captures: List<WaybackCapture>, max: Int): List<WaybackCapture> {
-        if (max <= 0 || captures.isEmpty()) return emptyList()
-        val chronological = captures
-            .distinctBy { it.rawTimestamp to it.originalUrl }
-            .sortedBy { it.timestamp }
-        val quarterly = chronological
-            .groupBy { capture ->
-                val utc = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"), Locale.ROOT)
-                utc.timeInMillis = capture.timestamp
-                utc.get(java.util.Calendar.YEAR) * 4 + utc.get(java.util.Calendar.MONTH) / 3
-            }
-            .toSortedMap()
-            .values
-            .map { quarterCaptures -> quarterCaptures[quarterCaptures.size / 2] }
-
-        if (quarterly.size <= max) return quarterly
-        if (max == 1) return listOf(quarterly.last())
-        return (0 until max).map { index ->
-            quarterly[(index.toDouble() * (quarterly.size - 1) / (max - 1)).toInt()]
-        }.distinctBy { it.rawTimestamp to it.originalUrl }
-    }
+    internal fun sampleCaptures(
+        captures: List<WaybackCapture>,
+        max: Int
+    ): List<WaybackCapture> = sampleByQuarter(
+        items = captures,
+        max = max,
+        timestampOf = { it.timestamp },
+        keyOf = { it.rawTimestamp to it.originalUrl }
+    )
 
     /**
      * When exact-URL and prefix CDX results overlap, sample captures that have not already been
@@ -5092,9 +5109,9 @@ class WaybackPriceHistoryClient(
         private const val KEY_LAST_AVAILABILITY_REQUEST_AT = "wayback_last_availability_request_at"
         private const val MIN_RATE_LIMIT_COOLDOWN_MS = 60L * 1000L
         private const val DEFAULT_RATE_LIMIT_COOLDOWN_MS = 5L * 60L * 1000L
-        private const val MAX_RATE_LIMIT_COOLDOWN_MS = 6L * 60L * 60L * 1000L
+        private const val MAX_RATE_LIMIT_COOLDOWN_MS = 24L * 60L * 60L * 1000L
         private const val RATE_LIMIT_ESCALATION_WINDOW_MS = 24L * 60L * 60L * 1000L
-        private const val MAX_RATE_LIMIT_HITS = 8
+        private const val MAX_RATE_LIMIT_HITS = 10
         private const val KEY_RATE_LIMIT_UNTIL = "wayback_rate_limit_until"
         private const val KEY_RATE_LIMIT_LAST_HIT_AT = "wayback_rate_limit_last_hit_at"
         private const val KEY_RATE_LIMIT_HIT_COUNT = "wayback_rate_limit_hit_count"

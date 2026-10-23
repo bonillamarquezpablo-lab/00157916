@@ -2,6 +2,7 @@ package com.example.data.remote
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -22,6 +23,41 @@ class MementoClientTest {
     private fun newClient() = MementoClient(ApplicationProvider.getApplicationContext<Context>())
 
     @Test
+    fun mementoFallbackRunsForSparseHistoryAndStopsAtThreeDistinctDates() {
+        val base = 1_700_000_000_000L
+        fun quote(at: Long) = ArchivedPriceQuote(
+            observedAt = at,
+            price = 199.99,
+            currency = "EUR",
+            productTitle = "Sony WH-1000XM5",
+            originalUrl = "https://shop.example/sony-wh-1000xm5",
+            snapshotUrl = "https://web.archive.org/web/20230101000000/https://shop.example/sony-wh-1000xm5"
+        )
+
+        val oneDate = listOf(quote(base))
+        assertFalse(hasSufficientHistoricalCoverage(oneDate))
+        assertFalse(
+            "New archived-product discoveries are not historical points for the selected product",
+            hasSufficientHistoricalCoverage(listOf(quote(base).copy(isDiscoveryCandidate = true)))
+        )
+        assertTrue(shouldAttemptMementoFallback(false, true, false, false))
+        assertFalse(shouldAttemptMementoFallback(true, true, false, false))
+        assertFalse(shouldAttemptMementoFallback(false, false, false, false))
+        assertFalse(shouldAttemptMementoFallback(false, true, false, true))
+
+        val duplicateSameDay = listOf(quote(base), quote(base + 60L * 60L * 1000L))
+        assertFalse("Two captures from the same day count as one date", hasSufficientHistoricalCoverage(duplicateSameDay))
+
+        val threeDates = listOf(
+            quote(base),
+            quote(base + WaybackPriceHistoryClient.DAY_MS),
+            quote(base + 2L * WaybackPriceHistoryClient.DAY_MS)
+        )
+        assertTrue(hasSufficientHistoricalCoverage(threeDates))
+        assertFalse(shouldAttemptMementoFallback(false, true, true, false))
+    }
+
+    @Test
     fun buildTimeMapUrlRejectsSearchEnginesAndEncodesNestedQuerySeparators() {
         val client = newClient()
         val url = client.buildTimeMapUrl("https://shop.example/product/item?sku=blue&size=256#offer")
@@ -31,6 +67,95 @@ class MementoClientTest {
         assertTrue(url.contains("%23offer"))
         assertNull(client.buildTimeMapUrl("https://www.google.com/search?q=phone"))
         assertNull(client.buildTimeMapUrl("http://shop.example/product/item"))
+    }
+
+    @Test
+    fun buildCdxUrlUsesBoundedExactUrlHtmlCaptureQuery() {
+        val client = newClient()
+        val now = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.parse("20261021000000")!!.time
+        val url = client.buildCdxUrl(
+            originalUrl = "https://shop.example/product/item?sku=blue&size=256",
+            now = now,
+            lookbackDays = 365
+        )
+        assertNotNull(url)
+        val parsed = url!!.toHttpUrl()
+        assertEquals("arquivo.pt", parsed.host)
+        assertEquals("/wayback/cdx", parsed.encodedPath)
+        assertEquals("https://shop.example/product/item?sku=blue&size=256", parsed.queryParameter("url"))
+        assertEquals("exact", parsed.queryParameter("matchType"))
+        assertEquals("json", parsed.queryParameter("output"))
+        assertEquals("6", parsed.queryParameter("collapseTime"))
+        assertEquals("status:200", parsed.queryParameterValues("filter")?.getOrNull(0))
+        assertEquals("mime:text/html", parsed.queryParameterValues("filter")?.getOrNull(1))
+        assertEquals("100", parsed.queryParameter("limit"))
+        assertNull(client.buildCdxUrl("https://www.google.com/search?q=phone", now, 365))
+    }
+
+    @Test
+    fun parseCdxNdjsonKeepsOnlyMatchingHtmlCaptureDatesInsideWindow() {
+        val client = newClient()
+        val now = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.parse("20261021000000")!!.time
+        val target = "https://shop.example/product/item?sku=blue&size=256"
+        val body = """
+            {"timestamp":"20260701000000","url":"$target","mime":"text/html","status":"200"}
+            {"timestamp":"20260101000000","url":"$target","mime":"text/html","status":"200"}
+            {"timestamp":"20200101000000","url":"$target","mime":"text/html","status":"200"}
+            {"timestamp":"20260501000000","url":"https://other.example/product/item","mime":"text/html","status":"200"}
+            {"timestamp":"20260601000000","url":"$target","mime":"text/html","status":"404"}
+            {"timestamp":"20260602000000","url":"$target","mime":"image/jpeg","status":"200"}
+            {"timestamp":"20260603000000","url":"$target","mime":"warc/revisit","status":"200"}
+        """.trimIndent()
+
+        val captures = client.parseCdxJsonLines(
+            body = body,
+            originalUrl = target,
+            now = now,
+            lookbackDays = 365
+        )
+
+        assertEquals(listOf("20260101000000", "20260701000000"), captures.map { it.rawTimestamp })
+        assertTrue(captures.all { it.snapshotUrl.startsWith("https://arquivo.pt/wayback/") })
+        assertTrue(captures.all { it.snapshotUrl.contains("/item%3Fsku=blue%26size=256") })
+        assertTrue(captures.all { it.originalUrl == target })
+    }
+
+    @Test
+    fun quarterlySamplingKeepsSeveralCapturesFromTheSameQuarterWithinBudget() {
+        val client = newClient()
+        val formatter = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val rawDates = listOf(
+            "20260401000000", "20260415000000", "20260501000000", "20260615000000"
+        )
+        val captures = rawDates.map { raw ->
+            MementoClient.MementoCapture(
+                rawTimestamp = raw,
+                timestamp = formatter.parse(raw)!!.time,
+                snapshotUrl = "https://arquivo.pt/wayback/$raw/https://shop.example/product",
+                originalUrl = "https://shop.example/product"
+            )
+        } + MementoClient.MementoCapture(
+            rawTimestamp = rawDates[1],
+            timestamp = formatter.parse(rawDates[1])!!.time,
+            snapshotUrl = "https://arquivo.pt/wayback/${rawDates[1]}/https://shop.example/product?alternate=1",
+            originalUrl = "https://shop.example/product?alternate=1"
+        )
+
+        val sampled = client.sampleQuarterlyCaptures(captures, maxSnapshots = 3)
+
+        assertEquals(3, sampled.size)
+        assertEquals(rawDates.first(), sampled.first().rawTimestamp)
+        assertEquals(rawDates.last(), sampled.last().rawTimestamp)
+        assertEquals(3, sampled.map { it.timestamp }.distinct().size)
     }
 
     @Test
@@ -88,17 +213,23 @@ class MementoClientTest {
             )
         }
         val allQuarters = client.sampleQuarterlyCaptures(captures, maxSnapshots = 8)
-        assertEquals(5, allQuarters.size)
+        assertEquals("Use spare download slots for additional dates when CDX has fewer quarters than the cap", 8, allQuarters.size)
         val quarterIds = allQuarters.map {
             val calendar = java.util.Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT).apply {
                 timeInMillis = it.timestamp
             }
             calendar.get(java.util.Calendar.YEAR) * 4 + calendar.get(java.util.Calendar.MONTH) / 3
         }
-        assertEquals(quarterIds.size, quarterIds.distinct().size)
+        assertEquals(5, quarterIds.distinct().size)
         val bounded = client.sampleQuarterlyCaptures(captures, maxSnapshots = 3)
         assertEquals(3, bounded.size)
-        assertEquals(allQuarters.first(), bounded.first())
-        assertEquals(allQuarters.last(), bounded.last())
+        fun quarterOf(capture: MementoClient.MementoCapture): Int {
+            val calendar = java.util.Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT).apply {
+                timeInMillis = capture.timestamp
+            }
+            return calendar.get(java.util.Calendar.YEAR) * 4 + calendar.get(java.util.Calendar.MONTH) / 3
+        }
+        assertEquals(quarterOf(allQuarters.first()), quarterOf(bounded.first()))
+        assertEquals(quarterOf(allQuarters.last()), quarterOf(bounded.last()))
     }
 }

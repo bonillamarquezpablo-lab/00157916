@@ -21,6 +21,42 @@ import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 import kotlin.math.ceil
 
+/** A named Dyson model makes the query specific; don't widen it to sibling products. */
+private val SPECIFIC_DYSON_HAIR_TOOL_MODEL_PATTERN = Regex(
+    """(?i)\b(corrale|airwrap|supersonic|airstrait|airblade|v\d{1,2}|hd\d{2,3}|hs\d{2,3}|tp\d{2,3}|hp\d{2,3}|i\s*\.?\s*d\s*\.?\s*curly)\b"""
+)
+
+internal fun queryNamesSpecificDysonHairToolModel(query: String): Boolean =
+    SPECIFIC_DYSON_HAIR_TOOL_MODEL_PATTERN.containsMatchIn(query)
+
+/** Refuse sibling Dyson models whenever the request includes an explicit family/model token. */
+/** Require an explicitly requested storage capacity to exist in the candidate title. */
+private val EXPLICIT_STORAGE_CAPACITY_PATTERN =
+    Regex("""(?i)\b(\d+(?:[.,]\d+)?)\s*(gb|tb)\b""")
+
+internal fun hasMatchingExplicitStorageCapacity(query: String, title: String): Boolean {
+    fun capacities(value: String): Set<String> =
+        EXPLICIT_STORAGE_CAPACITY_PATTERN.findAll(value).map { match ->
+            match.groupValues[1].replace(',', '.').removeSuffix(".") +
+                match.groupValues[2].lowercase(Locale.ROOT)
+        }.toSet()
+    val requested = capacities(query)
+    return requested.isEmpty() || requested.all { it in capacities(title) }
+}
+internal fun returnedTitleMatchesSpecificDysonHairToolModel(query: String, title: String): Boolean {
+    val requestedModels = SPECIFIC_DYSON_HAIR_TOOL_MODEL_PATTERN.findAll(query)
+        .map { it.value.filter(Char::isLetterOrDigit).lowercase(Locale.ROOT) }
+        .distinct()
+        .toList()
+    if (requestedModels.isEmpty()) return true
+    val returnedModels = SPECIFIC_DYSON_HAIR_TOOL_MODEL_PATTERN.findAll(title)
+        .map { it.value.filter(Char::isLetterOrDigit).lowercase(Locale.ROOT) }
+        .toSet()
+    // Avoid prefix collisions such as HD07 matching HD070. A named family or model in the
+    // request must appear as the same extracted token in the returned listing.
+    return requestedModels.all { model -> model in returnedModels }
+}
+
 data class SerpApiRequestProduct(
     val id: String,
     val title: String,
@@ -1635,6 +1671,13 @@ class SerpApiClient(
         // in the strict persistence/history filters and in the selected-model search.
         if (isBroadFamilyOverviewQuery(requested, returned)) return true
 
+        // "plancha Dyson" is a family search: show related models and matching parts even when
+        // retailers use family names such as Airwrap or Styler instead of "plancha".
+        if (!queryNamesSpecificDysonHairToolModel(requested) &&
+            isBroadDysonHairToolsQueryMatch(requested, returned) &&
+            returnedTitleMatchesSpecificDysonHairToolModel(requested, returned)
+        ) return true
+
         val orderedWanted = normalize(requested)
             .replace(Regex("(\\d+)\\s?(gb|tb|mb)\\b"), "$1 $2")
             .split(' ')
@@ -1924,4 +1967,39 @@ class SerpApiClient(
             "para", "con", "por", "nuevo", "nueva", "original", "oficial", "gb", "tb", "mb"
         )
     }
+}
+
+/**
+ * Broad, brand-specific Dyson hair-tool searches intentionally include related hair tools and spares.
+ * Exact Dyson model searches still use the stricter variant checks before this helper is reached.
+ */
+internal fun isBroadDysonHairToolsQueryMatch(requested: String, returned: String): Boolean {
+    fun words(value: String): Set<String> = value.lowercase(Locale.ROOT)
+        .replace(Regex("""[^a-z0-9]+"""), " ")
+        .trim()
+        .split(Regex("""\s+"""))
+        .filter { it.isNotBlank() }
+        .toSet()
+
+    val query = words(requested)
+    val title = words(returned)
+    if ("dyson" !in query || "dyson" !in title) return false
+    if (queryNamesSpecificDysonHairToolModel(requested)) return false
+    // A vacuum/air-purifier spare part must not leak into a hair-tool search just because its
+    // title contains "nozzle" or "attachment".
+    if (Regex("""(?i)\b(aspiradoras?|vacuum(?:s)?|robot\s+aspirador|cordless\s+cleaner|gen5detect|washg1|big\s+ball)\b""")
+            .containsMatchIn(returned) ||
+        // Dyson vacuum generations use V/SV/DC codes; hair tools use HS/HD/Airwrap/Corrale
+        // families. Reject the vacuum model code even when its suffix (Fluffy/Absolute/etc.)
+        // is omitted by the seller title.
+        Regex("""(?i)\b(?:v|sv|dc)\s*\d{1,3}\b""").containsMatchIn(returned)
+    ) return false
+    val genericHairQuery = setOf("plancha", "planchas", "secador", "secadores", "alisador", "alisadores", "pelo", "hair")
+    val hairToolOrPart = setOf(
+        "airwrap", "corrale", "supersonic", "styler", "plancha", "planchas",
+        "secador", "secadores", "alisador", "alisadores", "pelo", "hair",
+        "boquilla", "boquillas", "nozzle", "nozzles", "difusor", "difusores",
+        "diffuser", "diffusers", "attachment", "attachments", "accesorio", "accesorios"
+    )
+    return query.any { it in genericHairQuery } && title.any { it in hairToolOrPart }
 }

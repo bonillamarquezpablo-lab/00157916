@@ -4111,7 +4111,8 @@ class WaybackPriceHistoryClient(
                 if (urlExplicitlyContradictsSavedSku) return@mapNotNull null
 
                 val pageConfirmsVariant =
-                    isMatchingTitleForArchivedUrl(savedTitle, archivedTitle, originalUrl)
+                    !hasExplicitVariantConflictInProductUrl(savedTitle, originalUrl) &&
+                        isMatchingTitleForArchivedUrl(savedTitle, archivedTitle, originalUrl)
                 val offerUrlConfirmsVariant = offerUrls.any { offerUrl ->
                     !hasExplicitVariantConflictInProductUrl(savedTitle, offerUrl) &&
                         matchesVariantDetailsConfirmedByUrl(savedTitle, archivedTitle, offerUrl)

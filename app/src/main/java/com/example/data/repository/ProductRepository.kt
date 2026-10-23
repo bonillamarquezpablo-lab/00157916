@@ -1375,8 +1375,8 @@ class ProductRepository(
     }
 
     private fun inferProductCategory(title: String, query: String): ProductCategory {
-        val titleText = title.lowercase(Locale.ROOT)
-        val text = "${titleText} ${query.lowercase(Locale.ROOT)}"
+        val titleText = normalizedProductTitle(title)
+        val text = "${titleText} ${normalizedProductTitle(query)}"
         // Identify toys from the listing itself before consulting a broad search query. Searching
         // for "Dyson" must not turn a Dyson toy into a hair appliance, or vice versa.
         if (isToyListingTitle(title)) return ProductCategory.TOYS
@@ -1957,7 +1957,13 @@ class ProductRepository(
             val verifiedArchived = snapshotHistory.filter(::isHistoricalDisplayObservation)
             val savedLegacyLive = verifiedObservations.filter(::isPrePolicySavedLiveObservation)
             val recoverableStoredRows = allObservations.filter { observation ->
-                observation.currency.trim().equals("EUR", ignoreCase = true) &&
+                val sourceUri = parseHttpUri(observation.sourceUrl)
+                val sourceHost = sourceUri?.host.orEmpty().lowercase(Locale.ROOT)
+                // This fallback may recover legacy rows, but it must never promote a provisional
+                // Shopping/listing observation into historical evidence just because the URL and
+                // amount look plausible. Verified provenance is mandatory here.
+                observation.isVerified &&
+                    observation.currency.trim().equals("EUR", ignoreCase = true) &&
                     observation.price.isFinite() &&
                     observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
                     observation.observedAt in 1L..System.currentTimeMillis() &&
@@ -1966,7 +1972,11 @@ class ProductRepository(
                     isSafeCatalogTitleMatch(observation.productTitle, title) &&
                     !isPromotionalBulkListing(observation.productTitle, "") &&
                     isPlausibleHistoryPrice(observation.productTitle, observation.price) &&
-                    parseHttpUri(observation.sourceUrl) != null &&
+                    sourceUri != null &&
+                    sourceHost != "google.com" && !sourceHost.endsWith(".google.com") &&
+                    !isGoogleShoppingUrl(observation.sourceUrl) &&
+                    !sourceHost.contains("web.archive.org") &&
+                    !sourceHost.contains("arquivo.pt") &&
                     !observation.sourceUrl.contains("google.com/search", ignoreCase = true) &&
                     !observation.sourceUrl.contains("web.archive.org", ignoreCase = true)
             }

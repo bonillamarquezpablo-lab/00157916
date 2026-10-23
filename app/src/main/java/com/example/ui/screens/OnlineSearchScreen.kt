@@ -863,7 +863,8 @@ private fun ShoppingResultCard(
     val categoryUnverified = group.offers.all { it.isCategoryUnverified }
     val wheelSetCount = group.wheelSetCount
     val hasTrustedPrice = group.offers.any {
-        !it.isSuspiciousPrice && !it.isFitmentUnverified && !it.isCategoryUnverified
+        !it.isSuspiciousPrice && !it.isFitmentUnverified && !it.isCategoryUnverified &&
+            !it.isSearchFallbackDestination && !it.isGoogleShoppingProductLink
     }
     Card(
         modifier = Modifier.fillMaxWidth()
@@ -1003,6 +1004,21 @@ private fun ShoppingResultCard(
                             color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
                     }
+                }
+            }
+            if (onOpenProduct != null) {
+                OutlinedButton(
+                    onClick = onOpenProduct,
+                    modifier = Modifier.fillMaxWidth().testTag("open-online-product-ficha")
+                ) {
+                    Text("Ver ficha e historial")
+                }
+            } else {
+                TextButton(
+                    onClick = onOpenBestOffer,
+                    modifier = Modifier.fillMaxWidth().testTag("open-online-related-offer")
+                ) {
+                    Text("Abrir oferta para revisar")
                 }
             }
             val displayedOffers = buildList {

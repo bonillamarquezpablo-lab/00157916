@@ -1971,10 +1971,11 @@ class ProductRepository(
             val recoverableStoredRows = allObservations.filter { observation ->
                 val sourceUri = parseHttpUri(observation.sourceUrl)
                 val sourceHost = sourceUri?.host.orEmpty().lowercase(Locale.ROOT)
-                // This fallback may recover legacy rows, but it must never promote a provisional
-                // Shopping/listing observation into historical evidence just because the URL and
-                // amount look plausible. Verified provenance is mandatory here.
-                observation.isVerified &&
+                // This fallback may show a legacy direct-retailer quote as pending
+                // revalidation, but it must never promote it into verified history or current price.
+                // In particular, provisional Shopping/search-page rows are excluded even if their
+                // title and amount look plausible.
+                valLegacyQuoteCanBeShownAsPending(observation, sourceUri, sourceHost) &&
                     observation.currency.trim().equals("EUR", ignoreCase = true) &&
                     observation.price.isFinite() &&
                     observation.price in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR &&
@@ -2045,6 +2046,31 @@ class ProductRepository(
                 ?.let { it.sourceType.ifBlank { it.sourceName } }
                 .orEmpty()
         )
+    }
+
+    /**
+     * A saved legacy seller quote can be displayed as pending verification only when it is a
+     * direct HTTPS retailer listing with matching product identity. It never joins priceHistory,
+     * currentPrice, or verified deal calculations unless it independently passes the verified
+     * observation path above.
+     */
+    private fun valLegacyQuoteCanBeShownAsPending(
+        observation: PriceObservationEntity,
+        sourceUri: URI?,
+        sourceHost: String
+    ): Boolean {
+        if (observation.isVerified) return true
+        if (!isLiveObservation(observation) || sourceUri == null ||
+            !sourceUri.scheme.equals("https", ignoreCase = true)
+        ) return false
+        if (sourceHost == "google.com" || sourceHost.endsWith(".google.com") ||
+            sourceHost.contains("web.archive.org") || sourceHost.contains("arquivo.pt") ||
+            isGoogleShoppingUrl(observation.sourceUrl) ||
+            observation.sourceUrl.contains("google.com/search", ignoreCase = true)
+        ) return false
+        return observation.storeName.isNotBlank() &&
+            isEligibleSeller(observation.storeName, observation.sourceUrl) &&
+            isSafeCatalogTitleMatch(observation.productTitle, observation.productTitle)
     }
 
     /**

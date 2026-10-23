@@ -20,6 +20,8 @@ import com.example.data.remote.WaybackTraceStatus
 import com.example.data.remote.isGoogleShoppingUrl
 import com.example.data.remote.extractDirectRetailerUrl
 import com.example.data.remote.onlineProductIdentityKey
+import com.example.data.remote.queryNamesSpecificDysonHairToolModel
+import com.example.data.remote.returnedTitleMatchesSpecificDysonHairToolModel
 import com.example.data.remote.onlineProductRelevanceScore
 import com.example.data.remote.isBroadDysonHairToolsQueryMatch
 import com.example.data.remote.isGameSpainOffer
@@ -1971,7 +1973,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             .filter { it.isUnverifiedLiveListing }
             .filter { onlineProductIdentityKey(it.title) !in representedIdentityKeys }
             .mapNotNull { product ->
-                val broadDysonMatch = isBroadDysonHairToolsQueryMatch(queryText, product.title)
+                // Exact Dyson model searches must not pull sibling models from Mercado just
+                // because the live result set happens to be empty for that model.
+                if (queryNamesSpecificDysonHairToolModel(queryText) &&
+                    !returnedTitleMatchesSpecificDysonHairToolModel(queryText, product.title)
+                ) return@mapNotNull null
+                val broadDysonMatch = isBroadDysonHairToolsQueryMatch(queryText, product.title) &&
+                    returnedTitleMatchesSpecificDysonHairToolModel(queryText, product.title)
                 val score = onlineProductRelevanceScore(queryText, product.title)
                 if (broadDysonMatch || score >= minimumScore) {
                     (product to if (broadDysonMatch) score + 1000 else score)

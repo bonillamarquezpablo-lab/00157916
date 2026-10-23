@@ -139,7 +139,8 @@ data class Product(
     /** A search-only catalogue row can show its listed amount without asserting seller verification. */
     val isUnverifiedLiveListing: Boolean
         get() = !isPriceVerified &&
-            id.startsWith("online_candidate_") &&
+            (id.startsWith("online_candidate_") ||
+                athMinDate.equals("Pendiente de verificación", ignoreCase = true)) &&
             currentPrice.isFinite() && currentPrice > 0.0 &&
             savedHistoricalPrice == null
 

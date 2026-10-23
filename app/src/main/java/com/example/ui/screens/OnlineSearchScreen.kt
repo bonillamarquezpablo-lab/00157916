@@ -804,11 +804,10 @@ fun OnlineSearchScreen(
                         }
                         ShoppingResultCard(
                             group = group,
-                            onOpenProduct = if (group.offers.all { it.isFitmentUnverified || it.isCategoryUnverified }) {
-                                null
-                            } else {
-                                { onOpenProduct(group.identityKey) }
-                            },
+                            // Unverified variant/category is a warning, not a reason to
+                            // disable the ficha. Opening it lets the user inspect the offer and
+                            // resolve uncertainty instead of making the result appear unclickable.
+                            onOpenProduct = { onOpenProduct(group.identityKey) },
                             onOpenOffer = ::openOffer,
                             onOpenBestOffer = { openOffer(group.bestPurchaseOffer) }
                         )

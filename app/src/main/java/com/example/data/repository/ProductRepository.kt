@@ -25,6 +25,8 @@ import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.isIrrelevantMultiProductBundle
 import com.example.data.remote.hasXiaomiModelMismatch
 import com.example.data.remote.isAccessoryListingTitle
+import com.example.data.remote.isReplacementPartListingTitle
+import com.example.data.remote.isToyListingTitle
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.remote.linkTypeForUrl
 import com.example.data.remote.isGoogleShoppingUrl
@@ -1369,23 +1371,29 @@ class ProductRepository(
     }
 
     private fun inferProductCategory(title: String, query: String): ProductCategory {
-        val text = "${title.lowercase(Locale.ROOT)} ${query.lowercase(Locale.ROOT)}"
+        val titleText = normalizedProductTitle(title)
+        val text = "$titleText ${normalizedProductTitle(query)}"
+        // Classify the listing itself before using a broad search term. This prevents a query
+        // like "plancha Dyson" from turning a toy or a replacement nozzle into a hair appliance.
         return when {
-            Regex("""\b(iphone|redmi|poco|smartphone|movil|telefono|galaxy s|pixel)\b""").containsMatchIn(text) ->
+            isToyListingTitle(title) -> ProductCategory.TOYS
+            isReplacementPartListingTitle(title) -> ProductCategory.REPLACEMENT_PARTS
+            isAccessoryListingTitle(title) -> ProductCategory.ACCESSORIES
+            Regex("""\b(iphone|redmi|poco|smartphone|movil|telefono|galaxy s|pixel)\b""").containsMatchIn(titleText) ->
                 ProductCategory.SMARTPHONES
-            Regex("""\b(laptop|portatil|macbook|chromebook|pc|ram|ssd|procesador|gpu|usb|hub|ethernet|router|cable|cargador)\b""").containsMatchIn(text) ->
+            Regex("""\b(laptop|portatil|macbook|chromebook|pc|ram|ssd|procesador|gpu|monitor|ethernet|router)\b""").containsMatchIn(text) ->
                 ProductCategory.COMPUTING
-            Regex("""\b(playstation|ps5|xbox|nintendo|switch|consola|mando)\b""").containsMatchIn(text) ->
+            Regex("""\b(playstation|ps5|xbox|nintendo|switch|consola|mando|gamepad)\b""").containsMatchIn(titleText) ->
                 ProductCategory.GAMING
-            Regex("""\b(oled|qled|televisor|television|tv|auriculares|headphones|altavoz|speaker)\b""").containsMatchIn(text) ->
+            Regex("""\b(oled|qled|televisor|television|tv|auriculares|headphones|altavoz|speaker)\b""").containsMatchIn(titleText) ->
                 ProductCategory.TV_AUDIO
-            Regex("""\b(aspiradora|vacuum|robot aspirador|cafetera|frigorifico|microondas|lavadora|mop kit)\b""").containsMatchIn(text) ->
+            Regex("""\b(aspiradora|vacuum|robot aspirador|cafetera|frigorifico|microondas|lavadora|mop kit)\b""").containsMatchIn(titleText) ->
                 ProductCategory.HOME_APPLIANCES
-            Regex("""\b(afeitadora|depiladora|secador|cepillo electrico)\b""").containsMatchIn(text) ->
+            Regex("""\b(plancha|planchas|alisador|alisadora|rizador|rizadora|airwrap|corrale|supersonic|secador|cepillo electrico|afeitadora|depiladora|tenacilla)\b""").containsMatchIn(titleText) ->
                 ProductCategory.PERSONAL_CARE
-            Regex("""\b(bicicleta|bicicletas|casco|running|deporte)\b""").containsMatchIn(text) ->
+            Regex("""\b(bicicleta|bicicletas|casco|running|deporte)\b""").containsMatchIn(titleText) ->
                 ProductCategory.SPORTS
-            else -> ProductCategory.ALL
+            else -> ProductCategory.OTHER
         }
     }
 

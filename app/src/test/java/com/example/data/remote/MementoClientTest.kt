@@ -36,6 +36,10 @@ class MementoClientTest {
 
         val oneDate = listOf(quote(base))
         assertFalse(hasSufficientHistoricalCoverage(oneDate))
+        assertFalse(
+            "New archived-product discoveries are not historical points for the selected product",
+            hasSufficientHistoricalCoverage(listOf(quote(base).copy(isDiscoveryCandidate = true)))
+        )
         assertTrue(shouldAttemptMementoFallback(false, true, false, false))
         assertFalse(shouldAttemptMementoFallback(true, true, false, false))
         assertFalse(shouldAttemptMementoFallback(false, false, false, false))

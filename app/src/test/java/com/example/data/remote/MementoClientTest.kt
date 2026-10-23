@@ -88,7 +88,7 @@ class MementoClientTest {
         assertEquals(listOf("20260101000000", "20260701000000"), captures.map { it.rawTimestamp })
         assertTrue(captures.all { it.snapshotUrl.startsWith("https://arquivo.pt/wayback/") })
         assertTrue(captures.all { it.snapshotUrl.contains("/item%3Fsku=blue%26size=256") })
-        assertTrue(captures.all { it.originalUrl == target }
+        assertTrue(captures.all { it.originalUrl == target })
     }
 
     @Test

@@ -4078,38 +4078,9 @@ class WaybackPriceHistoryClient(
                     )
                 if (isPrimarySavedProduct) return@mapNotNull null
 
-                val urlExplicitlyContradictsSavedSku = offerUrls.any { offerUrl ->
-                    val uri = runCatching { URI(offerUrl) }.getOrNull()
-                    val urlIdentityText = normalizeTitle(
-                        decodePathUrlComponent(uri?.rawPath.orEmpty()) + " " +
-                            uri?.rawQuery.orEmpty().split('&').mapNotNull { parameter ->
-                                val key = decodeQueryUrlComponent(parameter.substringBefore('='))
-                                    .lowercase(Locale.ROOT)
-                                val value = decodeQueryUrlComponent(parameter.substringAfter('=', ""))
-                                if (key in setOf(
-                                        "sku", "skuid", "variant", "variantid", "variant_id",
-                                        "capacity", "storage", "color", "colour", "model", "gtin", "ean"
-                                    )
-                                ) value else null
-                            }.joinToString(" ")
-                    )
-                    val expectedStorage = Regex("""\b\d+\s*(?:gb|tb)\b""")
-                        .findAll(normalizeTitle(savedTitle))
-                        .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }
-                        .toSet()
-                    val urlStorage = Regex("""\b\d+\s*(?:gb|tb)\b""")
-                        .findAll(urlIdentityText)
-                        .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }
-                        .toSet()
-                    val expectedColour = productColourFamily(savedTitle)
-                    val urlColour = productColourFamily(urlIdentityText)
-                    hasExplicitVariantConflictInProductUrl(savedTitle, offerUrl) ||
-                        (urlStorage.isNotEmpty() &&
-                            (expectedStorage.isEmpty() || urlStorage.any { it !in expectedStorage })) ||
-                        (urlColour != null && (expectedColour == null || expectedColour != urlColour))
-                }
-                if (urlExplicitlyContradictsSavedSku) return@mapNotNull null
-
+                // The shared URL validator below already checks explicit model, edition,
+                // capacity and colour conflicts. Avoid a second parser with different normalization,
+                // which could reject an otherwise exact same-SKU Offer URL.
                 val pageConfirmsVariant =
                     !hasExplicitVariantConflictInProductUrl(savedTitle, originalUrl) &&
                         isMatchingTitleForArchivedUrl(savedTitle, archivedTitle, originalUrl)
@@ -4758,8 +4729,8 @@ class WaybackPriceHistoryClient(
         val urlColour = productColourFamily(urlTitle)
         val missingColour = expectedColour != null && archivedColour == null
         // Do not attach a colour-specific archived offer to a saved product whose colour is
-        // unknown. The selected product must request the colour that the URL proves.
-        if (expectedColour == null && archivedColour != null) return false
+        // unknown. Neither the archived title nor its own URL may silently introduce a colour.
+        if (expectedColour == null && (archivedColour != null || urlColour != null)) return false
         if (missingColour && urlColour != expectedColour) return false
         fun coreIdentity(value: String): String =
             onlineProductIdentityKey(canonicalizeArchiveTitle(value)).split('|')

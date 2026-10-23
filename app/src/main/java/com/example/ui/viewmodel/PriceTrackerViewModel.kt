@@ -2007,7 +2007,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         val cacheNotice = "Resultados recuperados de caché: consulta capturada ${formatOnlineSnapshotAge(cached.savedAt)}. No se ha consumido otra búsqueda; los precios pueden haber cambiado."
                         val savedObservations = if (cachedHistoryCandidates.isNotEmpty()) {
                             withContext(Dispatchers.IO) {
-                                repository.recordOnlineSearchResults(cachedHistoryCandidates, provider.name, query)
+                                repository.recordOnlineSearchResults(visibleCachedResults, provider.name, query)
                             }
                         } else 0
                         val historyNotice = if (cachedHistoryCandidates.isNotEmpty()) {
@@ -2146,7 +2146,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = discarded
                     val savedObservations = if (historyCandidates.isNotEmpty()) {
                         withContext(Dispatchers.IO) {
-                            repository.recordOnlineSearchResults(historyCandidates, provider.name, query)
+                            repository.recordOnlineSearchResults(results, provider.name, query)
                         }
                     } else 0
 

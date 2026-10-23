@@ -84,7 +84,7 @@ class OnlineSearchScreenTest {
         searchList.performScrollToNode(hasText(title))
         composeRule.onNodeWithTag("online-search-product-card").assertIsDisplayed()
         composeRule.onNode(hasText("Precio no verificado", substring = true)).assertIsDisplayed()
-        composeRule.onNodeWithTag("open-online-product-ficha").assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("open-online-product-ficha").performScrollTo().assertIsDisplayed().performClick()
         assertEquals(
             "A product card with a fallback seller link must still open its Room-backed ficha",
             com.example.data.remote.onlineProductIdentityKey(title),
@@ -144,6 +144,7 @@ class OnlineSearchScreenTest {
         composeRule.onNodeWithText("También en tu Mercado").assertIsDisplayed()
         composeRule.onNodeWithText("PRECIO NO VERIFICADO · Ya existe en Mercado").assertIsDisplayed()
         composeRule.onNodeWithTag("open-related-market-online_candidate_market_test")
+            .performScrollTo()
             .assertIsDisplayed()
             .performClick()
         assertEquals(com.example.data.remote.onlineProductIdentityKey(title), openedIdentity)

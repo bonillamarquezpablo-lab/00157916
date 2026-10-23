@@ -113,7 +113,7 @@ class MementoClientTest {
         assertEquals(3, sampled.size)
         assertEquals(rawDates.first(), sampled.first().rawTimestamp)
         assertEquals(rawDates.last(), sampled.last().rawTimestamp)
-        assertEquals(1, sampled.map { it.timestamp }.distinct().size.let { 1 })
+        assertEquals(3, sampled.map { it.timestamp }.distinct().size)
     }
 
     @Test

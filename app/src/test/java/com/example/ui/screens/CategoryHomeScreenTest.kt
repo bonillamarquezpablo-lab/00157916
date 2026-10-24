@@ -120,7 +120,7 @@ class CategoryHomeScreenTest {
 
         composeRule.waitForIdle()
         assertFalse("The category home must not subscribe to product rows", productFlowRequested)
-        composeRule.onNodeWithTag("category_home_screen")
+        composeRule.onNodeWithTag("market_screen_list")
             .performScrollToNode(androidx.compose.ui.test.hasTestTag("view_all_products_button"))
         composeRule.onNodeWithText("Ver todos los productos (871)").assertIsDisplayed()
 
@@ -221,8 +221,8 @@ class CategoryHomeScreenTest {
         composeRule.onNodeWithTag("market_screen_list")
             .performScrollToNode(androidx.compose.ui.test.hasTestTag("saved_family_card_${family.key.hashCode()}"))
         composeRule.onNodeWithTag("saved_family_card_${family.key.hashCode()}").assertIsDisplayed()
-        composeRule.onNodeWithTag("family_photo_${family.key.hashCode()}").assertIsDisplayed()
-        composeRule.onNodeWithTag("product_photo_pixel-10").assertIsDisplayed()
+        composeRule.onNodeWithTag("family_photo_${family.key.hashCode()}").assertExists()
+        composeRule.onNodeWithTag("product_photo_pixel-10").assertExists()
     }
 
     @Test

@@ -376,6 +376,10 @@ class CategoryHomeScreenTest {
                 title = "Xiaomi Redmi 17 Pro 5G 8GB/256GB",
                 brand = "Xiaomi"
             ),
+            testProduct("redmi17-pro5g-black", ProductCategory.SMARTPHONES, store).copy(
+                title = "Xiaomi Redmi 17 Pro 5G 8GB/256GB Negro",
+                brand = "Xiaomi"
+            ),
             testProduct("redmi17-pro-ultra", ProductCategory.SMARTPHONES, store).copy(
                 title = "Xiaomi Redmi 17 Pro Ultra 4G 12GB + 512GB",
                 brand = "Xiaomi"
@@ -417,6 +421,7 @@ class CategoryHomeScreenTest {
             )
         composeRule.onNodeWithText("Estándar · 6 GB RAM · 128 GB").assertIsDisplayed()
         composeRule.onNodeWithText("Pro 5G · 8 GB RAM · 256 GB").assertIsDisplayed()
+        composeRule.onNodeWithText("8GB/256GB Negro", substring = true).assertExists()
         composeRule.onNodeWithText("Modelo por confirmar 4G · 12 GB RAM · 512 GB").assertIsDisplayed()
         assertEquals(
             "The former expansion affordance must not be needed to see versions",

@@ -3027,6 +3027,57 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun acceptsMoreSpecificArchivedColourWhenSelectedTitleLeavesColourUnknown() {
+        val client = newClient()
+        val expected = "Apple iPhone 15 Plus 256GB"
+        val yellowTitle = "Apple iPhone 15 Plus 256GB Amarillo Libre"
+        val yellowUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo-libre"
+        val timestamp = 1_735_732_800_000L
+
+        fun html(title: String, url: String): String = """
+            <html><head>
+              <title>Apple iPhone 15 Plus 256GB</title>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@type":"Product",
+                "name":"$title",
+                "url":"$url",
+                "offers":{"@type":"Offer","price":"624.00","priceCurrency":"EUR","url":"$url"}
+              }
+              </script>
+            </head><body></body></html>
+        """.trimIndent()
+
+        val yellowQuote = client.parseArchivedPrice(
+            html = html(yellowTitle, yellowUrl),
+            expectedTitle = expected,
+            originalUrl = yellowUrl,
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/$yellowUrl",
+            observedAt = timestamp
+        )
+        assertNotNull(
+            "A seller's explicit colour is added detail when the selected product title has no colour",
+            yellowQuote
+        )
+        assertEquals(624.0, yellowQuote!!.price, 0.001)
+
+        val selectedYellow = "Apple iPhone 15 Plus 256GB Amarillo"
+        val blackTitle = "Apple iPhone 15 Plus 256GB Negro Libre"
+        val blackUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-negro-libre"
+        assertNull(
+            "An explicitly different colour must still be rejected",
+            client.parseArchivedPrice(
+                html = html(blackTitle, blackUrl),
+                expectedTitle = selectedYellow,
+                originalUrl = blackUrl,
+                snapshotUrl = "https://web.archive.org/web/20250101120000id_/$blackUrl",
+                observedAt = timestamp
+            )
+        )
+    }
+
+    @Test
     fun acceptsGenericArchivedHeadingOnlyWhenUrlConfirmsTheMissingStorage() {
         val client = newClient()
         val html = """

@@ -4818,7 +4818,9 @@ class WaybackPriceHistoryClient(
         // Missing colour in an archived title is unknown, not a contradiction. Only an
         // explicitly different archived colour rejects the candidate; storage and model checks
         // below remain strict so a generic page cannot lend a price to another SKU.
-        if (expectedColourFamily != archivedColourFamily) return false
+        if (expectedColourFamily != null && archivedColourFamily != null &&
+            expectedColourFamily != archivedColourFamily
+        ) return false
 
         // Trim/model suffixes (Pro, Ultra, Max, etc.) are meaningful for phones and scooters.
         // Require the same explicit trim markers on both titles to avoid cross-variant prices.
@@ -5020,7 +5022,9 @@ class WaybackPriceHistoryClient(
         if (productConditionKey(e) != productConditionKey(a)) return true
         val expectedColour = productColourFamily(e)
         val archivedColour = productColourFamily(a)
-        if (expectedColour == null && archivedColour != null) return true
+        // A colour specified only by the archived offer adds detail; it is not a
+        // contradiction when the selected catalogue title leaves colour unspecified.
+        // Explicitly different colours remain a hard conflict.
         if (expectedColour != null && archivedColour != null && expectedColour != archivedColour) return true
 
         val expectedModelVariants = productModelVariantTokens(e)

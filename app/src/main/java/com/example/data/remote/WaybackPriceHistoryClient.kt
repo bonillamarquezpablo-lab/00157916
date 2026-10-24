@@ -410,7 +410,7 @@ class WaybackPriceHistoryClient(
             )
         val directCandidates = buildDirectUrlCandidates(originalUrl)
         val directUrl = directCandidates.lastOrNull() ?: decomposedUrl.canonicalUrl
-        val attempt = attemptKey("url-cdx-batch-v9-exact-first|${decomposedUrl.merchantDomain}|${decomposedUrl.productIdentifiers.sorted().joinToString(",")}|$directUrl|$expectedTitle")
+        val attempt = attemptKey("url-cdx-batch-v10-adaptive-three-dates|${decomposedUrl.merchantDomain}|${decomposedUrl.productIdentifiers.sorted().joinToString(",")}|$directUrl|$expectedTitle")
         serializedArchiveLookup {
             if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
                 return@serializedArchiveLookup WaybackBackfillResult(
@@ -542,8 +542,7 @@ class WaybackPriceHistoryClient(
                 capturesFound = maxOf(exactResult.capturesFound, prefixResult.capturesFound),
                 capturesChecked = exactResult.capturesChecked + prefixResult.capturesChecked,
                 available = exactResult.available || prefixResult.available,
-                requestFailed = rateLimited ||
-                    (mergedQuotes.isEmpty() && partialRequestFailed),
+                requestFailed = incompleteLookupFailed,
                 diagnosticCodes = if (
                     mergedQuotes.isEmpty() || incompleteLookupFailed
                 ) {
@@ -3916,7 +3915,8 @@ class WaybackPriceHistoryClient(
             matchingVariantUrlForArchivedOffer(document, expectedTitle, candidate, originalUrl)
 
         fun matchesCandidateIdentity(candidate: Triple<String, Double, String>): Boolean =
-            matchesArchivedTitle(candidate.first) || matchingOfferUrl(candidate) != null
+            !hasExplicitProductVariantConflict(expectedTitle, candidate.first) &&
+                (matchesArchivedTitle(candidate.first) || matchingOfferUrl(candidate) != null)
 
         fun isValidCandidate(candidate: Triple<String, Double, String>): Boolean =
             candidate.third.uppercase(Locale.ROOT) in allowedCurrencies &&

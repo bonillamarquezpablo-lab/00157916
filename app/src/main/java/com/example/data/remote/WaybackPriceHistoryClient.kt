@@ -611,6 +611,7 @@ class WaybackPriceHistoryClient(
         lookbackDays: Int = DEFAULT_LOOKBACK_DAYS,
         preferredUrl: String? = null,
         preferredUrlAlreadyQueried: Boolean = false,
+        priorCdxDiagnostics: Set<String> = emptySet(),
         onTrace: ((WaybackTraceEvent) -> Unit)? = null,
         knownProductTitlesById: Map<String, String> = emptyMap(),
         onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null,
@@ -789,6 +790,15 @@ class WaybackPriceHistoryClient(
                 )
             }
             if (preferredUrlAlreadyQueried && resolvedPreferredUrl != null) {
+                val priorPrefixFailures = priorCdxDiagnostics.filter { code ->
+                    (code.startsWith("CDX_URL_PREFIX") ||
+                        code.startsWith("CDX_PRODUCT_PREFIX") ||
+                        code.startsWith("CDX_ALTERNATE_PREFIX")) &&
+                        (code.endsWith("_TIMEOUT") || code.endsWith("_DNS") ||
+                            (code.contains("_HTTP_") &&
+                                code.substringAfterLast('_').toIntOrNull()
+                                    ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true))
+                }
                 return@serializedArchiveLookup runDomainAvailabilityFallback(
                     normalizedDomain = normalizedDomain,
                     expectedTitle = expectedTitle,
@@ -796,7 +806,7 @@ class WaybackPriceHistoryClient(
                     now = now,
                     lookbackDays = lookbackDays,
                     cacheKey = attempt,
-                    failureCodes = setOf("CDX_DIRECT_URL_ALREADY_QUERIED"),
+                    failureCodes = setOf("CDX_DIRECT_URL_ALREADY_QUERIED") + priorPrefixFailures,
                     onTrace = onTrace,
                     snapshotResultsCache = snapshotResultsCache,
                     onVerifiedQuotes = onVerifiedQuotes,

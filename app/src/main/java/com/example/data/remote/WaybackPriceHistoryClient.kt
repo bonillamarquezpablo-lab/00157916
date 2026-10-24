@@ -1497,7 +1497,9 @@ class WaybackPriceHistoryClient(
         knownProductTitlesById: Map<String, String> = emptyMap(),
         snapshotResultsCache: MutableMap<String, SnapshotFetch>? = null,
         onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null,
-        forceRefresh: Boolean = false
+        forceRefresh: Boolean = false,
+        stopAfterDistinctPrimaryDates: Int? = null,
+        primarySeedQuotes: List<ArchivedPriceQuote> = emptyList()
     ): WaybackBackfillResult {
         val urls = candidateUrls.asSequence()
             .filter(::isEligibleDirectUrl)

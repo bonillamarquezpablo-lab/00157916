@@ -42,6 +42,7 @@ import com.example.data.model.Product
 import com.example.data.model.PriceBadgeType
 import com.example.data.model.ProductCategory
 import com.example.data.model.MarketplaceCategorySummary
+import com.example.ui.screens.filterMarketplaceProducts
 import com.example.data.model.Store
 import com.example.data.repository.ProductRepository
 import com.example.data.repository.ProductDiscoveryRepository

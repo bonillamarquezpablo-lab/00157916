@@ -91,6 +91,20 @@ internal fun shouldSkipDomainFallbackAfterSnapshotTimeout(
         !result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
 }
 
+/**
+ * Probe an alternate direct URL only when the exact index answered cleanly but found no captures.
+ * Network errors and 429s are handled by retry/cooldown logic, not by fanning out more requests.
+ */
+internal fun shouldUseAlternateUrlForPrefix(
+    result: WaybackBackfillResult,
+    hasAlternateCandidate: Boolean
+): Boolean = hasAlternateCandidate &&
+    result.available &&
+    result.capturesFound == 0 &&
+    result.quotes.isEmpty() &&
+    !result.requestFailed &&
+    !result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
+
 /** Common UTC boundary for eight-calendar-year discovery, archive fallbacks and local persistence. */
 internal fun archiveHistoryWindowStartTimestampUtc(now: Long, lookbackDays: Int): Long {
     val safeNow = now.coerceAtLeast(0L)
@@ -410,7 +424,7 @@ class WaybackPriceHistoryClient(
             )
         val directCandidates = buildDirectUrlCandidates(originalUrl)
         val directUrl = directCandidates.lastOrNull() ?: decomposedUrl.canonicalUrl
-        val attempt = attemptKey("url-cdx-batch-v9-exact-first|${decomposedUrl.merchantDomain}|${decomposedUrl.productIdentifiers.sorted().joinToString(",")}|$directUrl|$expectedTitle")
+        val attempt = attemptKey("url-cdx-batch-v11-bounded-url-alternate|${decomposedUrl.merchantDomain}|${decomposedUrl.productIdentifiers.sorted().joinToString(",")}|$directUrl|$expectedTitle")
         serializedArchiveLookup {
             if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
                 return@serializedArchiveLookup WaybackBackfillResult(
@@ -435,11 +449,12 @@ class WaybackPriceHistoryClient(
             }
 
             val snapshotResultsCache = mutableMapOf<String, SnapshotFetch>()
-            val prefixCdxUrl = buildCdxUrl(directUrl, now, lookbackDays, matchType = "prefix")
+            val prefixCdxUrlInitial = buildCdxUrl(directUrl, now, lookbackDays, matchType = "prefix")
                 ?: return@serializedArchiveLookup WaybackBackfillResult(
                     requestFailed = true,
                     diagnosticCodes = setOf("DIRECT_URL_INVALID")
                 )
+            var prefixCdxUrl = prefixCdxUrlInitial
             val exactCdxUrl = buildCdxUrl(directUrl, now, lookbackDays, matchType = "exact")
             val exactResult = if (exactCdxUrl == null) {
                 WaybackBackfillResult(diagnosticCodes = setOf("CDX_EXACT_URL_NOT_BUILT"))
@@ -457,12 +472,35 @@ class WaybackPriceHistoryClient(
                     onTrace = onTrace,
                     knownProductTitlesById = knownProductTitlesById,
                     snapshotResultsCache = snapshotResultsCache,
-                    onVerifiedQuotes = onVerifiedQuotes
+                    onVerifiedQuotes = onVerifiedQuotes,
+                    stopAfterDistinctPrimaryDates = MIN_HISTORICAL_DATES_BEFORE_EARLY_STOP
                 )
             }
             if (exactResult.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) {
                 rememberAttempt(attempt, now, hasQuotes = false, failed = true, rateLimited = true)
                 return@serializedArchiveLookup exactResult
+            }
+
+            // Tracking parameters and trailing slashes can change the URL string indexed by CDX.
+            // Reuse the existing prefix request budget for one equivalent URL candidate, but only
+            // after a valid exact response with zero captures. This improves coverage without
+            // adding a network round trip to searches that already found captures or hit an error.
+            val alternateDirectUrl = directCandidates.firstOrNull {
+                it != directUrl &&
+                    isEligibleDirectUrl(it) &&
+                    directUrl.startsWith(it)
+            }
+            if (shouldUseAlternateUrlForPrefix(exactResult, alternateDirectUrl != null)) {
+                val alternatePrefix = buildCdxUrl(
+                    alternateDirectUrl!!, now, lookbackDays, matchType = "prefix"
+                )
+                if (alternatePrefix != null) {
+                    prefixCdxUrl = alternatePrefix
+                    emitWaybackTrace(
+                        onTrace, 4, WaybackTraceStatus.RUNNING,
+                        "La URL exacta no tenía capturas; el fallback por prefijo usará una URL equivalente sin añadir otra petición."
+                    )
+                }
             }
             if (shouldSkipDomainFallbackAfterSnapshotTimeout(listOf(exactResult))) {
                 rememberAttempt(attempt, now, hasQuotes = false, failed = true)
@@ -472,55 +510,90 @@ class WaybackPriceHistoryClient(
                 )
                 return@serializedArchiveLookup exactResult
             }
-            // If exact URL already yields a usable series, avoid the more expensive prefix scan.
-            val exactHasPrimaryVerifiedPrice = exactResult.quotes.any {
+            // A single exact-URL quote is useful, but it is not a usable historical series.
+            // Only skip prefix matching when the selected product already has at least three
+            // distinct UTC dates; sibling-product and quarantined discovery quotes do not count.
+            val exactPrimaryQuotes = exactResult.quotes.filter {
                 it.targetProductId.isNullOrBlank() && !it.isDiscoveryCandidate
             }
-            if (exactHasPrimaryVerifiedPrice) {
+            if (hasSufficientHistoricalCoverage(exactPrimaryQuotes)) {
                 rememberAttempt(attempt, now, hasQuotes = true, failed = false)
-                // The exact CDX path already verified the requested product. The prefix scan
-                // is an expensive recovery path for missed slugs, not a reason to wait another
-                // 5–7 seconds after the selected product is already confirmed.
+                // The exact CDX path already supplies a meaningful series for the selected SKU.
+                // Otherwise continue to prefix matching so one isolated capture cannot stop the
+                // historical engine before it searches other archived URL forms.
                 return@serializedArchiveLookup exactResult.copy(diagnosticCodes = emptySet())
             }
 
-            // Prefix matching is a fallback for alternate slashes, locale paths and canonical URL variants.
+            // Adaptive budget: if the exact URL already found a valid price, this is a quick
+            // supplement to add one or two more dated points, not another full historical crawl.
+            // If the exact URL found nothing, keep the wider recovery budget.
+            val foundExactPrimaryQuote = exactPrimaryQuotes.isNotEmpty()
             val prefixResult = queryCdxAndFetchPrices(
                 cdxUrl = prefixCdxUrl,
                 expectedTitle = expectedTitle,
                 cacheKey = attempt,
                 now = now,
                 lookbackDays = lookbackDays,
-                maxSnapshots = MAX_DIRECT_SNAPSHOTS_PER_URL,
-                cdxTimeoutSeconds = DIRECT_CDX_TIMEOUT_SECONDS,
+                maxSnapshots = if (foundExactPrimaryQuote) {
+                    MAX_QUICK_SUPPLEMENTAL_SNAPSHOTS
+                } else {
+                    MAX_DIRECT_SNAPSHOTS_PER_URL
+                },
+                cdxTimeoutSeconds = if (foundExactPrimaryQuote) {
+                    QUICK_SUPPLEMENTAL_PREFIX_CDX_TIMEOUT_SECONDS
+                } else {
+                    DIRECT_CDX_TIMEOUT_SECONDS
+                },
                 cdxStage = "CDX_URL_PREFIX",
-                snapshotTimeoutSeconds = DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS,
+                snapshotTimeoutSeconds = if (foundExactPrimaryQuote) {
+                    QUICK_SUPPLEMENTAL_PREFIX_SNAPSHOT_TIMEOUT_SECONDS
+                } else {
+                    DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS
+                },
                 onTrace = onTrace,
                 knownProductTitlesById = knownProductTitlesById,
                 snapshotResultsCache = snapshotResultsCache,
-                onVerifiedQuotes = onVerifiedQuotes
+                onVerifiedQuotes = onVerifiedQuotes,
+                stopAfterDistinctPrimaryDates = if (foundExactPrimaryQuote) {
+                    MIN_HISTORICAL_DATES_BEFORE_EARLY_STOP
+                } else null,
+                primarySeedQuotes = exactPrimaryQuotes
             )
             val mergedQuotes = (exactResult.quotes + prefixResult.quotes)
                 .distinctBy { listOf(it.originalUrl, it.observedAt.toString(), it.price.toString(), it.currency) }
                 .sortedBy { it.observedAt }
+            val mergedPrimaryQuotes = mergedQuotes.filter {
+                it.targetProductId.isNullOrBlank() && !it.isDiscoveryCandidate
+            }
+            val mergedHasSufficientHistory = hasSufficientHistoricalCoverage(mergedPrimaryQuotes)
+            val combinedDiagnostics = exactResult.diagnosticCodes + prefixResult.diagnosticCodes
+            val rateLimited = combinedDiagnostics.contains("WAYBACK_RATE_LIMITED")
+            val partialRequestFailed = exactResult.requestFailed || prefixResult.requestFailed
+            // A quote from the exact route does not turn a failed prefix request into a completed
+            // historical lookup. Keep the transport diagnosis and retry state when the combined
+            // primary series is still too sparse, and honor the global 429 cooldown even with quotes.
+            val incompleteLookupFailed = rateLimited ||
+                (partialRequestFailed && !mergedHasSufficientHistory)
             val merged = prefixResult.copy(
                 quotes = mergedQuotes,
                 capturesFound = maxOf(exactResult.capturesFound, prefixResult.capturesFound),
                 capturesChecked = exactResult.capturesChecked + prefixResult.capturesChecked,
                 available = exactResult.available || prefixResult.available,
-                requestFailed = mergedQuotes.isEmpty() && (exactResult.requestFailed || prefixResult.requestFailed),
-                diagnosticCodes = if (mergedQuotes.isNotEmpty()) {
-                    emptySet()
+                requestFailed = incompleteLookupFailed,
+                diagnosticCodes = if (
+                    mergedQuotes.isEmpty() || incompleteLookupFailed
+                ) {
+                    combinedDiagnostics
                 } else {
-                    exactResult.diagnosticCodes + prefixResult.diagnosticCodes
+                    emptySet()
                 }
             )
             rememberAttempt(
                 attempt,
                 now,
                 hasQuotes = merged.quotes.isNotEmpty(),
-                failed = merged.requestFailed,
-                rateLimited = merged.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
+                failed = incompleteLookupFailed,
+                rateLimited = rateLimited
             )
             merged
         }
@@ -2117,19 +2190,26 @@ class WaybackPriceHistoryClient(
                             } else {
                                 emitWaybackTrace(captureTrace, evaluateStep, WaybackTraceStatus.PASSED, "HTML recibido y sin marcadores comunes de cookies, CAPTCHA o bloqueo.")
                                 val document = Jsoup.parse(html)
+                                // Parse JSON-LD scripts once per snapshot and share the roots with
+                                // primary, secondary and diagnostic validation.
+                                val jsonLdRoots = extractJsonLdRoots(document)
                                 val sourceQuote = parseArchivedPrice(
                                     document = document,
                                     expectedTitle = expectedTitle,
                                     originalUrl = capture.originalUrl,
                                     snapshotUrl = snapshotUrl,
                                     observedAt = capture.timestamp,
-                                    acceptedCurrencies = setOf("EUR", "USD")
+                                    acceptedCurrencies = setOf("EUR", "USD"),
+                                    jsonLdRoots = jsonLdRoots
                                 )
                                 val quote = when (sourceQuote?.currency?.uppercase(Locale.ROOT)) {
                                     "USD" -> sourceQuote?.let { convertUsdQuoteToEurAtCaptureDate(it, captureTrace) }
                                     else -> sourceQuote
                                 }
-                                reportArchiveFieldTrace(captureTrace, document, expectedTitle, capture.originalUrl, quote, sourceQuote)
+                                reportArchiveFieldTrace(
+                                    captureTrace, document, expectedTitle, capture.originalUrl, quote, sourceQuote,
+                                    jsonLdRoots = jsonLdRoots
+                                )
                                 val secondarySourceQuotes = parseArchivedPricesForKnownProducts(
                                     document = document,
                                     primaryExpectedTitle = expectedTitle,
@@ -2137,7 +2217,8 @@ class WaybackPriceHistoryClient(
                                     originalUrl = capture.originalUrl,
                                     snapshotUrl = snapshotUrl,
                                     observedAt = capture.timestamp,
-                                    acceptedCurrencies = setOf("EUR", "USD")
+                                    acceptedCurrencies = setOf("EUR", "USD"),
+                                    jsonLdRoots = jsonLdRoots
                                 )
                                 val secondaryQuotes = secondarySourceQuotes.mapNotNull { secondary ->
                                     when (secondary.currency.uppercase(Locale.ROOT)) {
@@ -2153,7 +2234,7 @@ class WaybackPriceHistoryClient(
                                     diagnosticCode = when {
                                         quote != null -> null
                                         sourceQuote?.currency?.equals("USD", ignoreCase = true) == true -> "ARCHIVE_USD_FX_UNAVAILABLE"
-                                        else -> diagnoseArchivedPrice(document, expectedTitle, capture.originalUrl)
+                                        else -> diagnoseArchivedPrice(document, expectedTitle, capture.originalUrl, jsonLdRoots)
                                     }
                                 )
                             }
@@ -2350,18 +2431,21 @@ class WaybackPriceHistoryClient(
         expectedTitle: String,
         originalUrl: String,
         quote: ArchivedPriceQuote?,
-        sourceQuote: ArchivedPriceQuote? = quote
+        sourceQuote: ArchivedPriceQuote? = quote,
+        jsonLdRoots: List<Any> = extractJsonLdRoots(document)
     ) {
-        val jsonLd = extractJsonLdProductOffers(document)
+        val jsonLd = extractJsonLdProductOffers(jsonLdRoots)
         val pageTitles = extractArchivedPageTitles(document)
         val titles = (jsonLd.map { it.first } + pageTitles).filter { it.isNotBlank() }
         val expectedTitleForTrace = expectedTitle.replace(Regex("""\s+"""), " ").trim().take(100)
         val detectedTitlesForTrace = titles.take(3)
             .joinToString(" | ") { it.replace(Regex("""\s+"""), " ").trim().take(100) }
-        val structuredMatch = jsonLd.any { isMatchingTitleForArchivedUrl(expectedTitle, it.first, originalUrl) }
-        val structuredConflict = jsonLd.firstOrNull {
-            hasExplicitProductVariantConflict(expectedTitle, it.first) &&
-                !isMatchingTitleForArchivedUrl(expectedTitle, it.first, originalUrl)
+        val structuredMatch = jsonLd.any { candidate ->
+            isMatchingArchivedOfferIdentity(document, expectedTitle, candidate, originalUrl, jsonLdRoots)
+        }
+        val structuredConflict = jsonLd.firstOrNull { candidate ->
+            hasExplicitProductVariantConflict(expectedTitle, candidate.first) &&
+                !isMatchingArchivedOfferIdentity(document, expectedTitle, candidate, originalUrl, jsonLdRoots)
         }
         val pageTitleMatch = pageTitles.any { isMatchingTitleForArchivedUrl(expectedTitle, it, originalUrl) }
         val titleMatches = structuredMatch || (structuredConflict == null && pageTitleMatch)
@@ -2434,8 +2518,13 @@ class WaybackPriceHistoryClient(
         emitWaybackTrace(onTrace, 14, WaybackTraceStatus.SKIPPED, detail)
     }
 
-    private fun diagnoseArchivedPrice(document: Document, expectedTitle: String, originalUrl: String): String {
-        val jsonLd = extractJsonLdProductOffers(document)
+    private fun diagnoseArchivedPrice(
+        document: Document,
+        expectedTitle: String,
+        originalUrl: String,
+        jsonLdRoots: List<Any> = extractJsonLdRoots(document)
+    ): String {
+        val jsonLd = extractJsonLdProductOffers(jsonLdRoots)
         val pageTitles = extractArchivedPageTitles(document)
         val metaPrice = listOf(
             "product:price:amount", "og:price:amount", "price", "product:price"
@@ -2884,14 +2973,16 @@ class WaybackPriceHistoryClient(
         val hadQuotes = preferences.getBoolean("${key}_has_quotes", false)
         val failed = preferences.getBoolean("${key}_failed", false)
         val rateLimited = preferences.getBoolean("${key}_rate_limited", false)
-        // Failed lookups are cached briefly. For an explicit HTTP 429, the global Retry-After
-        // cooldown is authoritative; let the same product retry as soon as that pause expires.
-        if (failed && !hadQuotes && rateLimited) {
+        // For HTTP 429, the global Retry-After cooldown is authoritative even if an
+        // earlier route produced a partial quote. Retry as soon as that pause expires.
+        if (rateLimited) {
             return preferences.getLong(KEY_RATE_LIMIT_UNTIL, 0L) > now
         }
+        // A partial series whose supplementary request failed must use the short failure
+        // interval, not the long successful-history cache simply because it contains one point.
         val retryInterval = when {
-            hadQuotes -> RETRY_INTERVAL_MS
             failed -> FAILURE_RETRY_INTERVAL_MS
+            hadQuotes -> RETRY_INTERVAL_MS
             else -> NEGATIVE_RETRY_INTERVAL_MS
         }
         return now - lastAttempt < retryInterval
@@ -3097,7 +3188,9 @@ class WaybackPriceHistoryClient(
         onTrace: ((WaybackTraceEvent) -> Unit)? = null,
         knownProductTitlesById: Map<String, String> = emptyMap(),
         snapshotResultsCache: MutableMap<String, SnapshotFetch>? = null,
-        onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null
+        onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null,
+        stopAfterDistinctPrimaryDates: Int? = null,
+        primarySeedQuotes: List<ArchivedPriceQuote> = emptyList()
     ): WaybackBackfillResult {
         emitWaybackTrace(onTrace, 4, WaybackTraceStatus.RUNNING,
             "$cdxStage: petición CDX preparada; URL completa omitida.")
@@ -3233,9 +3326,22 @@ class WaybackPriceHistoryClient(
             diagnosticStep = 10
         )
 
-        val sampled = sampleCaptures(captures, maxSnapshots)
+        val sampled = if (snapshotResultsCache != null) {
+            sampleUnprocessedCaptures(
+                captures = captures,
+                max = maxSnapshots,
+                processedCaptureKeys = snapshotResultsCache.keys
+            )
+        } else {
+            sampleCaptures(captures, maxSnapshots)
+        }
         val fetched = mutableListOf<SnapshotFetch>()
-        for ((snapshotIndex, capture) in sampled.withIndex()) {
+        // A bounded early-stop pass should start with the newest capture, then step back through
+        // the quarterly samples. This preserves a useful current anchor before seeking older dates.
+        val capturesToFetch = if (stopAfterDistinctPrimaryDates != null) {
+            sampled.sortedByDescending { it.timestamp }
+        } else sampled
+        for ((snapshotIndex, capture) in capturesToFetch.withIndex()) {
             val snapshot = fetchSnapshotOnce(
                 capture = capture,
                 expectedTitle = expectedTitle,
@@ -3250,6 +3356,27 @@ class WaybackPriceHistoryClient(
             )
             fetched += snapshot
             if (snapshot.diagnosticCode == "WAYBACK_RATE_LIMITED") break
+            val requiredPrimaryDates = stopAfterDistinctPrimaryDates
+            if (requiredPrimaryDates != null && requiredPrimaryDates > 0) {
+                val verifiedPrimaryDates = (
+                    primarySeedQuotes + fetched.flatMap { item ->
+                        listOfNotNull(item.quote) + item.additionalQuotes
+                    }
+                ).asSequence()
+                    .filter { !it.isDiscoveryCandidate && it.targetProductId.isNullOrBlank() }
+                    .map { Math.floorDiv(it.observedAt, DAY_MS) }
+                    .distinct()
+                    .take(requiredPrimaryDates)
+                    .count()
+                if (verifiedPrimaryDates >= requiredPrimaryDates) {
+                    emitWaybackTrace(
+                        onTrace, 14, WaybackTraceStatus.PASSED,
+                        "Búsqueda suplementaria detenida: ya hay $verifiedPrimaryDates fechas distintas verificadas del producto seleccionado.",
+                        diagnosticStep = 18
+                    )
+                    break
+                }
+            }
         }
         when {
             sampled.isEmpty() -> {
@@ -3817,12 +3944,13 @@ class WaybackPriceHistoryClient(
         originalUrl: String,
         snapshotUrl: String,
         observedAt: Long,
-        acceptedCurrencies: Set<String> = setOf("EUR")
+        acceptedCurrencies: Set<String> = setOf("EUR"),
+        jsonLdRoots: List<Any> = extractJsonLdRoots(document)
     ): ArchivedPriceQuote? {
         // The product price/title may exist only in <head> metadata or JSON-LD, so an empty
         // rendered body is not enough to reject an archived document.
         if (expectedTitle.isBlank() || observedAt <= 0L) return null
-        val jsonLdCandidates = extractJsonLdProductOffers(document)
+        val jsonLdCandidates = extractJsonLdProductOffers(jsonLdRoots)
         val pageTitles = extractArchivedPageTitles(document)
 
         val metaPrice = listOf(
@@ -3840,16 +3968,33 @@ class WaybackPriceHistoryClient(
         fun matchesArchivedTitle(title: String): Boolean =
             isMatchingTitleForArchivedUrl(expectedTitle, title, originalUrl)
 
+        // Some retailers publish a generic Product name while its structured Offer URL confirms
+        // the exact capacity/colour. Cache both matching and non-matching candidates; URL checks
+        // must not re-walk the same JSON-LD structures repeatedly within one snapshot.
+        val matchingOfferUrlCache = mutableMapOf<Triple<String, Double, String>, String?>()
+        fun matchingOfferUrl(candidate: Triple<String, Double, String>): String? {
+            if (matchingOfferUrlCache.containsKey(candidate)) return matchingOfferUrlCache[candidate]
+            val resolved = matchingVariantUrlForArchivedOffer(
+                document, expectedTitle, candidate, originalUrl, jsonLdRoots
+            )
+            matchingOfferUrlCache[candidate] = resolved
+            return resolved
+        }
+
+        fun matchesCandidateIdentity(candidate: Triple<String, Double, String>): Boolean =
+            !hasExplicitProductVariantConflict(expectedTitle, candidate.first) &&
+                (matchesArchivedTitle(candidate.first) || matchingOfferUrl(candidate) != null)
+
         fun isValidCandidate(candidate: Triple<String, Double, String>): Boolean =
             candidate.third.uppercase(Locale.ROOT) in allowedCurrencies &&
                 candidate.second in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE &&
-                matchesArchivedTitle(candidate.first)
+                matchesCandidateIdentity(candidate)
 
-        val matchingIdentityJsonLd = jsonLdCandidates.filter { matchesArchivedTitle(it.first) }
+        val matchingIdentityJsonLd = jsonLdCandidates.filter(::matchesCandidateIdentity)
         val matchingJsonLd = matchingIdentityJsonLd.filter(::isValidCandidate)
         val structuredVariantConflict = jsonLdCandidates.firstOrNull {
             hasExplicitProductVariantConflict(expectedTitle, it.first) &&
-                !matchesArchivedTitle(it.first)
+                !matchesCandidateIdentity(it)
         }
 
         // Do not borrow a generic page/meta title if its structured offer identifies another SKU,
@@ -3882,6 +4027,7 @@ class WaybackPriceHistoryClient(
             )
         }
         if (matching != null) {
+            val offerIdentityUrl = matchingOfferUrl(matching)
             return ArchivedPriceQuote(
                 observedAt = observedAt,
                 price = matching.second,
@@ -3893,7 +4039,8 @@ class WaybackPriceHistoryClient(
                 sourcePrice = matching.second,
                 variantIdentityConfirmedByUrl = matchesVariantDetailsConfirmedByUrl(
                     expectedTitle, matching.first, originalUrl
-                )
+                ) || offerIdentityUrl != null,
+                productUrl = offerIdentityUrl
             )
         }
 
@@ -3933,40 +4080,34 @@ class WaybackPriceHistoryClient(
         productTitle: String,
         expectedPrice: Double,
         expectedCurrency: String,
-        pageUrl: String
+        pageUrl: String,
+        jsonLdRoots: List<Any> = extractJsonLdRoots(document)
     ): List<String> {
         if (productTitle.isBlank() || expectedPrice <= 0.0) return emptyList()
-        val roots = document.select("script").asSequence()
-            .filter { script ->
-                script.attr("type").substringBefore(';').trim()
-                    .equals("application/ld+json", ignoreCase = true)
-            }
-            .mapNotNull { script ->
-                val payload = script.data().ifBlank { script.html() }
-                    .trim()
-                    .removePrefix("<!--").removeSuffix("-->").trim()
-                try { JSONTokener(payload).nextValue() } catch (_: Exception) { null }
-            }
-            .toList()
         val wantedName = normalizeTitle(productTitle)
         val wantedCurrency = expectedCurrency.uppercase(Locale.ROOT)
         val urls = linkedSetOf<String>()
 
-        fun resolveCandidate(raw: String?) {
-            if (raw.isNullOrBlank() || raw == "null") return
-            val resolved = runCatching { URI(pageUrl).resolve(raw).toString() }.getOrNull() ?: return
-            val uri = runCatching { URI(resolved) }.getOrNull() ?: return
+        fun resolveCandidate(raw: String?): String? {
+            if (raw.isNullOrBlank() || raw == "null") return null
+            val resolved = runCatching { URI(pageUrl).resolve(raw).toString() }.getOrNull() ?: return null
+            val uri = runCatching { URI(resolved) }.getOrNull() ?: return null
             if (!uri.scheme.equals("https", ignoreCase = true) ||
                 uri.host.isNullOrBlank() ||
                 uri.host.equals("web.archive.org", ignoreCase = true) ||
                 uri.host.equals("archive.org", ignoreCase = true) ||
                 uri.host.equals("arquivo.pt", ignoreCase = true) ||
                 !isEligibleDirectUrl(resolved)
-            ) return
-            urls += resolved
+            ) return null
+            return resolved
         }
 
-        fun matchingOffer(offers: Any?): Boolean {
+        fun matchingOffer(
+            offers: Any?,
+            offerUrls: MutableSet<String>,
+            itemUrls: MutableSet<String>,
+            hasExplicitOfferUrl: BooleanArray
+        ): Boolean {
             var matched = false
             fun visit(value: Any?) {
                 when (value) {
@@ -3990,8 +4131,19 @@ class WaybackPriceHistoryClient(
                             currency == wantedCurrency
                         ) {
                             matched = true
-                            resolveCandidate(value.optString("url"))
-                            value.optJSONObject("itemOffered")?.optString("url")?.let(::resolveCandidate)
+                            val rawOfferUrl = value.optString("url")
+                                .takeIf { it.isNotBlank() && it != "null" }
+                            if (rawOfferUrl != null) {
+                                // An explicit Offer.url determines where this exact price belongs.
+                                // Do not fall back to Product.url if that offer URL is external,
+                                // blocked, or otherwise ineligible.
+                                hasExplicitOfferUrl[0] = true
+                                resolveCandidate(rawOfferUrl)?.let(offerUrls::add)
+                            } else {
+                                value.optJSONObject("itemOffered")?.optString("url")
+                                    ?.takeIf { it.isNotBlank() && it != "null" }
+                                    ?.let { raw -> resolveCandidate(raw)?.let(itemUrls::add) }
+                            }
                         }
                         val keys = value.keys()
                         while (keys.hasNext()) visit(value.opt(keys.next()))
@@ -4009,10 +4161,28 @@ class WaybackPriceHistoryClient(
                     val productTypes = setOf("product", "productgroup", "individualproduct", "productmodel")
                     val name = value.optString("name").takeIf { it.isNotBlank() && it != "null" }
                     if (name != null && normalizeTitle(name) == wantedName &&
-                        jsonLdTypeNames(value).any { it in productTypes } &&
-                        matchingOffer(value.opt("offers"))
+                        jsonLdTypeNames(value).any { it in productTypes }
                     ) {
-                        resolveCandidate(value.optString("url"))
+                        val matchingOfferUrls = linkedSetOf<String>()
+                        val matchingItemUrls = linkedSetOf<String>()
+                        val hasExplicitOfferUrl = booleanArrayOf(false)
+                        if (matchingOffer(
+                                value.opt("offers"),
+                                matchingOfferUrls,
+                                matchingItemUrls,
+                                hasExplicitOfferUrl
+                            )
+                        ) {
+                            if (hasExplicitOfferUrl[0]) {
+                                // A matched Offer.url has priority over the general Product.url.
+                                // Its merchant provenance must not be replaced by a safer-looking
+                                // Product.url when the actual offer belongs to a different store.
+                                urls.addAll(matchingOfferUrls)
+                            } else {
+                                urls.addAll(matchingItemUrls)
+                                resolveCandidate(value.optString("url"))?.let(urls::add)
+                            }
+                        }
                     }
                     val keys = value.keys()
                     while (keys.hasNext()) visitProducts(value.opt(keys.next()))
@@ -4020,7 +4190,7 @@ class WaybackPriceHistoryClient(
                 is JSONArray -> for (index in 0 until value.length()) visitProducts(value.opt(index))
             }
         }
-        roots.forEach(::visitProducts)
+        jsonLdRoots.forEach(::visitProducts)
         return urls.toList()
     }
 
@@ -4031,12 +4201,29 @@ class WaybackPriceHistoryClient(
         originalUrl: String,
         snapshotUrl: String,
         observedAt: Long,
-        acceptedCurrencies: Set<String> = setOf("EUR", "USD")
+        acceptedCurrencies: Set<String> = setOf("EUR", "USD"),
+        jsonLdRoots: List<Any> = extractJsonLdRoots(document)
     ): List<ArchivedPriceQuote> {
         if (primaryExpectedTitle.isBlank() || observedAt <= 0L) return emptyList()
         val allowedCurrencies = acceptedCurrencies.map { it.uppercase(Locale.ROOT) }.toSet()
         val output = mutableListOf<ArchivedPriceQuote>()
-        for ((archivedTitle, price, rawCurrency) in extractJsonLdProductOffers(document)) {
+
+        // Each archived page may expose many offers, all compared with the same saved catalogue.
+        // Cache title and variant signals per product once; the final identity checks remain strict.
+        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+        fun storageTokens(title: String): Set<String> = storagePattern.findAll(title)
+            .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }
+            .toSet()
+        val primaryNormalizedTitle = normalizeTitle(primaryExpectedTitle)
+        val primaryStorage = storageTokens(primaryNormalizedTitle)
+        val primaryColour = productColourFamily(primaryNormalizedTitle)
+        val primaryModelVariants = productModelVariantTokens(primaryNormalizedTitle)
+        val normalizedKnownTitles = knownProductTitlesById.mapValues { normalizeTitle(it.value) }
+        val knownStorage = normalizedKnownTitles.mapValues { storageTokens(it.value) }
+        val knownColours = normalizedKnownTitles.mapValues { productColourFamily(it.value) }
+        val knownModelVariants = normalizedKnownTitles.mapValues { productModelVariantTokens(it.value) }
+
+        for ((archivedTitle, price, rawCurrency) in extractJsonLdProductOffers(jsonLdRoots)) {
             val currency = rawCurrency.uppercase(Locale.ROOT)
             if (currency !in allowedCurrencies || price !in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE) continue
 
@@ -4047,29 +4234,28 @@ class WaybackPriceHistoryClient(
                 productTitle = archivedTitle,
                 expectedPrice = price,
                 expectedCurrency = currency,
-                pageUrl = originalUrl
-            ).distinctBy { it.trimEnd('/').lowercase(Locale.ROOT) }
+                pageUrl = originalUrl,
+                jsonLdRoots = jsonLdRoots
+            ).filter { offerUrl ->
+                // Keep the archived price tied to the retailer that supplied the captured page.
+                // A third-party URL must not confirm a SKU and then be stored as if its price
+                // came from the original merchant.
+                isSameMerchantHost(originalUrl, offerUrl)
+            }.distinctBy { it.trimEnd('/').lowercase(Locale.ROOT) }
             val matches = knownProductTitlesById.entries.mapNotNull { (productId, savedTitle) ->
                 if (productId.isBlank() || savedTitle.isBlank()) return@mapNotNull null
                 // Exclude the selected product as a secondary only when its known SKU actually
                 // matches the archived page. A broad retailer URL for 256 GB must not cause a
                 // distinct 128 GB saved product to be discarded before its own Offer URL is checked.
-                val primaryNormalizedTitle = normalizeTitle(primaryExpectedTitle)
-                val savedNormalizedTitle = normalizeTitle(savedTitle)
-                val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
-                val primaryStorage = storagePattern.findAll(primaryNormalizedTitle)
-                    .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
-                val savedStorage = storagePattern.findAll(savedNormalizedTitle)
-                    .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
+                val savedNormalizedTitle = normalizedKnownTitles[productId].orEmpty()
+                val savedStorage = knownStorage[productId].orEmpty()
                 val explicitStorageConflict = primaryStorage.isNotEmpty() &&
                     savedStorage.isNotEmpty() && primaryStorage != savedStorage
-                val primaryColour = productColourFamily(primaryNormalizedTitle)
-                val savedColour = productColourFamily(savedNormalizedTitle)
+                val savedColour = knownColours[productId]
                 val explicitColourConflict = primaryColour != null && savedColour != null &&
                     primaryColour != savedColour
                 val explicitModelVariantConflict =
-                    productModelVariantTokens(primaryNormalizedTitle) !=
-                        productModelVariantTokens(savedNormalizedTitle)
+                    primaryModelVariants != knownModelVariants[productId].orEmpty()
                 val isPrimarySavedProduct = !explicitStorageConflict &&
                     !explicitColourConflict && !explicitModelVariantConflict && (
                         isMatchingProductTitle(primaryExpectedTitle, savedTitle) ||
@@ -4158,6 +4344,44 @@ class WaybackPriceHistoryClient(
         }
     }
 
+    /**
+     * Find a SKU-specific URL attached to the same JSON-LD Product/Offer title, amount and
+     * currency. A generic title may omit capacity or colour; the offer URL can fill that gap only
+     * when it independently proves every missing variant detail and contains no contradiction.
+     */
+    private fun matchingVariantUrlForArchivedOffer(
+        document: Document,
+        expectedTitle: String,
+        candidate: Triple<String, Double, String>,
+        pageUrl: String,
+        jsonLdRoots: List<Any> = extractJsonLdRoots(document)
+    ): String? {
+        if (isMatchingTitleForArchivedUrl(expectedTitle, candidate.first, pageUrl)) return null
+        return jsonLdProductUrlsForOffer(
+            document = document,
+            productTitle = candidate.first,
+            expectedPrice = candidate.second,
+            expectedCurrency = candidate.third,
+            pageUrl = pageUrl,
+            jsonLdRoots = jsonLdRoots
+        ).firstOrNull { offerUrl ->
+            isSameMerchantHost(pageUrl, offerUrl) &&
+                !hasExplicitVariantConflictInProductUrl(expectedTitle, offerUrl) &&
+                matchesVariantDetailsConfirmedByUrl(expectedTitle, candidate.first, offerUrl)
+        }
+    }
+
+    private fun isMatchingArchivedOfferIdentity(
+        document: Document,
+        expectedTitle: String,
+        candidate: Triple<String, Double, String>,
+        pageUrl: String,
+        jsonLdRoots: List<Any> = extractJsonLdRoots(document)
+    ): Boolean =
+        !hasExplicitProductVariantConflict(expectedTitle, candidate.first) &&
+            (isMatchingTitleForArchivedUrl(expectedTitle, candidate.first, pageUrl) ||
+                matchingVariantUrlForArchivedOffer(document, expectedTitle, candidate, pageUrl, jsonLdRoots) != null)
+
     private fun isSameMerchantHost(firstUrl: String, secondUrl: String): Boolean {
         val firstHost = runCatching { URI(firstUrl).host.orEmpty() }.getOrDefault("")
             .lowercase(Locale.ROOT).removePrefix("www.")
@@ -4176,8 +4400,8 @@ class WaybackPriceHistoryClient(
             .containsMatchIn(normalized)
     }
 
-    private fun extractJsonLdProductOffers(document: Document): List<Triple<String, Double, String>> {
-        val roots = document.select("script").asSequence()
+    private fun extractJsonLdRoots(document: Document): List<Any> =
+        document.select("script").asSequence()
             .filter { script ->
                 script.attr("type").substringBefore(';').trim()
                     .equals("application/ld+json", ignoreCase = true)
@@ -4189,6 +4413,11 @@ class WaybackPriceHistoryClient(
                 try { JSONTokener(payload).nextValue() } catch (_: Exception) { null }
             }
             .toList()
+
+    private fun extractJsonLdProductOffers(document: Document): List<Triple<String, Double, String>> =
+        extractJsonLdProductOffers(extractJsonLdRoots(document))
+
+    private fun extractJsonLdProductOffers(roots: List<Any>): List<Triple<String, Double, String>> {
         val output = mutableListOf<Triple<String, Double, String>>()
         val productNamesById = linkedMapOf<String, Pair<String, String>>()
         roots.forEach { indexJsonLdProducts(it, productNamesById) }
@@ -4785,24 +5014,30 @@ class WaybackPriceHistoryClient(
         val sameBroadIdentity = onlineProductIdentityKey(e) == onlineProductIdentityKey(a)
         if (!sharedIdentifier && !sameBroadIdentity) return false
 
+        // Missing qualifiers in a structured title are unknown, not a proven conflict: the
+        // matching offer URL may confirm them. Reject only qualifiers the title explicitly
+        // contradicts, or a specific colour/capacity attached to a product whose variant is unknown.
+        if (productConditionKey(e) != productConditionKey(a)) return true
         val expectedColour = productColourFamily(e)
         val archivedColour = productColourFamily(a)
-        if (expectedColour != null && expectedColour != archivedColour) return true
+        if (expectedColour == null && archivedColour != null) return true
+        if (expectedColour != null && archivedColour != null && expectedColour != archivedColour) return true
 
         val expectedModelVariants = productModelVariantTokens(e)
         val archivedModelVariants = productModelVariantTokens(a)
-        if (expectedModelVariants != archivedModelVariants &&
-            (expectedModelVariants.isNotEmpty() || archivedModelVariants.isNotEmpty())
-        ) return true
+        if (archivedModelVariants.isNotEmpty() && expectedModelVariants != archivedModelVariants) return true
 
         val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
         val expectedStorage = storagePattern.findAll(e).map { it.value.replace(Regex("""\s+"""), "") }.toSet()
         val archivedStorage = storagePattern.findAll(a).map { it.value.replace(Regex("""\s+"""), "") }.toSet()
-        if (expectedStorage.isNotEmpty() && !archivedStorage.containsAll(expectedStorage)) return true
+        if (expectedStorage.isEmpty() && archivedStorage.isNotEmpty()) return true
+        if (expectedStorage.isNotEmpty() && archivedStorage.any { it !in expectedStorage }) return true
 
         return expectedIdentifiers.isNotEmpty() &&
             expectedIdentifiers.any { it.matches(Regex("""\d+(?:gb|tb|mah|wh|w|hz|mm|cm)?""")) } &&
-            !archivedIdentifiers.containsAll(expectedIdentifiers)
+            archivedIdentifiers.any {
+                it.matches(Regex("""\d+(?:gb|tb|mah|wh|w|hz|mm|cm)?""")) && it !in expectedIdentifiers
+            }
     }
 
     private fun xiaomiMiModel(normalizedTitle: String): String? {
@@ -5093,6 +5328,12 @@ class WaybackPriceHistoryClient(
         private const val ALTERNATE_PRODUCT_CDX_TIMEOUT_SECONDS = 5L
         private const val MAX_DOMAIN_PRODUCT_URL_CANDIDATES = 2
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 12
+        // When an exact URL already returned a verified point, limit the prefix fallback to a
+        // few snapshots. With the early-stop threshold below this normally adds only 1–2 dates.
+        private const val MAX_QUICK_SUPPLEMENTAL_SNAPSHOTS = 3
+        private const val QUICK_SUPPLEMENTAL_PREFIX_CDX_TIMEOUT_SECONDS = 3L
+        private const val QUICK_SUPPLEMENTAL_PREFIX_SNAPSHOT_TIMEOUT_SECONDS = 5L
+        private const val MIN_HISTORICAL_DATES_BEFORE_EARLY_STOP = 3
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 8
         // Used only by historical backfill, never by the primary shopping search.
         private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 7L

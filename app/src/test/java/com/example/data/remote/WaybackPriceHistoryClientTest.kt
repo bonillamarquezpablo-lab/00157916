@@ -342,7 +342,7 @@ class WaybackPriceHistoryClientTest {
         val baseClient = WaybackPriceHistoryClient(context)
         val canonicalUrl = baseClient.buildDirectUrlCandidates(originalUrl).last()
         val urlParts = baseClient.decomposeProductUrl(originalUrl)!!
-        val rawKey = "url-cdx-batch-v9-exact-first|" +
+        val rawKey = "url-cdx-batch-v11-bounded-url-alternate|" +
             urlParts.merchantDomain + "|" +
             urlParts.productIdentifiers.sorted().joinToString(",") + "|" +
             canonicalUrl + "|" + title
@@ -507,7 +507,94 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun exactDirectCdxVerifiedPrimaryQuoteSkipsPrefixAndNotifiesCallback() = runBlocking {
+    fun exactHistoryStopsAfterThreeVerifiedDatesAndKeepsTheNewestCaptures() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .remove("wayback_rate_limit_last_hit_at")
+            .remove("wayback_rate_limit_hit_count")
+            .commit()
+
+        val title = "Anker Prime 27K Power Bank Early Stop Regression ${System.currentTimeMillis()}"
+        val originalUrl = "https://shop.example/products/anker-prime-27k-early-stop"
+        val timestamps = listOf("20220101120000", "20230101120000", "20240101120000", "20250101120000", "20260101120000")
+        val cdxRows = timestamps.joinToString(",\n") { timestamp ->
+            """["$timestamp","$originalUrl","200","text/html"]"""
+        }
+        val cdxBody = """
+            [
+              ["timestamp","original","statuscode","mimetype"],
+              $cdxRows
+            ]
+        """.trimIndent()
+        val archivedHtml = """
+            <html><head>
+              <script type="application/ld+json">
+                {"@type":"Product","name":"$title",
+                 "offers":{"@type":"Offer","price":"79.99","priceCurrency":"EUR"}}
+              </script>
+            </head><body></body></html>
+        """.trimIndent()
+        val requestUrls = CopyOnWriteArrayList<String>()
+        val cdxMatchTypes = CopyOnWriteArrayList<String>()
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            requestUrls += request.url.host + request.url.encodedPath
+            when {
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    cdxMatchTypes += request.url.queryParameter("matchType").orEmpty()
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(cdxBody.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/web/") ->
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "text/html; charset=utf-8")
+                        .body(archivedHtml.toResponseBody("text/html; charset=utf-8".toMediaType()))
+                        .build()
+                else -> throw AssertionError("Unexpected request during early-stop regression: ${request.url}")
+            }
+        }.build()
+
+        try {
+            val result = withTimeout(12_000L) {
+                WaybackPriceHistoryClient(context, http).fetchHistory(
+                    originalUrl = originalUrl,
+                    expectedTitle = title,
+                    lookbackDays = 2_920
+                )
+            }
+            assertEquals("A sufficient exact series should not trigger the prefix fallback", listOf("exact"), cdxMatchTypes.toList())
+            assertEquals("The lookup should stop after three verified dates instead of downloading all five", 3, result.quotes.size)
+            assertEquals(3, result.quotes.map { Math.floorDiv(it.observedAt, WaybackPriceHistoryClient.DAY_MS) }.distinct().size)
+            assertEquals("The three newest captures should be enough", 3, requestUrls.count { it.startsWith("web.archive.org/web/") })
+            assertTrue("The three saved dates should include the newest captured year",
+                result.quotes.any { java.text.SimpleDateFormat("yyyy", java.util.Locale.ROOT).format(java.util.Date(it.observedAt)) == "2026" })
+        } finally {
+            preferences.edit()
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .remove("wayback_rate_limit_last_hit_at")
+                .remove("wayback_rate_limit_hit_count")
+                .commit()
+        }
+    }
+
+    @Test
+    fun exactDirectCdxSingleQuoteStillChecksPrefixForMoreHistoricalDates() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
         preferences.edit()
@@ -521,9 +608,17 @@ class WaybackPriceHistoryClientTest {
         val originalUrl = "https://shop.example/products/anker-prime-27k-exact-regression"
         val requestUrls = CopyOnWriteArrayList<String>()
         val cdxMatchTypes = CopyOnWriteArrayList<String>()
-        val cdxBody = """
+        val exactCdxBody = """
             [
               ["timestamp","original","statuscode","mimetype"],
+              ["20250101120000","$originalUrl","200","text/html"]
+            ]
+        """.trimIndent()
+        val prefixCdxBody = """
+            [
+              ["timestamp","original","statuscode","mimetype"],
+              ["20230101120000","$originalUrl","200","text/html"],
+              ["20240101120000","$originalUrl","200","text/html"],
               ["20250101120000","$originalUrl","200","text/html"]
             ]
         """.trimIndent()
@@ -543,7 +638,9 @@ class WaybackPriceHistoryClientTest {
             when {
                 request.url.host == "web.archive.org" &&
                     request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
-                    cdxMatchTypes += request.url.queryParameter("matchType").orEmpty()
+                    val matchType = request.url.queryParameter("matchType").orEmpty()
+                    cdxMatchTypes += matchType
+                    val cdxBody = if (matchType == "exact") exactCdxBody else prefixCdxBody
                     Response.Builder()
                         .request(request)
                         .protocol(Protocol.HTTP_1_1)
@@ -579,18 +676,163 @@ class WaybackPriceHistoryClientTest {
                 )
             }
 
-            assertEquals("Only the exact CDX query should run after a verified primary price", listOf("exact"), cdxMatchTypes.toList())
-            assertEquals(1, result.quotes.size)
-            assertEquals(79.99, result.quotes.single().price, 0.001)
-            assertEquals("The incremental callback must receive the verified primary quote", 1, callbackQuotes.size)
-            assertEquals(79.99, callbackQuotes.single().price, 0.001)
-            assertEquals(1, requestUrls.count { it.startsWith("web.archive.org/web/") })
+            assertEquals(
+                "A single exact-URL quote must not stop the broader URL-prefix history lookup",
+                listOf("exact", "prefix"),
+                cdxMatchTypes.toList()
+            )
+            assertEquals("The prefix lookup should recover all three dated snapshots", 3, result.quotes.size)
+            assertTrue(result.quotes.all { kotlin.math.abs(it.price - 79.99) < 0.001 })
+            assertEquals(
+                "Incremental persistence must receive all three distinct historical dates",
+                3,
+                callbackQuotes.map { it.observedAt }.distinct().size
+            )
+            assertEquals("Snapshot downloads should be reused across exact and prefix queries", 3, requestUrls.count { it.startsWith("web.archive.org/web/") })
         } finally {
             preferences.edit()
                 .remove("wayback_rate_limit_until")
                 .remove("wayback_last_availability_request_at")
                 .remove("wayback_rate_limit_last_hit_at")
                 .remove("wayback_rate_limit_hit_count")
+                .commit()
+        }
+    }
+
+    @Test
+    fun prefix429IsNotHiddenWhenExactUrlAlreadyReturnedOneQuote() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .remove("wayback_rate_limit_last_hit_at")
+            .remove("wayback_rate_limit_hit_count")
+            .commit()
+
+        val title = "Anker Prime 27K Power Bank Prefix 429 Regression ${System.currentTimeMillis()}"
+        val originalUrl = "https://shop.example/products/anker-prime-27k-prefix-429"
+        val cdxMatchTypes = CopyOnWriteArrayList<String>()
+        val cdxBody = """
+            [
+              ["timestamp","original","statuscode","mimetype"],
+              ["20250101120000","$originalUrl","200","text/html"]
+            ]
+        """.trimIndent()
+        val archivedHtml = """
+            <html><head>
+              <script type="application/ld+json">
+                {"@type":"Product","name":"$title",
+                 "offers":{"@type":"Offer","price":"79.99","priceCurrency":"EUR"}}
+              </script>
+            </head><body></body></html>
+        """.trimIndent()
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            when {
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    val matchType = request.url.queryParameter("matchType").orEmpty()
+                    cdxMatchTypes += matchType
+                    if (matchType == "prefix") {
+                        Response.Builder()
+                            .request(request)
+                            .protocol(Protocol.HTTP_1_1)
+                            .code(429)
+                            .message("Too Many Requests")
+                            .header("Retry-After", "300")
+                            .body("rate limited".toResponseBody("text/plain; charset=utf-8".toMediaType()))
+                            .build()
+                    } else {
+                        Response.Builder()
+                            .request(request)
+                            .protocol(Protocol.HTTP_1_1)
+                            .code(200)
+                            .message("OK")
+                            .header("Content-Type", "application/json; charset=utf-8")
+                            .body(cdxBody.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                            .build()
+                    }
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/web/") ->
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "text/html; charset=utf-8")
+                        .body(archivedHtml.toResponseBody("text/html; charset=utf-8".toMediaType()))
+                        .build()
+                else -> throw AssertionError("Unexpected request during prefix-429 regression: ${request.url}")
+            }
+        }.build()
+
+        try {
+            val client = WaybackPriceHistoryClient(context, http)
+            val result = withTimeout(20_000L) {
+                client.fetchHistory(originalUrl = originalUrl, expectedTitle = title, lookbackDays = 2_920)
+            }
+
+            assertEquals("The exact quote must not stop the prefix request", listOf("exact", "prefix"), cdxMatchTypes.toList())
+            assertEquals("Keep the valid point already recovered from the exact route", 1, result.quotes.size)
+            assertTrue("The partial lookup must report the HTTP 429", result.requestFailed)
+            assertTrue("The 429 diagnostic must survive merging with an exact-route quote",
+                result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED"))
+
+            // The global pause is authoritative, but the partial lookup must be retryable once
+            // the pause expires rather than remaining cached as a successful history for 30 days.
+            preferences.edit().remove("wayback_rate_limit_until").commit()
+            val retried = withTimeout(20_000L) {
+                client.fetchHistory(originalUrl = originalUrl, expectedTitle = title, lookbackDays = 2_920)
+            }
+            assertFalse("A partial 429 lookup must not be served from the success cache", retried.skippedRecently)
+            assertEquals(
+                "After the cooldown expires, both exact and prefix requests should be sent again",
+                listOf("exact", "prefix", "exact", "prefix"),
+                cdxMatchTypes.toList()
+            )
+        } finally {
+            preferences.edit()
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .remove("wayback_rate_limit_last_hit_at")
+                .remove("wayback_rate_limit_hit_count")
+                .commit()
+        }
+    }
+
+    @Test
+    fun rateLimitedPartialHistoryCanRetryOnceTheGlobalCooldownExpires() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        val client = newClient()
+        val key = "partial_quote_rate_limit_retry_regression"
+        val now = System.currentTimeMillis()
+        try {
+            preferences.edit()
+                .putLong(key, now - 1_000L)
+                .putBoolean("${key}_has_quotes", true)
+                .putBoolean("${key}_failed", true)
+                .putBoolean("${key}_rate_limited", true)
+                .putLong("wayback_rate_limit_until", now + 300_000L)
+                .commit()
+
+            assertTrue("The global cooldown must suppress retries while the 429 pause is active",
+                client.wasAttemptedRecently(key, now))
+
+            preferences.edit().putLong("wayback_rate_limit_until", now - 1L).commit()
+            assertFalse(
+                "A partial quote must not trigger the long successful-history cache after cooldown expiry",
+                client.wasAttemptedRecently(key, now + 1L)
+            )
+        } finally {
+            preferences.edit()
+                .remove(key)
+                .remove("${key}_has_quotes")
+                .remove("${key}_failed")
+                .remove("${key}_rate_limited")
+                .remove("wayback_rate_limit_until")
                 .commit()
         }
     }
@@ -683,6 +925,56 @@ class WaybackPriceHistoryClientTest {
                 """{"archived_snapshots":{"closest":{"available":false,"timestamp":"20250101120000"}}}""",
                 "https://www.apple.com/es/iphone-16/"
             )
+        )
+    }
+
+    @Test
+    fun alternateUrlFallbackIsOnlySelectedAfterCleanEmptyExactResponse() {
+        val emptyIndex = WaybackBackfillResult(
+            capturesFound = 0,
+            capturesChecked = 0,
+            available = true,
+            requestFailed = false
+        )
+
+        assertTrue(
+            "A successful empty exact index may use one alternate URL for the already-budgeted prefix lookup",
+            shouldUseAlternateUrlForPrefix(emptyIndex, hasAlternateCandidate = true)
+        )
+        assertFalse(
+            "Do not probe when there is no distinct URL candidate",
+            shouldUseAlternateUrlForPrefix(emptyIndex, hasAlternateCandidate = false)
+        )
+        assertFalse(
+            "Do not replace the prefix URL when the exact lookup did not produce a valid response",
+            shouldUseAlternateUrlForPrefix(emptyIndex.copy(available = false), hasAlternateCandidate = true)
+        )
+        assertFalse(
+            "Do not fan out requests after a transport failure",
+            shouldUseAlternateUrlForPrefix(emptyIndex.copy(requestFailed = true), hasAlternateCandidate = true)
+        )
+        assertFalse(
+            "A rate limit must use the shared cooldown instead of another URL request",
+            shouldUseAlternateUrlForPrefix(
+                emptyIndex.copy(diagnosticCodes = setOf("WAYBACK_RATE_LIMITED")),
+                hasAlternateCandidate = true
+            )
+        )
+        assertFalse(
+            "A response with captures should go through normal verification, not a parallel URL probe",
+            shouldUseAlternateUrlForPrefix(emptyIndex.copy(capturesFound = 1), hasAlternateCandidate = true)
+        )
+        val quote = ArchivedPriceQuote(
+            observedAt = 1_800_000_000_000L,
+            price = 99.99,
+            currency = "EUR",
+            productTitle = "Producto de prueba",
+            originalUrl = "https://shop.example/product",
+            snapshotUrl = "https://web.archive.org/web/20261001000000/https://shop.example/product"
+        )
+        assertFalse(
+            "Never switch the prefix route after the exact path already supplied a quote",
+            shouldUseAlternateUrlForPrefix(emptyIndex.copy(quotes = listOf(quote)), hasAlternateCandidate = true)
         )
     }
 
@@ -2597,7 +2889,7 @@ class WaybackPriceHistoryClientTest {
                    "url":"https://www.apple.com/es/shop/buy-iphone/iphone-15/pantalla-de-6,1%22-256gb-amarillo",
                    "offers":{"@type":"Offer","price":"899.99","priceCurrency":"EUR"}},
                   {"@type":"Product","name":"Apple iPhone 15 Plus",
-                   "url":"https://www.pccomponentes.com/apple-iphone-15-plus-256gb",
+                   "url":"https://www.apple.com/es/shop/buy-iphone/iphone-15-plus-256gb",
                    "offers":{"@type":"Offer","price":"799.99","priceCurrency":"EUR"}}
                 ]
               }
@@ -2626,6 +2918,49 @@ class WaybackPriceHistoryClientTest {
         assertEquals("Apple iPhone 15 Plus 256GB", quotes.single().productTitle)
         assertEquals(799.99, quotes.single().price, 0.001)
         assertTrue(quotes.single().variantIdentityConfirmedByUrl)
+    }
+
+    @Test
+    fun secondaryOfferFromDifferentMerchantCannotConfirmOrRouteHistoricalPrice() {
+        val client = newClient()
+        val primaryUrl =
+            "https://www.apple.com/es/shop/buy-iphone/iphone-15/pantalla-de-6,1%22-256gb-amarillo"
+        val externalOfferUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb"
+        val html = """
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@graph":[
+                  {"@type":"Product","name":"Apple iPhone 15 256GB Amarillo",
+                   "url":"$primaryUrl",
+                   "offers":{"@type":"Offer","price":"899.99","priceCurrency":"EUR"}},
+                  {"@type":"Product","name":"Apple iPhone 15 Plus",
+                   "url":"https://www.apple.com/es/shop/buy-iphone/iphone-15-plus-256gb",
+                   "offers":{"@type":"Offer","url":"$externalOfferUrl","price":"799.99","priceCurrency":"EUR"}}
+                ]
+              }
+              </script>
+            </head></html>
+        """.trimIndent()
+
+        val quotes = client.parseArchivedPricesForKnownProducts(
+            document = Jsoup.parse(html),
+            primaryExpectedTitle = "Apple iPhone 15 256GB Amarillo",
+            knownProductTitlesById = mapOf(
+                "base-yellow-256" to "Apple iPhone 15 256GB Amarillo",
+                "plus-unknown" to "Apple iPhone 15 Plus",
+                "plus-256" to "Apple iPhone 15 Plus 256GB"
+            ),
+            originalUrl = primaryUrl,
+            snapshotUrl = "https://web.archive.org/web/20260901000000id_/$primaryUrl",
+            observedAt = 1_788_200_000_000L
+        )
+
+        assertTrue(
+            "A third-party offer URL must not be attributed to the merchant whose page was archived",
+            quotes.isEmpty()
+        )
     }
 
     @Test
@@ -3703,6 +4038,114 @@ class WaybackPriceHistoryClientTest {
 
         assertNull(
             "A generic/stale page title must not override structured metadata for another colour, capacity and trim",
+            quote
+        )
+    }
+
+    @Test
+    fun genericArchivedOfferTitleCanBeVerifiedByItsExactStructuredSkuUrl() {
+        val client = newClient()
+        val offerUrl = "https://shop.example/products/iphone-15-plus-256gb-amarillo-libre"
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head>
+                  <title>Apple iPhone 15 Plus Libre</title>
+                  <script type="application/ld+json">
+                    {
+                      "@type":"Product",
+                      "name":"Apple iPhone 15 Plus Libre",
+                      "url":"$offerUrl",
+                      "offers":{
+                        "@type":"Offer",
+                        "url":"$offerUrl",
+                        "price":"624.00",
+                        "priceCurrency":"EUR"
+                      }
+                    }
+                  </script>
+                </head><body></body></html>
+            """.trimIndent(),
+            expectedTitle = "Apple iPhone 15 Plus 256 GB Amarillo",
+            originalUrl = "https://shop.example/products/iphone-15-plus",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/products/iphone-15-plus",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull(
+            "A generic Product title may omit storage only when its own structured URL proves the exact SKU",
+            quote
+        )
+        assertEquals(624.00, quote!!.price, 0.001)
+        assertTrue(quote.variantIdentityConfirmedByUrl)
+        assertEquals(offerUrl, quote.productUrl)
+    }
+
+    @Test
+    fun explicitStructuredCapacityConflictCannotBeOverriddenByAnOfferUrl() {
+        val client = newClient()
+        val conflictingOfferUrl = "https://shop.example/products/iphone-15-plus-256gb-amarillo-libre"
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head>
+                  <title>Apple iPhone 15 Plus 128 GB Amarillo Libre</title>
+                  <script type="application/ld+json">
+                    {
+                      "@type":"Product",
+                      "name":"Apple iPhone 15 Plus 128 GB Amarillo Libre",
+                      "url":"$conflictingOfferUrl",
+                      "offers":{
+                        "@type":"Offer",
+                        "url":"$conflictingOfferUrl",
+                        "price":"624.00",
+                        "priceCurrency":"EUR"
+                      }
+                    }
+                  </script>
+                </head><body></body></html>
+            """.trimIndent(),
+            expectedTitle = "Apple iPhone 15 Plus 256 GB Amarillo",
+            originalUrl = "https://shop.example/products/iphone-15-plus",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/products/iphone-15-plus",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNull(
+            "A JSON-LD Product that explicitly says 128 GB cannot be accepted for 256 GB, even when a URL suggests otherwise",
+            quote
+        )
+    }
+
+    @Test
+    fun genericArchivedOfferTitleCannotBorrowPriceFromConflictingStructuredSkuUrl() {
+        val client = newClient()
+        val wrongOfferUrl = "https://shop.example/products/iphone-15-plus-128gb-amarillo-libre"
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head>
+                  <title>Apple iPhone 15 Plus Libre</title>
+                  <script type="application/ld+json">
+                    {
+                      "@type":"Product",
+                      "name":"Apple iPhone 15 Plus Libre",
+                      "url":"$wrongOfferUrl",
+                      "offers":{
+                        "@type":"Offer",
+                        "url":"$wrongOfferUrl",
+                        "price":"499.00",
+                        "priceCurrency":"EUR"
+                      }
+                    }
+                  </script>
+                </head><body></body></html>
+            """.trimIndent(),
+            expectedTitle = "Apple iPhone 15 Plus 256 GB Amarillo",
+            originalUrl = "https://shop.example/products/iphone-15-plus",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/products/iphone-15-plus",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNull(
+            "An Offer URL explicitly naming 128 GB must never verify a selected 256 GB product",
             quote
         )
     }

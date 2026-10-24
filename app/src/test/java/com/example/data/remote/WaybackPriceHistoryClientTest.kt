@@ -929,7 +929,7 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun alternateExactUrlProbeIsOnlyAllowedAfterCleanEmptyExactResponse() {
+    fun alternateUrlFallbackIsOnlySelectedAfterCleanEmptyExactResponse() {
         val emptyIndex = WaybackBackfillResult(
             capturesFound = 0,
             capturesChecked = 0,
@@ -938,31 +938,31 @@ class WaybackPriceHistoryClientTest {
         )
 
         assertTrue(
-            "A successful empty exact index may justify one bounded alternate URL probe",
-            shouldTryAlternateExactUrl(emptyIndex, hasAlternateCandidate = true)
+            "A successful empty exact index may use one alternate URL for the already-budgeted prefix lookup",
+            shouldUseAlternateUrlForPrefix(emptyIndex, hasAlternateCandidate = true)
         )
         assertFalse(
             "Do not probe when there is no distinct URL candidate",
-            shouldTryAlternateExactUrl(emptyIndex, hasAlternateCandidate = false)
+            shouldUseAlternateUrlForPrefix(emptyIndex, hasAlternateCandidate = false)
         )
         assertFalse(
-            "Do not add latency when the exact lookup did not produce a valid response",
-            shouldTryAlternateExactUrl(emptyIndex.copy(available = false), hasAlternateCandidate = true)
+            "Do not replace the prefix URL when the exact lookup did not produce a valid response",
+            shouldUseAlternateUrlForPrefix(emptyIndex.copy(available = false), hasAlternateCandidate = true)
         )
         assertFalse(
             "Do not fan out requests after a transport failure",
-            shouldTryAlternateExactUrl(emptyIndex.copy(requestFailed = true), hasAlternateCandidate = true)
+            shouldUseAlternateUrlForPrefix(emptyIndex.copy(requestFailed = true), hasAlternateCandidate = true)
         )
         assertFalse(
             "A rate limit must use the shared cooldown instead of another URL request",
-            shouldTryAlternateExactUrl(
+            shouldUseAlternateUrlForPrefix(
                 emptyIndex.copy(diagnosticCodes = setOf("WAYBACK_RATE_LIMITED")),
                 hasAlternateCandidate = true
             )
         )
         assertFalse(
             "A response with captures should go through normal verification, not a parallel URL probe",
-            shouldTryAlternateExactUrl(emptyIndex.copy(capturesFound = 1), hasAlternateCandidate = true)
+            shouldUseAlternateUrlForPrefix(emptyIndex.copy(capturesFound = 1), hasAlternateCandidate = true)
         )
         val quote = ArchivedPriceQuote(
             observedAt = 1_800_000_000_000L,
@@ -973,8 +973,8 @@ class WaybackPriceHistoryClientTest {
             snapshotUrl = "https://web.archive.org/web/20261001000000/https://shop.example/product"
         )
         assertFalse(
-            "Never probe an alternate URL once the exact path already supplied a quote",
-            shouldTryAlternateExactUrl(emptyIndex.copy(quotes = listOf(quote)), hasAlternateCandidate = true)
+            "Never switch the prefix route after the exact path already supplied a quote",
+            shouldUseAlternateUrlForPrefix(emptyIndex.copy(quotes = listOf(quote)), hasAlternateCandidate = true)
         )
     }
 

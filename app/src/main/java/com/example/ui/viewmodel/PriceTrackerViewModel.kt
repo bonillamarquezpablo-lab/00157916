@@ -41,6 +41,7 @@ import com.example.data.remote.extractGoogleShoppingProductId
 import com.example.data.model.Product
 import com.example.data.model.PriceBadgeType
 import com.example.data.model.ProductCategory
+import com.example.data.model.MarketplaceCategorySummary
 import com.example.data.model.Store
 import com.example.data.repository.ProductRepository
 import com.example.data.repository.ProductDiscoveryRepository
@@ -550,21 +551,69 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         runCatching { PriceAlertScheduler.ensureScheduled(application) }
     }
 
+    // The home page subscribes only to a compact SQL aggregate, not to the complete catalogue.
+    private val emptyMarketplaceSummaries = ProductCategory.values()
+        .filter { it != ProductCategory.ALL }
+        .map { MarketplaceCategorySummary(it, productCount = 0, storeCount = 0) }
+
+    val marketplaceCategorySummaries: StateFlow<List<MarketplaceCategorySummary>> =
+        repository.marketplaceCategorySummariesStream.stateIn(
+            viewModelScope,
+            SharingStarted.Lazily,
+            emptyMarketplaceSummaries
+        )
+
+    /** Lightweight badge count; never opens the complete product stream. */
+    val trackedProductCount: StateFlow<Int> = repository.trackedProductCountStream
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), 0)
+
     // Only show merchants represented by at least one valid saved price. Store.ALL_STORES
     // remains the internal directory used to resolve existing product and offer records.
     val spanishStores: StateFlow<List<Store>> = repository.storesWithSavedPricesStream
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    // Filtered products flow
+    private val marketplaceProductFlows = mutableMapOf<ProductCategory, StateFlow<List<Product>>>()
+
+    /**
+     * Returns a cached, category-specific product flow. It starts only when the product list is
+     * opened, and stays warm after its first use so returning from Android's task switcher does
+     * not rebuild hundreds of cards and price histories again.
+     */
+    @Synchronized
+    fun filteredProductsForCategory(category: ProductCategory): StateFlow<List<Product>> =
+        marketplaceProductFlows.getOrPut(category) {
+            combine(repository.productsForCategoryStream(category), _uiState) { products, state ->
+                filterMarketplaceProducts(products, state, category)
+            }.flowOn(Dispatchers.Default)
+                .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        }
+
+    // Legacy all-catalogue flow kept for non-market actions and compatibility. The home screen
+    // deliberately does not collect it.
     val filteredProducts: StateFlow<List<Product>> = combine(
         repository.allProductsStream,
         _uiState
     ) { allProducts, state ->
-        allProducts
-            // Keep demo catalogue rows out of Mercado. A product with saved, validated
-            // history remains discoverable when the current quote needs revalidation; otherwise
-            // a persisted historical minimum can look deleted merely because it is not a current
-            // verified price. Historical points never imply that today's price is verified.
+        filterMarketplaceProducts(allProducts, state, state.selectedCategory)
+    }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
+
+    // These flows are subscribed only when their tabs are opened. Once started, their StateFlow
+    // cache remains warm across temporary backgrounding rather than re-reading Room after 5 sec.
+    val trackedProducts: StateFlow<List<Product>> = repository.trackedProductsStream
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    val todayAthDeals: StateFlow<List<Product>> = repository.todayAthDealsStream
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    private fun filterMarketplaceProducts(
+        products: List<Product>,
+        state: TrackerUiState,
+        category: ProductCategory
+    ): List<Product> =
+        products
+            // Keep demo catalogue rows out of Mercado. Saved, validated history and explicit
+            // pending live-search listings remain discoverable while today's price is rechecked.
             .filter { product ->
                 product.isPriceVerified ||
                     product.isTracked ||
@@ -572,42 +621,32 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     product.savedHistoricalPrice != null ||
                     product.isUnverifiedLiveListing
             }
+            .filter { product -> category == ProductCategory.ALL || product.category == category }
             .filter { product ->
-                // Category filter
-                (state.selectedCategory == ProductCategory.ALL || product.category == state.selectedCategory)
-            }
-            .filter { product ->
-                // Search query
                 if (state.searchQuery.isBlank()) true
                 else {
                     val query = state.searchQuery.trim().lowercase()
                     product.title.lowercase().contains(query) ||
-                    product.brand.lowercase().contains(query) ||
-                    (product.isEanVerified && product.ean.contains(query)) ||
-                    product.category.displayName.lowercase().contains(query) ||
-                    product.currentStore.name.lowercase().contains(query) ||
-                    product.currentStore.domain.lowercase().contains(query)
+                        product.brand.lowercase().contains(query) ||
+                        (product.isEanVerified && product.ean.contains(query)) ||
+                        product.category.displayName.lowercase().contains(query) ||
+                        product.currentStore.name.lowercase().contains(query) ||
+                        product.currentStore.domain.lowercase().contains(query)
                 }
             }
+            .filter { product -> if (state.onlyAthFilter) product.isAtAth else true }
             .filter { product ->
-                // ATH (all-time low) is a distinct filter from the evidence-based historical-minimum badge.
-                if (state.onlyAthFilter) product.isAtAth else true
-            }
-            .filter { product ->
-                // Only show products whose current verified quote equals or improves the observed history minimum.
                 if (state.onlyHistoricalMinimumFilter) {
                     product.priceBadgeState.type == PriceBadgeType.HISTORICAL_MINIMUM
                 } else true
             }
             .filter { product ->
-                // Store filter
                 if (state.selectedStoreName != null) {
                     product.currentStore.name.contains(state.selectedStoreName, ignoreCase = true) ||
-                    product.offers.any { it.store.name.contains(state.selectedStoreName, ignoreCase = true) }
+                        product.offers.any { it.store.name.contains(state.selectedStoreName, ignoreCase = true) }
                 } else true
             }
             .let { list ->
-                // Sorting
                 when (state.sortOption) {
                     SortOption.BEST_ATH_DISCOUNT -> list.sortedWith(
                         compareByDescending<Product> { it.isPriceVerified }
@@ -637,14 +676,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     )
                 }
             }
-    }.flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val trackedProducts: StateFlow<List<Product>> = repository.trackedProductsStream
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val todayAthDeals: StateFlow<List<Product>> = repository.todayAthDealsStream
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     /**
      * Account checks are free at SerpApi. If the account endpoint is temporarily unavailable,

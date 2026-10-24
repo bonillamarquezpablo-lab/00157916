@@ -3988,6 +3988,41 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun explicitStructuredCapacityConflictCannotBeOverriddenByAnOfferUrl() {
+        val client = newClient()
+        val conflictingOfferUrl = "https://shop.example/products/iphone-15-plus-256gb-amarillo-libre"
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head>
+                  <title>Apple iPhone 15 Plus 128 GB Amarillo Libre</title>
+                  <script type="application/ld+json">
+                    {
+                      "@type":"Product",
+                      "name":"Apple iPhone 15 Plus 128 GB Amarillo Libre",
+                      "url":"$conflictingOfferUrl",
+                      "offers":{
+                        "@type":"Offer",
+                        "url":"$conflictingOfferUrl",
+                        "price":"624.00",
+                        "priceCurrency":"EUR"
+                      }
+                    }
+                  </script>
+                </head><body></body></html>
+            """.trimIndent(),
+            expectedTitle = "Apple iPhone 15 Plus 256 GB Amarillo",
+            originalUrl = "https://shop.example/products/iphone-15-plus",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/products/iphone-15-plus",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNull(
+            "A JSON-LD Product that explicitly says 128 GB cannot be accepted for 256 GB, even when a URL suggests otherwise",
+            quote
+        )
+    }
+
+    @Test
     fun genericArchivedOfferTitleCannotBorrowPriceFromConflictingStructuredSkuUrl() {
         val client = newClient()
         val wrongOfferUrl = "https://shop.example/products/iphone-15-plus-128gb-amarillo-libre"

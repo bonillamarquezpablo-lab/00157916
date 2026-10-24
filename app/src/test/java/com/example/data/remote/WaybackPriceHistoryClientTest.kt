@@ -507,7 +507,7 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun exactDirectCdxVerifiedPrimaryQuoteSkipsPrefixAndNotifiesCallback() = runBlocking {
+    fun exactDirectCdxSingleQuoteStillChecksPrefixForMoreHistoricalDates() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
         preferences.edit()
@@ -521,9 +521,17 @@ class WaybackPriceHistoryClientTest {
         val originalUrl = "https://shop.example/products/anker-prime-27k-exact-regression"
         val requestUrls = CopyOnWriteArrayList<String>()
         val cdxMatchTypes = CopyOnWriteArrayList<String>()
-        val cdxBody = """
+        val exactCdxBody = """
             [
               ["timestamp","original","statuscode","mimetype"],
+              ["20250101120000","$originalUrl","200","text/html"]
+            ]
+        """.trimIndent()
+        val prefixCdxBody = """
+            [
+              ["timestamp","original","statuscode","mimetype"],
+              ["20230101120000","$originalUrl","200","text/html"],
+              ["20240101120000","$originalUrl","200","text/html"],
               ["20250101120000","$originalUrl","200","text/html"]
             ]
         """.trimIndent()
@@ -543,7 +551,9 @@ class WaybackPriceHistoryClientTest {
             when {
                 request.url.host == "web.archive.org" &&
                     request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
-                    cdxMatchTypes += request.url.queryParameter("matchType").orEmpty()
+                    val matchType = request.url.queryParameter("matchType").orEmpty()
+                    cdxMatchTypes += matchType
+                    val cdxBody = if (matchType == "exact") exactCdxBody else prefixCdxBody
                     Response.Builder()
                         .request(request)
                         .protocol(Protocol.HTTP_1_1)
@@ -579,12 +589,19 @@ class WaybackPriceHistoryClientTest {
                 )
             }
 
-            assertEquals("Only the exact CDX query should run after a verified primary price", listOf("exact"), cdxMatchTypes.toList())
-            assertEquals(1, result.quotes.size)
-            assertEquals(79.99, result.quotes.single().price, 0.001)
-            assertEquals("The incremental callback must receive the verified primary quote", 1, callbackQuotes.size)
-            assertEquals(79.99, callbackQuotes.single().price, 0.001)
-            assertEquals(1, requestUrls.count { it.startsWith("web.archive.org/web/") })
+            assertEquals(
+                "A single exact-URL quote must not stop the broader URL-prefix history lookup",
+                listOf("exact", "prefix"),
+                cdxMatchTypes.toList()
+            )
+            assertEquals("The prefix lookup should recover all three dated snapshots", 3, result.quotes.size)
+            assertTrue(result.quotes.all { kotlin.math.abs(it.price - 79.99) < 0.001 })
+            assertEquals(
+                "Incremental persistence must receive all three distinct historical dates",
+                3,
+                callbackQuotes.map { it.observedAt }.distinct().size
+            )
+            assertEquals("Snapshot downloads should be reused across exact and prefix queries", 3, requestUrls.count { it.startsWith("web.archive.org/web/") })
         } finally {
             preferences.edit()
                 .remove("wayback_rate_limit_until")

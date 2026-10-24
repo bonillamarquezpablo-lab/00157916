@@ -3176,6 +3176,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }
                 }
 
+                val selectedProductDistinctDateCount = archiveDates
+                    .map { Math.floorDiv(it, com.example.data.remote.WaybackPriceHistoryClient.DAY_MS) }
+                    .distinct()
+                    .size
                 val notice = when {
                     waybackPriceHistoryClient.activeRateLimitUntil() != null ->
                         waybackRateLimitNotice() + when {
@@ -3194,6 +3198,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         "Internet Archive no respondió en el intento anterior. Mínimo evita repetir enseguida una consulta que agotó el tiempo; vuelve a probar dentro de unos minutos. Esto no significa que no existan capturas."
                     skippedCount == candidates.size ->
                         "Estas consultas gratuitas ya se comprobaron recientemente. La caché evita repetir búsquedas completadas sin resultados útiles."
+                    requestFailedCount > 0 && selectedProductDistinctDateCount < 3 &&
+                        (savedCount > 0 || foundPrimaryCount > 0) ->
+                        "Histórico parcial: se conservaron los puntos válidos del producto seleccionado " +
+                            "(nuevos guardados: $savedCount; precios verificados encontrados: $foundPrimaryCount), " +
+                            "pero falló una o más consultas y solo se confirmaron $selectedProductDistinctDateCount " +
+                            "fechas distintas. El histórico no se marca como completado; los puntos guardados se mantienen."
                     savedCount > 0 && crossSavedVariantObservationCount > 0 -> {
                         val oldest = archiveDates.minOrNull()?.let { timestamp ->
                             SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(timestamp))

@@ -4088,21 +4088,26 @@ class WaybackPriceHistoryClient(
         val wantedCurrency = expectedCurrency.uppercase(Locale.ROOT)
         val urls = linkedSetOf<String>()
 
-        fun resolveCandidate(raw: String?) {
-            if (raw.isNullOrBlank() || raw == "null") return
-            val resolved = runCatching { URI(pageUrl).resolve(raw).toString() }.getOrNull() ?: return
-            val uri = runCatching { URI(resolved) }.getOrNull() ?: return
+        fun resolveCandidate(raw: String?): String? {
+            if (raw.isNullOrBlank() || raw == "null") return null
+            val resolved = runCatching { URI(pageUrl).resolve(raw).toString() }.getOrNull() ?: return null
+            val uri = runCatching { URI(resolved) }.getOrNull() ?: return null
             if (!uri.scheme.equals("https", ignoreCase = true) ||
                 uri.host.isNullOrBlank() ||
                 uri.host.equals("web.archive.org", ignoreCase = true) ||
                 uri.host.equals("archive.org", ignoreCase = true) ||
                 uri.host.equals("arquivo.pt", ignoreCase = true) ||
                 !isEligibleDirectUrl(resolved)
-            ) return
-            urls += resolved
+            ) return null
+            return resolved
         }
 
-        fun matchingOffer(offers: Any?): Boolean {
+        fun matchingOffer(
+            offers: Any?,
+            offerUrls: MutableSet<String>,
+            itemUrls: MutableSet<String>,
+            hasExplicitOfferUrl: BooleanArray
+        ): Boolean {
             var matched = false
             fun visit(value: Any?) {
                 when (value) {
@@ -4126,8 +4131,19 @@ class WaybackPriceHistoryClient(
                             currency == wantedCurrency
                         ) {
                             matched = true
-                            resolveCandidate(value.optString("url"))
-                            value.optJSONObject("itemOffered")?.optString("url")?.let(::resolveCandidate)
+                            val rawOfferUrl = value.optString("url")
+                                .takeIf { it.isNotBlank() && it != "null" }
+                            if (rawOfferUrl != null) {
+                                // An explicit Offer.url determines where this exact price belongs.
+                                // Do not fall back to Product.url if that offer URL is external,
+                                // blocked, or otherwise ineligible.
+                                hasExplicitOfferUrl[0] = true
+                                resolveCandidate(rawOfferUrl)?.let(offerUrls::add)
+                            } else {
+                                value.optJSONObject("itemOffered")?.optString("url")
+                                    ?.takeIf { it.isNotBlank() && it != "null" }
+                                    ?.let { raw -> resolveCandidate(raw)?.let(itemUrls::add) }
+                            }
                         }
                         val keys = value.keys()
                         while (keys.hasNext()) visit(value.opt(keys.next()))
@@ -4145,10 +4161,28 @@ class WaybackPriceHistoryClient(
                     val productTypes = setOf("product", "productgroup", "individualproduct", "productmodel")
                     val name = value.optString("name").takeIf { it.isNotBlank() && it != "null" }
                     if (name != null && normalizeTitle(name) == wantedName &&
-                        jsonLdTypeNames(value).any { it in productTypes } &&
-                        matchingOffer(value.opt("offers"))
+                        jsonLdTypeNames(value).any { it in productTypes }
                     ) {
-                        resolveCandidate(value.optString("url"))
+                        val matchingOfferUrls = linkedSetOf<String>()
+                        val matchingItemUrls = linkedSetOf<String>()
+                        val hasExplicitOfferUrl = booleanArrayOf(false)
+                        if (matchingOffer(
+                                value.opt("offers"),
+                                matchingOfferUrls,
+                                matchingItemUrls,
+                                hasExplicitOfferUrl
+                            )
+                        ) {
+                            if (hasExplicitOfferUrl[0]) {
+                                // A matched Offer.url has priority over the general Product.url.
+                                // Its merchant provenance must not be replaced by a safer-looking
+                                // Product.url when the actual offer belongs to a different store.
+                                urls.addAll(matchingOfferUrls)
+                            } else {
+                                urls.addAll(matchingItemUrls)
+                                resolveCandidate(value.optString("url"))?.let(urls::add)
+                            }
+                        }
                     }
                     val keys = value.keys()
                     while (keys.hasNext()) visitProducts(value.opt(keys.next()))

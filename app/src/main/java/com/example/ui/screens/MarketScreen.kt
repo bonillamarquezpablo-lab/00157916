@@ -88,8 +88,7 @@ fun MarketScreen(
     var showStoreMenu by remember { mutableStateOf(false) }
     var forceShowAllProducts by remember { mutableStateOf(false) }
 
-    val hasActiveMarketFilter = uiState.searchQuery.isNotBlank() ||
-        uiState.selectedStoreName != null ||
+    val hasActiveMarketFilter = uiState.selectedStoreName != null ||
         uiState.onlyAthFilter ||
         uiState.onlyHistoricalMinimumFilter
     val shouldShowCategoryHome = uiState.selectedCategory == ProductCategory.ALL &&
@@ -120,6 +119,7 @@ fun MarketScreen(
             products = products,
             searchQuery = uiState.searchQuery,
             onSearchChange = onSearchChange,
+            onSearchSubmit = { forceShowAllProducts = true },
             onCategorySelect = { category ->
                 forceShowAllProducts = false
                 onCategorySelect(category)

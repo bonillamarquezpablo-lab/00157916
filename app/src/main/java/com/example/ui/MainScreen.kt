@@ -93,7 +93,6 @@ fun MainScreen(
     val categorySummaries by viewModel.marketplaceCategorySummaries.collectAsStateWithLifecycle()
     val trackedProductCount by viewModel.trackedProductCount.collectAsStateWithLifecycle()
     val pendingDiscoveries by viewModel.pendingDiscoveries.collectAsStateWithLifecycle()
-    val spanishStores by viewModel.spanishStores.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -153,7 +152,7 @@ fun MainScreen(
                             color = MaterialTheme.colorScheme.secondaryContainer
                         ) {
                             Text(
-                                text = "${spanishStores.size} comercios",
+                                text = "${categorySummaries.count { it.productCount > 0 }} categorías activas",
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
@@ -269,6 +268,7 @@ fun MainScreen(
                 .padding(innerPadding)
         ) {
             if (showSettings) {
+                val spanishStores by viewModel.spanishStores.collectAsStateWithLifecycle()
                 SettingsScreen(
                     storeCount = spanishStores.size,
                     isRefreshingPrices = uiState.isRefreshingPrices,
@@ -301,7 +301,7 @@ fun MainScreen(
                     MarketScreen(
                         productsForCategory = viewModel::filteredProductsForCategory,
                         categorySummaries = categorySummaries,
-                        stores = spanishStores,
+                        storesFlow = viewModel.spanishStores,
                         uiState = uiState,
                         onSearchChange = viewModel::onSearchQueryChange,
                         onCategorySelect = viewModel::onCategorySelect,
@@ -326,6 +326,7 @@ fun MainScreen(
                     )
                 }
                 MainTab.STORES -> {
+                    val spanishStores by viewModel.spanishStores.collectAsStateWithLifecycle()
                     StoresScreen(
                         stores = spanishStores,
                         onSelectStoreForMarket = { storeName ->

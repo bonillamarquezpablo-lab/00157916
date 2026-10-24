@@ -1566,13 +1566,6 @@ class WaybackPriceHistoryClientTest {
             .first { it.domain.contains("pccomponentes.com", ignoreCase = true) && it.supportsProductSearch }
             .searchUrlFor(title)!!
         val cdxQueriedUrls = CopyOnWriteArrayList<String>()
-        val cdxSeriesBody = """
-            [
-              ["timestamp","original","statuscode","mimetype"],
-              ["20250101120000","$realStoreSearchUrl","200","text/html"],
-              ["20260901120000","$realStoreSearchUrl","200","text/html"]
-            ]
-        """.trimIndent()
         val archivedHtml = """
             <html><head>
               <script type="application/ld+json">
@@ -1591,18 +1584,11 @@ class WaybackPriceHistoryClientTest {
                     val indexedUrl = request.url.queryParameter("url").orEmpty()
                     cdxQueriedUrls += indexedUrl
                     if (indexedUrl == realStoreSearchUrl) {
-                        // Once Availability has confirmed the real retailer URL, CDX must be
-                        // queried against that verified URL to retrieve multiple archive dates.
-                        Response.Builder()
-                            .request(request)
-                            .protocol(Protocol.HTTP_1_1)
-                            .code(200)
-                            .message("OK")
-                            .header("Content-Type", "application/json; charset=utf-8")
-                            .body(cdxSeriesBody.toResponseBody("application/json; charset=utf-8".toMediaType()))
-                            .build()
+                        // After the product-prefix timeout, the Availability URL is kept for
+                        // verified partial history, but a second CDX request is intentionally skipped.
+                        throw AssertionError("A supplemental CDX series must be skipped after the product-prefix timeout")
                     } else {
-                        // The guessed/direct product URL still reproduces the failure on-device.
+                        // The guessed/direct product URL reproduces the transient failure.
                         throw java.net.SocketTimeoutException("simulated CDX product URL timeout")
                     }
                 }
@@ -1684,16 +1670,23 @@ class WaybackPriceHistoryClientTest {
             )
             assertTrue("The verified archived EUR price should be recovered after a 3.5-second HTML response", result.quotes.isNotEmpty())
             assertTrue("Every accepted result must retain the verified EUR price", result.quotes.all { kotlin.math.abs(it.price - 79.99) < 0.001 })
-            assertTrue(
-                "The verified Availability URL must be queried through CDX to recover more than one date",
-                cdxQueriedUrls.contains(realStoreSearchUrl) &&
-                    result.quotes.map { it.observedAt }.distinct().size >= 2
+            assertEquals(
+                "After the product-prefix timeout, do not query CDX again for the Availability URL",
+                false,
+                cdxQueriedUrls.contains(realStoreSearchUrl)
+            )
+            assertEquals(
+                "Keep the verified Availability quote as partial history without pretending it is a series",
+                1,
+                result.quotes.map { it.observedAt }.distinct().size
             )
             assertTrue(
-                "Diagnostic steps 5–6 must record the CDX series request instead of remaining unexecuted",
-                traceEvents.any { it.step == 4 && it.status == WaybackTraceStatus.PASSED &&
-                    it.detail.contains("CDX_AVAILABILITY_SERIES") } &&
-                    traceEvents.any { it.step == 5 && it.detail.contains("CDX_AVAILABILITY_SERIES") }
+                "Diagnostics must explain that supplemental CDX was skipped after the timeout",
+                traceEvents.any {
+                    it.status == WaybackTraceStatus.SKIPPED &&
+                        it.detail.contains("Se conserva el precio verificado de Availability") &&
+                        it.detail.contains("el índice de producto ya agotó el tiempo")
+                }
             )
             assertTrue(requests.any { it.startsWith("web.archive.org/web/") })
             assertTrue(

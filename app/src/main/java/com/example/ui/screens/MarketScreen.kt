@@ -662,8 +662,8 @@ private fun SavedProductFamilyGridTile(
         ) {
             family.variants.forEach { variant ->
                 variant.storages.forEach { storage ->
-                    val product = storage.products.firstOrNull()
-                    if (product != null) {
+                    if (storage.products.size == 1) {
+                        val product = storage.products.single()
                         val displayProduct = product.copy(title = savedProductDisplayTitle(product))
                         Row(
                             modifier = Modifier
@@ -674,32 +674,62 @@ private fun SavedProductFamilyGridTile(
                                 .padding(horizontal = 8.dp, vertical = 7.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(
+                            Text(
+                                text = "${variant.label} · ${storage.label}",
                                 modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                Text(
-                                    text = "${variant.label} · ${storage.label}",
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                if (storage.products.size > 1) {
-                                    Text(
-                                        text = "${storage.products.size} fichas de color/SKU",
-                                        fontSize = 9.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1
-                                    )
-                                }
-                            }
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
                             Text(
                                 text = "›",
                                 fontSize = 18.sp,
                                 color = MaterialTheme.colorScheme.primary
                             )
+                        }
+                    } else {
+                        Text(
+                            text = "${variant.label} · ${storage.label}",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(start = 4.dp, top = 3.dp)
+                        )
+                        storage.products.forEach { product ->
+                            val displayProduct = product.copy(title = savedProductDisplayTitle(product))
+                            val familyIndex = displayProduct.title.indexOf(family.label, ignoreCase = true)
+                            val skuLabel = if (familyIndex >= 0) {
+                                displayProduct.title.substring(familyIndex + family.label.length)
+                                    .trim()
+                                    .trimStart('-', '|', ',', ':')
+                            } else displayProduct.title
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceContainer)
+                                    .clickable { onProductClick(displayProduct) }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = skuLabel.ifBlank { "Ver ficha" },
+                                    modifier = Modifier.weight(1f),
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "›",
+                                    fontSize = 16.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
                     }
                 }

@@ -1665,9 +1665,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     now >= previousSuccess &&
                     now - previousSuccess < ARCHIVE_LIVE_FALLBACK_SUCCESS_COOLDOWN_MS
                 val message = if (wasSuccessful) {
-                    "El histórico gratuito no dio un precio verificable ($archiveFailureReason). " +
-                        "La búsqueda alternativa ya encontró ofertas recientemente; para proteger la cuota, " +
-                        "se podrá repetir en unas $minutes min."
+                    "El histórico gratuito no dio un precio histórico verificable ($archiveFailureReason). " +
+                        "La búsqueda del precio actual sí guardó ofertas verificadas recientemente; para no gastar otra " +
+                        "consulta de pago, se podrá repetir esa búsqueda en unas $minutes min. El histórico no se ha completado."
                 } else {
                     "El histórico gratuito no dio un precio verificable ($archiveFailureReason). " +
                         "La última búsqueda alternativa no obtuvo un resultado confirmado; se podrá reintentar " +

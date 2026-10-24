@@ -3,7 +3,7 @@ package com.example.ui.screens
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.test.assertDoesNotExist
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -288,7 +288,7 @@ class CategoryHomeScreenTest {
         composeRule.onNodeWithTag("filter_store_chip").performClick()
         composeRule.onNodeWithText("Amazon España").assertIsDisplayed()
         composeRule.onNodeWithText("PcComponentes").assertIsDisplayed()
-        composeRule.onNodeWithText(unrelated.name).assertDoesNotExist()
+        assertEquals(0, composeRule.onAllNodesWithText(unrelated.name).fetchSemanticsNodes().size)
     }
 
     private fun testStore(id: String, name: String) = Store(

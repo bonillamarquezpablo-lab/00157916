@@ -325,7 +325,8 @@ fun MarketScreen(
                                         onClick = {
                                             onStoreFilterSelect(displayName)
                                             showStoreMenu = false
-                                        }
+                                        },
+                                        modifier = Modifier.testTag("store_menu_item_${store.id}")
                                     )
                                 }
                             }

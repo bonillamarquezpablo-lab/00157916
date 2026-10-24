@@ -86,7 +86,7 @@ internal fun marketplaceStoresForProducts(products: List<Product>): List<Store> 
         .flatMap { product -> sequenceOf(product.currentStore) + product.offers.asSequence().map { it.store } }
         .filter { it.name.isNotBlank() }
         .distinctBy {
-            it.id.takeIf(String::isNotBlank)?.lowercase(Locale.ROOT)
+            it.id.takeIf { it.isNotBlank() }?.lowercase(Locale.ROOT)
                 ?: "${it.name.trim().lowercase(Locale.ROOT)}|${it.domain.trim().lowercase(Locale.ROOT)}"
         }
         .toList()

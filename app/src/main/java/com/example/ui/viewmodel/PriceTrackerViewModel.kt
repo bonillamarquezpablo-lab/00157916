@@ -2937,6 +2937,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 // The direct URL's prefix-CDX lookup ran just above. Avoid
                                 // repeating the same request before the Availability fallback.
                                 preferredUrlAlreadyQueried = candidate.directUrl != null,
+                                priorCdxDiagnostics = (
+                                    attempts.flatMap { it.diagnosticCodes } +
+                                        if (candidateTimedOut) setOf("CDX_URL_PREFIX_TIMEOUT") else emptySet()
+                                    ).filter { code ->
+                                        code.startsWith("CDX_URL_PREFIX") ||
+                                            code.startsWith("CDX_PRODUCT_PREFIX") ||
+                                            code.startsWith("CDX_ALTERNATE_PREFIX")
+                                    }.toSet(),
                                 onTrace = traceCallback,
                                 knownProductTitlesById = knownProductTitlesById,
                                 onVerifiedQuotes = persistQuotesAsTheyArrive,

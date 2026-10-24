@@ -45,7 +45,7 @@ class CategoryHomeScreenTest {
                     categorySummaries = ProductCategory.values()
                         .filter { it != ProductCategory.ALL }
                         .map { MarketplaceCategorySummary(it, productCount = 0, storeCount = 0) },
-                    storesFlow = MutableStateFlow<List<Store>>(emptyList()),
+
                     uiState = state.value,
                     onSearchChange = { query -> state.value = state.value.copy(searchQuery = query) },
                     onCategorySelect = { category -> state.value = state.value.copy(selectedCategory = category) },
@@ -78,7 +78,17 @@ class CategoryHomeScreenTest {
         var productFlowRequested = false
         val summaries = ProductCategory.values()
             .filter { it != ProductCategory.ALL }
-            .map { MarketplaceCategorySummary(it, productCount = 0, storeCount = 0) }
+            .map { category ->
+                MarketplaceCategorySummary(
+                    category = category,
+                    productCount = when (category) {
+                        ProductCategory.SMARTPHONES -> 850
+                        ProductCategory.OTHER -> 21
+                        else -> 0
+                    },
+                    storeCount = 0
+                )
+            }
 
         composeRule.setContent {
             MaterialTheme {
@@ -88,7 +98,7 @@ class CategoryHomeScreenTest {
                         MutableStateFlow<List<Product>>(emptyList())
                     },
                     categorySummaries = summaries,
-                    storesFlow = MutableStateFlow<List<Store>>(emptyList()),
+
                     uiState = state.value,
                     onSearchChange = { query -> state.value = state.value.copy(searchQuery = query) },
                     onCategorySelect = { category -> state.value = state.value.copy(selectedCategory = category) },
@@ -106,6 +116,7 @@ class CategoryHomeScreenTest {
 
         composeRule.waitForIdle()
         assertFalse("The category home must not subscribe to product rows", productFlowRequested)
+        composeRule.onNodeWithText("Ver todos los productos (871)").assertIsDisplayed()
 
         composeRule.onNodeWithTag("category_card_SMARTPHONES").performClick()
         composeRule.waitForIdle()

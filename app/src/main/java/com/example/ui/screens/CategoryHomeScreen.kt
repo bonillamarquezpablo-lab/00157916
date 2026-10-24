@@ -87,6 +87,7 @@ internal fun buildCategorySummaries(products: List<Product>): List<CategorySumma
 @Composable
 fun CategoryHomeScreen(
     products: List<Product>,
+    searchQuery: String,
     onSearchChange: (String) -> Unit,
     onCategorySelect: (ProductCategory) -> Unit,
     onViewAllProducts: () -> Unit,
@@ -125,7 +126,7 @@ fun CategoryHomeScreen(
 
         item {
             OutlinedTextField(
-                value = rememberSearchValue(products) { "" },
+                value = searchQuery,
                 onValueChange = onSearchChange,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -260,15 +261,4 @@ private fun categoryIcon(category: ProductCategory): ImageVector = when (categor
     ProductCategory.TOYS -> Icons.Default.Toys
     ProductCategory.SPORTS -> Icons.Default.FitnessCenter
     ProductCategory.OTHER, ProductCategory.ALL -> Icons.Default.Category
-}
-
-/**
- * A minimal remembered empty value used until the caller passes the current query through state.
- * Kept separate so recomposition does not allocate another state holder for every card.
- */
-@Composable
-private fun rememberSearchValue(products: List<Product>, initialValue: () -> String): String {
-    // The actual query is owned by MarketScreen's view model; read it via the overload in
-    // CategoryHomeScreen before showing this composable.
-    return remember(products) { initialValue() }
 }

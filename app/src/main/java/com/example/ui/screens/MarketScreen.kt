@@ -86,14 +86,6 @@ fun MarketScreen(
 ) {
     var showSortMenu by remember { mutableStateOf(false) }
     var showStoreMenu by remember { mutableStateOf(false) }
-    val verifiedProductCount = remember(products) { products.count { it.isPriceVerified } }
-    val savedFamilies = remember(products, uiState.sortOption) {
-        buildSavedProductFamilyBuckets(products, uiState.sortOption)
-    }
-    // Repeated products stay tucked away until the user chooses a family, version, then capacity.
-    var expandedFamilyKeys by remember { mutableStateOf(emptySet<String>()) }
-    var expandedVariantKeys by remember { mutableStateOf(emptySet<String>()) }
-    var expandedStorageKeys by remember { mutableStateOf(emptySet<String>()) }
     var forceShowAllProducts by remember { mutableStateOf(false) }
 
     val hasActiveMarketFilter = uiState.searchQuery.isNotBlank() ||
@@ -107,6 +99,21 @@ fun MarketScreen(
         !uiState.onlyAthFilter &&
         !uiState.onlyHistoricalMinimumFilter &&
         (uiState.selectedCategory != ProductCategory.ALL || forceShowAllProducts)
+
+    // Avoid building the full family/version/capacity hierarchy while the category landing
+    // screen is visible; that work is only needed after the user enters the product list.
+    val verifiedProductCount = remember(products, shouldShowCategoryHome) {
+        if (shouldShowCategoryHome) 0 else products.count { it.isPriceVerified }
+    }
+    val savedFamilies = remember(products, uiState.sortOption, shouldShowCategoryHome) {
+        if (shouldShowCategoryHome) emptyList()
+        else buildSavedProductFamilyBuckets(products, uiState.sortOption)
+    }
+
+    // Repeated products stay tucked away until the user chooses a family, version, then capacity.
+    var expandedFamilyKeys by remember { mutableStateOf(emptySet<String>()) }
+    var expandedVariantKeys by remember { mutableStateOf(emptySet<String>()) }
+    var expandedStorageKeys by remember { mutableStateOf(emptySet<String>()) }
 
     if (shouldShowCategoryHome) {
         CategoryHomeScreen(

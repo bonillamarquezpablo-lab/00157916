@@ -70,7 +70,8 @@ fun ProductCard(
     onClick: () -> Unit,
     onToggleTrack: () -> Unit,
     modifier: Modifier = Modifier,
-    compact: Boolean = false
+    compact: Boolean = false,
+    displayTitle: String = product.title
 ) {
     val context = LocalContext.current
     var showStoreComparison by remember { mutableStateOf(false) }
@@ -160,7 +161,7 @@ fun ProductCard(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = product.title,
+                        text = displayTitle,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 13.sp,
                         lineHeight = 17.sp,
@@ -580,7 +581,7 @@ fun ProductCard(
     if (showStoreComparison) {
         AlertDialog(
             onDismissRequest = { showStoreComparison = false },
-            title = { Text("Buscar ${product.title}") },
+            title = { Text("Buscar ${displayTitle}") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(

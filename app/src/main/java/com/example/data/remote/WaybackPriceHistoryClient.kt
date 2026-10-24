@@ -4329,8 +4329,9 @@ class WaybackPriceHistoryClient(
         pageUrl: String,
         jsonLdRoots: List<Any> = extractJsonLdRoots(document)
     ): Boolean =
-        isMatchingTitleForArchivedUrl(expectedTitle, candidate.first, pageUrl) ||
-            matchingVariantUrlForArchivedOffer(document, expectedTitle, candidate, pageUrl, jsonLdRoots) != null
+        !hasExplicitProductVariantConflict(expectedTitle, candidate.first) &&
+            (isMatchingTitleForArchivedUrl(expectedTitle, candidate.first, pageUrl) ||
+                matchingVariantUrlForArchivedOffer(document, expectedTitle, candidate, pageUrl, jsonLdRoots) != null)
 
     private fun isSameMerchantHost(firstUrl: String, secondUrl: String): Boolean {
         val firstHost = runCatching { URI(firstUrl).host.orEmpty() }.getOrDefault("")

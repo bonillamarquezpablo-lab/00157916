@@ -2936,8 +2936,8 @@ class WaybackPriceHistoryClientTest {
                    "url":"$primaryUrl",
                    "offers":{"@type":"Offer","price":"899.99","priceCurrency":"EUR"}},
                   {"@type":"Product","name":"Apple iPhone 15 Plus",
-                   "url":"$externalOfferUrl",
-                   "offers":{"@type":"Offer","price":"799.99","priceCurrency":"EUR"}}
+                   "url":"https://www.apple.com/es/shop/buy-iphone/iphone-15-plus-256gb",
+                   "offers":{"@type":"Offer","url":"$externalOfferUrl","price":"799.99","priceCurrency":"EUR"}}
                 ]
               }
               </script>

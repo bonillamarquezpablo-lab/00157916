@@ -45,7 +45,7 @@ class CategoryHomeScreenTest {
                     categorySummaries = ProductCategory.values()
                         .filter { it != ProductCategory.ALL }
                         .map { MarketplaceCategorySummary(it, productCount = 0, storeCount = 0) },
-                    stores = emptyList(),
+                    storesFlow = MutableStateFlow<List<Store>>(emptyList()),
                     uiState = state.value,
                     onSearchChange = { query -> state.value = state.value.copy(searchQuery = query) },
                     onCategorySelect = { category -> state.value = state.value.copy(selectedCategory = category) },

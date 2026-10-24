@@ -45,21 +45,43 @@ internal data class SavedProductFamily(
  * Retailer feeds often append SEO/marketing text after '|'. Ignore that tail for identity only
  * when the title before it already carries a concrete model/spec and the tail adds no variant.
  */
+private val SAVED_IDENTITY_TAIL_DIGIT_PATTERN = Regex("""\d""")
+private val SAVED_IDENTITY_TAIL_SPEC_PATTERN = Regex(
+    """(?i)\b\d+(?:[.,]\d+)?\s*(?:w|gb|tb|mah|mp|hz|mm|cm|a|mbps|gbps)\b"""
+)
+private val SAVED_IDENTITY_TAIL_VARIANT_PATTERN = Regex(
+    """(?i)\b(pro|max|plus|ultra|fe|lite|mini|fold|flip|4g|5g)\b"""
+)
+private val SAVED_IDENTITY_TAIL_CONDITION_PACKAGE_CONNECTIVITY_PATTERN = Regex(
+    """(?i)\b(open[\s-]?box|refurbished|renewed|reacondicionado|reacondicionada|usado|usada|used|segunda\s+mano|second\s+hand|como\s+nuevo|como\s+nueva|nuevos?|nuevas?|semi[\s-]?nuevo|semi[\s-]?nueva|packs?|bundle|bundles|duo|pair|set|kit|unidades?|uds|pcs|pieces|piezas|wifi|wi-fi|bluetooth|nfc|usb|type[\s-]?c|tipo[\s-]?c|pd|qc|lte|lightning|magsafe|thunderbolt)\b"""
+)
+private val SAVED_CONDITION_PATTERN = Regex(
+    """(?i)\b(open[\s-]?box|refurbished|renewed|reacondicionado|reacondicionada|usado|usada|used|segunda\s+mano|second\s+hand|como\s+nuevo|como\s+nueva|semi[\s-]?nuevo|semi[\s-]?nueva|nuevos?|nuevas?)\b"""
+)
+private val SAVED_PACK_MARKER_PATTERN = Regex(
+    """(?i)\b(packs?|bundle|bundles|duo|pair|set|kit|unidades?|uds|pcs|pieces|piezas)\b"""
+)
+private val SAVED_PACK_COUNT_PATTERN = Regex(
+    """(?i)\b(?:(\d{1,2})[\s-]*(?:x[\s-]*)?(?:packs?|unidades?|uds|pcs|piezas|pieces)|(?:packs?|bundles?|sets?)[\s-]*(\d{1,2}))\b"""
+)
+
+/**
+ * Retailer feeds append SEO/marketing text after '|'. Strip it only when it is generic advertising.
+ * Digits, specifications, colours, editions, condition, package, and connectivity tokens are SKU data.
+ */
 private fun savedIdentityTitle(product: Product): String {
     val title = product.title.trim()
     val separator = title.indexOf('|')
     if (separator <= 0) return title
     val base = title.substring(0, separator).trim()
     val tail = title.substring(separator + 1)
-    val baseHasConcreteSpec = Regex(
-        """(?i)\b\d+(?:[.,]\d+)?\s*(?:w|gb|tb|mah|mp|hz|mm|cm)\b"""
-    ).containsMatchIn(base)
-    val tailHasDistinctSpec = Regex(
-        """(?i)\b\d+(?:[.,]\d+)?\s*(?:w|gb|tb|mah|mp|hz|mm|cm)\b"""
-    ).containsMatchIn(tail) ||
+    val baseHasConcreteSpec = SAVED_IDENTITY_TAIL_SPEC_PATTERN.containsMatchIn(base)
+    val tailHasDistinctIdentity = SAVED_IDENTITY_TAIL_DIGIT_PATTERN.containsMatchIn(tail) ||
+        SAVED_IDENTITY_TAIL_SPEC_PATTERN.containsMatchIn(tail) ||
         SAVED_COLOUR_PATTERN.containsMatchIn(tail) ||
-        Regex("""(?i)\b(pro|max|plus|ultra|fe|lite|mini|fold|flip|4g|5g)\b""").containsMatchIn(tail)
-    return if (base.length >= 20 && baseHasConcreteSpec && !tailHasDistinctSpec) base else title
+        SAVED_IDENTITY_TAIL_VARIANT_PATTERN.containsMatchIn(tail) ||
+        SAVED_IDENTITY_TAIL_CONDITION_PACKAGE_CONNECTIVITY_PATTERN.containsMatchIn(tail)
+    return if (base.length >= 20 && baseHasConcreteSpec && !tailHasDistinctIdentity) base else title
 }
 
 /** Keep an unrecognised Xiaomi/Redmi/Poco "Pro Ultra" listing from masquerading as a real edition. */
@@ -72,8 +94,23 @@ internal fun savedProductDisplayTitle(product: Product): String {
     } else title
 }
 
-private fun savedIdentityParts(product: Product): List<String> =
-    onlineProductIdentityKey(savedIdentityTitle(product)).split('|').filter { it.isNotBlank() }
+private fun savedIdentityParts(product: Product): List<String> {
+    val title = savedIdentityTitle(product)
+    val parts = onlineProductIdentityKey(title)
+        .split('|')
+        .filter { it.isNotBlank() }
+        .toMutableList()
+    SAVED_CONDITION_PATTERN.find(title)?.value?.let { condition ->
+        parts += "condition:" + normalizeFamilyTitle(condition).replace(' ', '_')
+    }
+    if (SAVED_PACK_MARKER_PATTERN.containsMatchIn(title)) {
+        val count = SAVED_PACK_COUNT_PATTERN.find(title)?.let { match ->
+            match.groups[1]?.value ?: match.groups[2]?.value
+        }
+        parts += "pack:" + (count ?: "unspecified")
+    }
+    return parts
+}
 
 private fun savedFamilyKey(product: Product): String {
     val parts = savedIdentityParts(product)
@@ -83,7 +120,9 @@ private fun savedFamilyKey(product: Product): String {
         it.startsWith("variant:") ||
             it.startsWith("memory:") ||
             it.startsWith("color:") ||
-            it.startsWith("specs:")
+            it.startsWith("specs:") ||
+            it.startsWith("condition:") ||
+            it.startsWith("pack:")
     }
     return base.joinToString("|").ifBlank { normalizeFamilyTitle(product.title) }
 }
@@ -321,13 +360,16 @@ private fun variantLabel(key: String): String {
 
 private fun familyLabel(products: List<Product>): String =
     products.map { product ->
-        savedIdentityTitle(product).replace(
+        savedIdentityTitle(product).substringBefore('|').trim().replace(
             Regex("""(?i)(\bredmi\s+note\s*\d+)(pro\s*max|pro|plus|ultra|fe|lite|mini|4g|5g)\b"""),
             "$1 $2"
         )
             .replace(SAVED_CAPACITY_PATTERN, " ")
             .replace(SAVED_COLOUR_PATTERN, " ")
             .replace(SAVED_VARIANT_PATTERN, " ")
+            .replace(SAVED_CONDITION_PATTERN, " ")
+            .replace(SAVED_PACK_COUNT_PATTERN, " ")
+            .replace(SAVED_PACK_MARKER_PATTERN, " ")
             .replace(Regex("""(?i)\b(ram|rom|memoria|storage|almacenamiento)\b"""), " ")
             .replace(Regex("""\s+"""), " ")
             .trim(' ', '-', '/', '|', ',')
@@ -465,7 +507,7 @@ internal fun buildSavedProductFamilyBuckets(
                     val storageGroups = variantProducts.groupBy { product ->
                         capacityLabel(savedIdentityTitle(product), savedIdentityParts(product))
                     }.map { (label, rows) ->
-                        val exactVariantRows = rows.groupBy { onlineProductIdentityKey(savedIdentityTitle(it)) }
+                        val exactVariantRows = rows.groupBy { savedIdentityParts(it).joinToString("|") }
                             .values
                             .map(::mergeExactVariantProducts)
                             .sortedWith(savedProductComparator(sortOption))

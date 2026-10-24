@@ -54,6 +54,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Product
+import com.example.data.model.MarketplaceCategorySummary
 import com.example.data.model.ProductCategory
 
 internal data class CategorySummary(
@@ -90,7 +91,8 @@ internal fun buildCategorySummaries(products: List<Product>): List<CategorySumma
 
 @Composable
 fun CategoryHomeScreen(
-    products: List<Product>,
+    summaries: List<MarketplaceCategorySummary>,
+    totalProductCount: Int,
     searchQuery: String,
     onSearchChange: (String) -> Unit,
     onSearchSubmit: () -> Unit,
@@ -98,7 +100,7 @@ fun CategoryHomeScreen(
     onViewAllProducts: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val categories = remember(products) { buildCategorySummaries(products) }
+    val categories = remember(summaries) { summaries }
 
     LazyColumn(
         modifier = modifier
@@ -123,9 +125,9 @@ fun CategoryHomeScreen(
                 )
                 Text(
                     text = if (searchQuery.isBlank()) {
-                        "${products.size} productos guardados, organizados para encontrarlos más rápido."
+                        "$totalProductCount productos guardados, organizados para encontrarlos más rápido."
                     } else {
-                        "${products.size} resultados por categoría. Pulsa Buscar para abrir la lista."
+                        "Pulsa Buscar para abrir la lista y ver los resultados de «${searchQuery.trim()}»."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -202,8 +204,8 @@ fun CategoryHomeScreen(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    if (searchQuery.isBlank()) "Ver todos los productos (${products.size})"
-                    else "Ver resultados (${products.size})"
+                    if (searchQuery.isBlank()) "Ver todos los productos ($totalProductCount)"
+                    else "Ver resultados de búsqueda"
                 )
             }
         }
@@ -212,7 +214,7 @@ fun CategoryHomeScreen(
 
 @Composable
 private fun CategoryCard(
-    summary: CategorySummary,
+    summary: MarketplaceCategorySummary,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {

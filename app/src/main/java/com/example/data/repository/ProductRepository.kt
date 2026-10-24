@@ -11,6 +11,7 @@ import com.example.data.local.TrackedProductEntity
 import com.example.data.model.PricePoint
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
+import com.example.data.model.MarketplaceCategorySummary
 import com.example.data.model.PENDING_VERIFICATION_DATE_LABEL
 import com.example.data.model.StoreOffer
 import com.example.data.remote.ArchivedPriceQuote
@@ -45,6 +46,8 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -228,6 +231,68 @@ class ProductRepository(
         _latestProducts.value = currentProducts
     }.flowOn(Dispatchers.Default)
         .shareIn(externalScope, SharingStarted.WhileSubscribed(5_000L), replay = 1)
+
+
+    /**
+     * Aggregate the home-screen counts in Room. This flow deliberately returns only one row per
+     * category, rather than mapping every saved entity into a full Product and price-history graph.
+     */
+    val marketplaceCategorySummariesStream: Flow<List<MarketplaceCategorySummary>> =
+        productDao.observeMarketplaceCategoryCounts().map { rows ->
+            val byCategory = rows.associateBy { it.categoryName }
+            ProductCategory.values()
+                .filter { it != ProductCategory.ALL }
+                .map { category ->
+                    val row = byCategory[category.name]
+                    MarketplaceCategorySummary(
+                        category = category,
+                        productCount = row?.productCount ?: 0,
+                        storeCount = row?.storeCount ?: 0
+                    )
+                }
+        }.flowOn(Dispatchers.Default)
+
+    /**
+     * Load and map only the active marketplace category. Selecting "Todos" intentionally opts
+     * into the full catalogue; the category landing page never subscribes to this stream.
+     */
+    fun productsForCategoryStream(category: ProductCategory): Flow<List<Product>> {
+        val productRows = if (category == ProductCategory.ALL) {
+            productDao.getAllProducts()
+        } else {
+            productDao.getProductsByCategory(category.name)
+        }
+        return productRows.flatMapLatest { productEntities ->
+            if (productEntities.isEmpty()) {
+                flowOf(emptyList<Product>())
+            } else {
+                val productIds = productEntities.map { it.id }
+                combine(
+                    storeDao.getAllStores(),
+                    trackedDao.getAllTracked(),
+                    priceObservationDao.observeForProducts(productIds)
+                ) { storeEntities, trackedEntities, observations ->
+                    val stores = storeEntities.map { it.toDomainStore() }.ifEmpty { Store.ALL_STORES }
+                    val trackingMap = trackedEntities.associateBy { it.productId }
+                    val observationsByProduct = observations.groupBy { it.productId }
+                    productEntities.map { entity ->
+                        val product = entity.toDomainProduct(
+                            stores = stores,
+                            allObservations = observationsByProduct[entity.id].orEmpty()
+                        )
+                        val trackingInfo = trackingMap[product.id]
+                        product.copy(
+                            isTracked = trackingInfo != null,
+                            alertTargetPrice = trackingInfo?.targetAlertPrice
+                        )
+                    }
+                }
+            }
+        }.flowOn(Dispatchers.Default)
+    }
+
+    /** Lightweight badge count; avoids forcing a product catalogue load just for the bottom bar. */
+    val trackedProductCountStream: Flow<Int> = trackedDao.getAllTracked().map { it.size }
 
     val trackedProductsStream: Flow<List<Product>> = allProductsStream.map { list ->
         list.filter { it.isTracked }

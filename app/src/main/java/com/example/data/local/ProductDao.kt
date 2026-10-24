@@ -1,11 +1,18 @@
 package com.example.data.local
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
+
+data class ProductCategoryCountRow(
+    @ColumnInfo(name = "categoryName") val categoryName: String,
+    @ColumnInfo(name = "productCount") val productCount: Int,
+    @ColumnInfo(name = "storeCount") val storeCount: Int
+)
 
 @Dao
 interface ProductDao {
@@ -14,6 +21,33 @@ interface ProductDao {
 
     @Query("SELECT COUNT(*) FROM products")
     suspend fun getProductCount(): Int
+
+
+    /** Load a single category when the user opens it instead of converting the whole catalogue. */
+    @Query("SELECT * FROM products WHERE category = :category ORDER BY title ASC")
+    fun getProductsByCategory(category: String): Flow<List<ProductEntity>>
+
+    /**
+     * Compact dashboard summary computed inside SQLite. It counts only catalogue entries that
+     * Mercado can surface (verified products, watched products, products with validated history,
+     * or explicit pending live-search candidates). Retailer IDs from saved observations are
+     * included and deduplicated, without constructing every domain Product on the home screen.
+     */
+    @Query(
+        "SELECT categoryName, COUNT(DISTINCT productId) AS productCount, " +
+            "COUNT(DISTINCT CASE WHEN TRIM(storeId) <> '' THEN storeId END) AS storeCount " +
+            "FROM (" +
+            "SELECT p.category AS categoryName, p.id AS productId, p.currentStoreId AS storeId " +
+            "FROM products p WHERE " + MARKETPLACE_VISIBLE_PRODUCT_SQL +
+            " UNION ALL " +
+            "SELECT p.category AS categoryName, p.id AS productId, o.storeId AS storeId " +
+            "FROM products p INNER JOIN price_observations o ON o.productId = p.id " +
+            "WHERE (" + MARKETPLACE_VISIBLE_PRODUCT_SQL + ") AND o.isVerified = 1 " +
+            "AND upper(trim(o.currency)) = 'EUR' AND o.price >= 0.5 AND o.price <= 10000.0 " +
+            "AND trim(o.productTitle) <> '' AND o.observedAt > 0" +
+            ") GROUP BY categoryName"
+    )
+    fun observeMarketplaceCategoryCounts(): Flow<List<ProductCategoryCountRow>>
 
     @Query("SELECT * FROM products ORDER BY title ASC")
     suspend fun getAllProductsSnapshot(): List<ProductEntity>
@@ -88,4 +122,17 @@ interface ProductDao {
 
     @Query("UPDATE products SET isPriceVerified = :isVerified WHERE id = :productId")
     suspend fun updatePriceVerification(productId: String, isVerified: Boolean)
+
+    companion object {
+        private const val MARKETPLACE_VISIBLE_PRODUCT_SQL =
+            "p.isPriceVerified = 1 " +
+                "OR EXISTS (SELECT 1 FROM tracked_products t WHERE t.productId = p.id) " +
+                "OR EXISTS (SELECT 1 FROM price_observations v WHERE v.productId = p.id " +
+                "AND v.isVerified = 1 AND upper(trim(v.currency)) = 'EUR' " +
+                "AND v.price >= 0.5 AND v.price <= 10000.0 AND trim(v.productTitle) <> '' " +
+                "AND v.observedAt > 0) " +
+                "OR ((p.id LIKE 'online_candidate_%' " +
+                "OR lower(trim(p.athMinDate)) = 'pendiente de verificación') " +
+                "AND p.currentPrice > 0)"
+    }
 }

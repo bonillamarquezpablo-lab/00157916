@@ -50,7 +50,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,6 +64,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
+import com.example.data.model.MarketplaceCategorySummary
+import kotlinx.coroutines.flow.StateFlow
 import com.example.data.model.Store
 import com.example.ui.components.ProductCard
 import com.example.ui.viewmodel.SortOption
@@ -70,8 +74,9 @@ import com.example.ui.viewmodel.TrackerUiState
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MarketScreen(
-    products: List<Product>,
-    stores: List<Store>,
+    productsForCategory: (ProductCategory) -> StateFlow<List<Product>>,
+    categorySummaries: List<MarketplaceCategorySummary>,
+    storesFlow: StateFlow<List<Store>>,
     uiState: TrackerUiState,
     onSearchChange: (String) -> Unit,
     onCategorySelect: (ProductCategory) -> Unit,
@@ -86,7 +91,7 @@ fun MarketScreen(
 ) {
     var showSortMenu by remember { mutableStateOf(false) }
     var showStoreMenu by remember { mutableStateOf(false) }
-    var forceShowAllProducts by remember { mutableStateOf(false) }
+    var forceShowAllProducts by rememberSaveable { mutableStateOf(false) }
 
     val hasActiveMarketFilter = uiState.selectedStoreName != null ||
         uiState.onlyAthFilter ||
@@ -99,16 +104,6 @@ fun MarketScreen(
         !uiState.onlyHistoricalMinimumFilter &&
         (uiState.selectedCategory != ProductCategory.ALL || forceShowAllProducts)
 
-    // Avoid building the full family/version/capacity hierarchy while the category landing
-    // screen is visible; that work is only needed after the user enters the product list.
-    val verifiedProductCount = remember(products, shouldShowCategoryHome) {
-        if (shouldShowCategoryHome) 0 else products.count { it.isPriceVerified }
-    }
-    val savedFamilies = remember(products, uiState.sortOption, shouldShowCategoryHome) {
-        if (shouldShowCategoryHome) emptyList()
-        else buildSavedProductFamilyBuckets(products, uiState.sortOption)
-    }
-
     // Repeated products stay tucked away until the user chooses a family, version, then capacity.
     var expandedFamilyKeys by remember { mutableStateOf(emptySet<String>()) }
     var expandedVariantKeys by remember { mutableStateOf(emptySet<String>()) }
@@ -116,7 +111,8 @@ fun MarketScreen(
 
     if (shouldShowCategoryHome) {
         CategoryHomeScreen(
-            products = products,
+            summaries = categorySummaries,
+            totalProductCount = categorySummaries.sumOf { it.productCount },
             searchQuery = uiState.searchQuery,
             onSearchChange = onSearchChange,
             onSearchSubmit = { forceShowAllProducts = true },
@@ -128,6 +124,22 @@ fun MarketScreen(
             modifier = modifier
         )
         return
+    }
+
+    // Store directory also performs cross-observation validation; defer it until the user
+    // opens a category/list or explicit all-products view instead of doing this work on home.
+    val stores by storesFlow.collectAsStateWithLifecycle()
+
+    // Subscribe to product rows only after the user opens a category/list. The per-category
+    // StateFlow remains cached after its first use, so background/foreground transitions do not
+    // reconstruct the full list or its price-history hierarchy.
+    val products by productsForCategory(uiState.selectedCategory).collectAsStateWithLifecycle()
+
+    // Avoid building the family/version/capacity hierarchy while the category landing screen
+    // is visible. This branch is reached only after opening a category or requesting all results.
+    val verifiedProductCount = remember(products) { products.count { it.isPriceVerified } }
+    val savedFamilies = remember(products, uiState.sortOption) {
+        buildSavedProductFamilyBuckets(products, uiState.sortOption)
     }
 
     // Keep Mercado as a drill-down, not a wall of expanded cards. Changing filters

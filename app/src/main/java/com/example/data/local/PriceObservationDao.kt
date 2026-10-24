@@ -18,6 +18,11 @@ interface PriceObservationDao {
     @Query("SELECT * FROM price_observations ORDER BY observedAt DESC")
     fun observeAllStored(): Flow<List<PriceObservationEntity>>
 
+
+    /** Load history rows only for the product IDs currently visible in a category. */
+    @Query("SELECT * FROM price_observations WHERE productId IN (:productIds) ORDER BY observedAt ASC")
+    fun observeForProducts(productIds: List<String>): Flow<List<PriceObservationEntity>>
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(observation: PriceObservationEntity): Long
 

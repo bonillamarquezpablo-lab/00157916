@@ -1852,6 +1852,76 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun priorProductPrefixTimeoutKeepsAvailabilityFallbackButSkipsRepeatedCdxRequests() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .commit()
+
+        val title = "Anker Prime bounded CDX timeout fallback " + System.currentTimeMillis()
+        val preferredUrl = "https://shop.example/products/anker-prime-bounded-timeout.html"
+        val cdxRequests = AtomicInteger()
+        val availabilityRequests = AtomicInteger()
+        val traceEvents = CopyOnWriteArrayList<WaybackTraceEvent>()
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            when {
+                request.url.host == "archive.org" &&
+                    request.url.encodedPath == "/wayback/available" -> {
+                    availabilityRequests.incrementAndGet()
+                    val body = """{"archived_snapshots":{"closest":{"available":false}}}"""
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(body.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    cdxRequests.incrementAndGet()
+                    throw AssertionError("Do not issue another CDX query after the prior product-prefix timeout")
+                }
+                else -> throw AssertionError("Unexpected archive request: ${request.url.host}${request.url.encodedPath}")
+            }
+        }.build()
+
+        try {
+            val result = withTimeout(20_000L) {
+                WaybackPriceHistoryClient(context, http).fetchHistoryByMerchantDomain(
+                    domain = "shop.example",
+                    expectedTitle = title,
+                    lookbackDays = 730,
+                    preferredUrl = preferredUrl,
+                    preferredUrlAlreadyQueried = true,
+                    priorCdxDiagnostics = setOf("CDX_URL_PREFIX_TIMEOUT"),
+                    onTrace = { traceEvents += it }
+                )
+            }
+
+            assertEquals("No repeat CDX queries should be sent in this run", 0, cdxRequests.get())
+            assertTrue("The independent Availability fallback should still be attempted", availabilityRequests.get() > 0)
+            assertTrue("The result should preserve that recovery was incomplete", result.quotes.isEmpty())
+            assertTrue(
+                "The diagnostic should explain why additional CDX calls were skipped",
+                traceEvents.any {
+                    it.status == WaybackTraceStatus.SKIPPED &&
+                        it.detail.contains("la búsqueda de producto ya agotó el tiempo")
+                }
+            )
+        } finally {
+            preferences.edit()
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .commit()
+        }
+    }
+
+    @Test
     fun availabilityEmptyPlusAlternateCdxTimeoutIsCachedAsFailureNotSixHourNegative() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
@@ -4038,6 +4108,79 @@ class WaybackPriceHistoryClientTest {
 
         assertNull(
             "A generic/stale page title must not override structured metadata for another colour, capacity and trim",
+            quote
+        )
+    }
+
+    @Test
+    fun archivedOfferMaySpecifyColourWhenSelectedTitleLeavesItUnspecified() {
+        val client = newClient()
+        val offerUrl = "https://shop.example/products/iphone-15-plus-256gb-amarillo-libre"
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head>
+                  <title>Apple iPhone 15 Plus 256GB Amarillo Libre</title>
+                  <script type="application/ld+json">
+                    {
+                      "@type":"Product",
+                      "name":"Apple iPhone 15 Plus 256GB Amarillo Libre",
+                      "url":"$offerUrl",
+                      "offers":{
+                        "@type":"Offer",
+                        "url":"$offerUrl",
+                        "price":"624.00",
+                        "priceCurrency":"EUR"
+                      }
+                    }
+                  </script>
+                </head><body></body></html>
+            """.trimIndent(),
+            expectedTitle = "Apple iPhone 15 Plus 256GB",
+            originalUrl = "https://shop.example/products/iphone-15-plus-256gb",
+            snapshotUrl = "https://web.archive.org/web/20250901000000id_/https://shop.example/products/iphone-15-plus-256gb",
+            observedAt = 1_756_684_800_000L
+        )
+
+        assertNotNull(
+            "An unspecified selected colour should not reject an otherwise matching model and capacity",
+            quote
+        )
+        assertEquals(624.00, quote!!.price, 0.001)
+        assertEquals("EUR", quote.currency)
+        assertEquals(offerUrl, quote.productUrl)
+    }
+
+    @Test
+    fun explicitlyConflictingSelectedColourStillRejectsArchivedOffer() {
+        val client = newClient()
+        val wrongColourUrl = "https://shop.example/products/iphone-15-plus-256gb-negro"
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head>
+                  <title>Apple iPhone 15 Plus 256GB Negro</title>
+                  <script type="application/ld+json">
+                    {
+                      "@type":"Product",
+                      "name":"Apple iPhone 15 Plus 256GB Negro",
+                      "url":"$wrongColourUrl",
+                      "offers":{
+                        "@type":"Offer",
+                        "url":"$wrongColourUrl",
+                        "price":"624.00",
+                        "priceCurrency":"EUR"
+                      }
+                    }
+                  </script>
+                </head><body></body></html>
+            """.trimIndent(),
+            expectedTitle = "Apple iPhone 15 Plus 256GB Amarillo",
+            originalUrl = "https://shop.example/products/iphone-15-plus-256gb-amarillo",
+            snapshotUrl = "https://web.archive.org/web/20250901000000id_/https://shop.example/products/iphone-15-plus-256gb-amarillo",
+            observedAt = 1_756_684_800_000L
+        )
+
+        assertNull(
+            "A selected colour is a hard requirement; the matching model and capacity cannot override a different colour",
             quote
         )
     }

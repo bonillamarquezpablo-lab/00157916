@@ -44,6 +44,7 @@ class CategoryHomeScreenTest {
             MaterialTheme {
                 MarketScreen(
                     productsForCategory = { MutableStateFlow<List<Product>>(emptyList()) },
+                    filteredProductsForCategory = { MutableStateFlow<List<Product>>(emptyList()) },
                     categorySummaries = ProductCategory.values()
                         .filter { it != ProductCategory.ALL }
                         .map { MarketplaceCategorySummary(it, productCount = 0, storeCount = 0) },
@@ -99,6 +100,7 @@ class CategoryHomeScreenTest {
                         productFlowRequested = true
                         MutableStateFlow<List<Product>>(emptyList())
                     },
+                    filteredProductsForCategory = { MutableStateFlow<List<Product>>(emptyList()) },
                     categorySummaries = summaries,
 
                     uiState = state.value,
@@ -195,6 +197,7 @@ class CategoryHomeScreenTest {
             MaterialTheme {
                 MarketScreen(
                     productsForCategory = { MutableStateFlow(products) },
+                    filteredProductsForCategory = { MutableStateFlow(products) },
                     categorySummaries = ProductCategory.values()
                         .filter { it != ProductCategory.ALL }
                         .map { MarketplaceCategorySummary(it, productCount = 0, storeCount = 0) },

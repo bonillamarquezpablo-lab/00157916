@@ -63,10 +63,12 @@ internal fun filterMarketplaceProductsForState(
                 product.priceBadgeState.type == PriceBadgeType.HISTORICAL_MINIMUM
         }
         .filter { product ->
-            val selectedStore = state.selectedStoreName
+            val selectedStore = state.selectedStoreName?.let { marketplaceLabel(it) }
             selectedStore == null ||
-                marketplaceLabel(product.currentStore) == marketplaceLabel(selectedStore) ||
-                product.offers.any { marketplaceLabel(it.store) == marketplaceLabel(selectedStore) }
+                marketplaceLabel(product.currentStore).equals(selectedStore, ignoreCase = true) ||
+                product.offers.any {
+                    marketplaceLabel(it.store).equals(selectedStore, ignoreCase = true)
+                }
         }
         .let { list ->
             when (state.sortOption) {

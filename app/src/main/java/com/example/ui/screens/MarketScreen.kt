@@ -26,6 +26,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Info
@@ -46,7 +48,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -73,6 +74,8 @@ import com.example.ui.viewmodel.SortOption
 import com.example.ui.viewmodel.marketplaceLabel
 import com.example.ui.viewmodel.marketplaceStoresForProducts
 import com.example.ui.viewmodel.TrackerUiState
+
+private val MARKETPLACE_GRID_CARD_HEIGHT = 420.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -107,11 +110,6 @@ fun MarketScreen(
         !uiState.onlyHistoricalMinimumFilter &&
         (uiState.selectedCategory != ProductCategory.ALL || forceShowAllProducts)
 
-    // Repeated products stay tucked away until the user chooses a family, version, then capacity.
-    var expandedFamilyKeys by remember { mutableStateOf(emptySet<String>()) }
-    var expandedVariantKeys by remember { mutableStateOf(emptySet<String>()) }
-    var expandedStorageKeys by remember { mutableStateOf(emptySet<String>()) }
-
     if (shouldShowCategoryHome) {
         CategoryHomeScreen(
             summaries = categorySummaries,
@@ -145,14 +143,6 @@ fun MarketScreen(
     val verifiedProductCount = remember(products) { products.count { it.isPriceVerified } }
     val savedFamilies = remember(products, uiState.sortOption) {
         buildSavedProductFamilyBuckets(products, uiState.sortOption)
-    }
-
-    // Keep Mercado as a drill-down, not a wall of expanded cards. Changing filters
-    // resets the selection so expansions from a previous result set cannot reappear.
-    LaunchedEffect(uiState.selectedCategory, uiState.searchQuery, uiState.selectedStoreName) {
-        expandedFamilyKeys = emptySet()
-        expandedVariantKeys = emptySet()
-        expandedStorageKeys = emptySet()
     }
 
     LazyColumn(
@@ -542,40 +532,21 @@ fun MarketScreen(
                     verticalAlignment = Alignment.Top
                 ) {
                     familyRow.forEach { family ->
-                        val familyExpanded = family.key in expandedFamilyKeys
                         if (family.productCount == 1) {
                             val product = family.products.single()
+                            val displayProduct = product.copy(title = savedProductDisplayTitle(product))
                             ProductCard(
-                                product = product,
-                                onClick = { onProductClick(product) },
+                                product = displayProduct,
+                                onClick = { onProductClick(displayProduct) },
                                 onToggleTrack = { onToggleTrack(product) },
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(MARKETPLACE_GRID_CARD_HEIGHT),
                                 compact = true
                             )
                         } else {
                             SavedProductFamilyGridTile(
                                 family = family,
-                                expanded = familyExpanded,
-                                expandedVariantKeys = expandedVariantKeys,
-                                expandedStorageKeys = expandedStorageKeys,
-                                onToggleFamily = {
-                                    if (familyExpanded) {
-                                        expandedFamilyKeys = emptySet()
-                                        expandedVariantKeys = emptySet()
-                                        expandedStorageKeys = emptySet()
-                                    } else {
-                                        expandedFamilyKeys = setOf(family.key)
-                                        expandedVariantKeys = emptySet()
-                                        expandedStorageKeys = emptySet()
-                                    }
-                                },
-                                onToggleVariant = { key, isExpanded ->
-                                    expandedVariantKeys = if (isExpanded) emptySet() else setOf(key)
-                                    expandedStorageKeys = emptySet()
-                                },
-                                onToggleStorage = { key, isExpanded ->
-                                    expandedStorageKeys = if (isExpanded) emptySet() else setOf(key)
-                                },
                                 onProductClick = onProductClick,
                                 onToggleTrack = onToggleTrack,
                                 modifier = Modifier.weight(1f)
@@ -592,12 +563,6 @@ fun MarketScreen(
 @Composable
 private fun SavedProductFamilyGridTile(
     family: SavedProductFamily,
-    expanded: Boolean,
-    expandedVariantKeys: Set<String>,
-    expandedStorageKeys: Set<String>,
-    onToggleFamily: () -> Unit,
-    onToggleVariant: (String, Boolean) -> Unit,
-    onToggleStorage: (String, Boolean) -> Unit,
     onProductClick: (Product) -> Unit,
     onToggleTrack: (Product) -> Unit,
     modifier: Modifier = Modifier
@@ -609,139 +574,142 @@ private fun SavedProductFamilyGridTile(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .height(MARKETPLACE_GRID_CARD_HEIGHT)
             .clip(shape)
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f), shape)
             .padding(10.dp)
             .testTag("saved_family_card_${family.key.hashCode()}"),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .clickable(onClick = onToggleFamily)
-                .padding(2.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Top
         ) {
             if (representative != null) {
-                ProductImageView(
-                    product = representative,
+                Box(
                     modifier = Modifier
                         .size(68.dp)
-                        .testTag("family_photo_${family.key.hashCode()}"),
-                    showAthRibbon = false
-                )
+                        .clip(RoundedCornerShape(10.dp))
+                ) {
+                    ProductImageView(
+                        product = representative,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag("family_photo_${family.key.hashCode()}"),
+                        showAthRibbon = false
+                    )
+                    IconButton(
+                        onClick = { onToggleTrack(representative) },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .size(27.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
+                    ) {
+                        Icon(
+                            imageVector = if (representative.isTracked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                            contentDescription = if (representative.isTracked) "Siguiendo" else "Seguir precio",
+                            tint = if (representative.isTracked) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
                 Spacer(modifier = Modifier.width(8.dp))
             }
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
                 Text(
                     text = family.label,
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp,
                     lineHeight = 16.sp,
-                    maxLines = 3,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
                     text = "${family.productCount} fichas · ${family.variants.size} versiones",
                     fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
                 )
                 Text(
                     text = "${family.storeCount} tiendas",
                     fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = if (expanded) "Ocultar ▴" else "Elegir versión ▾",
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
                 )
             }
         }
 
-        if (expanded) {
-            family.variants.forEach { variant ->
-                val variantKey = "${family.key}::${variant.key}"
-                val variantExpanded = variantKey in expandedVariantKeys
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(9.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainer)
-                            .clickable { onToggleVariant(variantKey, variantExpanded) }
-                            .padding(horizontal = 8.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = variant.label,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = if (variant.storages.size == 1) "1 configuración" else "${variant.storages.size} configuraciones",
-                                fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Text(text = if (variantExpanded) "▴" else "▾", color = MaterialTheme.colorScheme.primary)
-                    }
+        Text(
+            text = "Versiones disponibles",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
-                    if (variantExpanded) {
-                        variant.storages.forEach { storage ->
-                            val storageKey = "${variantKey}::${storage.label}"
-                            val storageExpanded = storageKey in expandedStorageKeys
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
-                                        .clickable { onToggleStorage(storageKey, storageExpanded) }
-                                        .padding(horizontal = 8.dp, vertical = 7.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            family.variants.forEach { variant ->
+                variant.storages.forEach { storage ->
+                    val product = storage.products.firstOrNull()
+                    if (product != null) {
+                        val displayProduct = product.copy(title = savedProductDisplayTitle(product))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainer)
+                                .clickable { onProductClick(displayProduct) }
+                                .padding(horizontal = 8.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    text = "${variant.label} · ${storage.label}",
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (storage.products.size > 1) {
                                     Text(
-                                        text = storage.label,
-                                        modifier = Modifier.weight(1f),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
+                                        text = "${storage.products.size} fichas de color/SKU",
+                                        fontSize = 9.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
                                     )
-                                    Text(
-                                        text = "${storage.products.size} fichas ${if (storageExpanded) "▴" else "▾"}",
-                                        fontSize = 10.sp,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                                if (storageExpanded) {
-                                    storage.products.forEach { product ->
-                                        ProductCard(
-                                            product = product,
-                                            onClick = { onProductClick(product) },
-                                            onToggleTrack = { onToggleTrack(product) },
-                                            modifier = Modifier.padding(top = 3.dp),
-                                            compact = true
-                                        )
-                                    }
                                 }
                             }
+                            Text(
+                                text = "›",
+                                fontSize = 18.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
                         }
                     }
                 }
             }
         }
+        Text(
+            text = "Toca una versión para ver su ficha",
+            fontSize = 9.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
+        )
     }
 }
-

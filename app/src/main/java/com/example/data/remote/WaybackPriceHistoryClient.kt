@@ -5014,24 +5014,30 @@ class WaybackPriceHistoryClient(
         val sameBroadIdentity = onlineProductIdentityKey(e) == onlineProductIdentityKey(a)
         if (!sharedIdentifier && !sameBroadIdentity) return false
 
+        // Missing qualifiers in a structured title are unknown, not a proven conflict: the
+        // matching offer URL may confirm them. Reject only qualifiers the title explicitly
+        // contradicts, or a specific colour/capacity attached to a product whose variant is unknown.
+        if (productConditionKey(e) != productConditionKey(a)) return true
         val expectedColour = productColourFamily(e)
         val archivedColour = productColourFamily(a)
-        if (expectedColour != null && expectedColour != archivedColour) return true
+        if (expectedColour == null && archivedColour != null) return true
+        if (expectedColour != null && archivedColour != null && expectedColour != archivedColour) return true
 
         val expectedModelVariants = productModelVariantTokens(e)
         val archivedModelVariants = productModelVariantTokens(a)
-        if (expectedModelVariants != archivedModelVariants &&
-            (expectedModelVariants.isNotEmpty() || archivedModelVariants.isNotEmpty())
-        ) return true
+        if (archivedModelVariants.isNotEmpty() && expectedModelVariants != archivedModelVariants) return true
 
         val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
         val expectedStorage = storagePattern.findAll(e).map { it.value.replace(Regex("""\s+"""), "") }.toSet()
         val archivedStorage = storagePattern.findAll(a).map { it.value.replace(Regex("""\s+"""), "") }.toSet()
-        if (expectedStorage.isNotEmpty() && !archivedStorage.containsAll(expectedStorage)) return true
+        if (expectedStorage.isEmpty() && archivedStorage.isNotEmpty()) return true
+        if (expectedStorage.isNotEmpty() && archivedStorage.any { it !in expectedStorage }) return true
 
         return expectedIdentifiers.isNotEmpty() &&
             expectedIdentifiers.any { it.matches(Regex("""\d+(?:gb|tb|mah|wh|w|hz|mm|cm)?""")) } &&
-            !archivedIdentifiers.containsAll(expectedIdentifiers)
+            archivedIdentifiers.any {
+                it.matches(Regex("""\d+(?:gb|tb|mah|wh|w|hz|mm|cm)?""")) && it !in expectedIdentifiers
+            }
     }
 
     private fun xiaomiMiModel(normalizedTitle: String): String? {

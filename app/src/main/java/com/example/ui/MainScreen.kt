@@ -300,6 +300,7 @@ fun MainScreen(
                 MainTab.MARKET -> {
                     MarketScreen(
                         productsForCategory = viewModel::productsForCategory,
+                        filteredProductsForCategory = viewModel::filteredProductsForCategory,
                         categorySummaries = categorySummaries,
                         uiState = uiState,
                         onSearchChange = viewModel::onSearchQueryChange,

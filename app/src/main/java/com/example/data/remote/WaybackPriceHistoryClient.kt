@@ -640,7 +640,7 @@ class WaybackPriceHistoryClient(
                 attempt,
                 now,
                 hasQuotes = merged.quotes.isNotEmpty(),
-                failed = incompleteLookupFailed || merged.requestFailed,
+                failed = incompleteLookupFailed,
                 rateLimited = rateLimited
             )
             merged

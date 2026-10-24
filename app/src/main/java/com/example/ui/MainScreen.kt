@@ -299,9 +299,8 @@ fun MainScreen(
             } else when (currentTab) {
                 MainTab.MARKET -> {
                     MarketScreen(
-                        productsForCategory = viewModel::filteredProductsForCategory,
+                        productsForCategory = viewModel::productsForCategory,
                         categorySummaries = categorySummaries,
-                        storesFlow = viewModel.spanishStores,
                         uiState = uiState,
                         onSearchChange = viewModel::onSearchQueryChange,
                         onCategorySelect = viewModel::onCategorySelect,

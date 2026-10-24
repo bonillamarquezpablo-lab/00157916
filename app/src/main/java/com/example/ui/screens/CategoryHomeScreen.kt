@@ -64,10 +64,11 @@ internal data class CategorySummary(
  * Store IDs from both primary products and their offers are de-duplicated for each category.
  */
 internal fun buildCategorySummaries(products: List<Product>): List<CategorySummary> {
+    val productsByCategory = products.groupBy { it.category }
     return ProductCategory.values()
         .filter { it != ProductCategory.ALL }
         .map { category ->
-            val categoryProducts = products.filter { it.category == category }
+            val categoryProducts = productsByCategory[category].orEmpty()
             val storeIds = buildSet {
                 categoryProducts.forEach { product ->
                     product.currentStore.id.takeIf { it.isNotBlank() }?.let(::add)
@@ -138,6 +139,13 @@ fun CategoryHomeScreen(
                         contentDescription = "Buscar",
                         tint = MaterialTheme.colorScheme.primary
                     )
+                },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { onSearchChange("") }) {
+                            Icon(Icons.Default.Clear, contentDescription = "Limpiar búsqueda")
+                        }
+                    }
                 },
                 singleLine = true,
                 shape = MaterialTheme.shapes.medium,

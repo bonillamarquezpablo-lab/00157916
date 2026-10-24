@@ -486,21 +486,40 @@ class WaybackPriceHistoryClient(
                 return@serializedArchiveLookup exactResult.copy(diagnosticCodes = emptySet())
             }
 
-            // Prefix matching is a fallback for alternate slashes, locale paths and canonical URL variants.
+            // Adaptive budget: if the exact URL already found a valid price, this is a quick
+            // supplement to add one or two more dated points, not another full historical crawl.
+            // If the exact URL found nothing, keep the wider recovery budget.
+            val foundExactPrimaryQuote = exactPrimaryQuotes.isNotEmpty()
             val prefixResult = queryCdxAndFetchPrices(
                 cdxUrl = prefixCdxUrl,
                 expectedTitle = expectedTitle,
                 cacheKey = attempt,
                 now = now,
                 lookbackDays = lookbackDays,
-                maxSnapshots = MAX_DIRECT_SNAPSHOTS_PER_URL,
-                cdxTimeoutSeconds = DIRECT_CDX_TIMEOUT_SECONDS,
+                maxSnapshots = if (foundExactPrimaryQuote) {
+                    MAX_QUICK_SUPPLEMENTAL_SNAPSHOTS
+                } else {
+                    MAX_DIRECT_SNAPSHOTS_PER_URL
+                },
+                cdxTimeoutSeconds = if (foundExactPrimaryQuote) {
+                    QUICK_SUPPLEMENTAL_PREFIX_CDX_TIMEOUT_SECONDS
+                } else {
+                    DIRECT_CDX_TIMEOUT_SECONDS
+                },
                 cdxStage = "CDX_URL_PREFIX",
-                snapshotTimeoutSeconds = DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS,
+                snapshotTimeoutSeconds = if (foundExactPrimaryQuote) {
+                    QUICK_SUPPLEMENTAL_PREFIX_SNAPSHOT_TIMEOUT_SECONDS
+                } else {
+                    DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS
+                },
                 onTrace = onTrace,
                 knownProductTitlesById = knownProductTitlesById,
                 snapshotResultsCache = snapshotResultsCache,
-                onVerifiedQuotes = onVerifiedQuotes
+                onVerifiedQuotes = onVerifiedQuotes,
+                stopAfterDistinctPrimaryDates = if (foundExactPrimaryQuote) {
+                    MIN_HISTORICAL_DATES_BEFORE_EARLY_STOP
+                } else null,
+                primarySeedQuotes = exactPrimaryQuotes
             )
             val mergedQuotes = (exactResult.quotes + prefixResult.quotes)
                 .distinctBy { listOf(it.originalUrl, it.observedAt.toString(), it.price.toString(), it.currency) }
@@ -1714,6 +1733,27 @@ class WaybackPriceHistoryClient(
             )
             fetched += snapshot
             if (snapshot.diagnosticCode == "WAYBACK_RATE_LIMITED") break
+            val requiredPrimaryDates = stopAfterDistinctPrimaryDates
+            if (requiredPrimaryDates != null && requiredPrimaryDates > 0) {
+                val verifiedPrimaryDates = (
+                    primarySeedQuotes + fetched.flatMap { item ->
+                        listOfNotNull(item.quote) + item.additionalQuotes
+                    }
+                ).asSequence()
+                    .filter { !it.isDiscoveryCandidate && it.targetProductId.isNullOrBlank() }
+                    .map { Math.floorDiv(it.observedAt, DAY_MS) }
+                    .distinct()
+                    .take(requiredPrimaryDates)
+                    .count()
+                if (verifiedPrimaryDates >= requiredPrimaryDates) {
+                    emitWaybackTrace(
+                        onTrace, 14, WaybackTraceStatus.PASSED,
+                        "Búsqueda suplementaria detenida: ya hay $verifiedPrimaryDates fechas distintas verificadas del producto seleccionado.",
+                        diagnosticStep = 18
+                    )
+                    break
+                }
+            }
         }
         if (sampled.size == 1) {
             emitWaybackTrace(
@@ -3118,7 +3158,9 @@ class WaybackPriceHistoryClient(
         onTrace: ((WaybackTraceEvent) -> Unit)? = null,
         knownProductTitlesById: Map<String, String> = emptyMap(),
         snapshotResultsCache: MutableMap<String, SnapshotFetch>? = null,
-        onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null
+        onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null,
+        stopAfterDistinctPrimaryDates: Int? = null,
+        primarySeedQuotes: List<ArchivedPriceQuote> = emptyList()
     ): WaybackBackfillResult {
         emitWaybackTrace(onTrace, 4, WaybackTraceStatus.RUNNING,
             "$cdxStage: petición CDX preparada; URL completa omitida.")
@@ -5159,6 +5201,12 @@ class WaybackPriceHistoryClient(
         private const val ALTERNATE_PRODUCT_CDX_TIMEOUT_SECONDS = 5L
         private const val MAX_DOMAIN_PRODUCT_URL_CANDIDATES = 2
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 12
+        // When an exact URL already returned a verified point, limit the prefix fallback to a
+        // few snapshots. With the early-stop threshold below this normally adds only 1–2 dates.
+        private const val MAX_QUICK_SUPPLEMENTAL_SNAPSHOTS = 3
+        private const val QUICK_SUPPLEMENTAL_PREFIX_CDX_TIMEOUT_SECONDS = 3L
+        private const val QUICK_SUPPLEMENTAL_PREFIX_SNAPSHOT_TIMEOUT_SECONDS = 3L
+        private const val MIN_HISTORICAL_DATES_BEFORE_EARLY_STOP = 3
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 8
         // Used only by historical backfill, never by the primary shopping search.
         private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 7L

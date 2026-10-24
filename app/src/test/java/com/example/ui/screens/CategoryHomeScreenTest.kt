@@ -285,6 +285,10 @@ class CategoryHomeScreenTest {
             }
         }
 
+        composeRule.onNodeWithTag("market_filter_rail")
+            .performScrollToNode(
+                androidx.compose.ui.test.hasTestTag("filter_store_chip")
+            )
         composeRule.onNodeWithTag("filter_store_chip").performClick()
         composeRule.onNodeWithText("Amazon España").assertIsDisplayed()
         composeRule.onNodeWithText("PcComponentes").assertIsDisplayed()

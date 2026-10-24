@@ -336,8 +336,13 @@ private fun familyLabel(products: List<Product>): String =
         .orEmpty()
         .ifBlank { products.first().brand.ifBlank { products.first().title } }
 
+/**
+ * Only quotes observed in the current freshness window can drive deal/price ordering.
+ * Archived values remain visible as saved history, but must not make a stale card jump ahead
+ * of products with genuinely current prices.
+ */
 private fun hasValidSortablePrice(product: Product): Boolean =
-    product.isPriceVerified && product.currentPrice.isFinite() && product.currentPrice > 0.0
+    product.isPriceFresh && product.currentPrice.isFinite() && product.currentPrice > 0.0
 
 private fun savedProductComparator(sortOption: SortOption): Comparator<Product> = when (sortOption) {
     SortOption.BEST_ATH_DISCOUNT -> compareByDescending<Product> { hasValidSortablePrice(it) }

@@ -8,6 +8,7 @@ import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.Modifier
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -68,6 +70,46 @@ class CategoryHomeScreenTest {
 
         search.performImeAction()
         composeRule.onNodeWithText("Productos guardados").assertIsDisplayed()
+    }
+
+    @Test
+    fun categoryHomeDoesNotRequestProductRowsUntilAListIsOpened() {
+        val state = mutableStateOf(TrackerUiState())
+        var productFlowRequested = false
+        val summaries = ProductCategory.values()
+            .filter { it != ProductCategory.ALL }
+            .map { MarketplaceCategorySummary(it, productCount = 0, storeCount = 0) }
+
+        composeRule.setContent {
+            MaterialTheme {
+                MarketScreen(
+                    productsForCategory = {
+                        productFlowRequested = true
+                        MutableStateFlow<List<Product>>(emptyList())
+                    },
+                    categorySummaries = summaries,
+                    stores = emptyList(),
+                    uiState = state.value,
+                    onSearchChange = { query -> state.value = state.value.copy(searchQuery = query) },
+                    onCategorySelect = { category -> state.value = state.value.copy(selectedCategory = category) },
+                    onToggleOnlyAth = {},
+                    onToggleOnlyHistoricalMinimum = {},
+                    onStoreFilterSelect = { store -> state.value = state.value.copy(selectedStoreName = store) },
+                    onSortChange = { sort -> state.value = state.value.copy(sortOption = sort) },
+                    onProductClick = {},
+                    onToggleTrack = {},
+                    onPrepareTrackedRefresh = {},
+                    modifier = Modifier
+                )
+            }
+        }
+
+        composeRule.waitForIdle()
+        assertFalse("The category home must not subscribe to product rows", productFlowRequested)
+
+        composeRule.onNodeWithTag("category_card_SMARTPHONES").performClick()
+        composeRule.waitForIdle()
+        assertTrue("Opening a category must request that category's product flow", productFlowRequested)
     }
 
     @Test

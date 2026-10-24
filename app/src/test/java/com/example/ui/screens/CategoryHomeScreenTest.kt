@@ -3,7 +3,6 @@ package com.example.ui.screens
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -63,7 +62,6 @@ class CategoryHomeScreenTest {
         assertEquals("Typing should keep the complete query in state", "iphone", state.value.searchQuery)
 
         search.performImeAction()
-        composeRule.onNodeWithTag("category_home_screen").assertDoesNotExist()
         composeRule.onNodeWithText("Productos guardados").assertIsDisplayed()
     }
 

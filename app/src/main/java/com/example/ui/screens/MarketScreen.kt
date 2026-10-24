@@ -155,16 +155,6 @@ fun MarketScreen(
         expandedStorageKeys = emptySet()
     }
 
-    // Collapse marketplace-generated aliases (for example AliExpress-239640258)
-    // into one canonical display/filter option without deleting any underlying seller records.
-    val displayStores = remember(stores) {
-        stores.map { store ->
-            val canonical = Store.findKnownByName(store.name, "https://${store.domain}")
-            val label = canonical?.name ?: store.name
-            Triple(store, label, label.lowercase(java.util.Locale.ROOT))
-        }.distinctBy { it.third }
-    }
-
     LazyColumn(
         modifier = modifier
             .fillMaxSize()

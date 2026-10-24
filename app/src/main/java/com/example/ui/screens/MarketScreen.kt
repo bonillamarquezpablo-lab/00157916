@@ -70,6 +70,9 @@ import com.example.data.model.Store
 import com.example.ui.components.ProductCard
 import com.example.ui.components.ProductImageView
 import com.example.ui.viewmodel.SortOption
+import com.example.ui.viewmodel.filterMarketplaceProductsForState
+import com.example.ui.viewmodel.marketplaceCategoryProducts
+import com.example.ui.viewmodel.marketplaceStoresForProducts
 import com.example.ui.viewmodel.TrackerUiState
 
 @OptIn(ExperimentalMaterial3Api::class)

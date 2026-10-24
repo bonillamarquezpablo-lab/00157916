@@ -4202,7 +4202,12 @@ class WaybackPriceHistoryClient(
                 expectedCurrency = currency,
                 pageUrl = originalUrl,
                 jsonLdRoots = jsonLdRoots
-            ).distinctBy { it.trimEnd('/').lowercase(Locale.ROOT) }
+            ).filter { offerUrl ->
+                // Keep the archived price tied to the retailer that supplied the captured page.
+                // A third-party URL must not confirm a SKU and then be stored as if its price
+                // came from the original merchant.
+                isSameMerchantHost(originalUrl, offerUrl)
+            }.distinctBy { it.trimEnd('/').lowercase(Locale.ROOT) }
             val matches = knownProductTitlesById.entries.mapNotNull { (productId, savedTitle) ->
                 if (productId.isBlank() || savedTitle.isBlank()) return@mapNotNull null
                 // Exclude the selected product as a secondary only when its known SKU actually

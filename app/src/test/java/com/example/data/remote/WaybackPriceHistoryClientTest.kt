@@ -1862,8 +1862,8 @@ class WaybackPriceHistoryClientTest {
 
         val title = "Anker Prime bounded CDX timeout fallback " + System.currentTimeMillis()
         val preferredUrl = "https://shop.example/products/anker-prime-bounded-timeout.html"
-        val cdxRequests = AtomicInteger()
-        val availabilityRequests = AtomicInteger()
+        val cdxRequests = java.util.concurrent.atomic.AtomicInteger()
+        val availabilityRequests = java.util.concurrent.atomic.AtomicInteger()
         val traceEvents = CopyOnWriteArrayList<WaybackTraceEvent>()
         val http = OkHttpClient.Builder().addInterceptor { chain ->
             val request = chain.request()

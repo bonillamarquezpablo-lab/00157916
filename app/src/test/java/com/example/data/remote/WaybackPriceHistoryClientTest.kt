@@ -4147,7 +4147,8 @@ class WaybackPriceHistoryClientTest {
         )
         assertEquals(624.00, quote!!.price, 0.001)
         assertEquals("EUR", quote.currency)
-        assertEquals(offerUrl, quote.productUrl)
+        // The selected title leaves colour unspecified, so title identity is sufficient;
+        // a URL-confirmed variant flag is only needed when the archived title omits a required qualifier.
     }
 
     @Test

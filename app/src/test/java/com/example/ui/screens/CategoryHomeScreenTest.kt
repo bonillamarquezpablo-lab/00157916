@@ -88,7 +88,7 @@ class CategoryHomeScreenTest {
                         MutableStateFlow<List<Product>>(emptyList())
                     },
                     categorySummaries = summaries,
-                    stores = emptyList(),
+                    storesFlow = MutableStateFlow<List<Store>>(emptyList()),
                     uiState = state.value,
                     onSearchChange = { query -> state.value = state.value.copy(searchQuery = query) },
                     onCategorySelect = { category -> state.value = state.value.copy(selectedCategory = category) },

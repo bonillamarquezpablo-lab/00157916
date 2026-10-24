@@ -4192,7 +4192,8 @@ class WaybackPriceHistoryClient(
             expectedCurrency = candidate.third,
             pageUrl = pageUrl
         ).firstOrNull { offerUrl ->
-            !hasExplicitVariantConflictInProductUrl(expectedTitle, offerUrl) &&
+            isSameMerchantHost(pageUrl, offerUrl) &&
+                !hasExplicitVariantConflictInProductUrl(expectedTitle, offerUrl) &&
                 matchesVariantDetailsConfirmedByUrl(expectedTitle, candidate.first, offerUrl)
         }
     }

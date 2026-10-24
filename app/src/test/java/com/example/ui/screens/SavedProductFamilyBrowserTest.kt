@@ -204,4 +204,60 @@ class SavedProductFamilyBrowserTest {
         assertEquals("Xiaomi Redmi Note 10", families.single { it.label == "Xiaomi Redmi Note 10" }.label)
     }
 
+
+    @Test
+    fun retailerMarketingTailDoesNotCreateDuplicateCardsForTheSameCharger() {
+        val template = SpanishMarketData.getInitialProducts().first()
+        fun product(id: String, title: String) = template.copy(
+            id = id,
+            title = title,
+            brand = "UGREEN",
+            category = ProductCategory.ACCESSORIES,
+            priceHistory = emptyList()
+        )
+        val rows = listOf(
+            product(
+                "ugreen-nexode-a",
+                "UGREEN Nexode Air 65W Cargador USB C Rápida con Cable USB C (Gray) | AVS GAN charger"
+            ),
+            product(
+                "ugreen-nexode-b",
+                "UGREEN Nexode Air 65W Cargador USB C Rápida con Cable USB C (Gray) | GAN II AliExpress"
+            )
+        )
+        val family = buildSavedProductFamilyBuckets(rows).single()
+        assertEquals("The same SKU with seller SEO tails should render as one product", 1, family.productCount)
+        assertEquals(
+            "The visible title should omit the different marketing tails",
+            "UGREEN Nexode Air 65W Cargador USB C Rápida con Cable USB C (Gray)",
+            family.products.single().title
+        )
+    }
+
+    @Test
+    fun unsupportedXiaomiProUltraTitleIsNotPresentedAsAnAuthenticVariant() {
+        val template = SpanishMarketData.getInitialProducts().first()
+        fun product(id: String, title: String) = template.copy(
+            id = id,
+            title = title,
+            brand = "Xiaomi",
+            category = ProductCategory.SMARTPHONES,
+            priceHistory = emptyList()
+        )
+        val uncertain = product(
+            "redmi17-pro-ultra",
+            "Xiaomi Redmi 17 Pro Ultra 4G 12GB + 512GB"
+        )
+        val family = buildSavedProductFamilyBuckets(
+            listOf(
+                product("redmi17-base", "Xiaomi Redmi 17 6GB/128GB"),
+                uncertain
+            )
+        ).single()
+        assertEquals("Xiaomi Redmi 17", family.label)
+        assertTrue(family.variants.any { it.label == "Modelo por confirmar 4G" })
+        org.junit.Assert.assertFalse(family.variants.any { it.label.contains("Pro Ultra", ignoreCase = true) })
+        assertTrue(savedProductDisplayTitle(uncertain).contains("modelo por confirmar", ignoreCase = true))
+    }
+
 }

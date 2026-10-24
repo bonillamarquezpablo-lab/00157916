@@ -2889,7 +2889,7 @@ class WaybackPriceHistoryClientTest {
                    "url":"https://www.apple.com/es/shop/buy-iphone/iphone-15/pantalla-de-6,1%22-256gb-amarillo",
                    "offers":{"@type":"Offer","price":"899.99","priceCurrency":"EUR"}},
                   {"@type":"Product","name":"Apple iPhone 15 Plus",
-                   "url":"https://www.pccomponentes.com/apple-iphone-15-plus-256gb",
+                   "url":"https://www.apple.com/es/shop/buy-iphone/iphone-15-plus-256gb",
                    "offers":{"@type":"Offer","price":"799.99","priceCurrency":"EUR"}}
                 ]
               }
@@ -2918,6 +2918,49 @@ class WaybackPriceHistoryClientTest {
         assertEquals("Apple iPhone 15 Plus 256GB", quotes.single().productTitle)
         assertEquals(799.99, quotes.single().price, 0.001)
         assertTrue(quotes.single().variantIdentityConfirmedByUrl)
+    }
+
+    @Test
+    fun secondaryOfferFromDifferentMerchantCannotConfirmOrRouteHistoricalPrice() {
+        val client = newClient()
+        val primaryUrl =
+            "https://www.apple.com/es/shop/buy-iphone/iphone-15/pantalla-de-6,1%22-256gb-amarillo"
+        val externalOfferUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb"
+        val html = """
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@graph":[
+                  {"@type":"Product","name":"Apple iPhone 15 256GB Amarillo",
+                   "url":"$primaryUrl",
+                   "offers":{"@type":"Offer","price":"899.99","priceCurrency":"EUR"}},
+                  {"@type":"Product","name":"Apple iPhone 15 Plus",
+                   "url":"$externalOfferUrl",
+                   "offers":{"@type":"Offer","price":"799.99","priceCurrency":"EUR"}}
+                ]
+              }
+              </script>
+            </head></html>
+        """.trimIndent()
+
+        val quotes = client.parseArchivedPricesForKnownProducts(
+            document = Jsoup.parse(html),
+            primaryExpectedTitle = "Apple iPhone 15 256GB Amarillo",
+            knownProductTitlesById = mapOf(
+                "base-yellow-256" to "Apple iPhone 15 256GB Amarillo",
+                "plus-unknown" to "Apple iPhone 15 Plus",
+                "plus-256" to "Apple iPhone 15 Plus 256GB"
+            ),
+            originalUrl = primaryUrl,
+            snapshotUrl = "https://web.archive.org/web/20260901000000id_/$primaryUrl",
+            observedAt = 1_788_200_000_000L
+        )
+
+        assertTrue(
+            "A third-party offer URL must not be attributed to the merchant whose page was archived",
+            quotes.isEmpty()
+        )
     }
 
     @Test

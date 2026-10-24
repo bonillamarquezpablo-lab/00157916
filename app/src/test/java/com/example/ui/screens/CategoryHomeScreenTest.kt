@@ -15,6 +15,7 @@ import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.Modifier
+import com.example.ui.viewmodel.SortOption
 import com.example.ui.viewmodel.TrackerUiState
 import com.example.ui.viewmodel.filterMarketplaceProductsForState
 import com.example.data.model.Product
@@ -358,4 +359,80 @@ class CategoryHomeScreenTest {
         priceHistory = emptyList(),
         offers = offers
     )
+
+    @Test
+    fun familyVersionsAreVisibleWithoutExpansionAndGridCardsHaveEqualHeight() {
+        val store = testStore("amazon", "Amazon España")
+        val products = listOf(
+            testProduct("anker-735", ProductCategory.SMARTPHONES, store).copy(
+                title = "Anker 735 Cargador USB C 65W",
+                brand = "Anker"
+            ),
+            testProduct("redmi17-base", ProductCategory.SMARTPHONES, store).copy(
+                title = "Xiaomi Redmi 17 6GB/128GB",
+                brand = "Xiaomi"
+            ),
+            testProduct("redmi17-pro5g", ProductCategory.SMARTPHONES, store).copy(
+                title = "Xiaomi Redmi 17 Pro 5G 8GB/256GB",
+                brand = "Xiaomi"
+            ),
+            testProduct("redmi17-pro-ultra", ProductCategory.SMARTPHONES, store).copy(
+                title = "Xiaomi Redmi 17 Pro Ultra 4G 12GB + 512GB",
+                brand = "Xiaomi"
+            )
+        )
+        val family = buildSavedProductFamilyBuckets(products, SortOption.NAME_AZ)
+            .single { it.productCount > 1 }
+        val state = mutableStateOf(
+            TrackerUiState(
+                selectedCategory = ProductCategory.SMARTPHONES,
+                sortOption = SortOption.NAME_AZ
+            )
+        )
+        composeRule.setContent {
+            MaterialTheme {
+                MarketScreen(
+                    productsForCategory = { MutableStateFlow(products) },
+                    filteredProductsForCategory = { MutableStateFlow(products) },
+                    categorySummaries = ProductCategory.values()
+                        .filter { it != ProductCategory.ALL }
+                        .map { MarketplaceCategorySummary(it, 0, 0) },
+                    uiState = state.value,
+                    onSearchChange = { query -> state.value = state.value.copy(searchQuery = query) },
+                    onCategorySelect = { category -> state.value = state.value.copy(selectedCategory = category) },
+                    onToggleOnlyAth = {},
+                    onToggleOnlyHistoricalMinimum = {},
+                    onStoreFilterSelect = { storeName -> state.value = state.value.copy(selectedStoreName = storeName) },
+                    onSortChange = { sort -> state.value = state.value.copy(sortOption = sort) },
+                    onProductClick = {},
+                    onToggleTrack = {},
+                    onPrepareTrackedRefresh = {},
+                    modifier = Modifier
+                )
+            }
+        }
+        composeRule.onNodeWithTag("market_screen_list")
+            .performScrollToNode(
+                androidx.compose.ui.test.hasTestTag("saved_family_card_${family.key.hashCode()}")
+            )
+        composeRule.onNodeWithText("Estándar · 6 GB RAM · 128 GB").assertIsDisplayed()
+        composeRule.onNodeWithText("Pro 5G · 8 GB RAM · 256 GB").assertIsDisplayed()
+        composeRule.onNodeWithText("Modelo por confirmar 4G · 12 GB RAM · 512 GB").assertIsDisplayed()
+        assertEquals(
+            "The former expansion affordance must not be needed to see versions",
+            0,
+            composeRule.onAllNodesWithText("Elegir versión").fetchSemanticsNodes().size
+        )
+        assertEquals(
+            "Unverified edition claims must not leak into the displayed variant labels",
+            0,
+            composeRule.onAllNodesWithText("Pro Ultra", substring = true).fetchSemanticsNodes().size
+        )
+        val familyHeight = composeRule.onNodeWithTag("saved_family_card_${family.key.hashCode()}")
+            .fetchSemanticsNode().boundsInRoot.height
+        val productHeight = composeRule.onNodeWithTag("product_card_anker-735")
+            .fetchSemanticsNode().boundsInRoot.height
+        assertEquals("Family and single-product grid cells should have equal height", productHeight, familyHeight, 1f)
+    }
+
 }

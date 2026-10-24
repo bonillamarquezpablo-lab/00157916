@@ -570,7 +570,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     // Only show merchants represented by at least one valid saved price. Store.ALL_STORES
     // remains the internal directory used to resolve existing product and offer records.
     val spanishStores: StateFlow<List<Store>> = repository.storesWithSavedPricesStream
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
 
     private val marketplaceProductFlows = mutableMapOf<ProductCategory, StateFlow<List<Product>>>()
 
@@ -601,10 +601,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     // These flows are subscribed only when their tabs are opened. Once started, their StateFlow
     // cache remains warm across temporary backgrounding rather than re-reading Room after 5 sec.
     val trackedProducts: StateFlow<List<Product>> = repository.trackedProductsStream
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
 
     val todayAthDeals: StateFlow<List<Product>> = repository.todayAthDealsStream
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
 
     private fun filterMarketplaceProducts(
         products: List<Product>,

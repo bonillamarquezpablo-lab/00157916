@@ -486,7 +486,9 @@ class WaybackPriceHistoryClient(
             // after a valid exact response with zero captures. This improves coverage without
             // adding a network round trip to searches that already found captures or hit an error.
             val alternateDirectUrl = directCandidates.firstOrNull {
-                it != directUrl && isEligibleDirectUrl(it)
+                it != directUrl &&
+                    isEligibleDirectUrl(it) &&
+                    directUrl.startsWith(it)
             }
             if (shouldUseAlternateUrlForPrefix(exactResult, alternateDirectUrl != null)) {
                 val alternatePrefix = buildCdxUrl(
@@ -1497,9 +1499,7 @@ class WaybackPriceHistoryClient(
         knownProductTitlesById: Map<String, String> = emptyMap(),
         snapshotResultsCache: MutableMap<String, SnapshotFetch>? = null,
         onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null,
-        forceRefresh: Boolean = false,
-        stopAfterDistinctPrimaryDates: Int? = null,
-        primarySeedQuotes: List<ArchivedPriceQuote> = emptyList()
+        forceRefresh: Boolean = false
     ): WaybackBackfillResult {
         val urls = candidateUrls.asSequence()
             .filter(::isEligibleDirectUrl)
@@ -3326,7 +3326,15 @@ class WaybackPriceHistoryClient(
             diagnosticStep = 10
         )
 
-        val sampled = sampleCaptures(captures, maxSnapshots)
+        val sampled = if (snapshotResultsCache != null) {
+            sampleUnprocessedCaptures(
+                captures = captures,
+                max = maxSnapshots,
+                processedCaptureKeys = snapshotResultsCache.keys
+            )
+        } else {
+            sampleCaptures(captures, maxSnapshots)
+        }
         val fetched = mutableListOf<SnapshotFetch>()
         // A bounded early-stop pass should start with the newest capture, then step back through
         // the quarterly samples. This preserves a useful current anchor before seeking older dates.
@@ -5285,7 +5293,7 @@ class WaybackPriceHistoryClient(
         // few snapshots. With the early-stop threshold below this normally adds only 1–2 dates.
         private const val MAX_QUICK_SUPPLEMENTAL_SNAPSHOTS = 3
         private const val QUICK_SUPPLEMENTAL_PREFIX_CDX_TIMEOUT_SECONDS = 3L
-        private const val QUICK_SUPPLEMENTAL_PREFIX_SNAPSHOT_TIMEOUT_SECONDS = 3L
+        private const val QUICK_SUPPLEMENTAL_PREFIX_SNAPSHOT_TIMEOUT_SECONDS = 5L
         private const val MIN_HISTORICAL_DATES_BEFORE_EARLY_STOP = 3
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 8
         // Used only by historical backfill, never by the primary shopping search.

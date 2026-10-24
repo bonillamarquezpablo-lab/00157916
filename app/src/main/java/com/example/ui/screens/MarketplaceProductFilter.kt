@@ -92,3 +92,13 @@ internal fun marketplaceStoresForProducts(products: List<Product>): List<Store> 
                 ?: "${it.name.trim().lowercase(Locale.ROOT)}|${it.domain.trim().lowercase(Locale.ROOT)}"
         }
         .toList()
+
+/** Shared filtering entry point for non-Mercado consumers of the complete product stream. */
+internal fun filterMarketplaceProducts(
+    products: List<Product>,
+    state: TrackerUiState,
+    category: ProductCategory
+): List<Product> = filterMarketplaceProductsForState(
+    marketplaceCategoryProducts(products, category),
+    state
+)

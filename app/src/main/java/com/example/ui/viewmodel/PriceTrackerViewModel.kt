@@ -579,12 +579,16 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
      * opened, and stays warm after its first use so returning from Android's task switcher does
      * not rebuild hundreds of cards and price histories again.
      */
+    /**
+     * Return the raw rows for one selected category. Mercado applies the live search/filter state
+     * in the screen so it can derive store choices from the same category without opening a second
+     * Room flow or loading the global store directory.
+     */
     @Synchronized
-    fun filteredProductsForCategory(category: ProductCategory): StateFlow<List<Product>> =
+    fun productsForCategory(category: ProductCategory): StateFlow<List<Product>> =
         marketplaceProductFlows.getOrPut(category) {
-            combine(repository.productsForCategoryStream(category), _uiState) { products, state ->
-                filterMarketplaceProducts(products, state, category)
-            }.flowOn(Dispatchers.Default)
+            repository.productsForCategoryStream(category)
+                .flowOn(Dispatchers.Default)
                 .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
         }
 
@@ -605,77 +609,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     val todayAthDeals: StateFlow<List<Product>> = repository.todayAthDealsStream
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
-
-    private fun filterMarketplaceProducts(
-        products: List<Product>,
-        state: TrackerUiState,
-        category: ProductCategory
-    ): List<Product> =
-        products
-            // Keep demo catalogue rows out of Mercado. Saved, validated history and explicit
-            // pending live-search listings remain discoverable while today's price is rechecked.
-            .filter { product ->
-                product.isPriceVerified ||
-                    product.isTracked ||
-                    product.priceHistory.isNotEmpty() ||
-                    product.savedHistoricalPrice != null ||
-                    product.isUnverifiedLiveListing
-            }
-            .filter { product -> category == ProductCategory.ALL || product.category == category }
-            .filter { product ->
-                if (state.searchQuery.isBlank()) true
-                else {
-                    val query = state.searchQuery.trim().lowercase()
-                    product.title.lowercase().contains(query) ||
-                        product.brand.lowercase().contains(query) ||
-                        (product.isEanVerified && product.ean.contains(query)) ||
-                        product.category.displayName.lowercase().contains(query) ||
-                        product.currentStore.name.lowercase().contains(query) ||
-                        product.currentStore.domain.lowercase().contains(query)
-                }
-            }
-            .filter { product -> if (state.onlyAthFilter) product.isAtAth else true }
-            .filter { product ->
-                if (state.onlyHistoricalMinimumFilter) {
-                    product.priceBadgeState.type == PriceBadgeType.HISTORICAL_MINIMUM
-                } else true
-            }
-            .filter { product ->
-                if (state.selectedStoreName != null) {
-                    product.currentStore.name.contains(state.selectedStoreName, ignoreCase = true) ||
-                        product.offers.any { it.store.name.contains(state.selectedStoreName, ignoreCase = true) }
-                } else true
-            }
-            .let { list ->
-                when (state.sortOption) {
-                    SortOption.BEST_ATH_DISCOUNT -> list.sortedWith(
-                        compareByDescending<Product> { it.isPriceVerified }
-                            .thenByDescending { it.realSavingsPercent }
-                            .thenBy { it.title.lowercase() }
-                    )
-                    SortOption.PRICE_LOW_HIGH -> list.sortedWith(
-                        compareByDescending<Product> { it.isPriceVerified }
-                            .thenBy { if (it.isPriceVerified) it.currentPrice else Double.POSITIVE_INFINITY }
-                            .thenBy { it.title.lowercase() }
-                    )
-                    SortOption.PRICE_HIGH_LOW -> list.sortedWith(
-                        compareByDescending<Product> { it.isPriceVerified }
-                            .thenByDescending { if (it.isPriceVerified) it.currentPrice else Double.NEGATIVE_INFINITY }
-                            .thenBy { it.title.lowercase() }
-                    )
-                    SortOption.NAME_AZ -> list.sortedBy { it.title.lowercase() }
-                    SortOption.NAME_ZA -> list.sortedByDescending { it.title.lowercase() }
-                    SortOption.CATEGORY_AZ -> list.sortedWith(
-                        compareBy<Product> { it.category.displayName.lowercase() }
-                            .thenBy { it.title.lowercase() }
-                    )
-                    SortOption.RATING -> list.sortedWith(
-                        compareByDescending<Product> { it.isRatingVerified }
-                            .thenByDescending { if (it.isRatingVerified) it.rating else Double.NEGATIVE_INFINITY }
-                            .thenBy { it.title.lowercase() }
-                    )
-                }
-            }
 
     /**
      * Account checks are free at SerpApi. If the account endpoint is temporarily unavailable,

@@ -3,6 +3,7 @@ package com.example.ui.screens
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
@@ -290,9 +291,12 @@ class CategoryHomeScreenTest {
                 androidx.compose.ui.test.hasTestTag("filter_store_chip")
             )
         composeRule.onNodeWithTag("filter_store_chip").performClick()
-        composeRule.onNodeWithText("Amazon España").assertIsDisplayed()
-        composeRule.onNodeWithText("PcComponentes").assertIsDisplayed()
-        assertEquals(0, composeRule.onAllNodesWithText(unrelated.name).fetchSemanticsNodes().size)
+        composeRule.onNodeWithTag("store_menu_item_amazon").assertIsDisplayed()
+        composeRule.onNodeWithTag("store_menu_item_pc").assertIsDisplayed()
+        assertEquals(
+            0,
+            composeRule.onAllNodesWithTag("store_menu_item_unrelated").fetchSemanticsNodes().size
+        )
     }
 
     private fun testStore(id: String, name: String) = Store(

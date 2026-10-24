@@ -2153,19 +2153,26 @@ class WaybackPriceHistoryClient(
                             } else {
                                 emitWaybackTrace(captureTrace, evaluateStep, WaybackTraceStatus.PASSED, "HTML recibido y sin marcadores comunes de cookies, CAPTCHA o bloqueo.")
                                 val document = Jsoup.parse(html)
+                                // Parse JSON-LD scripts once per snapshot and share the roots with
+                                // primary, secondary and diagnostic validation.
+                                val jsonLdRoots = extractJsonLdRoots(document)
                                 val sourceQuote = parseArchivedPrice(
                                     document = document,
                                     expectedTitle = expectedTitle,
                                     originalUrl = capture.originalUrl,
                                     snapshotUrl = snapshotUrl,
                                     observedAt = capture.timestamp,
-                                    acceptedCurrencies = setOf("EUR", "USD")
+                                    acceptedCurrencies = setOf("EUR", "USD"),
+                                    jsonLdRoots = jsonLdRoots
                                 )
                                 val quote = when (sourceQuote?.currency?.uppercase(Locale.ROOT)) {
                                     "USD" -> sourceQuote?.let { convertUsdQuoteToEurAtCaptureDate(it, captureTrace) }
                                     else -> sourceQuote
                                 }
-                                reportArchiveFieldTrace(captureTrace, document, expectedTitle, capture.originalUrl, quote, sourceQuote)
+                                reportArchiveFieldTrace(
+                                    captureTrace, document, expectedTitle, capture.originalUrl, quote, sourceQuote,
+                                    jsonLdRoots = jsonLdRoots
+                                )
                                 val secondarySourceQuotes = parseArchivedPricesForKnownProducts(
                                     document = document,
                                     primaryExpectedTitle = expectedTitle,
@@ -2173,7 +2180,8 @@ class WaybackPriceHistoryClient(
                                     originalUrl = capture.originalUrl,
                                     snapshotUrl = snapshotUrl,
                                     observedAt = capture.timestamp,
-                                    acceptedCurrencies = setOf("EUR", "USD")
+                                    acceptedCurrencies = setOf("EUR", "USD"),
+                                    jsonLdRoots = jsonLdRoots
                                 )
                                 val secondaryQuotes = secondarySourceQuotes.mapNotNull { secondary ->
                                     when (secondary.currency.uppercase(Locale.ROOT)) {
@@ -2189,7 +2197,7 @@ class WaybackPriceHistoryClient(
                                     diagnosticCode = when {
                                         quote != null -> null
                                         sourceQuote?.currency?.equals("USD", ignoreCase = true) == true -> "ARCHIVE_USD_FX_UNAVAILABLE"
-                                        else -> diagnoseArchivedPrice(document, expectedTitle, capture.originalUrl)
+                                        else -> diagnoseArchivedPrice(document, expectedTitle, capture.originalUrl, jsonLdRoots)
                                     }
                                 )
                             }
@@ -2386,20 +2394,21 @@ class WaybackPriceHistoryClient(
         expectedTitle: String,
         originalUrl: String,
         quote: ArchivedPriceQuote?,
-        sourceQuote: ArchivedPriceQuote? = quote
+        sourceQuote: ArchivedPriceQuote? = quote,
+        jsonLdRoots: List<Any> = extractJsonLdRoots(document)
     ) {
-        val jsonLd = extractJsonLdProductOffers(document)
+        val jsonLd = extractJsonLdProductOffers(jsonLdRoots)
         val pageTitles = extractArchivedPageTitles(document)
         val titles = (jsonLd.map { it.first } + pageTitles).filter { it.isNotBlank() }
         val expectedTitleForTrace = expectedTitle.replace(Regex("""\s+"""), " ").trim().take(100)
         val detectedTitlesForTrace = titles.take(3)
             .joinToString(" | ") { it.replace(Regex("""\s+"""), " ").trim().take(100) }
         val structuredMatch = jsonLd.any { candidate ->
-            isMatchingArchivedOfferIdentity(document, expectedTitle, candidate, originalUrl)
+            isMatchingArchivedOfferIdentity(document, expectedTitle, candidate, originalUrl, jsonLdRoots)
         }
         val structuredConflict = jsonLd.firstOrNull { candidate ->
             hasExplicitProductVariantConflict(expectedTitle, candidate.first) &&
-                !isMatchingArchivedOfferIdentity(document, expectedTitle, candidate, originalUrl)
+                !isMatchingArchivedOfferIdentity(document, expectedTitle, candidate, originalUrl, jsonLdRoots)
         }
         val pageTitleMatch = pageTitles.any { isMatchingTitleForArchivedUrl(expectedTitle, it, originalUrl) }
         val titleMatches = structuredMatch || (structuredConflict == null && pageTitleMatch)
@@ -2472,8 +2481,13 @@ class WaybackPriceHistoryClient(
         emitWaybackTrace(onTrace, 14, WaybackTraceStatus.SKIPPED, detail)
     }
 
-    private fun diagnoseArchivedPrice(document: Document, expectedTitle: String, originalUrl: String): String {
-        val jsonLd = extractJsonLdProductOffers(document)
+    private fun diagnoseArchivedPrice(
+        document: Document,
+        expectedTitle: String,
+        originalUrl: String,
+        jsonLdRoots: List<Any> = extractJsonLdRoots(document)
+    ): String {
+        val jsonLd = extractJsonLdProductOffers(jsonLdRoots)
         val pageTitles = extractArchivedPageTitles(document)
         val metaPrice = listOf(
             "product:price:amount", "og:price:amount", "price", "product:price"
@@ -3885,12 +3899,13 @@ class WaybackPriceHistoryClient(
         originalUrl: String,
         snapshotUrl: String,
         observedAt: Long,
-        acceptedCurrencies: Set<String> = setOf("EUR")
+        acceptedCurrencies: Set<String> = setOf("EUR"),
+        jsonLdRoots: List<Any> = extractJsonLdRoots(document)
     ): ArchivedPriceQuote? {
         // The product price/title may exist only in <head> metadata or JSON-LD, so an empty
         // rendered body is not enough to reject an archived document.
         if (expectedTitle.isBlank() || observedAt <= 0L) return null
-        val jsonLdCandidates = extractJsonLdProductOffers(document)
+        val jsonLdCandidates = extractJsonLdProductOffers(jsonLdRoots)
         val pageTitles = extractArchivedPageTitles(document)
 
         val metaPrice = listOf(
@@ -3908,11 +3923,18 @@ class WaybackPriceHistoryClient(
         fun matchesArchivedTitle(title: String): Boolean =
             isMatchingTitleForArchivedUrl(expectedTitle, title, originalUrl)
 
-        // Some retailers publish a generic Product name (for example, "iPhone 15 Plus Libre")
-        // while the individual JSON-LD Offer contains a URL for the exact capacity/colour SKU.
-        // Use that URL only when it is attached to this same structured title, price and currency.
-        fun matchingOfferUrl(candidate: Triple<String, Double, String>): String? =
-            matchingVariantUrlForArchivedOffer(document, expectedTitle, candidate, originalUrl)
+        // Some retailers publish a generic Product name while its structured Offer URL confirms
+        // the exact capacity/colour. Cache both matching and non-matching candidates; URL checks
+        // must not re-walk the same JSON-LD structures repeatedly within one snapshot.
+        val matchingOfferUrlCache = mutableMapOf<Triple<String, Double, String>, String?>()
+        fun matchingOfferUrl(candidate: Triple<String, Double, String>): String? {
+            if (matchingOfferUrlCache.containsKey(candidate)) return matchingOfferUrlCache[candidate]
+            val resolved = matchingVariantUrlForArchivedOffer(
+                document, expectedTitle, candidate, originalUrl, jsonLdRoots
+            )
+            matchingOfferUrlCache[candidate] = resolved
+            return resolved
+        }
 
         fun matchesCandidateIdentity(candidate: Triple<String, Double, String>): Boolean =
             !hasExplicitProductVariantConflict(expectedTitle, candidate.first) &&
@@ -4013,21 +4035,10 @@ class WaybackPriceHistoryClient(
         productTitle: String,
         expectedPrice: Double,
         expectedCurrency: String,
-        pageUrl: String
+        pageUrl: String,
+        jsonLdRoots: List<Any> = extractJsonLdRoots(document)
     ): List<String> {
         if (productTitle.isBlank() || expectedPrice <= 0.0) return emptyList()
-        val roots = document.select("script").asSequence()
-            .filter { script ->
-                script.attr("type").substringBefore(';').trim()
-                    .equals("application/ld+json", ignoreCase = true)
-            }
-            .mapNotNull { script ->
-                val payload = script.data().ifBlank { script.html() }
-                    .trim()
-                    .removePrefix("<!--").removeSuffix("-->").trim()
-                try { JSONTokener(payload).nextValue() } catch (_: Exception) { null }
-            }
-            .toList()
         val wantedName = normalizeTitle(productTitle)
         val wantedCurrency = expectedCurrency.uppercase(Locale.ROOT)
         val urls = linkedSetOf<String>()
@@ -4100,7 +4111,7 @@ class WaybackPriceHistoryClient(
                 is JSONArray -> for (index in 0 until value.length()) visitProducts(value.opt(index))
             }
         }
-        roots.forEach(::visitProducts)
+        jsonLdRoots.forEach(::visitProducts)
         return urls.toList()
     }
 
@@ -4111,12 +4122,13 @@ class WaybackPriceHistoryClient(
         originalUrl: String,
         snapshotUrl: String,
         observedAt: Long,
-        acceptedCurrencies: Set<String> = setOf("EUR", "USD")
+        acceptedCurrencies: Set<String> = setOf("EUR", "USD"),
+        jsonLdRoots: List<Any> = extractJsonLdRoots(document)
     ): List<ArchivedPriceQuote> {
         if (primaryExpectedTitle.isBlank() || observedAt <= 0L) return emptyList()
         val allowedCurrencies = acceptedCurrencies.map { it.uppercase(Locale.ROOT) }.toSet()
         val output = mutableListOf<ArchivedPriceQuote>()
-        for ((archivedTitle, price, rawCurrency) in extractJsonLdProductOffers(document)) {
+        for ((archivedTitle, price, rawCurrency) in extractJsonLdProductOffers(jsonLdRoots)) {
             val currency = rawCurrency.uppercase(Locale.ROOT)
             if (currency !in allowedCurrencies || price !in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE) continue
 
@@ -4127,7 +4139,8 @@ class WaybackPriceHistoryClient(
                 productTitle = archivedTitle,
                 expectedPrice = price,
                 expectedCurrency = currency,
-                pageUrl = originalUrl
+                pageUrl = originalUrl,
+                jsonLdRoots = jsonLdRoots
             ).distinctBy { it.trimEnd('/').lowercase(Locale.ROOT) }
             val matches = knownProductTitlesById.entries.mapNotNull { (productId, savedTitle) ->
                 if (productId.isBlank() || savedTitle.isBlank()) return@mapNotNull null
@@ -4247,7 +4260,8 @@ class WaybackPriceHistoryClient(
         document: Document,
         expectedTitle: String,
         candidate: Triple<String, Double, String>,
-        pageUrl: String
+        pageUrl: String,
+        jsonLdRoots: List<Any> = extractJsonLdRoots(document)
     ): String? {
         if (isMatchingTitleForArchivedUrl(expectedTitle, candidate.first, pageUrl)) return null
         return jsonLdProductUrlsForOffer(
@@ -4255,7 +4269,8 @@ class WaybackPriceHistoryClient(
             productTitle = candidate.first,
             expectedPrice = candidate.second,
             expectedCurrency = candidate.third,
-            pageUrl = pageUrl
+            pageUrl = pageUrl,
+            jsonLdRoots = jsonLdRoots
         ).firstOrNull { offerUrl ->
             isSameMerchantHost(pageUrl, offerUrl) &&
                 !hasExplicitVariantConflictInProductUrl(expectedTitle, offerUrl) &&
@@ -4267,10 +4282,11 @@ class WaybackPriceHistoryClient(
         document: Document,
         expectedTitle: String,
         candidate: Triple<String, Double, String>,
-        pageUrl: String
+        pageUrl: String,
+        jsonLdRoots: List<Any> = extractJsonLdRoots(document)
     ): Boolean =
         isMatchingTitleForArchivedUrl(expectedTitle, candidate.first, pageUrl) ||
-            matchingVariantUrlForArchivedOffer(document, expectedTitle, candidate, pageUrl) != null
+            matchingVariantUrlForArchivedOffer(document, expectedTitle, candidate, pageUrl, jsonLdRoots) != null
 
     private fun isSameMerchantHost(firstUrl: String, secondUrl: String): Boolean {
         val firstHost = runCatching { URI(firstUrl).host.orEmpty() }.getOrDefault("")
@@ -4290,8 +4306,8 @@ class WaybackPriceHistoryClient(
             .containsMatchIn(normalized)
     }
 
-    private fun extractJsonLdProductOffers(document: Document): List<Triple<String, Double, String>> {
-        val roots = document.select("script").asSequence()
+    private fun extractJsonLdRoots(document: Document): List<Any> =
+        document.select("script").asSequence()
             .filter { script ->
                 script.attr("type").substringBefore(';').trim()
                     .equals("application/ld+json", ignoreCase = true)
@@ -4303,6 +4319,11 @@ class WaybackPriceHistoryClient(
                 try { JSONTokener(payload).nextValue() } catch (_: Exception) { null }
             }
             .toList()
+
+    private fun extractJsonLdProductOffers(document: Document): List<Triple<String, Double, String>> =
+        extractJsonLdProductOffers(extractJsonLdRoots(document))
+
+    private fun extractJsonLdProductOffers(roots: List<Any>): List<Triple<String, Double, String>> {
         val output = mutableListOf<Triple<String, Double, String>>()
         val productNamesById = linkedMapOf<String, Pair<String, String>>()
         roots.forEach { indexJsonLdProducts(it, productNamesById) }

@@ -160,7 +160,7 @@ fun ProductCard(
                         overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    ProductPriceBadge(
+                    HeroPriceBadge(
                         state = priceBadgeState,
                         compact = true
                     )

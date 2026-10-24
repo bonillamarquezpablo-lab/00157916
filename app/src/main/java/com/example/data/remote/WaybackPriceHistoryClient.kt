@@ -1734,27 +1734,6 @@ class WaybackPriceHistoryClient(
             )
             fetched += snapshot
             if (snapshot.diagnosticCode == "WAYBACK_RATE_LIMITED") break
-            val requiredPrimaryDates = stopAfterDistinctPrimaryDates
-            if (requiredPrimaryDates != null && requiredPrimaryDates > 0) {
-                val verifiedPrimaryDates = (
-                    primarySeedQuotes + fetched.flatMap { item ->
-                        listOfNotNull(item.quote) + item.additionalQuotes
-                    }
-                ).asSequence()
-                    .filter { !it.isDiscoveryCandidate && it.targetProductId.isNullOrBlank() }
-                    .map { Math.floorDiv(it.observedAt, DAY_MS) }
-                    .distinct()
-                    .take(requiredPrimaryDates)
-                    .count()
-                if (verifiedPrimaryDates >= requiredPrimaryDates) {
-                    emitWaybackTrace(
-                        onTrace, 14, WaybackTraceStatus.PASSED,
-                        "Búsqueda suplementaria detenida: ya hay $verifiedPrimaryDates fechas distintas verificadas del producto seleccionado.",
-                        diagnosticStep = 18
-                    )
-                    break
-                }
-            }
         }
         if (sampled.size == 1) {
             emitWaybackTrace(
@@ -3319,6 +3298,27 @@ class WaybackPriceHistoryClient(
             )
             fetched += snapshot
             if (snapshot.diagnosticCode == "WAYBACK_RATE_LIMITED") break
+            val requiredPrimaryDates = stopAfterDistinctPrimaryDates
+            if (requiredPrimaryDates != null && requiredPrimaryDates > 0) {
+                val verifiedPrimaryDates = (
+                    primarySeedQuotes + fetched.flatMap { item ->
+                        listOfNotNull(item.quote) + item.additionalQuotes
+                    }
+                ).asSequence()
+                    .filter { !it.isDiscoveryCandidate && it.targetProductId.isNullOrBlank() }
+                    .map { Math.floorDiv(it.observedAt, DAY_MS) }
+                    .distinct()
+                    .take(requiredPrimaryDates)
+                    .count()
+                if (verifiedPrimaryDates >= requiredPrimaryDates) {
+                    emitWaybackTrace(
+                        onTrace, 14, WaybackTraceStatus.PASSED,
+                        "Búsqueda suplementaria detenida: ya hay $verifiedPrimaryDates fechas distintas verificadas del producto seleccionado.",
+                        diagnosticStep = 18
+                    )
+                    break
+                }
+            }
         }
         when {
             sampled.isEmpty() -> {

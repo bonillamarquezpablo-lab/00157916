@@ -32,6 +32,8 @@ import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Store
 import androidx.compose.material.icons.filled.Toys
 import androidx.compose.material.icons.filled.Tv
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +50,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Product
@@ -90,6 +93,7 @@ fun CategoryHomeScreen(
     products: List<Product>,
     searchQuery: String,
     onSearchChange: (String) -> Unit,
+    onSearchSubmit: () -> Unit,
     onCategorySelect: (ProductCategory) -> Unit,
     onViewAllProducts: () -> Unit,
     modifier: Modifier = Modifier
@@ -118,7 +122,11 @@ fun CategoryHomeScreen(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "${products.size} productos guardados, organizados para encontrarlos más rápido.",
+                    text = if (searchQuery.isBlank()) {
+                        "${products.size} productos guardados, organizados para encontrarlos más rápido."
+                    } else {
+                        "${products.size} resultados por categoría. Pulsa Buscar para abrir la lista."
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -148,6 +156,8 @@ fun CategoryHomeScreen(
                     }
                 },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { onSearchSubmit() }),
                 shape = MaterialTheme.shapes.medium,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -191,7 +201,10 @@ fun CategoryHomeScreen(
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Ver todos los productos (${products.size})")
+                Text(
+                    if (searchQuery.isBlank()) "Ver todos los productos (${products.size})"
+                    else "Ver resultados (${products.size})"
+                )
             }
         }
     }

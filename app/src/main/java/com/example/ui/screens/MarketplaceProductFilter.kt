@@ -1,11 +1,9 @@
-package com.example.ui.screens
+package com.example.ui.viewmodel
 
 import com.example.data.model.PriceBadgeType
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.Store
-import com.example.ui.viewmodel.SortOption
-import com.example.ui.viewmodel.TrackerUiState
 import java.util.Locale
 
 /** Visible category rows only; demo catalogue entries never become live marketplace results. */

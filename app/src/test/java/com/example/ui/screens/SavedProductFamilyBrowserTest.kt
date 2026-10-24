@@ -260,4 +260,42 @@ class SavedProductFamilyBrowserTest {
         assertTrue(savedProductDisplayTitle(uncertain).contains("modelo por confirmar", ignoreCase = true))
     }
 
+
+    @Test
+    fun bestDealSortPutsFreshPricesBeforeStaleSavedQuotes() {
+        val template = SpanishMarketData.getInitialProducts().first()
+        val now = System.currentTimeMillis()
+        val tenDaysAgo = now - 10L * 24L * 60L * 60L * 1000L
+
+        fun product(id: String, title: String, price: Double, observedAt: Long) =
+            template.copy(
+                id = id,
+                title = title,
+                brand = title.substringBefore(' '),
+                category = ProductCategory.ACCESSORIES,
+                currentPrice = price,
+                isPriceVerified = true,
+                priceObservedAt = observedAt,
+                savedHistoricalPrice = null,
+                priceHistory = emptyList()
+            )
+
+        val rows = listOf(
+            product("stale-anker", "Anker 735 Cargador USB C 65W", 29.99, tenDaysAgo),
+            product("fresh-ugreen", "UGREEN Nexode Air 65W Cargador USB C", 27.54, now),
+            product("stale-pixel", "Google Pixel 10 Pro 5G 128GB", 673.99, tenDaysAgo)
+        )
+        val sorted = buildSavedProductFamilyBuckets(rows, SortOption.BEST_ATH_DISCOUNT)
+        assertEquals(
+            "A fresh verified quote should outrank stale saved amounts",
+            "UGREEN Nexode Air 65W Cargador USB C",
+            sorted.first().label
+        )
+        assertEquals(
+            "Cards with only stale quotes should keep a predictable alphabetical order",
+            listOf("Anker 735 Cargador USB C 65W", "Google Pixel 10"),
+            sorted.drop(1).map { it.label }
+        )
+    }
+
 }

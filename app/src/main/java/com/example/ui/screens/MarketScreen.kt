@@ -76,7 +76,7 @@ import com.example.ui.viewmodel.TrackerUiState
 fun MarketScreen(
     productsForCategory: (ProductCategory) -> StateFlow<List<Product>>,
     categorySummaries: List<MarketplaceCategorySummary>,
-    stores: List<Store>,
+    storesFlow: StateFlow<List<Store>>,
     uiState: TrackerUiState,
     onSearchChange: (String) -> Unit,
     onCategorySelect: (ProductCategory) -> Unit,
@@ -125,6 +125,10 @@ fun MarketScreen(
         )
         return
     }
+
+    // Store directory also performs cross-observation validation; defer it until the user
+    // opens a category/list or explicit all-products view instead of doing this work on home.
+    val stores by storesFlow.collectAsStateWithLifecycle()
 
     // Subscribe to product rows only after the user opens a category/list. The per-category
     // StateFlow remains cached after its first use, so background/foreground transitions do not

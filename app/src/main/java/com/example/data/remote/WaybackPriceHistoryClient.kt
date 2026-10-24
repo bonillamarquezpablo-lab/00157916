@@ -2360,10 +2360,12 @@ class WaybackPriceHistoryClient(
         val expectedTitleForTrace = expectedTitle.replace(Regex("""\s+"""), " ").trim().take(100)
         val detectedTitlesForTrace = titles.take(3)
             .joinToString(" | ") { it.replace(Regex("""\s+"""), " ").trim().take(100) }
-        val structuredMatch = jsonLd.any { isMatchingTitleForArchivedUrl(expectedTitle, it.first, originalUrl) }
-        val structuredConflict = jsonLd.firstOrNull {
-            hasExplicitProductVariantConflict(expectedTitle, it.first) &&
-                !isMatchingTitleForArchivedUrl(expectedTitle, it.first, originalUrl)
+        val structuredMatch = jsonLd.any { candidate ->
+            isMatchingArchivedOfferIdentity(document, expectedTitle, candidate, originalUrl)
+        }
+        val structuredConflict = jsonLd.firstOrNull { candidate ->
+            hasExplicitProductVariantConflict(expectedTitle, candidate.first) &&
+                !isMatchingArchivedOfferIdentity(document, expectedTitle, candidate, originalUrl)
         }
         val pageTitleMatch = pageTitles.any { isMatchingTitleForArchivedUrl(expectedTitle, it, originalUrl) }
         val titleMatches = structuredMatch || (structuredConflict == null && pageTitleMatch)
@@ -3842,16 +3844,25 @@ class WaybackPriceHistoryClient(
         fun matchesArchivedTitle(title: String): Boolean =
             isMatchingTitleForArchivedUrl(expectedTitle, title, originalUrl)
 
+        // Some retailers publish a generic Product name (for example, "iPhone 15 Plus Libre")
+        // while the individual JSON-LD Offer contains a URL for the exact capacity/colour SKU.
+        // Use that URL only when it is attached to this same structured title, price and currency.
+        fun matchingOfferUrl(candidate: Triple<String, Double, String>): String? =
+            matchingVariantUrlForArchivedOffer(document, expectedTitle, candidate, originalUrl)
+
+        fun matchesCandidateIdentity(candidate: Triple<String, Double, String>): Boolean =
+            matchesArchivedTitle(candidate.first) || matchingOfferUrl(candidate) != null
+
         fun isValidCandidate(candidate: Triple<String, Double, String>): Boolean =
             candidate.third.uppercase(Locale.ROOT) in allowedCurrencies &&
                 candidate.second in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE &&
-                matchesArchivedTitle(candidate.first)
+                matchesCandidateIdentity(candidate)
 
-        val matchingIdentityJsonLd = jsonLdCandidates.filter { matchesArchivedTitle(it.first) }
+        val matchingIdentityJsonLd = jsonLdCandidates.filter(::matchesCandidateIdentity)
         val matchingJsonLd = matchingIdentityJsonLd.filter(::isValidCandidate)
         val structuredVariantConflict = jsonLdCandidates.firstOrNull {
             hasExplicitProductVariantConflict(expectedTitle, it.first) &&
-                !matchesArchivedTitle(it.first)
+                !matchesCandidateIdentity(it)
         }
 
         // Do not borrow a generic page/meta title if its structured offer identifies another SKU,
@@ -3884,6 +3895,7 @@ class WaybackPriceHistoryClient(
             )
         }
         if (matching != null) {
+            val offerIdentityUrl = matchingOfferUrl(matching)
             return ArchivedPriceQuote(
                 observedAt = observedAt,
                 price = matching.second,
@@ -3895,7 +3907,8 @@ class WaybackPriceHistoryClient(
                 sourcePrice = matching.second,
                 variantIdentityConfirmedByUrl = matchesVariantDetailsConfirmedByUrl(
                     expectedTitle, matching.first, originalUrl
-                )
+                ) || offerIdentityUrl != null,
+                productUrl = offerIdentityUrl
             )
         }
 
@@ -4159,6 +4172,39 @@ class WaybackPriceHistoryClient(
             )
         }
     }
+
+    /**
+     * Find a SKU-specific URL attached to the same JSON-LD Product/Offer title, amount and
+     * currency. A generic title may omit capacity or colour; the offer URL can fill that gap only
+     * when it independently proves every missing variant detail and contains no contradiction.
+     */
+    private fun matchingVariantUrlForArchivedOffer(
+        document: Document,
+        expectedTitle: String,
+        candidate: Triple<String, Double, String>,
+        pageUrl: String
+    ): String? {
+        if (isMatchingTitleForArchivedUrl(expectedTitle, candidate.first, pageUrl)) return null
+        return jsonLdProductUrlsForOffer(
+            document = document,
+            productTitle = candidate.first,
+            expectedPrice = candidate.second,
+            expectedCurrency = candidate.third,
+            pageUrl = pageUrl
+        ).firstOrNull { offerUrl ->
+            !hasExplicitVariantConflictInProductUrl(expectedTitle, offerUrl) &&
+                matchesVariantDetailsConfirmedByUrl(expectedTitle, candidate.first, offerUrl)
+        }
+    }
+
+    private fun isMatchingArchivedOfferIdentity(
+        document: Document,
+        expectedTitle: String,
+        candidate: Triple<String, Double, String>,
+        pageUrl: String
+    ): Boolean =
+        isMatchingTitleForArchivedUrl(expectedTitle, candidate.first, pageUrl) ||
+            matchingVariantUrlForArchivedOffer(document, expectedTitle, candidate, pageUrl) != null
 
     private fun isSameMerchantHost(firstUrl: String, secondUrl: String): Boolean {
         val firstHost = runCatching { URI(firstUrl).host.orEmpty() }.getOrDefault("")

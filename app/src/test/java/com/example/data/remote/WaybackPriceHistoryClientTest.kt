@@ -613,6 +613,131 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun prefix429IsNotHiddenWhenExactUrlAlreadyReturnedOneQuote() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .remove("wayback_rate_limit_last_hit_at")
+            .remove("wayback_rate_limit_hit_count")
+            .commit()
+
+        val title = "Anker Prime 27K Power Bank Prefix 429 Regression ${System.currentTimeMillis()}"
+        val originalUrl = "https://shop.example/products/anker-prime-27k-prefix-429"
+        val cdxMatchTypes = CopyOnWriteArrayList<String>()
+        val cdxBody = """
+            [
+              ["timestamp","original","statuscode","mimetype"],
+              ["20250101120000","$originalUrl","200","text/html"]
+            ]
+        """.trimIndent()
+        val archivedHtml = """
+            <html><head>
+              <script type="application/ld+json">
+                {"@type":"Product","name":"$title",
+                 "offers":{"@type":"Offer","price":"79.99","priceCurrency":"EUR"}}
+              </script>
+            </head><body></body></html>
+        """.trimIndent()
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            when {
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    val matchType = request.url.queryParameter("matchType").orEmpty()
+                    cdxMatchTypes += matchType
+                    if (matchType == "prefix") {
+                        Response.Builder()
+                            .request(request)
+                            .protocol(Protocol.HTTP_1_1)
+                            .code(429)
+                            .message("Too Many Requests")
+                            .header("Retry-After", "300")
+                            .body("rate limited".toResponseBody("text/plain; charset=utf-8".toMediaType()))
+                            .build()
+                    } else {
+                        Response.Builder()
+                            .request(request)
+                            .protocol(Protocol.HTTP_1_1)
+                            .code(200)
+                            .message("OK")
+                            .header("Content-Type", "application/json; charset=utf-8")
+                            .body(cdxBody.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                            .build()
+                    }
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/web/") ->
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "text/html; charset=utf-8")
+                        .body(archivedHtml.toResponseBody("text/html; charset=utf-8".toMediaType()))
+                        .build()
+                else -> throw AssertionError("Unexpected request during prefix-429 regression: ${request.url}")
+            }
+        }.build()
+
+        try {
+            val client = WaybackPriceHistoryClient(context, http)
+            val result = withTimeout(20_000L) {
+                client.fetchHistory(originalUrl = originalUrl, expectedTitle = title, lookbackDays = 2_920)
+            }
+
+            assertEquals("The exact quote must not stop the prefix request", listOf("exact", "prefix"), cdxMatchTypes.toList())
+            assertEquals("Keep the valid point already recovered from the exact route", 1, result.quotes.size)
+            assertTrue("The partial lookup must report the HTTP 429", result.requestFailed)
+            assertTrue("The 429 diagnostic must survive merging with an exact-route quote",
+                result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED"))
+        } finally {
+            preferences.edit()
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .remove("wayback_rate_limit_last_hit_at")
+                .remove("wayback_rate_limit_hit_count")
+                .commit()
+        }
+    }
+
+    @Test
+    fun rateLimitedPartialHistoryCanRetryOnceTheGlobalCooldownExpires() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        val client = newClient()
+        val key = "partial_quote_rate_limit_retry_regression"
+        val now = System.currentTimeMillis()
+        try {
+            preferences.edit()
+                .putLong(key, now - 1_000L)
+                .putBoolean("${key}_has_quotes", true)
+                .putBoolean("${key}_failed", true)
+                .putBoolean("${key}_rate_limited", true)
+                .putLong("wayback_rate_limit_until", now + 300_000L)
+                .commit()
+
+            assertTrue("The global cooldown must suppress retries while the 429 pause is active",
+                client.wasAttemptedRecently(key, now))
+
+            preferences.edit().putLong("wayback_rate_limit_until", now - 1L).commit()
+            assertFalse(
+                "A partial quote must not trigger the long successful-history cache after cooldown expiry",
+                client.wasAttemptedRecently(key, now + 1L)
+            )
+        } finally {
+            preferences.edit()
+                .remove(key)
+                .remove("${key}_has_quotes")
+                .remove("${key}_failed")
+                .remove("${key}_rate_limited")
+                .remove("wayback_rate_limit_until")
+                .commit()
+        }
+    }
+
+    @Test
     fun directCdx429ActivatesTheSharedPauseAndPreventsASecondRequest() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)

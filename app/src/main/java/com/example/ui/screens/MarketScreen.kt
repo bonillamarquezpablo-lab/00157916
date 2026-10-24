@@ -70,8 +70,6 @@ import com.example.data.model.Store
 import com.example.ui.components.ProductCard
 import com.example.ui.components.ProductImageView
 import com.example.ui.viewmodel.SortOption
-import com.example.ui.viewmodel.filterMarketplaceProductsForState
-import com.example.ui.viewmodel.marketplaceCategoryProducts
 import com.example.ui.viewmodel.marketplaceStoresForProducts
 import com.example.ui.viewmodel.TrackerUiState
 
@@ -79,6 +77,7 @@ import com.example.ui.viewmodel.TrackerUiState
 @Composable
 fun MarketScreen(
     productsForCategory: (ProductCategory) -> StateFlow<List<Product>>,
+    filteredProductsForCategory: (ProductCategory) -> StateFlow<List<Product>>,
     categorySummaries: List<MarketplaceCategorySummary>,
     uiState: TrackerUiState,
     onSearchChange: (String) -> Unit,
@@ -132,16 +131,11 @@ fun MarketScreen(
     // This branch is only reached after opening a category or explicitly requesting all results.
     // The StateFlow is scoped to the selected category and remains cached after first use.
     val loadedProducts by productsForCategory(uiState.selectedCategory).collectAsStateWithLifecycle()
-    val categoryProducts = remember(loadedProducts, uiState.selectedCategory) {
-        marketplaceCategoryProducts(loadedProducts, uiState.selectedCategory)
-    }
-    val products = remember(categoryProducts, uiState) {
-        filterMarketplaceProductsForState(categoryProducts, uiState)
-    }
+    val products by filteredProductsForCategory(uiState.selectedCategory).collectAsStateWithLifecycle()
 
-    // Store choices are derived from this category's own visible products, never the global directory.
-    val displayStores = remember(categoryProducts) {
-        marketplaceStoresForProducts(categoryProducts).map { store ->
+    // Store choices are derived from the same cached, visible category flow, never the global directory.
+    val displayStores = remember(loadedProducts) {
+        marketplaceStoresForProducts(loadedProducts).map { store ->
             val canonical = Store.findKnownByName(store.name, "https://${store.domain}")
             val label = canonical?.name ?: store.name
             Triple(store, label, label.lowercase(java.util.Locale.ROOT))

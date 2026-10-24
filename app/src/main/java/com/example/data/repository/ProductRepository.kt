@@ -2065,7 +2065,7 @@ class ProductRepository(
             id = id,
             title = title,
             brand = brand,
-            category = ProductCategory.values().firstOrNull { it.name == category } ?: ProductCategory.ALL,
+            category = ProductCategory.values().firstOrNull { it != ProductCategory.ALL && it.name == category } ?: ProductCategory.OTHER,
             currentPrice = current,
             athMinPrice = lowest,
             athMinDate = when {

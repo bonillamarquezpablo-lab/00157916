@@ -95,7 +95,7 @@ internal fun shouldSkipDomainFallbackAfterSnapshotTimeout(
  * Probe an alternate direct URL only when the exact index answered cleanly but found no captures.
  * Network errors and 429s are handled by retry/cooldown logic, not by fanning out more requests.
  */
-internal fun shouldTryAlternateExactUrl(
+internal fun shouldUseAlternateUrlForPrefix(
     result: WaybackBackfillResult,
     hasAlternateCandidate: Boolean
 ): Boolean = hasAlternateCandidate &&
@@ -449,13 +449,14 @@ class WaybackPriceHistoryClient(
             }
 
             val snapshotResultsCache = mutableMapOf<String, SnapshotFetch>()
-            var prefixCdxUrl = buildCdxUrl(directUrl, now, lookbackDays, matchType = "prefix")
+            val prefixCdxUrlInitial = buildCdxUrl(directUrl, now, lookbackDays, matchType = "prefix")
                 ?: return@serializedArchiveLookup WaybackBackfillResult(
                     requestFailed = true,
                     diagnosticCodes = setOf("DIRECT_URL_INVALID")
                 )
+            var prefixCdxUrl = prefixCdxUrlInitial
             val exactCdxUrl = buildCdxUrl(directUrl, now, lookbackDays, matchType = "exact")
-            var exactResult = if (exactCdxUrl == null) {
+            val exactResult = if (exactCdxUrl == null) {
                 WaybackBackfillResult(diagnosticCodes = setOf("CDX_EXACT_URL_NOT_BUILT"))
             } else {
                 queryCdxAndFetchPrices(
@@ -481,73 +482,22 @@ class WaybackPriceHistoryClient(
             }
 
             // Tracking parameters and trailing slashes can change the URL string indexed by CDX.
-            // Probe at most one alternate only after a valid empty exact response: successful fast
-            // paths are unchanged, and a timeout/429 never triggers more network traffic.
+            // Reuse the existing prefix request budget for one equivalent URL candidate, but only
+            // after a valid exact response with zero captures. This improves coverage without
+            // adding a network round trip to searches that already found captures or hit an error.
             val alternateDirectUrl = directCandidates.firstOrNull {
                 it != directUrl && isEligibleDirectUrl(it)
             }
-            if (shouldTryAlternateExactUrl(exactResult, alternateDirectUrl != null)) {
-                val alternateExactCdxUrl = buildCdxUrl(
-                    alternateDirectUrl!!, now, lookbackDays, matchType = "exact"
+            if (shouldUseAlternateUrlForPrefix(exactResult, alternateDirectUrl != null)) {
+                val alternatePrefix = buildCdxUrl(
+                    alternateDirectUrl!!, now, lookbackDays, matchType = "prefix"
                 )
-                if (alternateExactCdxUrl != null) {
+                if (alternatePrefix != null) {
+                    prefixCdxUrl = alternatePrefix
                     emitWaybackTrace(
                         onTrace, 4, WaybackTraceStatus.RUNNING,
-                        "La URL exacta no tenía capturas; se prueba una única variante equivalente con límite corto."
+                        "La URL exacta no tenía capturas; el fallback por prefijo usará una URL equivalente sin añadir otra petición."
                     )
-                    val alternateResult = queryCdxAndFetchPrices(
-                        cdxUrl = alternateExactCdxUrl,
-                        expectedTitle = expectedTitle,
-                        cacheKey = attemptKey("url-cdx-alternate-v1|$alternateDirectUrl|$expectedTitle"),
-                        now = now,
-                        lookbackDays = lookbackDays,
-                        maxSnapshots = MAX_ALTERNATE_URL_SNAPSHOTS,
-                        cdxTimeoutSeconds = ALTERNATE_URL_CDX_TIMEOUT_SECONDS,
-                        cdxStage = "CDX_URL_ALTERNATE",
-                        snapshotTimeoutSeconds = ALTERNATE_URL_SNAPSHOT_TIMEOUT_SECONDS,
-                        onTrace = onTrace,
-                        knownProductTitlesById = knownProductTitlesById,
-                        snapshotResultsCache = snapshotResultsCache,
-                        onVerifiedQuotes = onVerifiedQuotes
-                    )
-                    if (alternateResult.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) {
-                        rememberAttempt(
-                            attempt, now,
-                            hasQuotes = alternateResult.quotes.isNotEmpty(),
-                            failed = true,
-                            rateLimited = true
-                        )
-                        return@serializedArchiveLookup alternateResult.copy(
-                            quotes = (exactResult.quotes + alternateResult.quotes)
-                                .distinctBy { listOf(it.originalUrl, it.observedAt.toString(), it.price.toString(), it.currency) }
-                                .sortedBy { it.observedAt },
-                            diagnosticCodes = exactResult.diagnosticCodes + alternateResult.diagnosticCodes
-                        )
-                    }
-                    if (alternateResult.capturesFound > 0 || alternateResult.quotes.isNotEmpty()) {
-                        // The alternate URL is now the useful series seed, so its prefix route is
-                        // the one worth checking next. The snapshot cache avoids duplicate HTML.
-                        exactResult = alternateResult.copy(
-                            quotes = (exactResult.quotes + alternateResult.quotes)
-                                .distinctBy { listOf(it.originalUrl, it.observedAt.toString(), it.price.toString(), it.currency) }
-                                .sortedBy { it.observedAt },
-                            capturesFound = maxOf(exactResult.capturesFound, alternateResult.capturesFound),
-                            capturesChecked = exactResult.capturesChecked + alternateResult.capturesChecked,
-                            available = exactResult.available || alternateResult.available,
-                            diagnosticCodes = exactResult.diagnosticCodes + alternateResult.diagnosticCodes
-                        )
-                        prefixCdxUrl = buildCdxUrl(
-                            alternateDirectUrl, now, lookbackDays, matchType = "prefix"
-                        ) ?: prefixCdxUrl
-                    } else if (alternateResult.requestFailed) {
-                        // Preserve partial transport failures so an incomplete series can retry
-                        // after the short failure cooldown instead of being cached as a clean miss.
-                        exactResult = exactResult.copy(
-                            requestFailed = true,
-                            available = exactResult.available || alternateResult.available,
-                            diagnosticCodes = exactResult.diagnosticCodes + alternateResult.diagnosticCodes
-                        )
-                    }
                 }
             }
             if (shouldSkipDomainFallbackAfterSnapshotTimeout(listOf(exactResult))) {
@@ -5333,10 +5283,6 @@ class WaybackPriceHistoryClient(
         private const val MAX_QUICK_SUPPLEMENTAL_SNAPSHOTS = 3
         private const val QUICK_SUPPLEMENTAL_PREFIX_CDX_TIMEOUT_SECONDS = 3L
         private const val QUICK_SUPPLEMENTAL_PREFIX_SNAPSHOT_TIMEOUT_SECONDS = 3L
-        // If the exact index is empty, allow one cheap URL-shape alternative. Fast paths stay fast.
-        private const val MAX_ALTERNATE_URL_SNAPSHOTS = 1
-        private const val ALTERNATE_URL_CDX_TIMEOUT_SECONDS = 2L
-        private const val ALTERNATE_URL_SNAPSHOT_TIMEOUT_SECONDS = 2L
         private const val MIN_HISTORICAL_DATES_BEFORE_EARLY_STOP = 3
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 8
         // Used only by historical backfill, never by the primary shopping search.

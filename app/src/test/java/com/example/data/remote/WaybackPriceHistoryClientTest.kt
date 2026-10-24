@@ -342,7 +342,7 @@ class WaybackPriceHistoryClientTest {
         val baseClient = WaybackPriceHistoryClient(context)
         val canonicalUrl = baseClient.buildDirectUrlCandidates(originalUrl).last()
         val urlParts = baseClient.decomposeProductUrl(originalUrl)!!
-        val rawKey = "url-cdx-batch-v9-exact-first|" +
+        val rawKey = "url-cdx-batch-v10-adaptive-three-dates|" +
             urlParts.merchantDomain + "|" +
             urlParts.productIdentifiers.sorted().joinToString(",") + "|" +
             canonicalUrl + "|" + title
@@ -779,6 +779,19 @@ class WaybackPriceHistoryClientTest {
             assertTrue("The partial lookup must report the HTTP 429", result.requestFailed)
             assertTrue("The 429 diagnostic must survive merging with an exact-route quote",
                 result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED"))
+
+            // The global pause is authoritative, but the partial lookup must be retryable once
+            // the pause expires rather than remaining cached as a successful history for 30 days.
+            preferences.edit().remove("wayback_rate_limit_until").commit()
+            val retried = withTimeout(20_000L) {
+                client.fetchHistory(originalUrl = originalUrl, expectedTitle = title, lookbackDays = 2_920)
+            }
+            assertFalse("A partial 429 lookup must not be served from the success cache", retried.skippedRecently)
+            assertEquals(
+                "After the cooldown expires, both exact and prefix requests should be sent again",
+                listOf("exact", "prefix", "exact", "prefix"),
+                cdxMatchTypes.toList()
+            )
         } finally {
             preferences.edit()
                 .remove("wayback_rate_limit_until")

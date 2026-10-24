@@ -131,6 +131,13 @@ interface ProductDao {
                 "AND v.isVerified = 1 AND upper(trim(v.currency)) = 'EUR' " +
                 "AND v.price >= 0.5 AND v.price <= 10000.0 AND trim(v.productTitle) <> '' " +
                 "AND v.observedAt > 0) " +
+                "OR EXISTS (SELECT 1 FROM price_observations legacy WHERE legacy.productId = p.id " +
+                "AND lower(trim(legacy.sourceUrl)) LIKE 'https://%' " +
+                "AND lower(legacy.sourceUrl) NOT LIKE '%google.com%' " +
+                "AND lower(legacy.sourceUrl) NOT LIKE '%web.archive.org%' " +
+                "AND lower(legacy.sourceUrl) NOT LIKE '%arquivo.pt%' " +
+                "AND trim(legacy.storeName) <> '' AND trim(legacy.productTitle) <> '' " +
+                "AND legacy.observedAt > 0) " +
                 "OR ((p.id LIKE 'online_candidate_%' " +
                 "OR lower(trim(p.athMinDate)) = 'pendiente de verificación') " +
                 "AND p.currentPrice > 0)"

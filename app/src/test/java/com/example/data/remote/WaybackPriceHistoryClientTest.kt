@@ -342,7 +342,7 @@ class WaybackPriceHistoryClientTest {
         val baseClient = WaybackPriceHistoryClient(context)
         val canonicalUrl = baseClient.buildDirectUrlCandidates(originalUrl).last()
         val urlParts = baseClient.decomposeProductUrl(originalUrl)!!
-        val rawKey = "url-cdx-batch-v10-adaptive-three-dates|" +
+        val rawKey = "url-cdx-batch-v11-bounded-url-alternate|" +
             urlParts.merchantDomain + "|" +
             urlParts.productIdentifiers.sorted().joinToString(",") + "|" +
             canonicalUrl + "|" + title
@@ -925,6 +925,56 @@ class WaybackPriceHistoryClientTest {
                 """{"archived_snapshots":{"closest":{"available":false,"timestamp":"20250101120000"}}}""",
                 "https://www.apple.com/es/iphone-16/"
             )
+        )
+    }
+
+    @Test
+    fun alternateExactUrlProbeIsOnlyAllowedAfterCleanEmptyExactResponse() {
+        val emptyIndex = WaybackBackfillResult(
+            capturesFound = 0,
+            capturesChecked = 0,
+            available = true,
+            requestFailed = false
+        )
+
+        assertTrue(
+            "A successful empty exact index may justify one bounded alternate URL probe",
+            shouldTryAlternateExactUrl(emptyIndex, hasAlternateCandidate = true)
+        )
+        assertFalse(
+            "Do not probe when there is no distinct URL candidate",
+            shouldTryAlternateExactUrl(emptyIndex, hasAlternateCandidate = false)
+        )
+        assertFalse(
+            "Do not add latency when the exact lookup did not produce a valid response",
+            shouldTryAlternateExactUrl(emptyIndex.copy(available = false), hasAlternateCandidate = true)
+        )
+        assertFalse(
+            "Do not fan out requests after a transport failure",
+            shouldTryAlternateExactUrl(emptyIndex.copy(requestFailed = true), hasAlternateCandidate = true)
+        )
+        assertFalse(
+            "A rate limit must use the shared cooldown instead of another URL request",
+            shouldTryAlternateExactUrl(
+                emptyIndex.copy(diagnosticCodes = setOf("WAYBACK_RATE_LIMITED")),
+                hasAlternateCandidate = true
+            )
+        )
+        assertFalse(
+            "A response with captures should go through normal verification, not a parallel URL probe",
+            shouldTryAlternateExactUrl(emptyIndex.copy(capturesFound = 1), hasAlternateCandidate = true)
+        )
+        val quote = ArchivedPriceQuote(
+            observedAt = 1_800_000_000_000L,
+            price = 99.99,
+            currency = "EUR",
+            productTitle = "Producto de prueba",
+            originalUrl = "https://shop.example/product",
+            snapshotUrl = "https://web.archive.org/web/20261001000000/https://shop.example/product"
+        )
+        assertFalse(
+            "Never probe an alternate URL once the exact path already supplied a quote",
+            shouldTryAlternateExactUrl(emptyIndex.copy(quotes = listOf(quote)), hasAlternateCandidate = true)
         )
     }
 

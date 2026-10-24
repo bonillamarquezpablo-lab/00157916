@@ -106,13 +106,20 @@ fun ProductCard(
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Column(modifier = Modifier.padding(horizontal = if (compact) 9.dp else 12.dp, vertical = if (compact) 9.dp else 11.dp)) {
+        Column(
+            modifier = Modifier
+                .then(if (compact) Modifier.fillMaxHeight() else Modifier)
+                .padding(horizontal = if (compact) 9.dp else 12.dp, vertical = if (compact) 9.dp else 11.dp)
+        ) {
             if (compact) {
-                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                Column(
+                    modifier = Modifier.fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(110.dp)
+                            .height(100.dp)
                             .clip(RoundedCornerShape(12.dp))
                     ) {
                         ProductImageView(
@@ -156,7 +163,7 @@ fun ProductCard(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 13.sp,
                         lineHeight = 17.sp,
-                        maxLines = 3,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -282,6 +289,7 @@ fun ProductCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+                    Spacer(modifier = Modifier.weight(1f))
                     Button(
                         onClick = { showStoreComparison = true },
                         modifier = Modifier

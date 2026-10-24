@@ -505,24 +505,39 @@ class WaybackPriceHistoryClient(
             val mergedQuotes = (exactResult.quotes + prefixResult.quotes)
                 .distinctBy { listOf(it.originalUrl, it.observedAt.toString(), it.price.toString(), it.currency) }
                 .sortedBy { it.observedAt }
+            val mergedPrimaryQuotes = mergedQuotes.filter {
+                it.targetProductId.isNullOrBlank() && !it.isDiscoveryCandidate
+            }
+            val mergedHasSufficientHistory = hasSufficientHistoricalCoverage(mergedPrimaryQuotes)
+            val combinedDiagnostics = exactResult.diagnosticCodes + prefixResult.diagnosticCodes
+            val rateLimited = combinedDiagnostics.contains("WAYBACK_RATE_LIMITED")
+            val partialRequestFailed = exactResult.requestFailed || prefixResult.requestFailed
+            // A quote from the exact route does not turn a failed prefix request into a completed
+            // historical lookup. Keep the transport diagnosis and retry state when the combined
+            // primary series is still too sparse, and honor the global 429 cooldown even with quotes.
+            val incompleteLookupFailed = rateLimited ||
+                (partialRequestFailed && !mergedHasSufficientHistory)
             val merged = prefixResult.copy(
                 quotes = mergedQuotes,
                 capturesFound = maxOf(exactResult.capturesFound, prefixResult.capturesFound),
                 capturesChecked = exactResult.capturesChecked + prefixResult.capturesChecked,
                 available = exactResult.available || prefixResult.available,
-                requestFailed = mergedQuotes.isEmpty() && (exactResult.requestFailed || prefixResult.requestFailed),
-                diagnosticCodes = if (mergedQuotes.isNotEmpty()) {
-                    emptySet()
+                requestFailed = rateLimited ||
+                    (mergedQuotes.isEmpty() && partialRequestFailed),
+                diagnosticCodes = if (
+                    mergedQuotes.isEmpty() || incompleteLookupFailed
+                ) {
+                    combinedDiagnostics
                 } else {
-                    exactResult.diagnosticCodes + prefixResult.diagnosticCodes
+                    emptySet()
                 }
             )
             rememberAttempt(
                 attempt,
                 now,
                 hasQuotes = merged.quotes.isNotEmpty(),
-                failed = merged.requestFailed,
-                rateLimited = merged.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
+                failed = incompleteLookupFailed || merged.requestFailed,
+                rateLimited = rateLimited
             )
             merged
         }
@@ -2888,14 +2903,16 @@ class WaybackPriceHistoryClient(
         val hadQuotes = preferences.getBoolean("${key}_has_quotes", false)
         val failed = preferences.getBoolean("${key}_failed", false)
         val rateLimited = preferences.getBoolean("${key}_rate_limited", false)
-        // Failed lookups are cached briefly. For an explicit HTTP 429, the global Retry-After
-        // cooldown is authoritative; let the same product retry as soon as that pause expires.
-        if (failed && !hadQuotes && rateLimited) {
+        // For HTTP 429, the global Retry-After cooldown is authoritative even if an
+        // earlier route produced a partial quote. Retry as soon as that pause expires.
+        if (rateLimited) {
             return preferences.getLong(KEY_RATE_LIMIT_UNTIL, 0L) > now
         }
+        // A partial series whose supplementary request failed must use the short failure
+        // interval, not the long successful-history cache simply because it contains one point.
         val retryInterval = when {
-            hadQuotes -> RETRY_INTERVAL_MS
             failed -> FAILURE_RETRY_INTERVAL_MS
+            hadQuotes -> RETRY_INTERVAL_MS
             else -> NEGATIVE_RETRY_INTERVAL_MS
         }
         return now - lastAttempt < retryInterval

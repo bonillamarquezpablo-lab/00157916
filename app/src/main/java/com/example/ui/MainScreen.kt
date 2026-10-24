@@ -45,6 +45,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -85,13 +86,12 @@ fun MainScreen(
     viewModel: PriceTrackerViewModel,
     onOpenCrashReport: () -> Unit = {}
 ) {
-    var currentTab by remember { mutableStateOf(MainTab.MARKET) }
-    var showSettings by remember { mutableStateOf(false) }
-    var showOnlineSearch by remember { mutableStateOf(false) }
+    var currentTab by rememberSaveable { mutableStateOf(MainTab.MARKET) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showOnlineSearch by rememberSaveable { mutableStateOf(false) }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val filteredProducts by viewModel.filteredProducts.collectAsStateWithLifecycle()
-    val trackedProducts by viewModel.trackedProducts.collectAsStateWithLifecycle()
-    val todayAthDeals by viewModel.todayAthDeals.collectAsStateWithLifecycle()
+    val categorySummaries by viewModel.marketplaceCategorySummaries.collectAsStateWithLifecycle()
+    val trackedProductCount by viewModel.trackedProductCount.collectAsStateWithLifecycle()
     val pendingDiscoveries by viewModel.pendingDiscoveries.collectAsStateWithLifecycle()
     val spanishStores by viewModel.spanishStores.collectAsStateWithLifecycle()
 
@@ -218,14 +218,14 @@ fun MainScreen(
                                         modifier = Modifier.size(24.dp)
                                     )
                                 }
-                            } else if (tab == MainTab.ALERTS && trackedProducts.isNotEmpty()) {
+                            } else if (tab == MainTab.ALERTS && trackedProductCount > 0) {
                                 BadgedBox(
                                     badge = {
                                         Badge(
                                             containerColor = MaterialTheme.colorScheme.primary,
                                             contentColor = MaterialTheme.colorScheme.onPrimary
                                         ) {
-                                            Text("${trackedProducts.size}")
+                                            Text("$trackedProductCount")
                                         }
                                     }
                                 ) {
@@ -299,7 +299,8 @@ fun MainScreen(
             } else when (currentTab) {
                 MainTab.MARKET -> {
                     MarketScreen(
-                        products = filteredProducts,
+                        productsForCategory = viewModel::filteredProductsForCategory,
+                        categorySummaries = categorySummaries,
                         stores = spanishStores,
                         uiState = uiState,
                         onSearchChange = viewModel::onSearchQueryChange,
@@ -314,6 +315,7 @@ fun MainScreen(
                     )
                 }
                 MainTab.RADAR -> {
+                    val todayAthDeals by viewModel.todayAthDeals.collectAsStateWithLifecycle()
                     DiscoveryRadarScreen(
                         discoveries = pendingDiscoveries,
                         athProducts = todayAthDeals,
@@ -345,6 +347,7 @@ fun MainScreen(
                     )
                 }
                 MainTab.ALERTS -> {
+                    val trackedProducts by viewModel.trackedProducts.collectAsStateWithLifecycle()
                     AlertsScreen(
                         trackedProducts = trackedProducts,
                         onProductClick = viewModel::onSelectProduct,

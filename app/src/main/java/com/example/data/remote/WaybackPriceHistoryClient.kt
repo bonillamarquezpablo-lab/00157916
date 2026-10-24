@@ -990,8 +990,21 @@ class WaybackPriceHistoryClient(
         // all three probes on guessed slugs while keeping product-specific candidates first.
         val transientCdxFailure = failureCodes.any { code ->
             code.endsWith("_TIMEOUT") ||
+                code.endsWith("_DNS") ||
                 code.substringAfterLast('_').toIntOrNull()
                     ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true
+        }
+        // A product-prefix CDX request has already paid its full timeout budget. After that,
+        // keep the independent Availability fallback, but do not send another CDX prefix or
+        // host-wide query in the same run. This prevents two/three sequential waits against the
+        // same struggling archive service while retaining any verified Availability quotes.
+        val priorProductPrefixTransientFailure = failureCodes.any { code ->
+            (code.startsWith("CDX_URL_PREFIX") ||
+                code.startsWith("CDX_PRODUCT_PREFIX") ||
+                code.startsWith("CDX_ALTERNATE_PREFIX")) &&
+                (code.endsWith("_TIMEOUT") || code.endsWith("_DNS") ||
+                    code.substringAfterLast('_').toIntOrNull()
+                        ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true)
         }
         val retailerSearchUrl = Store.ALL_STORES.firstOrNull { store ->
             normalizeMerchantDomain(store.domain) == normalizedDomain && store.supportsProductSearch
@@ -1072,8 +1085,10 @@ class WaybackPriceHistoryClient(
         // remains mandatory before any quote is accepted.
         var alternateResult: WaybackBackfillResult? = null
         if (!fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") &&
+            !priorProductPrefixTransientFailure &&
             activeRateLimitUntil(System.currentTimeMillis()) == null
         ) {
+            
             val availabilityConfirmedUrl = fallback.quotes
                 .firstOrNull { it.originalUrl != preferredUrl && isEligibleDirectUrl(it.originalUrl) }
                 ?.originalUrl
@@ -1159,6 +1174,12 @@ class WaybackPriceHistoryClient(
         val domainDiscoveryResults = mutableListOf<WaybackBackfillResult>()
         val priorRateLimited = fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ||
             alternateResult?.diagnosticCodes?.contains("WAYBACK_RATE_LIMITED") == true
+        if (priorProductPrefixTransientFailure && !priorRateLimited) {
+            emitWaybackTrace(
+                onTrace, 6, WaybackTraceStatus.SKIPPED,
+                "Se omiten más consultas CDX: la búsqueda de producto ya agotó el tiempo. Se conserva el fallback independiente de Availability y cualquier precio verificado."
+            )
+        }
         // If the one alternate product-prefix request has already timed out or failed at the
         // transport/server level, do not fan out into two broad host scans. They hit the same
         // CDX service, usually time out again, and can consume the rest of the per-product budget.
@@ -1184,7 +1205,8 @@ class WaybackPriceHistoryClient(
         // A valid empty product-prefix response is already a negative result for the narrow
         // product path. After checking bounded Availability and one alternate prefix, do not
         // escalate it into an expensive host-wide scan; keep recovery targeted and predictable.
-        val skipBroadDomainDiscovery = failureCodes.contains("CDX_NO_CAPTURES")
+        val skipBroadDomainDiscovery = failureCodes.contains("CDX_NO_CAPTURES") ||
+            priorProductPrefixTransientFailure
         if (fallback.quotes.isEmpty() && !priorRateLimited && !alternateTransientFailure &&
             !skipBroadDomainDiscovery &&
             activeRateLimitUntil(System.currentTimeMillis()) == null
@@ -4815,10 +4837,10 @@ class WaybackPriceHistoryClient(
         // must never be treated as the same SKU. Normalize common Spanish/English/Italian names.
         val expectedColourFamily = productColourFamily(e)
         val archivedColourFamily = productColourFamily(a)
-        // Missing colour in an archived title is unknown, not a contradiction. Only an
-        // explicitly different archived colour rejects the candidate; storage and model checks
-        // below remain strict so a generic page cannot lend a price to another SKU.
-        if (expectedColourFamily != archivedColourFamily) return false
+        // If the selected title specifies a colour, the archived offer must match it.
+        // If the selected title omits colour, a concrete retailer offer colour is acceptable:
+        // capacity, model/trim and condition are still checked strictly below.
+        if (expectedColourFamily != null && expectedColourFamily != archivedColourFamily) return false
 
         // Trim/model suffixes (Pro, Ultra, Max, etc.) are meaningful for phones and scooters.
         // Require the same explicit trim markers on both titles to avoid cross-variant prices.
@@ -5020,7 +5042,9 @@ class WaybackPriceHistoryClient(
         if (productConditionKey(e) != productConditionKey(a)) return true
         val expectedColour = productColourFamily(e)
         val archivedColour = productColourFamily(a)
-        if (expectedColour == null && archivedColour != null) return true
+        // A colour present only in the archived offer is not a contradiction when the
+        // selected product title leaves colour unspecified. If the selected title names a
+        // colour, a different archived colour remains a hard conflict.
         if (expectedColour != null && archivedColour != null && expectedColour != archivedColour) return true
 
         val expectedModelVariants = productModelVariantTokens(e)

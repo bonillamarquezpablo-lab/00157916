@@ -457,7 +457,8 @@ class WaybackPriceHistoryClient(
                     onTrace = onTrace,
                     knownProductTitlesById = knownProductTitlesById,
                     snapshotResultsCache = snapshotResultsCache,
-                    onVerifiedQuotes = onVerifiedQuotes
+                    onVerifiedQuotes = onVerifiedQuotes,
+                    stopAfterDistinctPrimaryDates = MIN_HISTORICAL_DATES_BEFORE_EARLY_STOP
                 )
             }
             if (exactResult.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) {
@@ -3298,7 +3299,12 @@ class WaybackPriceHistoryClient(
 
         val sampled = sampleCaptures(captures, maxSnapshots)
         val fetched = mutableListOf<SnapshotFetch>()
-        for ((snapshotIndex, capture) in sampled.withIndex()) {
+        // A bounded early-stop pass should start with the newest capture, then step back through
+        // the quarterly samples. This preserves a useful current anchor before seeking older dates.
+        val capturesToFetch = if (stopAfterDistinctPrimaryDates != null) {
+            sampled.sortedByDescending { it.timestamp }
+        } else sampled
+        for ((snapshotIndex, capture) in capturesToFetch.withIndex()) {
             val snapshot = fetchSnapshotOnce(
                 capture = capture,
                 expectedTitle = expectedTitle,

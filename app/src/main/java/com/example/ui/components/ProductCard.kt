@@ -66,7 +66,8 @@ fun ProductCard(
     product: Product,
     onClick: () -> Unit,
     onToggleTrack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    compact: Boolean = false
 ) {
     val context = LocalContext.current
     var showStoreComparison by remember { mutableStateOf(false) }
@@ -104,57 +105,44 @@ fun ProductCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp)) {
-            // Top Section: Product Photo + Product Details
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Top
-            ) {
-                // Product Photo
-                ProductImageView(
-                    product = product,
-                    modifier = Modifier
-                        .size(84.dp)
-                        .testTag("product_photo_${product.id}"),
-                    showAthRibbon = product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isAtAth
-                )
-
-                Spacer(modifier = Modifier.width(10.dp))
-
-                // Metadata & Title
-                Column(modifier = Modifier.weight(1f)) {
+            if (compact) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    ProductImageView(
+                        product = product,
+                        modifier = Modifier.fillMaxWidth().height(118.dp).testTag("product_photo_${product.id}"),
+                        showAthRibbon = product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isAtAth
+                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        // Store pill
                         Box(
                             modifier = Modifier
+                                .weight(1f, fill = false)
                                 .clip(CircleShape)
                                 .background(if (product.isPriceVerified) product.currentStore.brandColor.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant)
-                                .widthIn(max = 176.dp)
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Text(
                                 text = when {
                                     product.isPriceVerified -> product.currentStore.name
                                     product.isUnverifiedLiveListing -> "Listado sin confirmar"
-                                    else -> "Sin precio verificado"
+                                    else -> "Precio pendiente"
                                 },
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 color = if (product.isPriceVerified) product.currentStore.brandColor else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-
-                        // Bookmark / Track
                         IconButton(
                             onClick = onToggleTrack,
-                            modifier = Modifier
-                                .size(28.dp)
-                                .testTag("track_button_${product.id}")
+                            modifier = Modifier.size(28.dp).testTag("track_button_${product.id}")
                         ) {
                             Icon(
                                 imageVector = if (product.isTracked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
@@ -164,56 +152,134 @@ fun ProductCard(
                             )
                         }
                     }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    // Title
                     Text(
                         text = product.title,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp,
-                        lineHeight = 19.sp,
-                        letterSpacing = (-0.15).sp,
-                        maxLines = 2,
+                        fontSize = 13.sp,
+                        lineHeight = 17.sp,
+                        maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    // "Todos" is a filter option, not a meaningful product category.
-                    if (product.category != ProductCategory.ALL || product.isRatingVerified) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (product.category != ProductCategory.ALL) {
+                    Text(
+                        text = product.category.displayName,
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            } else {
+                // Top Section: Product Photo + Product Details
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    // Product Photo
+                    ProductImageView(
+                        product = product,
+                        modifier = Modifier
+                            .size(84.dp)
+                            .testTag("product_photo_${product.id}"),
+                        showAthRibbon = product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isAtAth
+                    )
+    
+                    Spacer(modifier = Modifier.width(10.dp))
+    
+                    // Metadata & Title
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            // Store pill
+                            Box(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(if (product.isPriceVerified) product.currentStore.brandColor.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant)
+                                    .widthIn(max = 176.dp)
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
                                 Text(
-                                    text = product.category.displayName,
-                                    fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    text = when {
+                                        product.isPriceVerified -> product.currentStore.name
+                                        product.isUnverifiedLiveListing -> "Listado sin confirmar"
+                                        else -> "Sin precio verificado"
+                                    },
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = if (product.isPriceVerified) product.currentStore.brandColor else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            if (product.isRatingVerified) {
-                                if (product.category != ProductCategory.ALL) {
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                }
+    
+                            // Bookmark / Track
+                            IconButton(
+                                onClick = onToggleTrack,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .testTag("track_button_${product.id}")
+                            ) {
                                 Icon(
-                                    imageVector = Icons.Default.Star,
-                                    contentDescription = "Valoración verificada",
-                                    tint = Color(0xFFEAB308),
-                                    modifier = Modifier.size(11.dp)
+                                    imageVector = if (product.isTracked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                    contentDescription = if (product.isTracked) "Siguiendo" else "Seguir precio",
+                                    tint = if (product.isTracked) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Text(
-                                    text = "${product.rating}",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
+                            }
+                        }
+    
+                        Spacer(modifier = Modifier.height(4.dp))
+    
+                        // Title
+                        Text(
+                            text = product.title,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp,
+                            lineHeight = 19.sp,
+                            letterSpacing = (-0.15).sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+    
+                        Spacer(modifier = Modifier.height(4.dp))
+    
+                        // "Todos" is a filter option, not a meaningful product category.
+                        if (product.category != ProductCategory.ALL || product.isRatingVerified) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (product.category != ProductCategory.ALL) {
+                                    Text(
+                                        text = product.category.displayName,
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                if (product.isRatingVerified) {
+                                    if (product.category != ProductCategory.ALL) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.Star,
+                                        contentDescription = "Valoración verificada",
+                                        tint = Color(0xFFEAB308),
+                                        modifier = Modifier.size(11.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                    Text(
+                                        text = "${product.rating}",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
-
             Spacer(modifier = Modifier.height(6.dp))
 
             // Evidence-based hero badge: never call the first quote a historical minimum.

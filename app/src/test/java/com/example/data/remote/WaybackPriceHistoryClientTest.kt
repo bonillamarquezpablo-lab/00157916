@@ -1566,13 +1566,6 @@ class WaybackPriceHistoryClientTest {
             .first { it.domain.contains("pccomponentes.com", ignoreCase = true) && it.supportsProductSearch }
             .searchUrlFor(title)!!
         val cdxQueriedUrls = CopyOnWriteArrayList<String>()
-        val cdxSeriesBody = """
-            [
-              ["timestamp","original","statuscode","mimetype"],
-              ["20250101120000","$realStoreSearchUrl","200","text/html"],
-              ["20260901120000","$realStoreSearchUrl","200","text/html"]
-            ]
-        """.trimIndent()
         val archivedHtml = """
             <html><head>
               <script type="application/ld+json">
@@ -1591,18 +1584,11 @@ class WaybackPriceHistoryClientTest {
                     val indexedUrl = request.url.queryParameter("url").orEmpty()
                     cdxQueriedUrls += indexedUrl
                     if (indexedUrl == realStoreSearchUrl) {
-                        // Once Availability has confirmed the real retailer URL, CDX must be
-                        // queried against that verified URL to retrieve multiple archive dates.
-                        Response.Builder()
-                            .request(request)
-                            .protocol(Protocol.HTTP_1_1)
-                            .code(200)
-                            .message("OK")
-                            .header("Content-Type", "application/json; charset=utf-8")
-                            .body(cdxSeriesBody.toResponseBody("application/json; charset=utf-8".toMediaType()))
-                            .build()
+                        // After the product-prefix timeout, the Availability URL is kept for
+                        // verified partial history, but a second CDX request is intentionally skipped.
+                        throw AssertionError("A supplemental CDX series must be skipped after the product-prefix timeout")
                     } else {
-                        // The guessed/direct product URL still reproduces the failure on-device.
+                        // The guessed/direct product URL reproduces the transient failure.
                         throw java.net.SocketTimeoutException("simulated CDX product URL timeout")
                     }
                 }
@@ -1684,16 +1670,23 @@ class WaybackPriceHistoryClientTest {
             )
             assertTrue("The verified archived EUR price should be recovered after a 3.5-second HTML response", result.quotes.isNotEmpty())
             assertTrue("Every accepted result must retain the verified EUR price", result.quotes.all { kotlin.math.abs(it.price - 79.99) < 0.001 })
-            assertTrue(
-                "The verified Availability URL must be queried through CDX to recover more than one date",
-                cdxQueriedUrls.contains(realStoreSearchUrl) &&
-                    result.quotes.map { it.observedAt }.distinct().size >= 2
+            assertEquals(
+                "After the product-prefix timeout, do not query CDX again for the Availability URL",
+                false,
+                cdxQueriedUrls.contains(realStoreSearchUrl)
+            )
+            assertEquals(
+                "Keep the verified Availability quote as partial history without pretending it is a series",
+                1,
+                result.quotes.map { it.observedAt }.distinct().size
             )
             assertTrue(
-                "Diagnostic steps 5–6 must record the CDX series request instead of remaining unexecuted",
-                traceEvents.any { it.step == 4 && it.status == WaybackTraceStatus.PASSED &&
-                    it.detail.contains("CDX_AVAILABILITY_SERIES") } &&
-                    traceEvents.any { it.step == 5 && it.detail.contains("CDX_AVAILABILITY_SERIES") }
+                "Diagnostics must explain that supplemental CDX was skipped after the timeout",
+                traceEvents.any {
+                    it.status == WaybackTraceStatus.SKIPPED &&
+                        it.detail.contains("Se conserva el precio verificado de Availability") &&
+                        it.detail.contains("el índice de producto ya agotó el tiempo")
+                }
             )
             assertTrue(requests.any { it.startsWith("web.archive.org/web/") })
             assertTrue(
@@ -1841,6 +1834,76 @@ class WaybackPriceHistoryClientTest {
                 traceEvents.any {
                     it.diagnosticStep == 13 && it.status == WaybackTraceStatus.SKIPPED &&
                         it.detail.contains("solo había 1 captura válida")
+                }
+            )
+        } finally {
+            preferences.edit()
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .commit()
+        }
+    }
+
+    @Test
+    fun priorProductPrefixTimeoutKeepsAvailabilityFallbackButSkipsRepeatedCdxRequests() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .commit()
+
+        val title = "Anker Prime bounded CDX timeout fallback " + System.currentTimeMillis()
+        val preferredUrl = "https://shop.example/products/anker-prime-bounded-timeout.html"
+        val cdxRequests = java.util.concurrent.atomic.AtomicInteger()
+        val availabilityRequests = java.util.concurrent.atomic.AtomicInteger()
+        val traceEvents = CopyOnWriteArrayList<WaybackTraceEvent>()
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            when {
+                request.url.host == "archive.org" &&
+                    request.url.encodedPath == "/wayback/available" -> {
+                    availabilityRequests.incrementAndGet()
+                    val body = """{"archived_snapshots":{"closest":{"available":false}}}"""
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(body.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    cdxRequests.incrementAndGet()
+                    throw AssertionError("Do not issue another CDX query after the prior product-prefix timeout")
+                }
+                else -> throw AssertionError("Unexpected archive request: ${request.url.host}${request.url.encodedPath}")
+            }
+        }.build()
+
+        try {
+            val result = withTimeout(20_000L) {
+                WaybackPriceHistoryClient(context, http).fetchHistoryByMerchantDomain(
+                    domain = "shop.example",
+                    expectedTitle = title,
+                    lookbackDays = 730,
+                    preferredUrl = preferredUrl,
+                    preferredUrlAlreadyQueried = true,
+                    priorCdxDiagnostics = setOf("CDX_URL_PREFIX_TIMEOUT"),
+                    onTrace = { traceEvents += it }
+                )
+            }
+
+            assertEquals("No repeat CDX queries should be sent in this run", 0, cdxRequests.get())
+            assertTrue("The independent Availability fallback should still be attempted", availabilityRequests.get() > 0)
+            assertTrue("The result should preserve that recovery was incomplete", result.quotes.isEmpty())
+            assertTrue(
+                "The diagnostic should explain why additional CDX calls were skipped",
+                traceEvents.any {
+                    it.status == WaybackTraceStatus.SKIPPED &&
+                        it.detail.contains("la búsqueda de producto ya agotó el tiempo")
                 }
             )
         } finally {
@@ -4089,6 +4152,80 @@ class WaybackPriceHistoryClientTest {
 
         assertNull(
             "A generic/stale page title must not override structured metadata for another colour, capacity and trim",
+            quote
+        )
+    }
+
+    @Test
+    fun archivedOfferMaySpecifyColourWhenSelectedTitleLeavesItUnspecified() {
+        val client = newClient()
+        val offerUrl = "https://shop.example/products/iphone-15-plus-256gb-amarillo-libre"
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head>
+                  <title>Apple iPhone 15 Plus 256GB Amarillo Libre</title>
+                  <script type="application/ld+json">
+                    {
+                      "@type":"Product",
+                      "name":"Apple iPhone 15 Plus 256GB Amarillo Libre",
+                      "url":"$offerUrl",
+                      "offers":{
+                        "@type":"Offer",
+                        "url":"$offerUrl",
+                        "price":"624.00",
+                        "priceCurrency":"EUR"
+                      }
+                    }
+                  </script>
+                </head><body></body></html>
+            """.trimIndent(),
+            expectedTitle = "Apple iPhone 15 Plus 256GB",
+            originalUrl = "https://shop.example/products/iphone-15-plus-256gb",
+            snapshotUrl = "https://web.archive.org/web/20250901000000id_/https://shop.example/products/iphone-15-plus-256gb",
+            observedAt = 1_756_684_800_000L
+        )
+
+        assertNotNull(
+            "An unspecified selected colour should not reject an otherwise matching model and capacity",
+            quote
+        )
+        assertEquals(624.00, quote!!.price, 0.001)
+        assertEquals("EUR", quote.currency)
+        // The selected title leaves colour unspecified, so title identity is sufficient;
+        // a URL-confirmed variant flag is only needed when the archived title omits a required qualifier.
+    }
+
+    @Test
+    fun explicitlyConflictingSelectedColourStillRejectsArchivedOffer() {
+        val client = newClient()
+        val wrongColourUrl = "https://shop.example/products/iphone-15-plus-256gb-negro"
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head>
+                  <title>Apple iPhone 15 Plus 256GB Negro</title>
+                  <script type="application/ld+json">
+                    {
+                      "@type":"Product",
+                      "name":"Apple iPhone 15 Plus 256GB Negro",
+                      "url":"$wrongColourUrl",
+                      "offers":{
+                        "@type":"Offer",
+                        "url":"$wrongColourUrl",
+                        "price":"624.00",
+                        "priceCurrency":"EUR"
+                      }
+                    }
+                  </script>
+                </head><body></body></html>
+            """.trimIndent(),
+            expectedTitle = "Apple iPhone 15 Plus 256GB Amarillo",
+            originalUrl = "https://shop.example/products/iphone-15-plus-256gb-amarillo",
+            snapshotUrl = "https://web.archive.org/web/20250901000000id_/https://shop.example/products/iphone-15-plus-256gb-amarillo",
+            observedAt = 1_756_684_800_000L
+        )
+
+        assertNull(
+            "A selected colour is a hard requirement; the matching model and capacity cannot override a different colour",
             quote
         )
     }

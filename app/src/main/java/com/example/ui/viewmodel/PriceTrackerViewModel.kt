@@ -1696,9 +1696,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     now >= previousSuccess &&
                     now - previousSuccess < ARCHIVE_LIVE_FALLBACK_SUCCESS_COOLDOWN_MS
                 val message = if (wasSuccessful) {
-                    "El histórico gratuito no dio un precio verificable ($archiveFailureReason). " +
-                        "La búsqueda alternativa ya encontró ofertas recientemente; para proteger la cuota, " +
-                        "se podrá repetir en unas $minutes min."
+                    "El histórico gratuito no dio un precio histórico verificable ($archiveFailureReason). " +
+                        "La búsqueda del precio actual sí guardó ofertas verificadas recientemente; para no gastar otra " +
+                        "consulta de pago, se podrá repetir esa búsqueda en unas $minutes min. El histórico no se ha completado."
                 } else {
                     "El histórico gratuito no dio un precio verificable ($archiveFailureReason). " +
                         "La última búsqueda alternativa no obtuvo un resultado confirmado; se podrá reintentar " +
@@ -2968,6 +2968,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 // The direct URL's prefix-CDX lookup ran just above. Avoid
                                 // repeating the same request before the Availability fallback.
                                 preferredUrlAlreadyQueried = candidate.directUrl != null,
+                                priorCdxDiagnostics = (
+                                    attempts.flatMap { it.diagnosticCodes } +
+                                        if (candidateTimedOut) setOf("CDX_URL_PREFIX_TIMEOUT") else emptySet()
+                                    ).filter { code ->
+                                        code.startsWith("CDX_URL_PREFIX") ||
+                                            code.startsWith("CDX_PRODUCT_PREFIX") ||
+                                            code.startsWith("CDX_ALTERNATE_PREFIX")
+                                    }.toSet(),
                                 onTrace = traceCallback,
                                 knownProductTitlesById = knownProductTitlesById,
                                 onVerifiedQuotes = persistQuotesAsTheyArrive,
@@ -3199,6 +3207,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }
                 }
 
+                val selectedProductDistinctDateCount = archiveDates
+                    .map { Math.floorDiv(it, com.example.data.remote.WaybackPriceHistoryClient.DAY_MS) }
+                    .distinct()
+                    .size
                 val notice = when {
                     waybackPriceHistoryClient.activeRateLimitUntil() != null ->
                         waybackRateLimitNotice() + when {
@@ -3217,6 +3229,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         "Internet Archive no respondió en el intento anterior. Mínimo evita repetir enseguida una consulta que agotó el tiempo; vuelve a probar dentro de unos minutos. Esto no significa que no existan capturas."
                     skippedCount == candidates.size ->
                         "Estas consultas gratuitas ya se comprobaron recientemente. La caché evita repetir búsquedas completadas sin resultados útiles."
+                    requestFailedCount > 0 && selectedProductDistinctDateCount < 3 &&
+                        (savedCount > 0 || foundPrimaryCount > 0) ->
+                        "Histórico parcial: se conservaron los puntos válidos del producto seleccionado " +
+                            "(nuevos guardados: $savedCount; precios verificados encontrados: $foundPrimaryCount), " +
+                            "pero falló una o más consultas y solo se confirmaron $selectedProductDistinctDateCount " +
+                            "fechas distintas. El histórico no se marca como completado; los puntos guardados se mantienen."
                     savedCount > 0 && crossSavedVariantObservationCount > 0 -> {
                         val oldest = archiveDates.minOrNull()?.let { timestamp ->
                             SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")).format(Date(timestamp))

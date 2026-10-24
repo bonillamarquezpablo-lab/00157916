@@ -611,6 +611,7 @@ class WaybackPriceHistoryClient(
         lookbackDays: Int = DEFAULT_LOOKBACK_DAYS,
         preferredUrl: String? = null,
         preferredUrlAlreadyQueried: Boolean = false,
+        priorCdxDiagnostics: Set<String> = emptySet(),
         onTrace: ((WaybackTraceEvent) -> Unit)? = null,
         knownProductTitlesById: Map<String, String> = emptyMap(),
         onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null,
@@ -789,6 +790,15 @@ class WaybackPriceHistoryClient(
                 )
             }
             if (preferredUrlAlreadyQueried && resolvedPreferredUrl != null) {
+                val priorPrefixFailures = priorCdxDiagnostics.filter { code ->
+                    (code.startsWith("CDX_URL_PREFIX") ||
+                        code.startsWith("CDX_PRODUCT_PREFIX") ||
+                        code.startsWith("CDX_ALTERNATE_PREFIX")) &&
+                        (code.endsWith("_TIMEOUT") || code.endsWith("_DNS") ||
+                            (code.contains("_HTTP_") &&
+                                code.substringAfterLast('_').toIntOrNull()
+                                    ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true))
+                }
                 return@serializedArchiveLookup runDomainAvailabilityFallback(
                     normalizedDomain = normalizedDomain,
                     expectedTitle = expectedTitle,
@@ -796,7 +806,7 @@ class WaybackPriceHistoryClient(
                     now = now,
                     lookbackDays = lookbackDays,
                     cacheKey = attempt,
-                    failureCodes = setOf("CDX_DIRECT_URL_ALREADY_QUERIED"),
+                    failureCodes = setOf("CDX_DIRECT_URL_ALREADY_QUERIED") + priorPrefixFailures,
                     onTrace = onTrace,
                     snapshotResultsCache = snapshotResultsCache,
                     onVerifiedQuotes = onVerifiedQuotes,
@@ -990,8 +1000,21 @@ class WaybackPriceHistoryClient(
         // all three probes on guessed slugs while keeping product-specific candidates first.
         val transientCdxFailure = failureCodes.any { code ->
             code.endsWith("_TIMEOUT") ||
+                code.endsWith("_DNS") ||
                 code.substringAfterLast('_').toIntOrNull()
                     ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true
+        }
+        // A product-prefix CDX request has already paid its full timeout budget. After that,
+        // keep the independent Availability fallback, but do not send another CDX prefix or
+        // host-wide query in the same run. This prevents two/three sequential waits against the
+        // same struggling archive service while retaining any verified Availability quotes.
+        val priorProductPrefixTransientFailure = failureCodes.any { code ->
+            (code.startsWith("CDX_URL_PREFIX") ||
+                code.startsWith("CDX_PRODUCT_PREFIX") ||
+                code.startsWith("CDX_ALTERNATE_PREFIX")) &&
+                (code.endsWith("_TIMEOUT") || code.endsWith("_DNS") ||
+                    code.substringAfterLast('_').toIntOrNull()
+                        ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true)
         }
         val retailerSearchUrl = Store.ALL_STORES.firstOrNull { store ->
             normalizeMerchantDomain(store.domain) == normalizedDomain && store.supportsProductSearch
@@ -1030,7 +1053,8 @@ class WaybackPriceHistoryClient(
             snapshotResultsCache = snapshotResultsCache,
             onVerifiedQuotes = onVerifiedQuotes,
             knownProductTitlesById = knownProductTitlesById,
-            forceRefresh = forceRefresh
+            forceRefresh = forceRefresh,
+            allowSupplementalCdxSeries = !priorProductPrefixTransientFailure
         )
         emitWaybackTrace(
             onTrace, 6,
@@ -1052,16 +1076,32 @@ class WaybackPriceHistoryClient(
                     "La red respondió, pero no se recuperaron capturas históricas utilizables; no hay precio que verificar."
             }
         )
-        // Availability usually returns only the closest capture for each URL. A single
-        // verified quote is useful evidence, but it is not a time series; do not return early
-        // before the CDX fallback has a chance to discover older dated captures.
-        if (fallback.quotes.size >= 2) {
-            return fallback.copy(diagnosticCodes = emptySet())
+        // Availability usually returns the closest capture for each URL. Do not treat two
+        // quotes as sufficient if they repeat a date or belong to sibling/discovery products:
+        // the history stop rule requires three distinct dates for the selected product.
+        val primaryFallbackQuotes = fallback.quotes.filter {
+            !it.isDiscoveryCandidate && it.targetProductId.isNullOrBlank()
         }
-        if (fallback.quotes.size == 1) {
+        val primaryFallbackDateCount = primaryFallbackQuotes
+            .map { Math.floorDiv(it.observedAt, DAY_MS) }
+            .distinct()
+            .size
+        val hasSufficientFallbackHistory = hasSufficientHistoricalCoverage(primaryFallbackQuotes)
+        if (hasSufficientFallbackHistory) {
+            return fallback.copy(requestFailed = false, diagnosticCodes = emptySet())
+        }
+        if (primaryFallbackDateCount > 0) {
             emitWaybackTrace(
-                onTrace, 6, WaybackTraceStatus.RUNNING,
-                "Availability encontró una sola fecha verificable; se continúa con CDX para buscar capturas históricas de otras fechas."
+                onTrace, 6, if (priorProductPrefixTransientFailure) {
+                    WaybackTraceStatus.SKIPPED
+                } else {
+                    WaybackTraceStatus.RUNNING
+                },
+                if (priorProductPrefixTransientFailure) {
+                    "Availability conservó $primaryFallbackDateCount fecha(s) verificadas; no se repetirá CDX tras el timeout previo. El histórico sigue parcial."
+                } else {
+                    "Availability conservó $primaryFallbackDateCount fecha(s) verificadas; se continúa con CDX para intentar completar tres fechas distintas."
+                }
             )
         }
 
@@ -1072,8 +1112,10 @@ class WaybackPriceHistoryClient(
         // remains mandatory before any quote is accepted.
         var alternateResult: WaybackBackfillResult? = null
         if (!fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") &&
+            !priorProductPrefixTransientFailure &&
             activeRateLimitUntil(System.currentTimeMillis()) == null
         ) {
+            
             val availabilityConfirmedUrl = fallback.quotes
                 .firstOrNull { it.originalUrl != preferredUrl && isEligibleDirectUrl(it.originalUrl) }
                 ?.originalUrl
@@ -1159,6 +1201,12 @@ class WaybackPriceHistoryClient(
         val domainDiscoveryResults = mutableListOf<WaybackBackfillResult>()
         val priorRateLimited = fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ||
             alternateResult?.diagnosticCodes?.contains("WAYBACK_RATE_LIMITED") == true
+        if (priorProductPrefixTransientFailure && !priorRateLimited) {
+            emitWaybackTrace(
+                onTrace, 6, WaybackTraceStatus.SKIPPED,
+                "Se omiten más consultas CDX: la búsqueda de producto ya agotó el tiempo. Se conserva el fallback independiente de Availability y cualquier precio verificado."
+            )
+        }
         // If the one alternate product-prefix request has already timed out or failed at the
         // transport/server level, do not fan out into two broad host scans. They hit the same
         // CDX service, usually time out again, and can consume the rest of the per-product budget.
@@ -1184,7 +1232,8 @@ class WaybackPriceHistoryClient(
         // A valid empty product-prefix response is already a negative result for the narrow
         // product path. After checking bounded Availability and one alternate prefix, do not
         // escalate it into an expensive host-wide scan; keep recovery targeted and predictable.
-        val skipBroadDomainDiscovery = failureCodes.contains("CDX_NO_CAPTURES")
+        val skipBroadDomainDiscovery = failureCodes.contains("CDX_NO_CAPTURES") ||
+            priorProductPrefixTransientFailure
         if (fallback.quotes.isEmpty() && !priorRateLimited && !alternateTransientFailure &&
             !skipBroadDomainDiscovery &&
             activeRateLimitUntil(System.currentTimeMillis()) == null
@@ -1295,19 +1344,42 @@ class WaybackPriceHistoryClient(
                     diagnosticCodes = accumulated.diagnosticCodes + result.diagnosticCodes
                 )
             }
+        val combinedPrimaryQuotes = combined.quotes.filter {
+            !it.isDiscoveryCandidate && it.targetProductId.isNullOrBlank()
+        }
+        val sufficientCombinedHistory = hasSufficientHistoricalCoverage(combinedPrimaryQuotes)
+        val laterCdxTransientFailure = domainDiscoveryResults.any { result ->
+            result.requestFailed && result.diagnosticCodes.any { code ->
+                code.endsWith("_TIMEOUT") || code.endsWith("_DNS") ||
+                    (code.contains("_HTTP_") &&
+                        code.substringAfterLast('_').toIntOrNull()
+                            ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true)
+            }
+        }
+        val transientFailureLeftHistoryIncomplete =
+            !sufficientCombinedHistory &&
+                (priorProductPrefixTransientFailure || alternateTransientFailure ||
+                    laterCdxTransientFailure)
+        // A partial quote must not turn a timed-out history lookup into a 30-day success cache.
+        // Verified quotes have already been sent to the incremental save callback; keep them, but
+        // retain the failure state so the next manual attempt can retry after the short backoff.
+        val finalRequestFailed = !sufficientCombinedHistory &&
+            (combined.requestFailed || transientFailureLeftHistoryIncomplete)
+        val finalDiagnosticCodes = combined.diagnosticCodes + failureCodes +
+            if (transientFailureLeftHistoryIncomplete) setOf("HISTORICAL_COVERAGE_INCOMPLETE") else emptySet()
         rememberAttempt(
             cacheKey,
             now,
             hasQuotes = combined.quotes.isNotEmpty(),
-            failed = combined.requestFailed && combined.quotes.isEmpty(),
-            rateLimited = combined.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
+            failed = finalRequestFailed,
+            rateLimited = finalDiagnosticCodes.contains("WAYBACK_RATE_LIMITED")
         )
         // Preserve the distinction between a valid empty response and a transport failure. The
         // result includes diagnostics from both bounded recovery routes, even when neither yields
         // a verified EUR price.
         return combined.copy(
-            requestFailed = combined.requestFailed,
-            diagnosticCodes = combined.diagnosticCodes + failureCodes
+            requestFailed = finalRequestFailed,
+            diagnosticCodes = finalDiagnosticCodes
         )
     }
 
@@ -1499,7 +1571,8 @@ class WaybackPriceHistoryClient(
         knownProductTitlesById: Map<String, String> = emptyMap(),
         snapshotResultsCache: MutableMap<String, SnapshotFetch>? = null,
         onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null,
-        forceRefresh: Boolean = false
+        forceRefresh: Boolean = false,
+        allowSupplementalCdxSeries: Boolean = true
     ): WaybackBackfillResult {
         val urls = candidateUrls.asSequence()
             .filter(::isEligibleDirectUrl)
@@ -1814,7 +1887,10 @@ class WaybackPriceHistoryClient(
         val supplementalCdxDiagnostics = linkedSetOf<String>()
         var supplementalCdxCaptures = 0
         var supplementalCdxChecked = 0
-        if (verifiedSeriesUrl != null && !probeDiagnostics.contains("WAYBACK_RATE_LIMITED")) {
+        if (verifiedSeriesUrl != null &&
+            !probeDiagnostics.contains("WAYBACK_RATE_LIMITED") &&
+            allowSupplementalCdxSeries
+        ) {
             val seriesCacheKey = attemptKey(
                 "availability-verified-url-cdx-series-v1|$verifiedSeriesUrl|$expectedTitle|$lookbackDays"
             )
@@ -1854,6 +1930,14 @@ class WaybackPriceHistoryClient(
                     "La serie CDX de la URL verificada ya se consultó recientemente; se evita repetir tráfico."
                 )
             }
+        } else if (verifiedSeriesUrl != null &&
+            !probeDiagnostics.contains("WAYBACK_RATE_LIMITED") &&
+            !allowSupplementalCdxSeries
+        ) {
+            emitWaybackTrace(
+                onTrace, 4, WaybackTraceStatus.SKIPPED,
+                "Se conserva el precio verificado de Availability, pero se omite otra petición CDX suplementaria porque el índice de producto ya agotó el tiempo."
+            )
         }
 
         val quotes = (availabilityQuotes + supplementalCdxQuotes)
@@ -4252,8 +4336,13 @@ class WaybackPriceHistoryClient(
                 val explicitStorageConflict = primaryStorage.isNotEmpty() &&
                     savedStorage.isNotEmpty() && primaryStorage != savedStorage
                 val savedColour = knownColours[productId]
-                val explicitColourConflict = primaryColour != null && savedColour != null &&
-                    primaryColour != savedColour
+                // When the selected title omits colour, an archived concrete colour can
+                // still belong to a saved colour-specific sibling. Route it through that
+                // sibling's own Offer URL instead of treating the sibling as the generic primary.
+                val explicitColourConflict =
+                    (primaryColour == null && savedColour != null) ||
+                        (primaryColour != null && savedColour != null &&
+                            primaryColour != savedColour)
                 val explicitModelVariantConflict =
                     primaryModelVariants != knownModelVariants[productId].orEmpty()
                 val isPrimarySavedProduct = !explicitStorageConflict &&
@@ -4815,12 +4904,10 @@ class WaybackPriceHistoryClient(
         // must never be treated as the same SKU. Normalize common Spanish/English/Italian names.
         val expectedColourFamily = productColourFamily(e)
         val archivedColourFamily = productColourFamily(a)
-        // Missing colour in an archived title is unknown, not a contradiction. Only an
-        // explicitly different archived colour rejects the candidate; storage and model checks
-        // below remain strict so a generic page cannot lend a price to another SKU.
-        if (expectedColourFamily != null && archivedColourFamily != null &&
-            expectedColourFamily != archivedColourFamily
-        ) return false
+        // If the selected title specifies a colour, the archived offer must match it.
+        // If the selected title omits colour, a concrete retailer offer colour is acceptable:
+        // capacity, model/trim and condition are still checked strictly below.
+        if (expectedColourFamily != null && expectedColourFamily != archivedColourFamily) return false
 
         // Trim/model suffixes (Pro, Ultra, Max, etc.) are meaningful for phones and scooters.
         // Require the same explicit trim markers on both titles to avoid cross-variant prices.
@@ -5022,9 +5109,9 @@ class WaybackPriceHistoryClient(
         if (productConditionKey(e) != productConditionKey(a)) return true
         val expectedColour = productColourFamily(e)
         val archivedColour = productColourFamily(a)
-        // A colour specified only by the archived offer adds detail; it is not a
-        // contradiction when the selected catalogue title leaves colour unspecified.
-        // Explicitly different colours remain a hard conflict.
+        // A colour present only in the archived offer is not a contradiction when the
+        // selected product title leaves colour unspecified. If the selected title names a
+        // colour, a different archived colour remains a hard conflict.
         if (expectedColour != null && archivedColour != null && expectedColour != archivedColour) return true
 
         val expectedModelVariants = productModelVariantTokens(e)

@@ -3725,6 +3725,79 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun genericArchivedOfferTitleCanBeVerifiedByItsExactStructuredSkuUrl() {
+        val client = newClient()
+        val offerUrl = "https://shop.example/products/iphone-15-plus-256gb-amarillo-libre"
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head>
+                  <title>Apple iPhone 15 Plus Libre</title>
+                  <script type="application/ld+json">
+                    {
+                      "@type":"Product",
+                      "name":"Apple iPhone 15 Plus Libre",
+                      "url":"$offerUrl",
+                      "offers":{
+                        "@type":"Offer",
+                        "url":"$offerUrl",
+                        "price":"624.00",
+                        "priceCurrency":"EUR"
+                      }
+                    }
+                  </script>
+                </head><body></body></html>
+            """.trimIndent(),
+            expectedTitle = "Apple iPhone 15 Plus 256 GB Amarillo",
+            originalUrl = "https://shop.example/products/iphone-15-plus",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/products/iphone-15-plus",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull(
+            "A generic Product title may omit storage only when its own structured URL proves the exact SKU",
+            quote
+        )
+        assertEquals(624.00, quote!!.price, 0.001)
+        assertTrue(quote.variantIdentityConfirmedByUrl)
+        assertEquals(offerUrl, quote.productUrl)
+    }
+
+    @Test
+    fun genericArchivedOfferTitleCannotBorrowPriceFromConflictingStructuredSkuUrl() {
+        val client = newClient()
+        val wrongOfferUrl = "https://shop.example/products/iphone-15-plus-128gb-amarillo-libre"
+        val quote = client.parseArchivedPrice(
+            html = """
+                <html><head>
+                  <title>Apple iPhone 15 Plus Libre</title>
+                  <script type="application/ld+json">
+                    {
+                      "@type":"Product",
+                      "name":"Apple iPhone 15 Plus Libre",
+                      "url":"$wrongOfferUrl",
+                      "offers":{
+                        "@type":"Offer",
+                        "url":"$wrongOfferUrl",
+                        "price":"499.00",
+                        "priceCurrency":"EUR"
+                      }
+                    }
+                  </script>
+                </head><body></body></html>
+            """.trimIndent(),
+            expectedTitle = "Apple iPhone 15 Plus 256 GB Amarillo",
+            originalUrl = "https://shop.example/products/iphone-15-plus",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/products/iphone-15-plus",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNull(
+            "An Offer URL explicitly naming 128 GB must never verify a selected 256 GB product",
+            quote
+        )
+    }
+
+    @Test
     fun matchingIphone15OfferIsAcceptedWhenSiblingIphone15PlusOfferAlsoExists() {
         val client = newClient()
         val quote = client.parseArchivedPrice(

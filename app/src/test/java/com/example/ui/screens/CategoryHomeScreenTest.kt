@@ -13,9 +13,11 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.Modifier
 import com.example.ui.viewmodel.TrackerUiState
 import com.example.data.model.Product
+import com.example.data.model.MarketplaceCategorySummary
 import com.example.data.model.ProductCategory
 import com.example.data.model.Store
 import com.example.data.model.StoreOffer
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -37,7 +39,10 @@ class CategoryHomeScreenTest {
         composeRule.setContent {
             MaterialTheme {
                 MarketScreen(
-                    products = emptyList(),
+                    productsForCategory = { MutableStateFlow<List<Product>>(emptyList()) },
+                    categorySummaries = ProductCategory.values()
+                        .filter { it != ProductCategory.ALL }
+                        .map { MarketplaceCategorySummary(it, productCount = 0, storeCount = 0) },
                     stores = emptyList(),
                     uiState = state.value,
                     onSearchChange = { query -> state.value = state.value.copy(searchQuery = query) },

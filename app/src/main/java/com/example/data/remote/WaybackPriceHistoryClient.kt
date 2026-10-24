@@ -1075,16 +1075,32 @@ class WaybackPriceHistoryClient(
                     "La red respondió, pero no se recuperaron capturas históricas utilizables; no hay precio que verificar."
             }
         )
-        // Availability usually returns only the closest capture for each URL. A single
-        // verified quote is useful evidence, but it is not a time series; do not return early
-        // before the CDX fallback has a chance to discover older dated captures.
-        if (fallback.quotes.size >= 2) {
-            return fallback.copy(diagnosticCodes = emptySet())
+        // Availability usually returns the closest capture for each URL. Do not treat two
+        // quotes as sufficient if they repeat a date or belong to sibling/discovery products:
+        // the history stop rule requires three distinct dates for the selected product.
+        val primaryFallbackQuotes = fallback.quotes.filter {
+            !it.isDiscoveryCandidate && it.targetProductId.isNullOrBlank()
         }
-        if (fallback.quotes.size == 1) {
+        val primaryFallbackDateCount = primaryFallbackQuotes
+            .map { Math.floorDiv(it.observedAt, DAY_MS) }
+            .distinct()
+            .size
+        val hasSufficientFallbackHistory = hasSufficientHistoricalCoverage(primaryFallbackQuotes)
+        if (hasSufficientFallbackHistory) {
+            return fallback.copy(requestFailed = false, diagnosticCodes = emptySet())
+        }
+        if (primaryFallbackDateCount > 0) {
             emitWaybackTrace(
-                onTrace, 6, WaybackTraceStatus.RUNNING,
-                "Availability encontró una sola fecha verificable; se continúa con CDX para buscar capturas históricas de otras fechas."
+                onTrace, 6, if (priorProductPrefixTransientFailure) {
+                    WaybackTraceStatus.SKIPPED
+                } else {
+                    WaybackTraceStatus.RUNNING
+                },
+                if (priorProductPrefixTransientFailure) {
+                    "Availability conservó $primaryFallbackDateCount fecha(s) verificadas; no se repetirá CDX tras el timeout previo. El histórico sigue parcial."
+                } else {
+                    "Availability conservó $primaryFallbackDateCount fecha(s) verificadas; se continúa con CDX para intentar completar tres fechas distintas."
+                }
             )
         }
 
@@ -1327,19 +1343,42 @@ class WaybackPriceHistoryClient(
                     diagnosticCodes = accumulated.diagnosticCodes + result.diagnosticCodes
                 )
             }
+        val combinedPrimaryQuotes = combined.quotes.filter {
+            !it.isDiscoveryCandidate && it.targetProductId.isNullOrBlank()
+        }
+        val sufficientCombinedHistory = hasSufficientHistoricalCoverage(combinedPrimaryQuotes)
+        val laterCdxTransientFailure = domainDiscoveryResults.any { result ->
+            result.requestFailed && result.diagnosticCodes.any { code ->
+                code.endsWith("_TIMEOUT") || code.endsWith("_DNS") ||
+                    (code.contains("_HTTP_") &&
+                        code.substringAfterLast('_').toIntOrNull()
+                            ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true)
+            }
+        }
+        val transientFailureLeftHistoryIncomplete =
+            !sufficientCombinedHistory &&
+                (priorProductPrefixTransientFailure || alternateTransientFailure ||
+                    laterCdxTransientFailure)
+        // A partial quote must not turn a timed-out history lookup into a 30-day success cache.
+        // Verified quotes have already been sent to the incremental save callback; keep them, but
+        // retain the failure state so the next manual attempt can retry after the short backoff.
+        val finalRequestFailed = !sufficientCombinedHistory &&
+            (combined.requestFailed || transientFailureLeftHistoryIncomplete)
+        val finalDiagnosticCodes = combined.diagnosticCodes + failureCodes +
+            if (transientFailureLeftHistoryIncomplete) setOf("HISTORICAL_COVERAGE_INCOMPLETE") else emptySet()
         rememberAttempt(
             cacheKey,
             now,
             hasQuotes = combined.quotes.isNotEmpty(),
-            failed = combined.requestFailed && combined.quotes.isEmpty(),
-            rateLimited = combined.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
+            failed = finalRequestFailed,
+            rateLimited = finalDiagnosticCodes.contains("WAYBACK_RATE_LIMITED")
         )
         // Preserve the distinction between a valid empty response and a transport failure. The
         // result includes diagnostics from both bounded recovery routes, even when neither yields
         // a verified EUR price.
         return combined.copy(
-            requestFailed = combined.requestFailed,
-            diagnosticCodes = combined.diagnosticCodes + failureCodes
+            requestFailed = finalRequestFailed,
+            diagnosticCodes = finalDiagnosticCodes
         )
     }
 

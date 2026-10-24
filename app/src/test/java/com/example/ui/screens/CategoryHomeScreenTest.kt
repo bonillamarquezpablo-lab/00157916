@@ -123,6 +123,8 @@ class CategoryHomeScreenTest {
         composeRule.onNodeWithTag("market_screen_list")
             .performScrollToNode(androidx.compose.ui.test.hasTestTag("view_all_products_button"))
         composeRule.onNodeWithText("Ver todos los productos (871)").assertIsDisplayed()
+        composeRule.onNodeWithTag("market_screen_list")
+            .performScrollToNode(androidx.compose.ui.test.hasTestTag("category_card_SMARTPHONES"))
 
         composeRule.onNodeWithTag("category_card_SMARTPHONES").performClick()
         composeRule.waitForIdle()
@@ -221,8 +223,11 @@ class CategoryHomeScreenTest {
         composeRule.onNodeWithTag("market_screen_list")
             .performScrollToNode(androidx.compose.ui.test.hasTestTag("saved_family_card_${family.key.hashCode()}"))
         composeRule.onNodeWithTag("saved_family_card_${family.key.hashCode()}").assertIsDisplayed()
-        composeRule.onNodeWithTag("family_photo_${family.key.hashCode()}").assertExists()
-        composeRule.onNodeWithTag("product_photo_pixel-10").assertExists()
+        composeRule.onNodeWithTag(
+            "family_photo_${family.key.hashCode()}",
+            useUnmergedTree = true
+        ).assertExists()
+        composeRule.onNodeWithTag("product_photo_pixel-10", useUnmergedTree = true).assertExists()
     }
 
     @Test

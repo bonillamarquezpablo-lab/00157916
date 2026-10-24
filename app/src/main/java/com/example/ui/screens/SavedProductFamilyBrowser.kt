@@ -41,8 +41,39 @@ internal data class SavedProductFamily(
             .size
 }
 
+/**
+ * Retailer feeds often append SEO/marketing text after '|'. Ignore that tail for identity only
+ * when the title before it already carries a concrete model/spec and the tail adds no variant.
+ */
+private fun savedIdentityTitle(product: Product): String {
+    val title = product.title.trim()
+    val separator = title.indexOf('|')
+    if (separator <= 0) return title
+    val base = title.substring(0, separator).trim()
+    val tail = title.substring(separator + 1)
+    val baseHasConcreteSpec = Regex(
+        """(?i)\b\d+(?:[.,]\d+)?\s*(?:w|gb|tb|mah|mp|hz|mm|cm)\b"""
+    ).containsMatchIn(base)
+    val tailHasDistinctSpec = Regex(
+        """(?i)\b\d+(?:[.,]\d+)?\s*(?:w|gb|tb|mah|mp|hz|mm|cm)\b"""
+    ).containsMatchIn(tail) ||
+        SAVED_COLOUR_PATTERN.containsMatchIn(tail) ||
+        Regex("""(?i)\b(pro|max|plus|ultra|fe|lite|mini|fold|flip|4g|5g)\b""").containsMatchIn(tail)
+    return if (base.length >= 20 && baseHasConcreteSpec && !tailHasDistinctSpec) base else title
+}
+
+/** Keep an unrecognised Xiaomi/Redmi/Poco "Pro Ultra" listing from masquerading as a real edition. */
+internal fun savedProductDisplayTitle(product: Product): String {
+    val title = savedIdentityTitle(product)
+    val normalized = normalizeFamilyTitle(title)
+    val isXiaomiFamily = Regex("""\b(xiaomi|redmi|poco)\b""").containsMatchIn(normalized)
+    return if (isXiaomiFamily && Regex("""\bpro\s+ultra\b""").containsMatchIn(normalized)) {
+        title.replace(Regex("""(?i)\bpro\s+ultra\b"""), "modelo por confirmar")
+    } else title
+}
+
 private fun savedIdentityParts(product: Product): List<String> =
-    onlineProductIdentityKey(product.title).split('|').filter { it.isNotBlank() }
+    onlineProductIdentityKey(savedIdentityTitle(product)).split('|').filter { it.isNotBlank() }
 
 private fun savedFamilyKey(product: Product): String {
     val parts = savedIdentityParts(product)
@@ -110,8 +141,8 @@ private fun mergeExactVariantProducts(rows: List<Product>): Product {
             (if (parts.any { part -> part.startsWith("memory:") }) 4 else 0) +
                 (if (parts.any { part -> part.startsWith("color:") }) 2 else 0) +
                 (if (parts.any { part -> part.startsWith("variant:") }) 1 else 0)
-        }.thenBy { it.title.length }
-    )?.title ?: representative.title
+        }.thenBy { savedIdentityTitle(it).length }
+    )?.let(::savedProductDisplayTitle) ?: savedProductDisplayTitle(representative)
 
     val synthesizedCurrentOffers = validPriceRows.filter {
         it.isPriceFresh && isRealRetailerDestination(it.storeUrl)
@@ -214,7 +245,7 @@ private fun variantKey(product: Product): String {
         ?.split('+')
         .orEmpty()
         .filter { it.isNotBlank() && it != "base" }
-    val title = normalizeFamilyTitle(product.title).replace(
+    val title = normalizeFamilyTitle(savedIdentityTitle(product)).replace(
         Regex("""\b(redmi note\s*\d+)(pro\s*max|pro|plus|ultra|fe|lite|mini|4g|5g)\b"""),
         "$1 $2"
     )
@@ -227,6 +258,16 @@ private fun variantKey(product: Product): String {
     val consoleTokens = if (Regex("""\b(ps5|xbox|nintendo switch|switch)\b""").containsMatchIn(title)) {
         Regex("""\b(s|x)\b""").findAll(title).map { it.value }.toList()
     } else emptyList()
+    val isUnrecognisedXiaomiProUltra =
+        Regex("""\b(xiaomi|redmi|poco)\b""").containsMatchIn(title) &&
+            Regex("""\bpro\s+ultra\b""").containsMatchIn(title)
+    if (isUnrecognisedXiaomiProUltra) {
+        val network = (savedTokens + titleTokens).firstOrNull {
+            it.equals("4g", ignoreCase = true) || it.equals("5g", ignoreCase = true)
+        }?.lowercase(Locale.ROOT)
+        return if (network == null) "variant:unverified-model"
+        else "variant:unverified-model+$network"
+    }
     val tokens = (savedTokens + titleTokens + consoleTokens).distinct().sorted()
     return if (tokens.isEmpty()) "variant:base" else "variant:" + tokens.joinToString("+")
 }
@@ -242,7 +283,9 @@ private fun variantLabel(key: String): String {
         "lite", "mini", "fold", "flip", "classic", "edge", "slim", "digital", "disc",
         "disk", "oled", "series", "s", "x"
     )
-    val labels = tokens
+    val labels = if ("unverified-model" in tokens) {
+        listOf("Modelo por confirmar")
+    } else tokens
         .filterNot { it.equals("4g", true) || it.equals("5g", true) }
         .sortedWith(compareBy<String> { token ->
             editionOrder.indexOf(token.lowercase(Locale.ROOT)).let { if (it < 0) Int.MAX_VALUE else it }
@@ -278,7 +321,7 @@ private fun variantLabel(key: String): String {
 
 private fun familyLabel(products: List<Product>): String =
     products.map { product ->
-        product.title.replace(
+        savedIdentityTitle(product).replace(
             Regex("""(?i)(\bredmi\s+note\s*\d+)(pro\s*max|pro|plus|ultra|fe|lite|mini|4g|5g)\b"""),
             "$1 $2"
         )
@@ -415,9 +458,9 @@ internal fun buildSavedProductFamilyBuckets(
             val variants = familyProducts.groupBy(::variantKey)
                 .map { (key, variantProducts) ->
                     val storageGroups = variantProducts.groupBy { product ->
-                        capacityLabel(product.title, savedIdentityParts(product))
+                        capacityLabel(savedIdentityTitle(product), savedIdentityParts(product))
                     }.map { (label, rows) ->
-                        val exactVariantRows = rows.groupBy { onlineProductIdentityKey(it.title) }
+                        val exactVariantRows = rows.groupBy { onlineProductIdentityKey(savedIdentityTitle(it)) }
                             .values
                             .map(::mergeExactVariantProducts)
                             .sortedWith(savedProductComparator(sortOption))

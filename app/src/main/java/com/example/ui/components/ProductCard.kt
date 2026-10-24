@@ -9,11 +9,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -66,7 +68,8 @@ fun ProductCard(
     product: Product,
     onClick: () -> Unit,
     onToggleTrack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    compact: Boolean = false
 ) {
     val context = LocalContext.current
     var showStoreComparison by remember { mutableStateOf(false) }
@@ -103,7 +106,97 @@ fun ProductCard(
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp)) {
+        Column(modifier = Modifier.padding(horizontal = if (compact) 9.dp else 12.dp, vertical = if (compact) 9.dp else 11.dp)) {
+            if (compact) {
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(110.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                    ) {
+                        ProductImageView(
+                            product = product,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("product_photo_${product.id}"),
+                            showAthRibbon = product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isAtAth
+                        )
+                        IconButton(
+                            onClick = onToggleTrack,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
+                                .testTag("track_button_${product.id}")
+                        ) {
+                            Icon(
+                                imageVector = if (product.isTracked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                contentDescription = if (product.isTracked) "Siguiendo" else "Seguir precio",
+                                tint = if (product.isTracked) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                    Text(
+                        text = when {
+                            product.isPriceVerified -> product.currentStore.name
+                            product.isUnverifiedLiveListing -> "Listado sin confirmar"
+                            else -> "Precio guardado"
+                        },
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp,
+                        color = if (product.isPriceVerified) product.currentStore.brandColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = product.title,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        lineHeight = 17.sp,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    ProductPriceBadge(
+                        state = priceBadgeState,
+                        compact = true
+                    )
+                    val compactPrice = when (product.priceDisplayStatus) {
+                        com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT -> product.currentPrice
+                        com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION ->
+                            if (!product.isPriceVerified) product.savedHistoricalPrice else product.currentPrice
+                        com.example.data.model.PriceDisplayStatus.UNVERIFIED_LIVE_LISTING -> product.currentPrice
+                        com.example.data.model.PriceDisplayStatus.DEMONSTRATION -> null
+                    }
+                    Text(
+                        text = compactPrice?.let { "${String.format(SPANISH_LOCALE, "%.2f", it)} €" } ?: "Precio no disponible",
+                        fontWeight = FontWeight.Black,
+                        fontSize = if (compactPrice != null) 19.sp else 12.sp,
+                        letterSpacing = (-0.4).sp,
+                        color = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Button(
+                        onClick = { showStoreComparison = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 38.dp)
+                            .testTag("choose_store_button"),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+                        shape = MaterialTheme.shapes.medium
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.OpenInNew,
+                            contentDescription = null,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Elegir tienda", fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1)
+                    }
+                }
+            } else {
             // Top Section: Product Photo + Product Details
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -366,6 +459,7 @@ fun ProductCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+            }
             }
         }
     }

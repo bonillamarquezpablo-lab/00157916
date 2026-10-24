@@ -16,6 +16,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.Modifier
 import com.example.ui.viewmodel.TrackerUiState
+import com.example.ui.viewmodel.filterMarketplaceProductsForState
 import com.example.data.model.Product
 import com.example.data.model.MarketplaceCategorySummary
 import com.example.data.model.ProductCategory
@@ -229,6 +230,34 @@ class CategoryHomeScreenTest {
             useUnmergedTree = true
         ).assertExists()
         composeRule.onNodeWithTag("product_photo_pixel-10", useUnmergedTree = true).assertExists()
+    }
+
+    @Test
+    fun storeFilterMatchingIgnoresCaseForCurrentStoreAndOffers() {
+        val mixedCaseStore = testStore("mixed", "Mi Tienda")
+        val lowerCaseStore = testStore("lower", "mi tienda")
+        val otherStore = testStore("other", "Otra tienda")
+        val currentStoreProduct = testProduct(
+            id = "current-store-match",
+            category = ProductCategory.SMARTPHONES,
+            currentStore = mixedCaseStore
+        ).copy(isPriceVerified = true)
+        val offerStoreProduct = testProduct(
+            id = "offer-store-match",
+            category = ProductCategory.SMARTPHONES,
+            currentStore = otherStore,
+            offers = listOf(StoreOffer(lowerCaseStore, 89.0))
+        ).copy(isPriceVerified = true)
+
+        val filtered = filterMarketplaceProductsForState(
+            listOf(currentStoreProduct, offerStoreProduct),
+            TrackerUiState(selectedStoreName = "MI TIENDA")
+        )
+
+        assertEquals(
+            setOf("current-store-match", "offer-store-match"),
+            filtered.map { it.id }.toSet()
+        )
     }
 
     @Test

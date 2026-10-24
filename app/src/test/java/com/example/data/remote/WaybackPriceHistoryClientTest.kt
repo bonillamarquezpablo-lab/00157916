@@ -507,6 +507,93 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun exactHistoryStopsAfterThreeVerifiedDatesAndKeepsTheNewestCaptures() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .remove("wayback_rate_limit_last_hit_at")
+            .remove("wayback_rate_limit_hit_count")
+            .commit()
+
+        val title = "Anker Prime 27K Power Bank Early Stop Regression ${System.currentTimeMillis()}"
+        val originalUrl = "https://shop.example/products/anker-prime-27k-early-stop"
+        val timestamps = listOf("20220101120000", "20230101120000", "20240101120000", "20250101120000", "20260101120000")
+        val cdxRows = timestamps.joinToString(",\n") { timestamp ->
+            """["$timestamp","$originalUrl","200","text/html"]"""
+        }
+        val cdxBody = """
+            [
+              ["timestamp","original","statuscode","mimetype"],
+              $cdxRows
+            ]
+        """.trimIndent()
+        val archivedHtml = """
+            <html><head>
+              <script type="application/ld+json">
+                {"@type":"Product","name":"$title",
+                 "offers":{"@type":"Offer","price":"79.99","priceCurrency":"EUR"}}
+              </script>
+            </head><body></body></html>
+        """.trimIndent()
+        val requestUrls = CopyOnWriteArrayList<String>()
+        val cdxMatchTypes = CopyOnWriteArrayList<String>()
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            requestUrls += request.url.host + request.url.encodedPath
+            when {
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    cdxMatchTypes += request.url.queryParameter("matchType").orEmpty()
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(cdxBody.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/web/") ->
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "text/html; charset=utf-8")
+                        .body(archivedHtml.toResponseBody("text/html; charset=utf-8".toMediaType()))
+                        .build()
+                else -> throw AssertionError("Unexpected request during early-stop regression: ${request.url}")
+            }
+        }.build()
+
+        try {
+            val result = withTimeout(12_000L) {
+                WaybackPriceHistoryClient(context, http).fetchHistory(
+                    originalUrl = originalUrl,
+                    expectedTitle = title,
+                    lookbackDays = 2_920
+                )
+            }
+            assertEquals("A sufficient exact series should not trigger the prefix fallback", listOf("exact"), cdxMatchTypes.toList())
+            assertEquals("The lookup should stop after three verified dates instead of downloading all five", 3, result.quotes.size)
+            assertEquals(3, result.quotes.map { Math.floorDiv(it.observedAt, WaybackPriceHistoryClient.DAY_MS) }.distinct().size)
+            assertEquals("The three newest captures should be enough", 3, requestUrls.count { it.startsWith("web.archive.org/web/") })
+            assertTrue("The three saved dates should include the newest captured year",
+                result.quotes.any { java.text.SimpleDateFormat("yyyy", java.util.Locale.ROOT).format(java.util.Date(it.observedAt)) == "2026" })
+        } finally {
+            preferences.edit()
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .remove("wayback_rate_limit_last_hit_at")
+                .remove("wayback_rate_limit_hit_count")
+                .commit()
+        }
+    }
+
+    @Test
     fun exactDirectCdxSingleQuoteStillChecksPrefixForMoreHistoricalDates() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)

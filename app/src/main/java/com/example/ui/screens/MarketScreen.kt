@@ -86,14 +86,49 @@ fun MarketScreen(
 ) {
     var showSortMenu by remember { mutableStateOf(false) }
     var showStoreMenu by remember { mutableStateOf(false) }
-    val verifiedProductCount = remember(products) { products.count { it.isPriceVerified } }
-    val savedFamilies = remember(products, uiState.sortOption) {
-        buildSavedProductFamilyBuckets(products, uiState.sortOption)
+    var forceShowAllProducts by remember { mutableStateOf(false) }
+
+    val hasActiveMarketFilter = uiState.selectedStoreName != null ||
+        uiState.onlyAthFilter ||
+        uiState.onlyHistoricalMinimumFilter
+    val shouldShowCategoryHome = uiState.selectedCategory == ProductCategory.ALL &&
+        !hasActiveMarketFilter && !forceShowAllProducts
+    val canReturnToCategoryHome = uiState.searchQuery.isBlank() &&
+        uiState.selectedStoreName == null &&
+        !uiState.onlyAthFilter &&
+        !uiState.onlyHistoricalMinimumFilter &&
+        (uiState.selectedCategory != ProductCategory.ALL || forceShowAllProducts)
+
+    // Avoid building the full family/version/capacity hierarchy while the category landing
+    // screen is visible; that work is only needed after the user enters the product list.
+    val verifiedProductCount = remember(products, shouldShowCategoryHome) {
+        if (shouldShowCategoryHome) 0 else products.count { it.isPriceVerified }
     }
+    val savedFamilies = remember(products, uiState.sortOption, shouldShowCategoryHome) {
+        if (shouldShowCategoryHome) emptyList()
+        else buildSavedProductFamilyBuckets(products, uiState.sortOption)
+    }
+
     // Repeated products stay tucked away until the user chooses a family, version, then capacity.
     var expandedFamilyKeys by remember { mutableStateOf(emptySet<String>()) }
     var expandedVariantKeys by remember { mutableStateOf(emptySet<String>()) }
     var expandedStorageKeys by remember { mutableStateOf(emptySet<String>()) }
+
+    if (shouldShowCategoryHome) {
+        CategoryHomeScreen(
+            products = products,
+            searchQuery = uiState.searchQuery,
+            onSearchChange = onSearchChange,
+            onSearchSubmit = { forceShowAllProducts = true },
+            onCategorySelect = { category ->
+                forceShowAllProducts = false
+                onCategorySelect(category)
+            },
+            onViewAllProducts = { forceShowAllProducts = true },
+            modifier = modifier
+        )
+        return
+    }
 
     // Keep Mercado as a drill-down, not a wall of expanded cards. Changing filters
     // resets the selection so expansions from a previous result set cannot reappear.
@@ -119,6 +154,25 @@ fun MarketScreen(
             .testTag("market_screen_list"),
         contentPadding = PaddingValues(bottom = 24.dp)
     ) {
+        if (canReturnToCategoryHome) {
+            item {
+                OutlinedButton(
+                    onClick = {
+                        forceShowAllProducts = false
+                        if (uiState.selectedCategory != ProductCategory.ALL) {
+                            onCategorySelect(ProductCategory.ALL)
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .testTag("return_to_categories_button")
+                ) {
+                    Text("Volver a categorías")
+                }
+            }
+        }
+
         // Compact section heading: remove the large decorative banner so products and
         // filters appear sooner, with less drawing and less vertical scrolling.
         item {

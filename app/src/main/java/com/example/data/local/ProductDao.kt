@@ -25,11 +25,12 @@ interface ProductDao {
 
     /** Load a single category when the user opens it instead of converting the whole catalogue. */
     @Query(
-        "SELECT * FROM products WHERE category = :category OR (" +
+        "SELECT * FROM products p WHERE (" + MARKETPLACE_VISIBLE_PRODUCT_SQL + ") AND (" +
+            "category = :category OR (" +
             ":category = 'OTHER' AND category NOT IN (" +
             "'SMARTPHONES','COMPUTING','GAMING','TV_AUDIO','HOME_APPLIANCES'," +
             "'PERSONAL_CARE','ACCESSORIES','REPLACEMENT_PARTS','TOYS','SPORTS','OTHER'" +
-            ")) ORDER BY title ASC"
+            "))) ORDER BY title ASC"
     )
     fun getProductsByCategory(category: String): Flow<List<ProductEntity>>
 

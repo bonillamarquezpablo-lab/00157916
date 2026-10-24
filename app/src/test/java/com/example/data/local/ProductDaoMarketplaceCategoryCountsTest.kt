@@ -38,7 +38,9 @@ class ProductDaoMarketplaceCategoryCountsTest {
                 testProduct("phone", "SMARTPHONES"),
                 testProduct("legacy", "legacy_mobile_label"),
                 testProduct("old-all", "ALL"),
-                testProduct("other", "OTHER")
+                testProduct("other", "OTHER"),
+                testProduct("hidden-phone", "SMARTPHONES").copy(isPriceVerified = false),
+                testProduct("hidden-legacy", "old_legacy_mobile_label").copy(isPriceVerified = false)
             )
         )
 
@@ -74,11 +76,27 @@ class ProductDaoMarketplaceCategoryCountsTest {
         )
         assertEquals("All visible rows must be accounted for exactly once", 4, counts.values.sumOf { it.productCount })
 
+        val smartphoneProducts = database.productDao().getProductsByCategory("SMARTPHONES")
+            .first()
+            .map { it.id }
+            .toSet()
+        assertEquals("Category rows must use the same visibility rule as the home counts", setOf("phone"), smartphoneProducts)
+
         val otherProducts = database.productDao().getProductsByCategory("OTHER")
             .first()
             .map { it.id }
             .toSet()
         assertEquals(setOf("legacy", "old-all", "other"), otherProducts)
+
+        val fullCatalogueIds = database.productDao().getAllProducts()
+            .first()
+            .map { it.id }
+            .toSet()
+        assertEquals(
+            "The explicit ALL catalogue stream must retain all stored products",
+            setOf("phone", "legacy", "old-all", "other", "hidden-phone", "hidden-legacy"),
+            fullCatalogueIds
+        )
     }
 
     private fun testProduct(id: String, category: String) = ProductEntity(

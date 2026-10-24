@@ -617,7 +617,9 @@ private fun SavedProductFamilyGridTile(
     onToggleTrack: (Product) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val representative = family.products.firstOrNull()
+    val representative = family.products.firstOrNull {
+        it.imageUrl.isNotBlank() || !it.imageResName.isNullOrBlank()
+    } ?: family.products.firstOrNull()
     val shape = RoundedCornerShape(16.dp)
     Column(
         modifier = modifier

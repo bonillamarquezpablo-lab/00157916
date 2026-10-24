@@ -1053,7 +1053,8 @@ class WaybackPriceHistoryClient(
             snapshotResultsCache = snapshotResultsCache,
             onVerifiedQuotes = onVerifiedQuotes,
             knownProductTitlesById = knownProductTitlesById,
-            forceRefresh = forceRefresh
+            forceRefresh = forceRefresh,
+            allowSupplementalCdxSeries = !priorProductPrefixTransientFailure
         )
         emitWaybackTrace(
             onTrace, 6,
@@ -1570,7 +1571,8 @@ class WaybackPriceHistoryClient(
         knownProductTitlesById: Map<String, String> = emptyMap(),
         snapshotResultsCache: MutableMap<String, SnapshotFetch>? = null,
         onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null,
-        forceRefresh: Boolean = false
+        forceRefresh: Boolean = false,
+        allowSupplementalCdxSeries: Boolean = true
     ): WaybackBackfillResult {
         val urls = candidateUrls.asSequence()
             .filter(::isEligibleDirectUrl)
@@ -1885,7 +1887,10 @@ class WaybackPriceHistoryClient(
         val supplementalCdxDiagnostics = linkedSetOf<String>()
         var supplementalCdxCaptures = 0
         var supplementalCdxChecked = 0
-        if (verifiedSeriesUrl != null && !probeDiagnostics.contains("WAYBACK_RATE_LIMITED")) {
+        if (verifiedSeriesUrl != null &&
+            !probeDiagnostics.contains("WAYBACK_RATE_LIMITED") &&
+            allowSupplementalCdxSeries
+        ) {
             val seriesCacheKey = attemptKey(
                 "availability-verified-url-cdx-series-v1|$verifiedSeriesUrl|$expectedTitle|$lookbackDays"
             )
@@ -1925,6 +1930,14 @@ class WaybackPriceHistoryClient(
                     "La serie CDX de la URL verificada ya se consultó recientemente; se evita repetir tráfico."
                 )
             }
+        } else if (verifiedSeriesUrl != null &&
+            !probeDiagnostics.contains("WAYBACK_RATE_LIMITED") &&
+            !allowSupplementalCdxSeries
+        ) {
+            emitWaybackTrace(
+                onTrace, 4, WaybackTraceStatus.SKIPPED,
+                "Se conserva el precio verificado de Availability, pero se omite otra petición CDX suplementaria porque el índice de producto ya agotó el tiempo."
+            )
         }
 
         val quotes = (availabilityQuotes + supplementalCdxQuotes)
@@ -4323,8 +4336,13 @@ class WaybackPriceHistoryClient(
                 val explicitStorageConflict = primaryStorage.isNotEmpty() &&
                     savedStorage.isNotEmpty() && primaryStorage != savedStorage
                 val savedColour = knownColours[productId]
-                val explicitColourConflict = primaryColour != null && savedColour != null &&
-                    primaryColour != savedColour
+                // When the selected title omits colour, an archived concrete colour can
+                // still belong to a saved colour-specific sibling. Route it through that
+                // sibling's own Offer URL instead of treating the sibling as the generic primary.
+                val explicitColourConflict =
+                    (primaryColour == null && savedColour != null) ||
+                        (primaryColour != null && savedColour != null &&
+                            primaryColour != savedColour)
                 val explicitModelVariantConflict =
                     primaryModelVariants != knownModelVariants[productId].orEmpty()
                 val isPrimarySavedProduct = !explicitStorageConflict &&

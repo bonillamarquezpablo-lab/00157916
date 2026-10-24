@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.Modifier
 import com.example.ui.viewmodel.TrackerUiState
+import com.example.ui.viewmodel.marketplaceStoresForProducts
 import com.example.data.model.Product
 import com.example.data.model.MarketplaceCategorySummary
 import com.example.data.model.ProductCategory
@@ -167,6 +168,73 @@ class CategoryHomeScreenTest {
         assertNotNull(computing)
         assertEquals(0, computing!!.productCount)
         assertEquals(0, computing.storeCount)
+    }
+
+    @Test
+    fun categoryGridShowsGroupedAndSingleProductsWithImages() {
+        val store = testStore("amazon", "Amazon España")
+        val products = listOf(
+            testProduct("iphone-128", ProductCategory.SMARTPHONES, store).copy(
+                title = "Apple iPhone 15 128GB",
+                isPriceVerified = true
+            ),
+            testProduct("iphone-256", ProductCategory.SMARTPHONES, store).copy(
+                title = "Apple iPhone 15 256GB",
+                isPriceVerified = true
+            ),
+            testProduct("pixel-10", ProductCategory.SMARTPHONES, store).copy(
+                title = "Google Pixel 10 Pro 256GB",
+                isPriceVerified = true
+            )
+        )
+        val family = buildSavedProductFamilyBuckets(products).first { it.productCount > 1 }
+        val state = mutableStateOf(TrackerUiState(selectedCategory = ProductCategory.SMARTPHONES))
+
+        composeRule.setContent {
+            MaterialTheme {
+                MarketScreen(
+                    productsForCategory = { MutableStateFlow(products) },
+                    categorySummaries = ProductCategory.values()
+                        .filter { it != ProductCategory.ALL }
+                        .map { MarketplaceCategorySummary(it, productCount = 0, storeCount = 0) },
+                    uiState = state.value,
+                    onSearchChange = { query -> state.value = state.value.copy(searchQuery = query) },
+                    onCategorySelect = { category -> state.value = state.value.copy(selectedCategory = category) },
+                    onToggleOnlyAth = {},
+                    onToggleOnlyHistoricalMinimum = {},
+                    onStoreFilterSelect = { store -> state.value = state.value.copy(selectedStoreName = store) },
+                    onSortChange = { sort -> state.value = state.value.copy(sortOption = sort) },
+                    onProductClick = {},
+                    onToggleTrack = {},
+                    onPrepareTrackedRefresh = {},
+                    modifier = Modifier
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("market_screen_list")
+            .performScrollToNode(androidx.compose.ui.test.hasTestTag("market_product_grid_row"))
+        composeRule.onNodeWithTag("market_product_grid_row").assertIsDisplayed()
+        composeRule.onNodeWithTag("family_photo_${family.key.hashCode()}").assertIsDisplayed()
+        composeRule.onNodeWithTag("product_photo_pixel-10").assertIsDisplayed()
+    }
+
+    @Test
+    fun storeFilterChoicesAreDerivedFromTheProductsInTheSelectedCategory() {
+        val amazon = testStore("amazon", "Amazon España")
+        val pcComponents = testStore("pc", "PcComponentes")
+        val unrelated = testStore("unrelated", "Tienda de otra categoría")
+        val phone = testProduct(
+            id = "phone-only",
+            category = ProductCategory.SMARTPHONES,
+            currentStore = amazon,
+            offers = listOf(StoreOffer(amazon, 399.0), StoreOffer(pcComponents, 389.0))
+        )
+
+        val stores = marketplaceStoresForProducts(listOf(phone))
+
+        assertEquals(setOf("amazon", "pc"), stores.map { it.id }.toSet())
+        assertFalse(stores.any { it.id == unrelated.id })
     }
 
     private fun testStore(id: String, name: String) = Store(

@@ -42,6 +42,21 @@ class ProductDaoMarketplaceCategoryCountsTest {
             )
         )
 
+        database.priceObservationDao().insert(
+            PriceObservationEntity(
+                productId = "old-all",
+                storeId = "second-store",
+                price = 9.5,
+                currency = "EUR",
+                observedAt = System.currentTimeMillis(),
+                sourceUrl = "https://second.example/product",
+                sourceName = "Test source",
+                isVerified = true,
+                productTitle = "Producto de prueba old-all",
+                storeName = "Second store"
+            )
+        )
+
         val counts = database.productDao().observeMarketplaceCategoryCounts()
             .first()
             .associateBy { it.categoryName }
@@ -51,6 +66,11 @@ class ProductDaoMarketplaceCategoryCountsTest {
             "Unknown, legacy, and explicit OTHER rows must not disappear from the home total",
             3,
             counts["OTHER"]?.productCount
+        )
+        assertEquals(
+            "OTHER must include distinct merchants from verified saved price observations",
+            2,
+            counts["OTHER"]?.storeCount
         )
         assertEquals("All visible rows must be accounted for exactly once", 4, counts.values.sumOf { it.productCount })
 

@@ -6,6 +6,25 @@ import com.example.data.model.ProductCategory
 import com.example.data.model.Store
 import java.util.Locale
 
+/**
+ * One label for both the store menu and store filtering. Seller aliases and generated domains
+ * resolve to the same known merchant label when enough evidence is available.
+ */
+internal fun marketplaceLabel(storeName: String, storeDomain: String = ""): String {
+    val cleanName = storeName.trim()
+    if (cleanName.isEmpty()) return ""
+    val domain = storeDomain.trim()
+    val sourceUrl = when {
+        domain.isEmpty() -> ""
+        domain.startsWith("https://", ignoreCase = true) ||
+            domain.startsWith("http://", ignoreCase = true) -> domain
+        else -> "https://$domain"
+    }
+    return Store.findKnownByName(cleanName, sourceUrl)?.name ?: cleanName
+}
+
+internal fun marketplaceLabel(store: Store): String = marketplaceLabel(store.name, store.domain)
+
 /** Visible category rows only; demo catalogue entries never become live marketplace results. */
 internal fun marketplaceCategoryProducts(
     products: List<Product>,
@@ -46,8 +65,8 @@ internal fun filterMarketplaceProductsForState(
         .filter { product ->
             val selectedStore = state.selectedStoreName
             selectedStore == null ||
-                product.currentStore.name.contains(selectedStore, ignoreCase = true) ||
-                product.offers.any { it.store.name.contains(selectedStore, ignoreCase = true) }
+                marketplaceLabel(product.currentStore) == marketplaceLabel(selectedStore) ||
+                product.offers.any { marketplaceLabel(it.store) == marketplaceLabel(selectedStore) }
         }
         .let { list ->
             when (state.sortOption) {

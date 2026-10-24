@@ -70,6 +70,7 @@ import com.example.data.model.Store
 import com.example.ui.components.ProductCard
 import com.example.ui.components.ProductImageView
 import com.example.ui.viewmodel.SortOption
+import com.example.ui.viewmodel.marketplaceLabel
 import com.example.ui.viewmodel.marketplaceStoresForProducts
 import com.example.ui.viewmodel.TrackerUiState
 
@@ -136,8 +137,7 @@ fun MarketScreen(
     // Store choices are derived from the same cached, visible category flow, never the global directory.
     val displayStores = remember(loadedProducts) {
         marketplaceStoresForProducts(loadedProducts).map { store ->
-            val canonical = Store.findKnownByName(store.name, "https://${store.domain}")
-            val label = canonical?.name ?: store.name
+            val label = marketplaceLabel(store)
             Triple(store, label, label.lowercase(java.util.Locale.ROOT))
         }.distinctBy { it.third }
     }

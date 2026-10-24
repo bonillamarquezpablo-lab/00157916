@@ -3,6 +3,7 @@ package com.example.ui.screens
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -14,7 +15,6 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.Modifier
 import com.example.ui.viewmodel.TrackerUiState
-import com.example.ui.viewmodel.marketplaceStoresForProducts
 import com.example.data.model.Product
 import com.example.data.model.MarketplaceCategorySummary
 import com.example.data.model.ProductCategory
@@ -226,7 +226,7 @@ class CategoryHomeScreenTest {
     }
 
     @Test
-    fun storeFilterChoicesAreDerivedFromTheProductsInTheSelectedCategory() {
+    fun storeFilterChoicesAreLimitedToTheSelectedCategoryInMarketScreen() {
         val amazon = testStore("amazon", "Amazon España")
         val pcComponents = testStore("pc", "PcComponentes")
         val unrelated = testStore("unrelated", "Tienda de otra categoría")
@@ -235,12 +235,55 @@ class CategoryHomeScreenTest {
             category = ProductCategory.SMARTPHONES,
             currentStore = amazon,
             offers = listOf(StoreOffer(amazon, 399.0), StoreOffer(pcComponents, 389.0))
+        ).copy(isPriceVerified = true)
+        val television = testProduct(
+            id = "tv-only",
+            category = ProductCategory.TV_AUDIO,
+            currentStore = unrelated
+        ).copy(isPriceVerified = true)
+        val productsByCategory = mapOf(
+            ProductCategory.SMARTPHONES to listOf(phone),
+            ProductCategory.TV_AUDIO to listOf(television)
         )
+        val state = mutableStateOf(TrackerUiState(selectedCategory = ProductCategory.SMARTPHONES))
 
-        val stores = marketplaceStoresForProducts(listOf(phone))
+        composeRule.setContent {
+            MaterialTheme {
+                MarketScreen(
+                    productsForCategory = { category ->
+                        MutableStateFlow(productsByCategory[category].orEmpty())
+                    },
+                    filteredProductsForCategory = { category ->
+                        MutableStateFlow(productsByCategory[category].orEmpty())
+                    },
+                    categorySummaries = ProductCategory.values()
+                        .filter { it != ProductCategory.ALL }
+                        .map { category ->
+                            MarketplaceCategorySummary(
+                                category,
+                                productsByCategory[category]?.size ?: 0,
+                                0
+                            )
+                        },
+                    uiState = state.value,
+                    onSearchChange = { query -> state.value = state.value.copy(searchQuery = query) },
+                    onCategorySelect = { category -> state.value = state.value.copy(selectedCategory = category) },
+                    onToggleOnlyAth = {},
+                    onToggleOnlyHistoricalMinimum = {},
+                    onStoreFilterSelect = { store -> state.value = state.value.copy(selectedStoreName = store) },
+                    onSortChange = { sort -> state.value = state.value.copy(sortOption = sort) },
+                    onProductClick = {},
+                    onToggleTrack = {},
+                    onPrepareTrackedRefresh = {},
+                    modifier = Modifier
+                )
+            }
+        }
 
-        assertEquals(setOf("amazon", "pc"), stores.map { it.id }.toSet())
-        assertFalse(stores.any { it.id == unrelated.id })
+        composeRule.onNodeWithTag("filter_store_chip").performClick()
+        composeRule.onNodeWithText("Amazon España").assertIsDisplayed()
+        composeRule.onNodeWithText("PcComponentes").assertIsDisplayed()
+        composeRule.onNodeWithText(unrelated.name).assertDoesNotExist()
     }
 
     private fun testStore(id: String, name: String) = Store(

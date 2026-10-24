@@ -94,6 +94,34 @@ fun MarketScreen(
     var expandedFamilyKeys by remember { mutableStateOf(emptySet<String>()) }
     var expandedVariantKeys by remember { mutableStateOf(emptySet<String>()) }
     var expandedStorageKeys by remember { mutableStateOf(emptySet<String>()) }
+    var forceShowAllProducts by remember { mutableStateOf(false) }
+
+    val hasActiveMarketFilter = uiState.searchQuery.isNotBlank() ||
+        uiState.selectedStoreName != null ||
+        uiState.onlyAthFilter ||
+        uiState.onlyHistoricalMinimumFilter
+    val shouldShowCategoryHome = uiState.selectedCategory == ProductCategory.ALL &&
+        !hasActiveMarketFilter && !forceShowAllProducts
+    val canReturnToCategoryHome = uiState.searchQuery.isBlank() &&
+        uiState.selectedStoreName == null &&
+        !uiState.onlyAthFilter &&
+        !uiState.onlyHistoricalMinimumFilter &&
+        (uiState.selectedCategory != ProductCategory.ALL || forceShowAllProducts)
+
+    if (shouldShowCategoryHome) {
+        CategoryHomeScreen(
+            products = products,
+            searchQuery = uiState.searchQuery,
+            onSearchChange = onSearchChange,
+            onCategorySelect = { category ->
+                forceShowAllProducts = false
+                onCategorySelect(category)
+            },
+            onViewAllProducts = { forceShowAllProducts = true },
+            modifier = modifier
+        )
+        return
+    }
 
     // Keep Mercado as a drill-down, not a wall of expanded cards. Changing filters
     // resets the selection so expansions from a previous result set cannot reappear.
@@ -119,6 +147,25 @@ fun MarketScreen(
             .testTag("market_screen_list"),
         contentPadding = PaddingValues(bottom = 24.dp)
     ) {
+        if (canReturnToCategoryHome) {
+            item {
+                OutlinedButton(
+                    onClick = {
+                        forceShowAllProducts = false
+                        if (uiState.selectedCategory != ProductCategory.ALL) {
+                            onCategorySelect(ProductCategory.ALL)
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .testTag("return_to_categories_button")
+                ) {
+                    Text("Volver a categorías")
+                }
+            }
+        }
+
         // Compact section heading: remove the large decorative banner so products and
         // filters appear sooner, with less drawing and less vertical scrolling.
         item {

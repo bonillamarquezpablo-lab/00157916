@@ -24,7 +24,13 @@ interface ProductDao {
 
 
     /** Load a single category when the user opens it instead of converting the whole catalogue. */
-    @Query("SELECT * FROM products WHERE category = :category ORDER BY title ASC")
+    @Query(
+        "SELECT * FROM products WHERE category = :category OR (" +
+            ":category = 'OTHER' AND category NOT IN (" +
+            "'SMARTPHONES','COMPUTING','GAMING','TV_AUDIO','HOME_APPLIANCES'," +
+            "'PERSONAL_CARE','ACCESSORIES','REPLACEMENT_PARTS','TOYS','SPORTS','OTHER'" +
+            ")) ORDER BY title ASC"
+    )
     fun getProductsByCategory(category: String): Flow<List<ProductEntity>>
 
     /**
@@ -37,10 +43,10 @@ interface ProductDao {
         "SELECT categoryName, COUNT(DISTINCT productId) AS productCount, " +
             "COUNT(DISTINCT CASE WHEN TRIM(storeId) <> '' THEN storeId END) AS storeCount " +
             "FROM (" +
-            "SELECT p.category AS categoryName, p.id AS productId, p.currentStoreId AS storeId " +
+            "SELECT CASE WHEN p.category IN ('SMARTPHONES','COMPUTING','GAMING','TV_AUDIO','HOME_APPLIANCES','PERSONAL_CARE','ACCESSORIES','REPLACEMENT_PARTS','TOYS','SPORTS','OTHER') THEN p.category ELSE 'OTHER' END AS categoryName, p.id AS productId, p.currentStoreId AS storeId " +
             "FROM products p WHERE " + MARKETPLACE_VISIBLE_PRODUCT_SQL +
             " UNION ALL " +
-            "SELECT p.category AS categoryName, p.id AS productId, o.storeId AS storeId " +
+            "SELECT CASE WHEN p.category IN ('SMARTPHONES','COMPUTING','GAMING','TV_AUDIO','HOME_APPLIANCES','PERSONAL_CARE','ACCESSORIES','REPLACEMENT_PARTS','TOYS','SPORTS','OTHER') THEN p.category ELSE 'OTHER' END AS categoryName, p.id AS productId, o.storeId AS storeId " +
             "FROM products p INNER JOIN price_observations o ON o.productId = p.id " +
             "WHERE (" + MARKETPLACE_VISIBLE_PRODUCT_SQL + ") AND o.isVerified = 1 " +
             "AND upper(trim(o.currency)) = 'EUR' AND o.price >= 0.5 AND o.price <= 10000.0 " +

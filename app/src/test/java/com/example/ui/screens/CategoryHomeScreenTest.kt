@@ -1,6 +1,18 @@
 package com.example.ui.screens
 
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.test.assertDoesNotExist
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performImeAction
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.Modifier
+import com.example.ui.viewmodel.TrackerUiState
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
 import com.example.data.model.Store
@@ -8,9 +20,52 @@ import com.example.data.model.StoreOffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Rule
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class CategoryHomeScreenTest {
+    @get:Rule
+    val composeRule = createComposeRule()
+
+    @Test
+    fun categorySearchKeepsFocusUntilTheUserSubmitsTheQuery() {
+        val state = mutableStateOf(TrackerUiState())
+        composeRule.setContent {
+            MaterialTheme {
+                MarketScreen(
+                    products = emptyList(),
+                    stores = emptyList(),
+                    uiState = state.value,
+                    onSearchChange = { query -> state.value = state.value.copy(searchQuery = query) },
+                    onCategorySelect = { category -> state.value = state.value.copy(selectedCategory = category) },
+                    onToggleOnlyAth = {},
+                    onToggleOnlyHistoricalMinimum = {},
+                    onStoreFilterSelect = { store -> state.value = state.value.copy(selectedStoreName = store) },
+                    onSortChange = { sort -> state.value = state.value.copy(sortOption = sort) },
+                    onProductClick = {},
+                    onToggleTrack = {},
+                    onPrepareTrackedRefresh = {},
+                    modifier = Modifier
+                )
+            }
+        }
+
+        val search = composeRule.onNodeWithTag("search_input")
+        search.performTextInput("ip")
+        search.performTextInput("hone")
+        search.assertTextEquals("iphone")
+        composeRule.onNodeWithTag("category_home_screen").assertIsDisplayed()
+        assertEquals("Typing should keep the complete query in state", "iphone", state.value.searchQuery)
+
+        search.performImeAction()
+        composeRule.onNodeWithTag("category_home_screen").assertDoesNotExist()
+        composeRule.onNodeWithText("Productos guardados").assertIsDisplayed()
+    }
 
     @Test
     fun categorySummariesExcludeAllAndCountDistinctStoresPerCategory() {

@@ -68,6 +68,7 @@ import com.example.data.model.MarketplaceCategorySummary
 import kotlinx.coroutines.flow.StateFlow
 import com.example.data.model.Store
 import com.example.ui.components.ProductCard
+import com.example.ui.components.ProductImageView
 import com.example.ui.viewmodel.SortOption
 import com.example.ui.viewmodel.TrackerUiState
 
@@ -152,12 +153,18 @@ fun MarketScreen(
 
     // Collapse marketplace-generated aliases (for example AliExpress-239640258)
     // into one canonical display/filter option without deleting any underlying seller records.
-    val displayStores = remember(stores) {
-        stores.map { store ->
-            val canonical = Store.findKnownByName(store.name, "https://${store.domain}")
-            val label = canonical?.name ?: store.name
-            Triple(store, label, label.lowercase(java.util.Locale.ROOT))
-        }.distinctBy { it.third }
+    val displayStores = remember(stores, products) {
+        // A category exposes only merchants present on its own product cards/offers.
+        // The shared directory enriches those matching merchants but does not populate the list.
+        products.flatMap { product ->
+            listOf(product.currentStore) + product.offers.map { it.store }
+        }.distinctBy { it.id.ifBlank { it.name.lowercase(java.util.Locale.ROOT) } }
+            .map { productStore ->
+                val store = stores.firstOrNull { it.id == productStore.id } ?: productStore
+                val canonical = Store.findKnownByName(store.name, "https://${store.domain}")
+                val label = canonical?.name ?: store.name
+                Triple(store, label, label.lowercase(java.util.Locale.ROOT))
+            }.distinctBy { it.third }
     }
 
     LazyColumn(
@@ -246,94 +253,8 @@ fun MarketScreen(
             }
         }
 
-        // Spanish Stores Horizontal Quick Scroll
-        item {
-            Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 2.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Tiendas con precios",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (uiState.selectedStoreName != null) {
-                        androidx.compose.material3.TextButton(
-                            onClick = { onStoreFilterSelect(null) },
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
-                        ) {
-                            Text(
-                                text = "Limpiar filtro",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.padding(vertical = 4.dp)
-                ) {
-                    // All stores chip
-                    item {
-                        FilterChip(
-                            selected = uiState.selectedStoreName == null,
-                            onClick = { onStoreFilterSelect(null) },
-                            label = { Text("Todas (${displayStores.size})", fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primary,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary
-                            )
-                        )
-                    }
-
-                    items(displayStores, key = { it.first.id }) { (store, displayName, _) ->
-                        val isSelected = uiState.selectedStoreName.equals(displayName, ignoreCase = true)
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = {
-                                if (isSelected) onStoreFilterSelect(null)
-                                else onStoreFilterSelect(displayName)
-                            },
-                            label = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(store.brandColor)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = displayName,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.widthIn(max = 160.dp)
-                                    )
-                                }
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                            ),
-                            modifier = Modifier.testTag("store_chip_${store.id}")
-                        )
-                    }
-                }
-            }
-        }
-
-        // Category Filter Chips
-        item {
+        // Only show category switching in the explicit all-products view. A category page stays focused.
+        if (uiState.selectedCategory == ProductCategory.ALL) item {
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -624,26 +545,77 @@ fun MarketScreen(
                 }
             }
         } else {
-            items(savedFamilies, key = { it.key }) { family ->
+            items(savedFamilies.chunked(2), key = { row -> row.joinToString("|") { it.key } }) { familyRow ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    familyRow.forEach { family ->
+                    Box(modifier = Modifier.weight(1f)) {
                 if (family.productCount == 1) {
                     val product = family.products.single()
                     Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp)) {
                         ProductCard(
                             product = product,
                             onClick = { onProductClick(product) },
-                            onToggleTrack = { onToggleTrack(product) }
+                            onToggleTrack = { onToggleTrack(product) },
+                            compact = true
                         )
                     }
                 } else {
                     val familyExpanded = family.key in expandedFamilyKeys
                     Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
-                        Row(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(MaterialTheme.shapes.medium)
                                 .background(MaterialTheme.colorScheme.surfaceContainer)
                                 .clickable {
                                     if (familyExpanded) {
+                                        expandedFamilyKeys = emptySet()
+                                        expandedVariantKeys = emptySet()
+                                        expandedStorageKeys = emptySet()
+                                    } else {
+                                        expandedFamilyKeys = setOf(family.key)
+                                        expandedVariantKeys = emptySet()
+                                        expandedStorageKeys = emptySet()
+                                    }
+                                }
+                                .padding(10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            ProductImageView(
+                                product = family.products.first(),
+                                modifier = Modifier.fillMaxWidth().height(92.dp),
+                                showAthRibbon = false
+                            )
+                            Text(
+                                text = family.label,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${family.productCount} fichas · " +
+                                    (if (family.variants.size == 1) "1 versión" else "${family.variants.size} versiones") +
+                                    " · ${family.storeCount} tiendas",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = if (familyExpanded) "Ocultar ▴" else "Elegir versión ▾",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        if (familyExpanded) {
                                         expandedFamilyKeys = emptySet()
                                         expandedVariantKeys = emptySet()
                                         expandedStorageKeys = emptySet()
@@ -768,7 +740,8 @@ fun MarketScreen(
                                                             ProductCard(
                                                                 product = product,
                                                                 onClick = { onProductClick(product) },
-                                                                onToggleTrack = { onToggleTrack(product) }
+                                                                onToggleTrack = { onToggleTrack(product) },
+                                                                compact = true
                                                             )
                                                         }
                                                     }
@@ -781,6 +754,9 @@ fun MarketScreen(
                         }
                     }
                 }
+                }
+                if (familyRow.size == 1) Spacer(modifier = Modifier.weight(1f))
+            }
             }
         }
     }

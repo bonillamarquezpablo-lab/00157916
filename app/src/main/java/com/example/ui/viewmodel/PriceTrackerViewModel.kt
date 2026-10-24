@@ -54,6 +54,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -573,22 +574,31 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
 
     private val marketplaceProductFlows = mutableMapOf<ProductCategory, StateFlow<List<Product>>>()
+    private val marketplaceFilteredProductFlows = mutableMapOf<ProductCategory, StateFlow<List<Product>>>()
 
     /**
-     * Returns a cached, category-specific product flow. It starts only when the product list is
-     * opened, and stays warm after its first use so returning from Android's task switcher does
-     * not rebuild hundreds of cards and price histories again.
-     */
-    /**
-     * Return the raw rows for one selected category. Mercado applies the live search/filter state
-     * in the screen so it can derive store choices from the same category without opening a second
-     * Room flow or loading the global store directory.
+     * Cache only visible rows for the active category. The Room query and this conversion/filter
+     * run off the UI thread and do not start until Mercado actually opens a category.
      */
     @Synchronized
     fun productsForCategory(category: ProductCategory): StateFlow<List<Product>> =
         marketplaceProductFlows.getOrPut(category) {
             repository.productsForCategoryStream(category)
+                .map { products -> marketplaceCategoryProducts(products, category) }
                 .flowOn(Dispatchers.Default)
+                .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        }
+
+    /**
+     * Search, store, price and sorting filters also run off the UI thread, while sharing the same
+     * cached category flow used to build this category's merchant selector.
+     */
+    @Synchronized
+    fun filteredProductsForCategory(category: ProductCategory): StateFlow<List<Product>> =
+        marketplaceFilteredProductFlows.getOrPut(category) {
+            combine(productsForCategory(category), _uiState) { products, state ->
+                filterMarketplaceProductsForState(products, state)
+            }.flowOn(Dispatchers.Default)
                 .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
         }
 

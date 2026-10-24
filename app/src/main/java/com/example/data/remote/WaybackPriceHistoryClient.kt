@@ -472,15 +472,17 @@ class WaybackPriceHistoryClient(
                 )
                 return@serializedArchiveLookup exactResult
             }
-            // If exact URL already yields a usable series, avoid the more expensive prefix scan.
-            val exactHasPrimaryVerifiedPrice = exactResult.quotes.any {
+            // A single exact-URL quote is useful, but it is not a usable historical series.
+            // Only skip prefix matching when the selected product already has at least three
+            // distinct UTC dates; sibling-product and quarantined discovery quotes do not count.
+            val exactPrimaryQuotes = exactResult.quotes.filter {
                 it.targetProductId.isNullOrBlank() && !it.isDiscoveryCandidate
             }
-            if (exactHasPrimaryVerifiedPrice) {
+            if (hasSufficientHistoricalCoverage(exactPrimaryQuotes)) {
                 rememberAttempt(attempt, now, hasQuotes = true, failed = false)
-                // The exact CDX path already verified the requested product. The prefix scan
-                // is an expensive recovery path for missed slugs, not a reason to wait another
-                // 5–7 seconds after the selected product is already confirmed.
+                // The exact CDX path already supplies a meaningful series for the selected SKU.
+                // Otherwise continue to prefix matching so one isolated capture cannot stop the
+                // historical engine before it searches other archived URL forms.
                 return@serializedArchiveLookup exactResult.copy(diagnosticCodes = emptySet())
             }
 

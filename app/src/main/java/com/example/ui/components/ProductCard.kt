@@ -178,6 +178,93 @@ fun ProductCard(
                         letterSpacing = (-0.4).sp,
                         color = if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT && product.isAtAth) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    if (
+                        product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT &&
+                        product.realSavingsPercent > 0
+                    ) {
+                        Text(
+                            text = "Ahorro real: -${product.realSavingsPercent}%",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF059669),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (
+                        product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT &&
+                        product.isOfficialPvpVerified &&
+                        product.officialPvp > product.currentPrice
+                    ) {
+                        Text(
+                            text = "PVP: ${String.format(SPANISH_LOCALE, "%.2f", product.officialPvp)} €",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textDecoration = TextDecoration.LineThrough,
+                            maxLines = 1
+                        )
+                    }
+
+                    val compactIsArchivedPrice =
+                        product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION &&
+                            !product.isPriceVerified && product.savedHistoricalPrice != null
+                    val compactObservedAt = if (compactIsArchivedPrice) {
+                        product.savedHistoricalPriceObservedAt
+                    } else {
+                        product.priceObservedAt
+                    }
+                    if (
+                        product.priceDisplayStatus != com.example.data.model.PriceDisplayStatus.DEMONSTRATION &&
+                        compactObservedAt != null
+                    ) {
+                        Text(
+                            text = when {
+                                compactIsArchivedPrice -> "Guardado " + savedDateFormatter.format(Date(compactObservedAt))
+                                product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION ->
+                                    "Guardado " + observedAtFormatter.format(Date(compactObservedAt))
+                                else -> "Consultado " + observedAtFormatter.format(Date(compactObservedAt))
+                            },
+                            fontSize = 9.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (product.priceDisplayStatus != com.example.data.model.PriceDisplayStatus.DEMONSTRATION) {
+                        val compactSource = if (!product.isPriceVerified && product.savedHistoricalPrice != null) {
+                            product.savedHistoricalPriceSource.ifBlank { "historial archivado" }
+                        } else {
+                            product.priceSource.ifBlank { "buscador online" }
+                        }
+                        Text(
+                            text = when (product.priceDisplayStatus) {
+                                com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION ->
+                                    "Fuente guardada: $compactSource · no actual."
+                                com.example.data.model.PriceDisplayStatus.UNVERIFIED_LIVE_LISTING ->
+                                    "Listado sin confirmar · stock y envío pendientes."
+                                else -> "Fuente: $compactSource"
+                            },
+                            fontSize = 9.sp,
+                            lineHeight = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (
+                        product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.VERIFIED_CURRENT &&
+                        hasSufficientHistory
+                    ) {
+                        Text(
+                            text = "Mínimo observado: ${String.format(SPANISH_LOCALE, "%.2f", product.athMinPrice)} €",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                     Button(
                         onClick = { showStoreComparison = true },
                         modifier = Modifier

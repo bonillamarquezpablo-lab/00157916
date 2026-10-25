@@ -221,9 +221,15 @@ private fun variantKey(product: Product): String {
     val isMobile = Regex(
         """\b(redmi|poco|iphone|pixel|galaxy|smartphone|movil|moviles|telefono|telefonos)\b"""
     ).containsMatchIn(title)
-    val titleTokens = Regex(
+    val rawTitleTokens = Regex(
         """\b(pro|max|plus|ultra|fe|lite|mini|fold|flip|classic|edge|slim|digital|disc|disk|oled|series|standard|estandar|original|4g|5g)\b"""
     ).findAll(title).map { it.value }.filter { isMobile || (it != "4g" && it != "5g") }.toList()
+    // Imported Xiaomi Redmi Note titles can contain conflicting edition tokens and create
+    // a synthetic "Pro Ultra" option. Prefer the established Pro edition in that conflict.
+    val titleTokens = if (
+        Regex("""\bredmi note\s*\d+""").containsMatchIn(title) &&
+        rawTitleTokens.contains("pro") && rawTitleTokens.contains("ultra")
+    ) rawTitleTokens.filterNot { it == "ultra" } else rawTitleTokens
     val consoleTokens = if (Regex("""\b(ps5|xbox|nintendo switch|switch)\b""").containsMatchIn(title)) {
         Regex("""\b(s|x)\b""").findAll(title).map { it.value }.toList()
     } else emptyList()

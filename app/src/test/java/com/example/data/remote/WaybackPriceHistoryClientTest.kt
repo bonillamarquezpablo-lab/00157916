@@ -2827,6 +2827,31 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun failedYearlyPrefixRequestStopsFurtherAnnualQueriesAndKeepsItsCursor() {
+        assertTrue(
+            shouldStopYearlyPrefixScanAfterFailure(
+                WaybackBackfillResult(
+                    requestFailed = true,
+                    diagnosticCodes = setOf("CDX_URL_PREFIX_YEAR_TIMEOUT")
+                )
+            )
+        )
+        assertTrue(
+            shouldStopYearlyPrefixScanAfterFailure(
+                WaybackBackfillResult(
+                    diagnosticCodes = setOf("WAYBACK_RATE_LIMITED")
+                )
+            )
+        )
+        assertFalse(
+            "A clean empty index is not a transport failure, so older years can still be checked",
+            shouldStopYearlyPrefixScanAfterFailure(
+                WaybackBackfillResult(available = true, requestFailed = false)
+            )
+        )
+    }
+
+    @Test
     fun repeatedWaybackPrefixAndYearTimeoutsTripDomainFallbackCircuitBreaker() {
         assertTrue(
             shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(

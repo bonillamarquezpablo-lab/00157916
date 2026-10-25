@@ -22,6 +22,7 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 import com.example.ui.viewmodel.mergeWaybackDiagnosticStatus
 import com.example.ui.viewmodel.hasEnoughVerifiedArchiveDates
+import com.example.ui.viewmodel.hasSufficientNewVerifiedArchiveHistory
 import com.example.ui.viewmodel.isSupersededWaybackSkipDetail
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -2778,6 +2779,46 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun annualPrefixQueriesStayInsideOneUtcCalendarYearAndTheHistoryWindow() {
+        val now = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.parse("20261025120000")!!.time
+        val client = newClient()
+
+        val year2025 = client.buildCdxUrlForYear(
+            originalUrl = "https://www.pccomponentes.com/apple-iphone-15-plus",
+            year = 2025,
+            now = now,
+            lookbackDays = WaybackPriceHistoryClient.DEFAULT_LOOKBACK_DAYS
+        )!!
+        assertEquals("20250101", year2025.queryParameter("from"))
+        assertEquals("20251231", year2025.queryParameter("to"))
+
+        val currentYear = client.buildCdxUrlForYear(
+            originalUrl = "https://www.pccomponentes.com/apple-iphone-15-plus",
+            year = 2026,
+            now = now,
+            lookbackDays = WaybackPriceHistoryClient.DEFAULT_LOOKBACK_DAYS
+        )!!
+        assertEquals("20260101", currentYear.queryParameter("from"))
+        assertEquals("20261025", currentYear.queryParameter("to"))
+
+        val oldestPartialYear = client.buildCdxUrlForYear(
+            originalUrl = "https://www.pccomponentes.com/apple-iphone-15-plus",
+            year = 2018,
+            now = now,
+            lookbackDays = WaybackPriceHistoryClient.DEFAULT_LOOKBACK_DAYS
+        )!!
+        assertEquals("20181025", oldestPartialYear.queryParameter("from"))
+        assertEquals("20181231", oldestPartialYear.queryParameter("to"))
+
+        assertTrue(shouldRetryPrefixInYearBlocks(setOf("CDX_URL_PREFIX_TIMEOUT")))
+        assertFalse(shouldRetryPrefixInYearBlocks(setOf("CDX_URL_PREFIX_TIMEOUT", "WAYBACK_RATE_LIMITED")))
+        assertFalse(shouldRetryPrefixInYearBlocks(setOf("CDX_URL_PREFIX_DNS")))
+    }
+
+    @Test
     fun directCdxRequestKeepsTheNewestBoundedMonthlyWindow() {
         val client = newClient()
         val now = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {
@@ -4945,6 +4986,21 @@ class WaybackPriceHistoryClientTest {
         assertEquals("Connection timeout must use the bounded archive budget", 12_000, configured.connectTimeoutMillis)
         assertEquals("HTML read timeout must use the same bounded budget", 12_000, configured.readTimeoutMillis)
         assertEquals("Whole snapshot call timeout must use the same bounded budget", 12_000, configured.callTimeoutMillis)
+    }
+
+    @Test
+    fun repeatedRoomDatesDoNotCountAsSufficientNewArchiveCoverage() {
+        val day = WaybackPriceHistoryClient.DAY_MS
+        val dates = listOf(10L * day, 11L * day, 12L * day)
+        assertFalse(hasSufficientNewVerifiedArchiveHistory(dates, newPointsSaved = 0))
+        assertFalse(hasSufficientNewVerifiedArchiveHistory(dates, newPointsSaved = 2))
+        assertTrue(hasSufficientNewVerifiedArchiveHistory(dates, newPointsSaved = 3))
+        assertFalse(
+            hasSufficientNewVerifiedArchiveHistory(
+                listOf(10L * day, 10L * day, 11L * day),
+                newPointsSaved = 3
+            )
+        )
     }
 
     @Test

@@ -254,6 +254,27 @@ class MementoClientTest {
     }
 
     @Test
+    fun parseTimeMapKeepsProductQueryInsideTheArchivedReplayPath() {
+        val client = newClient()
+        val formatter = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val now = formatter.parse("20261021000000")!!.time
+        val target = "https://shop.example/products/phone?sku=yellow&capacity=256"
+        val body = """<https://arquivo.pt/wayback/20260701000000/$target>; rel="memento"; datetime="Wed, 01 Jul 2026 00:00:00 GMT""""
+
+        val captures = client.parseTimeMap(body, target, now, lookbackDays = 365)
+
+        assertEquals(1, captures.size)
+        assertTrue(captures.single().snapshotUrl.contains("phone%3Fsku=yellow%26capacity=256"))
+        assertEquals(
+            "https://arquivo.pt/wayback/20260701000000mp_/https://shop.example/products/phone%3Fsku=yellow%26capacity=256",
+            client.toContentSnapshotUrl(captures.single().snapshotUrl)
+        )
+    }
+
+    @Test
     fun quarterlySamplingSpansOlderAndNewerCapturesAndHonorsCap() {
         val client = newClient()
         val formatter = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {

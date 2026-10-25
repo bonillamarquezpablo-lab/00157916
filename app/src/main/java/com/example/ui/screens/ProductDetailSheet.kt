@@ -230,7 +230,9 @@ internal fun buildWaybackDiagnosticExportReport(
         var safe = raw
             .replace(Regex("""(?i)https?://[^\s<>\"']+"""), "[URL ocultada]")
             .replace(Regex("""(?i)\b(?:cookie|authorization|access_token|refresh_token|api[_-]?key)\s*[:=]\s*[^\s,;]+"""), "[credencial ocultada]")
-            .replace(Regex("""(?i)([?&][a-z0-9_.~-]+=)[^&\s]+"""), "$1[oculto]")
+            .replace(Regex("""(?i)([?&][a-z0-9_.~-]+=)[^&\s]+""")) { match ->
+                match.groupValues[1] + "[oculto]"
+            }
             .replace(Regex("""(?is)<[^>]{1,300}>"""), "[etiqueta HTML]")
             .trim()
         if (safe.length > 1800) safe = safe.take(1800) + "… [detalle recortado]"

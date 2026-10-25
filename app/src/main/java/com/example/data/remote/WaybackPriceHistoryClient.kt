@@ -120,7 +120,12 @@ internal fun shouldUseAlternateUrlForPrefix(
  * never retried by this path; the shared cooldown remains authoritative.
  */
 internal fun shouldRetryPrefixInYearBlocks(diagnosticCodes: Set<String>): Boolean =
-    diagnosticCodes.contains("CDX_URL_PREFIX_TIMEOUT") &&
+    // The caller may report its bounded candidate timeout rather than the lower-level CDX
+    // timeout. Both indicate an incomplete prefix scan; partial verified quotes do not mean
+    // the archive search is complete. Never retry after an explicit HTTP 429.
+    (diagnosticCodes.contains("CDX_URL_PREFIX_TIMEOUT") ||
+        diagnosticCodes.contains("CDX_URL_PREFIX_CANDIDATE_TIMEOUT") ||
+        diagnosticCodes.contains("CANDIDATE_TIMEOUT_PARTIAL_QUOTES")) &&
         !diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
 
 /** Common UTC boundary for eight-calendar-year discovery, archive fallbacks and local persistence. */

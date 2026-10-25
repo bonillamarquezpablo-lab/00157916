@@ -93,18 +93,6 @@ internal fun shouldSkipDomainFallbackAfterSnapshotTimeout(
 }
 
 /**
- * Exact CDX captures already establish a usable historical series once there are three distinct
- * verified dates. Avoid broad prefix/year scans that repeat those captures and can trigger 429.
- * Discovery-only candidates do not count as history for the selected product.
- */
-internal fun shouldSkipPrefixAfterSufficientExactHistory(
-    quotes: Iterable<ArchivedPriceQuote>
-): Boolean = hasSufficientHistoricalCoverage(
-    quotes.filter { it.targetProductId.isNullOrBlank() && !it.isDiscoveryCandidate },
-    minimumDistinctDates = 3
-)
-
-/**
  * After the direct lookup, a broad prefix index timeout followed by a calendar-year index timeout
  * means the same Wayback CDX backend has failed on two bounded routes. In that case the next
  * merchant-domain Availability probes are likely to add traffic while the archive is struggling.
@@ -153,6 +141,15 @@ internal fun shouldRetryPrefixInYearBlocks(diagnosticCodes: Set<String>): Boolea
         diagnosticCodes.contains("CDX_URL_PREFIX_CANDIDATE_TIMEOUT") ||
         diagnosticCodes.contains("CANDIDATE_TIMEOUT_PARTIAL_QUOTES")) &&
         !diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
+
+/**
+ * Stop the annual fallback after a failed yearly request. A timeout/network error is not evidence
+ * that the year has no captures; keep its cursor so a later run can retry it after cooldown rather
+ * than hammering the same failing CDX service with another year immediately.
+ */
+internal fun shouldStopYearlyPrefixScanAfterFailure(
+    result: WaybackBackfillResult
+): Boolean = result.requestFailed || result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
 
 /** Common UTC boundary for eight-calendar-year discovery, archive fallbacks and local persistence. */
 internal fun archiveHistoryWindowStartTimestampUtc(now: Long, lookbackDays: Int): Long {
@@ -581,19 +578,6 @@ class WaybackPriceHistoryClient(
                 )
                 return@serializedArchiveLookup exactResult
             }
-            if (shouldSkipPrefixAfterSufficientExactHistory(exactResult.quotes)) {
-                emitWaybackTrace(
-                    onTrace, 6, WaybackTraceStatus.SKIPPED,
-                    "La búsqueda exacta ya verificó precios en tres fechas distintas; se reutilizan esas capturas y se omiten prefijo y búsqueda anual para evitar consultas repetidas."
-                )
-                rememberAttempt(attempt, now, hasQuotes = true, failed = false)
-                return@serializedArchiveLookup exactResult.copy(
-                    requestFailed = false,
-                    diagnosticCodes = exactResult.diagnosticCodes +
-                        "CDX_PREFIX_SKIPPED_EXACT_HISTORY_SUFFICIENT"
-                )
-            }
-
             // Existing Room dates are filtered during persistence, not by the remote client.
             // If exact history is sparse, keep the prefix scan as a bounded supplement.
             val exactPrimaryQuotes = exactResult.quotes.filter {
@@ -684,9 +668,21 @@ class WaybackPriceHistoryClient(
                     yearlyResults += yearly
                     val hitRateLimit = yearly.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ||
                         activeRateLimitUntil(System.currentTimeMillis()) != null
-                    if (hitRateLimit) {
-                        // Do not advance the cursor for a year whose request hit 429; retry only
-                        // after the server cooldown expires.
+                    if (hitRateLimit || shouldStopYearlyPrefixScanAfterFailure(yearly)) {
+                        // Do not advance past a failed year. If it timed out, a later lookup should
+                        // retry this same block after the backend recovers instead of spending its
+                        // remaining request budget on another year immediately.
+                        if (year >= earliestYear) {
+                            preferences.edit().putInt(cursorKey, year).apply()
+                        }
+                        emitWaybackTrace(
+                            onTrace, 6, WaybackTraceStatus.SKIPPED,
+                            if (hitRateLimit) {
+                                "El archivo aplicó el límite de peticiones; se detienen las búsquedas anuales y se conserva el año $year para reintentarlo tras la pausa."
+                            } else {
+                                "El bloque anual $year falló o agotó el tiempo; se detienen las consultas anuales adicionales y se conserva ese año para reintentarlo más adelante."
+                            }
+                        )
                         break
                     }
                     if (year <= earliestYear) {

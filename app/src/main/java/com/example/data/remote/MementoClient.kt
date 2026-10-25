@@ -88,6 +88,17 @@ internal fun shouldAttemptMementoFallback(
     rateLimited: Boolean
 ): Boolean = !alreadyAttempted && hasEligibleDirectUrl && !hasSufficientHistory && !rateLimited
 
+/** Capture Memento traffic only in debug builds; never log it from sideload/release. */
+private fun createMementoHttpClient(context: Context): OkHttpClient {
+    val builder = OkHttpClient.Builder()
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(4, TimeUnit.SECONDS)
+        .callTimeout(5, TimeUnit.SECONDS)
+        .followRedirects(true)
+    addDebugNetworkInspector(context.applicationContext, builder)
+    return builder.build()
+}
+
 /**
  * Independent history source for Arquivo.pt's native Memento TimeMap API.
  *
@@ -97,12 +108,7 @@ internal fun shouldAttemptMementoFallback(
 class MementoClient(
     context: Context,
     private val priceParser: WaybackPriceHistoryClient = WaybackPriceHistoryClient(context),
-    private val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(3, TimeUnit.SECONDS)
-        .readTimeout(4, TimeUnit.SECONDS)
-        .callTimeout(5, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .build()
+    private val http: OkHttpClient = createMementoHttpClient(context)
 ) {
     private val preferences = context.applicationContext.getSharedPreferences(
         "minimo_memento_history", Context.MODE_PRIVATE

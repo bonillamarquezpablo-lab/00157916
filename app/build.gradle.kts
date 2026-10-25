@@ -66,6 +66,11 @@ android {
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
       signingConfig = signingConfigs.getByName("debugConfig")
+      // PR diagnostic APKs can use a separate app ID, allowing side-by-side installation
+      // without uninstalling the user's existing app or changing its signing key.
+      project.providers.gradleProperty("PARALLEL_DEBUG_APP_ID_SUFFIX").orNull?.let {
+        applicationIdSuffix = it
+      }
     }
     // Private sideload build: same pinned certificate as installed app, but release-like
     // manifest defaults (non-debuggable). This is not the Play Store production-signing setup.
@@ -146,6 +151,8 @@ dependencies {
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.logging.interceptor)
+  // HTTP inspector is debug-only; the sideload/release APK excludes Chucker.
+  debugImplementation(libs.chucker)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
   implementation(libs.jsoup)

@@ -148,6 +148,24 @@ class WaybackPriceHistoryClientTest {
                 "[00:40:02] Verificación del producto omitida: Availability no devolvió una captura para descargar."
             )
         )
+        assertTrue(
+            "A failed HTML profile must remain failed even if another route later emits a skip",
+            mergeWaybackDiagnosticStatus(
+                WaybackTraceStatus.PASSED,
+                WaybackTraceStatus.FAILED,
+                21,
+                "No se detectó un DOM legible."
+            ) == WaybackTraceStatus.FAILED
+        )
+        assertTrue(
+            "An extractor rejection must not be hidden by a later successful capture from another route",
+            mergeWaybackDiagnosticStatus(
+                WaybackTraceStatus.PASSED,
+                WaybackTraceStatus.FAILED,
+                22,
+                "Resultado del extractor: causa=ARCHIVE_PRODUCT_TITLE_MISMATCH"
+            ) == WaybackTraceStatus.FAILED
+        )
         assertFalse(
             "A real product-identity mismatch must remain visible",
             isSupersededWaybackSkipDetail(
@@ -3777,6 +3795,33 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun extractsVerifiedPriceFromEmbeddedStoreStateJsonWithoutJsonLdType() {
+        val client = newClient()
+        val html = """
+            <html><head>
+              <title>Anker Prime 27K Power Bank</title>
+              <script type="application/json">
+                {"page":{"product":{"name":"Anker Prime 27K Power Bank",
+                 "offers":{"price":"88.49","priceCurrency":"EUR"}}}}
+              </script>
+            </head><body></body></html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "Anker Prime 27K Power Bank",
+            originalUrl = "https://shop.example/products/anker-prime-27k",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/products/anker-prime-27k",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("A bounded embedded product-state JSON block should be considered", quote)
+        assertEquals(88.49, quote!!.price, 0.001)
+        assertEquals("EUR", quote.currency)
+        assertEquals("Anker Prime 27K Power Bank", quote.productTitle)
+    }
+
+    @Test
     fun explicitProductPriceMetadataTakesPrecedenceOverConflictingJsonLdOffers() {
         val client = newClient()
         val html = """
@@ -4997,11 +5042,55 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun archivedHtmlDecoderUsesMetaCharsetWhenHttpHeaderOmitsIt() {
+        val client = newClient()
+        val html = """<html><head><meta charset="windows-1252"></head><body><h1>Cámara clásica</h1></body></html>"""
+        val bytes = html.toByteArray(java.nio.charset.Charset.forName("windows-1252"))
+
+        val decoded = client.decodeArchiveContent(bytes, "text/html")
+
+        assertEquals("windows-1252", decoded.charsetName.lowercase(java.util.Locale.ROOT))
+        assertTrue("Legacy page titles must retain accented characters", decoded.text.contains("Cámara clásica"))
+    }
+
+    @Test
+    fun archivedHtmlDecoderPrefersBomThenExplicitHttpCharsetOverMetaHint() {
+        val client = newClient()
+        val html = """<html><head><meta charset="windows-1252"></head><body>Cámara</body></html>"""
+        val utf8Bytes = html.toByteArray(Charsets.UTF_8)
+
+        val headerDecoded = client.decodeArchiveContent(utf8Bytes, "text/html; charset=UTF-8")
+        assertEquals("UTF-8", headerDecoded.charsetName)
+        assertTrue(headerDecoded.text.contains("Cámara"))
+
+        val bomBytes = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) + utf8Bytes
+        val bomDecoded = client.decodeArchiveContent(bomBytes, "text/html; charset=windows-1252")
+        assertEquals("UTF-8", bomDecoded.charsetName)
+        assertTrue(bomDecoded.text.contains("Cámara"))
+    }
+
+    @Test
+    fun explicitArchiveDiagnosticPhaseNumbersIncludeTheTwoExtractorStages() {
+        assertEquals(
+            21,
+            diagnosticIndexForWaybackTrace(
+                WaybackTraceEvent(16, WaybackTraceStatus.PASSED, "HTML profile", diagnosticStep = 21)
+            )
+        )
+        assertEquals(
+            22,
+            diagnosticIndexForWaybackTrace(
+                WaybackTraceEvent(17, WaybackTraceStatus.FAILED, "Extractor result", diagnosticStep = 22)
+            )
+        )
+    }
+
+    @Test
     fun snapshotDnsFailureRetriesAtMostOnceAndCanRecover() = runBlocking {
         val client = newClient()
         var attempts = 0
         var retryChecks = 0
-        val result = client.retrySnapshotDnsOnce(
+        val result = client.retrySnapshotTransientOnce(
             request = {
                 attempts++
                 if (attempts == 1) throw java.net.UnknownHostException("temporary DNS failure")
@@ -5019,7 +5108,7 @@ class WaybackPriceHistoryClientTest {
         attempts = 0
         retryChecks = 0
         try {
-            client.retrySnapshotDnsOnce(
+            client.retrySnapshotTransientOnce(
                 request = {
                     attempts++
                     throw java.net.UnknownHostException("persistent DNS failure")
@@ -5038,7 +5127,7 @@ class WaybackPriceHistoryClientTest {
 
         attempts = 0
         retryChecks = 0
-        val wrappedResult = client.retrySnapshotDnsOnce(
+        val wrappedResult = client.retrySnapshotTransientOnce(
             request = {
                 attempts++
                 if (attempts == 1) throw java.io.IOException(
@@ -5058,11 +5147,94 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun snapshotStreamResetRetriesOnceButReadTimeoutDoesNotGetAnExtraRetry() = runBlocking {
+        val client = newClient()
+        var attempts = 0
+        var retryChecks = 0
+        val recovered = client.retrySnapshotTransientOnce(
+            request = {
+                attempts++
+                if (attempts == 1) throw java.io.IOException("stream was reset: CANCEL")
+                "recovered after stream reset"
+            },
+            beforeRetry = {
+                retryChecks++
+                true
+            }
+        )
+
+        assertEquals("recovered after stream reset", recovered)
+        assertEquals("One failed stream gets at most one retry", 2, attempts)
+        assertEquals(1, retryChecks)
+
+        assertTrue(
+            "An HTTP/2 stream reset should be considered a transient snapshot transport error",
+            client.isRetryableSnapshotTransportFailure(java.io.IOException("stream was reset"))
+        )
+        assertFalse(
+            "A slow response should not silently double the timeout budget",
+            client.isRetryableSnapshotTransportFailure(java.net.SocketTimeoutException("timeout"))
+        )
+
+        attempts = 0
+        try {
+            client.retrySnapshotTransientOnce(
+                request = {
+                    attempts++
+                    throw java.io.IOException("stream was reset")
+                },
+                beforeRetry = { true }
+            )
+            throw AssertionError("A persistent stream reset must fail after one retry")
+        } catch (_: java.io.IOException) {
+            // Expected: one original request plus exactly one retry.
+        }
+        assertEquals(2, attempts)
+    }
+
+    @Test
+    fun streamResetDiagnosticIsMoreSpecificThanTheOuterTimeout() {
+        val client = newClient()
+        val reset = java.io.IOException(
+            "call failed",
+            java.io.IOException("stream was reset: CANCEL")
+        )
+        assertEquals("SNAPSHOT_STREAM_RESET", client.classifyNetworkFailure("SNAPSHOT", reset))
+        assertEquals(
+            "CDX_ALTERNATE_PREFIX_STREAM_RESET",
+            client.classifyNetworkFailure("CDX_ALTERNATE_PREFIX", reset)
+        )
+        assertEquals(
+            "SNAPSHOT_TIMEOUT",
+            client.classifyNetworkFailure("SNAPSHOT", java.net.SocketTimeoutException("timeout"))
+        )
+    }
+
+    @Test
+    fun ordinarySnapshotErrorsAreNotRetried() = runBlocking {
+        val client = newClient()
+        var attempts = 0
+        try {
+            client.retrySnapshotTransientOnce(
+                request = {
+                    attempts++
+                    throw IllegalStateException("validation problem")
+                },
+                beforeRetry = { true }
+            )
+            throw AssertionError("Non-transport errors must be propagated without retry")
+        } catch (_: IllegalStateException) {
+            // Expected.
+        }
+        assertEquals(1, attempts)
+    }
+
+    @Test
     fun snapshotDnsRetryIsCancelledWhenGlobalArchiveGateBlocksIt() = runBlocking {
         val client = newClient()
         var attempts = 0
         try {
-            client.retrySnapshotDnsOnce(
+            client.retrySnapshotTransientOnce(
                 request = {
                     attempts++
                     throw java.net.UnknownHostException("temporary DNS failure")

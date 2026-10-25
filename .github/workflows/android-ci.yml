@@ -43,7 +43,7 @@ jobs:
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - name: Preparar Gradle
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
@@ -98,3 +98,40 @@ jobs:
 
       - name: Compilar pruebas instrumentadas Android
         run: gradle :app:compileDebugAndroidTestKotlin --stacktrace
+
+      - name: Generar clave temporal de depuración para firmar la APK de pruebas
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Esta clave solo sirve para la APK de depuración de CI y no se guarda en el repositorio.
+          keytool -genkeypair -v \
+            -keystore debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US" \
+            -keyalg RSA -keysize 2048 -validity 10000
+
+      - name: Compilar APK de depuración para probar Chucker (sin clave de firma de distribución)
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Version única por ejecución y reintento, siguiendo la convención de las APK verificadas.
+          VERSION_CODE=$((10000 + GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))
+          VERSION_NAME="1.7.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          if [ "$VERSION_CODE" -le 6296 ]; then
+            echo "::error::versionCode calculado ($VERSION_CODE) no supera la versión instalada 6296."
+            exit 1
+          fi
+          gradle :app:assembleDebug --stacktrace -PVERSION_CODE="$VERSION_CODE" -PVERSION_NAME="$VERSION_NAME" -PPARALLEL_DEBUG_APP_ID_SUFFIX=.debug
+
+      - name: Publicar APK de diagnóstico instalable junto a la app existente
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: minimo-debug-chucker-parallel
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7

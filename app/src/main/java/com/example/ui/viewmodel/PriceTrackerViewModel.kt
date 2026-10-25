@@ -124,7 +124,7 @@ internal fun mergeWaybackDiagnosticStatus(
     // Capture rows (download and barrier evaluation) represent several individually labelled
     // captures. If any one fails, keep the aggregate row red even if another capture succeeded;
     // the per-capture detail lines show exactly which dates succeeded and which DNS/download failed.
-    diagnosticStep in 11..14 &&
+    (diagnosticStep in 11..14 || diagnosticStep in 21..22) &&
         (current == WaybackTraceStatus.FAILED || incoming == WaybackTraceStatus.FAILED) ->
         WaybackTraceStatus.FAILED
     // Stages 6 and 7 describe recovery, not mere network reachability. A final explicit
@@ -201,7 +201,9 @@ private val WAYBACK_DIAGNOSTIC_TITLES = listOf(
     "Validación de importe, EUR y cambio histórico",
     "Consolidación de precios y eliminación de duplicados",
     "Guardado del histórico en la base de datos local",
-    "Actualización de la ficha/gráfica y resultado final"
+    "Actualización de la ficha/gráfica y resultado final",
+    "Perfil y decodificación de la página archivada",
+    "Decisión del extractor y causa de rechazo del precio"
 )
 
 data class SerpApiActionConfirmation(
@@ -399,7 +401,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         detail: String,
         durationMs: Long? = null
     ) {
-        if (step !in 1..20) return
+        if (step !in 1..22) return
         val time = SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(Date())
         val detailLine = "[$time] " + detail.trim() + (durationMs?.let { " · ${it} ms" } ?: "")
         // Trace callbacks can arrive from Dispatchers.IO while the ViewModel updates UI state.
@@ -422,7 +424,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             val oldDetailLines = when {
                 status == WaybackTraceStatus.PASSED || status == WaybackTraceStatus.FAILED ->
                     old.detail.lines().filterNot(::isSupersededWaybackSkipDetail)
-                // Multiple archive routes share one 20-stage UI. If an earlier route failed to
+                // Multiple archive routes share one 22-stage UI. If an earlier route failed to
                 // download HTML, a later route can emit a generic "CDX supplied no capture" skip
                 // for the same identity stage. Do not retain that contradictory stale skip beside
                 // the real timeout; it makes the report imply the index was empty.
@@ -457,11 +459,16 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
     private fun recordCaptureWaybackDiagnostic(productId: String, event: WaybackTraceEvent) {
         val step = diagnosticIndexForWaybackTrace(event)
-        if (step !in 11..14) return
+        if (step !in 11..14 && step !in 21..22) return
         val captureLabel = Regex(
             """^captura \d+ de \d+ · id [a-j]{8} · fecha \d{14} · ruta [A-Za-z0-9_-]+ · tienda [A-Za-z0-9.-]+"""
         ).find(event.detail)?.value ?: return
-        val phase = if (step == 11 || step == 13) "Descarga HTML" else "Evaluación HTML"
+        val phase = when (step) {
+            11, 13 -> "Descarga HTML"
+            12, 14 -> "Evaluación HTML"
+            21 -> "Perfil HTML"
+            else -> "Resultado del extractor"
+        }
         val key = "$captureLabel|$step"
         val eventText = event.detail.removePrefix(captureLabel).trim().removePrefix("·").trim()
         val time = SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(Date())

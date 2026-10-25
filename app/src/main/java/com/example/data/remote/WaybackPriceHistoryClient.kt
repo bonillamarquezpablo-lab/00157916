@@ -20,6 +20,7 @@ import org.json.JSONObject
 import org.json.JSONTokener
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
+import org.jsoup.nodes.Element
 import java.net.URI
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
@@ -250,9 +251,9 @@ private fun emitCachedLookupSkippedTrace(
     )
 }
 
-/** Translate stable client phase IDs into the clearer 20-stage on-device diagnostic. */
+/** Translate stable client phase IDs into the clearer 22-stage on-device diagnostic. */
 internal fun diagnosticIndexForWaybackTrace(event: WaybackTraceEvent): Int {
-    event.diagnosticStep?.takeIf { it in 1..20 }?.let { return it }
+    event.diagnosticStep?.takeIf { it in 1..22 }?.let { return it }
     return when (event.step) {
         4 -> 5  // CDX request sent
         5 -> 6  // CDX response classified
@@ -265,7 +266,7 @@ internal fun diagnosticIndexForWaybackTrace(event: WaybackTraceEvent): Int {
         12 -> 15 // product identity
         13 -> 16 // price extraction
         14 -> 17 // amount/currency validation
-        else -> event.step.coerceIn(1, 20)
+        else -> event.step.coerceIn(1, 22)
     }
 }
 
@@ -376,13 +377,22 @@ internal fun summarizeCdxStep5Events(
  * A capture is accepted only when structured metadata exposes a EUR price and a product title
  * matching the searched item. Archive gaps are expected; this client never invents prices.
  */
-class WaybackPriceHistoryClient(
-    context: Context,
-    private val http: OkHttpClient = OkHttpClient.Builder()
+/**
+ * Chucker is installed only for debug builds. The release/sideload variant keeps the same
+ * network timeouts and retry policy but never records HTTP traffic.
+ */
+private fun createWaybackHttpClient(context: Context): OkHttpClient {
+    val builder = OkHttpClient.Builder()
         .connectTimeout(4, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS)
         .callTimeout(5, TimeUnit.SECONDS)
-        .build(),
+    addDebugNetworkInspector(context.applicationContext, builder)
+    return builder.build()
+}
+
+class WaybackPriceHistoryClient(
+    context: Context,
+    private val http: OkHttpClient = createWaybackHttpClient(context),
     private val fxHttp: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(2, TimeUnit.SECONDS)
         .readTimeout(3, TimeUnit.SECONDS)
@@ -2167,7 +2177,15 @@ class WaybackPriceHistoryClient(
         return false
     }
 
-    internal suspend fun <T> retrySnapshotDnsOnce(
+    /**
+     * Internet Archive occasionally resets an HTTP/2 stream while sending a snapshot body.
+     * Retry only those known transient transport failures (and DNS resolution) once; do not retry
+     * ordinary validation errors, HTTP 4xx/429 responses, cancellation, or slow read timeouts.
+     */
+    internal fun isRetryableSnapshotTransportFailure(failure: Throwable): Boolean =
+        isDnsResolutionFailure(failure) || snapshotTransportResetKind(failure) != null
+
+    internal suspend fun <T> retrySnapshotTransientOnce(
         request: suspend () -> T,
         beforeRetry: suspend () -> Boolean
     ): T {
@@ -2178,7 +2196,7 @@ class WaybackPriceHistoryClient(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
-                if (!isDnsResolutionFailure(failure)) throw failure
+                if (!isRetryableSnapshotTransportFailure(failure)) throw failure
                 if (retried) throw failure
                 if (!beforeRetry()) throw SnapshotRetryBlockedException("WAYBACK_RATE_LIMITED")
                 retried = true
@@ -2228,16 +2246,13 @@ class WaybackPriceHistoryClient(
                 return@withPermit SnapshotFetch(false, null, gate)
             }
             try {
-                retrySnapshotDnsOnce(
+                retrySnapshotTransientOnce(
                     request = {
                         snapshotRequestAttempts++
-                        snapshotHttp.newCall(request).execute()
-                    },
-                    beforeRetry = {
-                        delay(SNAPSHOT_DNS_RETRY_DELAY_MS)
-                        awaitArchiveRequestTurn() == null
-                    }
-                ).use { response ->
+                        // Keep response-body consumption inside the retry boundary. OkHttp may
+                        // return headers successfully and then fail while reading a reset HTTP/2
+                        // stream; retrying only execute() would miss the failure seen in the trace.
+                        snapshotHttp.newCall(request).execute().use { response ->
                     val elapsed = ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(0L)
                     if (response.code == 429) {
                         activateRateLimit(response.header("Retry-After"), System.currentTimeMillis())
@@ -2252,8 +2267,9 @@ class WaybackPriceHistoryClient(
                         skipArchiveValidationTrace(captureTrace, "La descarga devolvió un código HTTP no satisfactorio.")
                         SnapshotFetch(false, null, code)
                     } else {
-                        val html = readBodyLimited(response.body, MAX_SNAPSHOT_BODY_BYTES)
-                        if (html == null) {
+                        val decodedHtml = readArchivedHtmlLimited(response.body, MAX_SNAPSHOT_BODY_BYTES)
+                        val html = decodedHtml?.text
+                        if (html == null || decodedHtml == null) {
                             emitWaybackTrace(captureTrace, downloadStep, WaybackTraceStatus.FAILED, "HTTP ${response.code}; contenido vacío o por encima del límite permitido.", elapsed)
                             emitWaybackTrace(captureTrace, evaluateStep, WaybackTraceStatus.FAILED, "No se pudo evaluar el HTML descargado.")
                             skipArchiveValidationTrace(captureTrace, "El cuerpo HTML estaba vacío o superaba el límite seguro.")
@@ -2292,7 +2308,10 @@ class WaybackPriceHistoryClient(
                                 }
                                 reportArchiveFieldTrace(
                                     captureTrace, document, expectedTitle, capture.originalUrl, quote, sourceQuote,
-                                    jsonLdRoots = jsonLdRoots
+                                    jsonLdRoots = jsonLdRoots,
+                                    decodedCharsetName = decodedHtml.charsetName,
+                                    decodedHtmlLength = html.length,
+                                    responseContentType = response.body?.contentType()?.toString()
                                 )
                                 val secondarySourceQuotes = parseArchivedPricesForKnownProducts(
                                     document = document,
@@ -2325,12 +2344,18 @@ class WaybackPriceHistoryClient(
                         }
                     }
                 }
+                    },
+                    beforeRetry = {
+                        delay(SNAPSHOT_TRANSPORT_RETRY_DELAY_MS)
+                        awaitArchiveRequestTurn() == null
+                    }
+                )
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (blocked: SnapshotRetryBlockedException) {
                 emitWaybackTrace(
                     captureTrace, downloadStep, WaybackTraceStatus.SKIPPED,
-                    "Reintento DNS omitido porque la pausa global de Internet Archive está activa."
+                    "Reintento de red omitido porque la pausa global de Internet Archive está activa."
                 )
                 emitWaybackTrace(captureTrace, evaluateStep, WaybackTraceStatus.SKIPPED, "No hubo HTML que evaluar.")
                 skipArchiveValidationTrace(captureTrace, "El reintento quedó bloqueado por el control de ritmo.")
@@ -2516,7 +2541,10 @@ class WaybackPriceHistoryClient(
         originalUrl: String,
         quote: ArchivedPriceQuote?,
         sourceQuote: ArchivedPriceQuote? = quote,
-        jsonLdRoots: List<Any> = extractJsonLdRoots(document)
+        jsonLdRoots: List<Any> = extractJsonLdRoots(document),
+        decodedCharsetName: String = "UTF-8",
+        decodedHtmlLength: Int = 0,
+        responseContentType: String? = null
     ) {
         val jsonLd = extractJsonLdProductOffers(jsonLdRoots)
         val pageTitles = extractArchivedPageTitles(document)
@@ -2524,6 +2552,7 @@ class WaybackPriceHistoryClient(
         val expectedTitleForTrace = expectedTitle.replace(Regex("""\s+"""), " ").trim().take(100)
         val detectedTitlesForTrace = titles.take(3)
             .joinToString(" | ") { it.replace(Regex("""\s+"""), " ").trim().take(100) }
+
         val structuredMatch = jsonLd.any { candidate ->
             isMatchingArchivedOfferIdentity(document, expectedTitle, candidate, originalUrl, jsonLdRoots)
         }
@@ -2544,7 +2573,9 @@ class WaybackPriceHistoryClient(
                         "»); el título general de la página no basta para confirmar «" +
                         expectedTitleForTrace + "». No se aceptará su precio."
                 titleMatches -> "Título/modelo de la oferta archivada coincide con el producto seleccionado."
-                else -> "No coincide la identidad. Producto esperado: «$expectedTitleForTrace». Título(s) archivado(s): «$detectedTitlesForTrace». No se aceptará un precio de otra variante."
+                else -> "No coincide la identidad. Producto esperado: «" + expectedTitleForTrace +
+                    "». Título(s) archivado(s): «" + detectedTitlesForTrace +
+                    "». No se aceptará un precio de otra variante."
             }
         )
 
@@ -2556,22 +2587,43 @@ class WaybackPriceHistoryClient(
             .firstNotNullOfOrNull { key ->
                 readMeta(document, setOf(key)) ?: readItemPropValue(document, key)
             }?.uppercase(Locale.ROOT)
-        val visiblePrice = if (quote == null) {
-            extractVisibleProductPrice(document, metaCurrency, setOf("EUR", "USD"))?.first
-        } else null
-        val hasPriceCandidate = jsonLd.isNotEmpty() || metaPrice != null || visiblePrice != null || quote != null || sourceQuote != null
+        val visibleCandidate = extractVisibleProductPrice(document, metaCurrency, setOf("EUR", "USD"))
+        val visiblePrice = visibleCandidate?.first
+
+        // A structured Offer belonging to a different model is not evidence that this product's
+        // price was found. Keep "candidate exists" separate from "candidate matches this SKU".
+        val matchingIdentityJsonLdOffers = jsonLd.filter { candidate ->
+            isMatchingArchivedOfferIdentity(document, expectedTitle, candidate, originalUrl, jsonLdRoots)
+        }
+        val matchingJsonLdOffers = matchingIdentityJsonLdOffers.filter { candidate ->
+            candidate.second.isFinite() &&
+                candidate.second in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE &&
+                candidate.third.uppercase(Locale.ROOT) in setOf("EUR", "USD")
+        }
+        val hasPriceCandidate = matchingJsonLdOffers.isNotEmpty() || metaPrice != null ||
+            visiblePrice != null || quote != null || sourceQuote != null
         emitWaybackTrace(
             onTrace, 13,
             if (hasPriceCandidate) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
             when {
-                jsonLd.isNotEmpty() -> "Precio detectado en metadatos JSON-LD (${jsonLd.size} oferta(s))."
+                matchingJsonLdOffers.isNotEmpty() ->
+                    "Se encontraron " + matchingJsonLdOffers.size +
+                        " oferta(s) estructurada(s) con importe y modelo compatibles."
+                matchingIdentityJsonLdOffers.isNotEmpty() ->
+                    "La identidad coincide en " + matchingIdentityJsonLdOffers.size +
+                        " oferta(s) JSON-LD, pero ninguna supera los límites de importe y moneda aceptados."
+                jsonLd.isNotEmpty() ->
+                    "Hay " + jsonLd.size +
+                        " oferta(s) estructurada(s), pero ninguna se ha confirmado para esta variante; no cuentan como precio encontrado."
                 metaPrice != null -> "Precio numérico detectado en metadatos de la página."
-                visiblePrice != null -> "Precio visible detectado en un bloque de precio del producto y con moneda EUR."
+                visiblePrice != null -> "Importe detectado en un selector específico de precio visible."
                 quote != null -> "Precio histórico verificado para el producto."
-                else -> "No se encontró precio numérico en datos estructurados, metadatos ni bloques de precio reconocidos."
+                sourceQuote != null -> "Se extrajo un candidato, pero falta conversión o validación final."
+                else -> "No se encontró un precio candidato en datos estructurados, metadatos ni selectores reconocidos."
             }
         )
-        val prices = jsonLd.map { it.second } + listOfNotNull(metaPrice, visiblePrice, sourceQuote?.price, quote?.price)
+        val prices = matchingJsonLdOffers.map { it.second } +
+            listOfNotNull(metaPrice, visiblePrice, sourceQuote?.price, quote?.price)
         val numericValid = prices.any { it.isFinite() && it in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE }
         val valid = numericValid && quote != null &&
             quote.currency.equals("EUR", ignoreCase = true) &&
@@ -2591,6 +2643,80 @@ class WaybackPriceHistoryClient(
                 else -> "Se detectó un importe, pero no se confirmó EUR ni una conversión histórica válida."
             }
         )
+
+        // Phase 21 profiles the actual archived document. It records counts and decoding choice,
+        // never page contents, complete URLs, search terms or extracted monetary amounts.
+        val allElements = document.getAllElements()
+        val jsonLdScriptCount = document.select("script[type]").count {
+            it.attr("type").substringBefore(';').trim()
+                .equals("application/ld+json", ignoreCase = true)
+        }
+        val embeddedStateScriptCount = document.select("script[type]").count(::isEmbeddedProductStateScript)
+        val priceMetadataCount = document.select("meta[property], meta[name], meta[itemprop]").count { element ->
+            listOf(element.attr("property"), element.attr("name"), element.attr("itemprop"))
+                .any { it.contains("price", ignoreCase = true) }
+        }
+        val priceElementCount = allElements.count { element ->
+            val itemProps = element.attr("itemprop").lowercase(Locale.ROOT)
+                .split(Regex("""\s+""")).filter { it.isNotBlank() }
+            itemProps.any { it == "price" || it == "lowprice" } ||
+                element.hasAttr("data-price") ||
+                element.hasAttr("data-price-amount") ||
+                element.hasAttr("data-product-price")
+        }
+        val declaredCharset = Regex("""(?i)\bcharset\s*=\s*["']?\s*([a-z0-9._:-]+)""")
+            .find(responseContentType.orEmpty())?.groupValues?.getOrNull(1)
+        val profileIsReadable = decodedHtmlLength > 0 && allElements.size > 3
+        emitWaybackTrace(
+            onTrace, 16,
+            if (profileIsReadable) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
+            "Perfil HTML: " + decodedHtmlLength + " caracteres; decodificado como " + decodedCharsetName +
+                (if (declaredCharset == null) " (sin charset HTTP explícito)" else " (charset HTTP declarado: " + declaredCharset + ")") +
+                "; " + allElements.size + " elementos DOM; " + jsonLdScriptCount +
+                " scripts JSON-LD; " + embeddedStateScriptCount + " bloques JSON de estado de tienda; " +
+                pageTitles.size + " títulos candidatos; " + priceMetadataCount +
+                " metadatos de precio; " + priceElementCount +
+                " campos itemprop/data-price. No se guarda el HTML.",
+            diagnosticStep = 21
+        )
+
+        // Phase 22 explains the chosen extraction path or why no quote was accepted. This is
+        // distinct from the transport error: the page may download perfectly and still have no
+        // parseable, matching, EUR-verifiable price.
+        val sourceMethod = when {
+            sourceQuote == null -> "ningún candidato aceptado"
+            matchingJsonLdOffers.any {
+                kotlin.math.abs(it.second - sourceQuote.price) < 0.011 &&
+                    it.third.equals(sourceQuote.currency, ignoreCase = true)
+            } -> "oferta estructurada compatible"
+            metaPrice != null && kotlin.math.abs(metaPrice - sourceQuote.price) < 0.011 &&
+                (metaCurrency.isNullOrBlank() || metaCurrency.equals(sourceQuote.currency, ignoreCase = true)) ->
+                "metadatos de precio"
+            visibleCandidate != null && kotlin.math.abs(visibleCandidate.first - sourceQuote.price) < 0.011 &&
+                visibleCandidate.second.equals(sourceQuote.currency, ignoreCase = true) ->
+                "selector de precio visible"
+            else -> "candidato extraído por ruta secundaria"
+        }
+        val extractionFailureCode = when {
+            quote != null -> "NONE"
+            sourceQuote?.currency?.equals("USD", ignoreCase = true) == true ->
+                "ARCHIVE_USD_FX_UNAVAILABLE"
+            else -> diagnoseArchivedPrice(document, expectedTitle, originalUrl, jsonLdRoots)
+        }
+        emitWaybackTrace(
+            onTrace, 17,
+            if (quote != null) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
+            "Resultado del extractor: ruta=" + sourceMethod +
+                "; ofertas estructuradas=" + jsonLd.size +
+                "; ofertas compatibles=" + matchingJsonLdOffers.size +
+                "; ofertas con identidad=" + matchingIdentityJsonLdOffers.size +
+                "; meta precio=" + (if (metaPrice != null) "sí" else "no") +
+                "; selector visible=" + (if (visibleCandidate != null) "sí" else "no") +
+                "; identidad de título=" + (if (titleMatches) "compatible" else "sin confirmar") +
+                "; causa=" + extractionFailureCode +
+                (if (quote != null) "; precio aceptado y validado." else "; no se guarda el candidato."),
+            diagnosticStep = 22
+        )
     }
 
     private fun skipArchiveValidationTrace(
@@ -2600,6 +2726,16 @@ class WaybackPriceHistoryClient(
         emitWaybackTrace(onTrace, 12, WaybackTraceStatus.SKIPPED, detail)
         emitWaybackTrace(onTrace, 13, WaybackTraceStatus.SKIPPED, detail)
         emitWaybackTrace(onTrace, 14, WaybackTraceStatus.SKIPPED, detail)
+        emitWaybackTrace(
+            onTrace, 16, WaybackTraceStatus.SKIPPED,
+            "No ejecutado: no hay HTML descargado que perfilar.",
+            diagnosticStep = 21
+        )
+        emitWaybackTrace(
+            onTrace, 17, WaybackTraceStatus.SKIPPED,
+            "No ejecutado: sin documento HTML no puede evaluarse la estrategia de extracción.",
+            diagnosticStep = 22
+        )
     }
 
     private fun diagnoseArchivedPrice(
@@ -4489,18 +4625,50 @@ class WaybackPriceHistoryClient(
             .containsMatchIn(normalized)
     }
 
+    /**
+     * Read JSON-LD plus a small, bounded set of embedded product-state JSON blocks used by
+     * modern shop front ends (for example Next.js/Nuxt pages). These blocks are not trusted as
+     * prices by themselves: every extracted offer still passes the same model/variant, EUR and
+     * amount checks as ordinary JSON-LD.
+     */
+    private fun isEmbeddedProductStateScript(script: Element): Boolean {
+        val type = script.attr("type").substringBefore(';').trim()
+            .lowercase(Locale.ROOT)
+        if (type != "application/json" && type != "text/json") return false
+        val payload = script.data().ifBlank { script.html() }.trim()
+        if (payload.isBlank() || payload.length > MAX_EMBEDDED_PRODUCT_STATE_CHARS) return false
+        val id = script.id().lowercase(Locale.ROOT)
+        val knownStateContainer = listOf(
+            "__next_data__", "__nuxt", "product-state", "product_state",
+            "product-data", "product_data", "product-details", "product_details",
+            "product-offer", "product_offer", "offer-data", "offer_data"
+        ).any { id.contains(it) }
+        if (knownStateContainer) return true
+        val hasPriceField = Regex(
+            """(?i)["'](?:price|currentPrice|salePrice|productPrice|priceCurrency|lowPrice)["']\s*:"""
+        ).containsMatchIn(payload)
+        val hasProductContext = Regex(
+            """(?i)["'](?:offers|product|productName|name|title|sku|itemOffered)["']\s*:"""
+        ).containsMatchIn(payload)
+        return hasPriceField && hasProductContext
+    }
+
     private fun extractJsonLdRoots(document: Document): List<Any> =
         document.select("script").asSequence()
-            .filter { script ->
-                script.attr("type").substringBefore(';').trim()
-                    .equals("application/ld+json", ignoreCase = true)
-            }
             .mapNotNull { script ->
+                val type = script.attr("type").substringBefore(';').trim()
+                val isJsonLd = type.equals("application/ld+json", ignoreCase = true)
+                val isProductState = isEmbeddedProductStateScript(script)
+                if (!isJsonLd && !isProductState) return@mapNotNull null
                 val payload = script.data().ifBlank { script.html() }
                     .trim()
                     .removePrefix("<!--").removeSuffix("-->").trim()
+                if (payload.isBlank() || payload.length > MAX_EMBEDDED_PRODUCT_STATE_CHARS) {
+                    return@mapNotNull null
+                }
                 try { JSONTokener(payload).nextValue() } catch (_: Exception) { null }
             }
+            .take(MAX_ARCHIVED_STRUCTURED_SCRIPTS)
             .toList()
 
     private fun extractJsonLdProductOffers(document: Document): List<Triple<String, Double, String>> =
@@ -5280,15 +5448,97 @@ class WaybackPriceHistoryClient(
         return true
     }
 
-    /** Read bounded response bodies so unexpectedly large archived pages cannot spike app memory. */
-    internal fun classifyNetworkFailure(stage: String, failure: Exception): String = when {
-        failure is SocketTimeoutException || failure is InterruptedIOException -> "${stage}_TIMEOUT"
-        isDnsResolutionFailure(failure) -> "${stage}_DNS"
-        failure is IOException -> "${stage}_NETWORK"
-        else -> "${stage}_UNEXPECTED_ERROR"
+    /**
+     * Classify common archive transport failures without leaking exception messages or URLs.
+     * In particular, OkHttp's outer timeout can wrap a more useful HTTP/2 StreamResetException;
+     * inspect the cause chain first so the diagnostic points at the interrupted stream.
+     */
+    internal fun snapshotTransportResetKind(failure: Throwable): String? {
+        val seen = mutableSetOf<Throwable>()
+        var current: Throwable? = failure
+        while (current != null && seen.add(current)) {
+            val type = current.javaClass.simpleName.lowercase(Locale.ROOT)
+            val message = current.message.orEmpty().lowercase(Locale.ROOT)
+            when {
+                type.contains("streamresetexception") || message.contains("stream was reset") ->
+                    return "STREAM_RESET"
+                type.contains("connectionshutdownexception") || message.contains("connection shutdown") ->
+                    return "CONNECTION_SHUTDOWN"
+                message.contains("connection reset") -> return "CONNECTION_RESET"
+                message.contains("unexpected end of stream") -> return "EARLY_EOF"
+            }
+            current = current.cause
+        }
+        return null
     }
 
-    private fun readBodyLimited(body: ResponseBody?, maxBytes: Int): String? {
+    internal fun classifyNetworkFailure(stage: String, failure: Exception): String {
+        if (isDnsResolutionFailure(failure)) return "${stage}_DNS"
+        snapshotTransportResetKind(failure)?.let { return "${stage}_$it" }
+        return when (failure) {
+            is SocketTimeoutException, is InterruptedIOException -> "${stage}_TIMEOUT"
+            is IOException -> "${stage}_NETWORK"
+            else -> "${stage}_UNEXPECTED_ERROR"
+        }
+    }
+
+    internal data class DecodedArchiveContent(
+        val text: String,
+        val charsetName: String
+    )
+
+    /**
+     * Decode archived bytes deterministically. A BOM wins, then the HTTP charset, then an HTML
+     * meta charset, and finally UTF-8. Old snapshots often omit the HTTP charset even though the
+     * original page declared windows-1252 or ISO-8859-1; decoding those bytes as UTF-8 corrupts
+     * accented model names and can cause an otherwise valid product match to be rejected.
+     */
+    internal fun decodeArchiveContent(
+        bytes: ByteArray,
+        contentTypeHeader: String? = null
+    ): DecodedArchiveContent {
+        var byteOffset = 0
+        val bomCharset = when {
+            bytes.size >= 3 &&
+                bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte() -> {
+                byteOffset = 3
+                Charsets.UTF_8
+            }
+            bytes.size >= 2 && bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte() -> {
+                byteOffset = 2
+                java.nio.charset.Charset.forName("UTF-16BE")
+            }
+            bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte() -> {
+                byteOffset = 2
+                java.nio.charset.Charset.forName("UTF-16LE")
+            }
+            else -> null
+        }
+        fun safeCharset(name: String?): java.nio.charset.Charset? =
+            name?.trim()?.takeIf { it.isNotBlank() }?.let {
+                runCatching { java.nio.charset.Charset.forName(it) }.getOrNull()
+            }
+
+        val headerCharsetName = Regex("""(?i)\bcharset\s*=\s*[\"']?\s*([a-z0-9._:-]+)""")
+            .find(contentTypeHeader.orEmpty())?.groupValues?.getOrNull(1)
+        val probeStart = byteOffset.coerceAtMost(bytes.size)
+        val probeEnd = minOf(bytes.size, probeStart + 8192)
+        // Charset labels and the meta element syntax are ASCII-compatible in legacy HTML
+        // encodings, so ISO-8859-1 is a safe byte-preserving view for this short sniff window.
+        val probe = String(bytes, probeStart, probeEnd - probeStart, Charsets.ISO_8859_1)
+        val metaCharsetName = Regex("""(?is)<meta\b[^>]*\bcharset\s*=\s*[\"']?\s*([a-z0-9._:-]+)""")
+            .find(probe)?.groupValues?.getOrNull(1)
+            ?: Regex("""(?is)<meta\b[^>]*\bcontent\s*=\s*[\"'][^\"']*charset\s*=\s*([a-z0-9._:-]+)""")
+                .find(probe)?.groupValues?.getOrNull(1)
+        val charset = bomCharset ?: safeCharset(headerCharsetName) ?: safeCharset(metaCharsetName)
+            ?: Charsets.UTF_8
+        return DecodedArchiveContent(
+            text = String(bytes, byteOffset, bytes.size - byteOffset, charset),
+            charsetName = charset.name()
+        )
+    }
+
+    private fun readBodyBytesLimited(body: ResponseBody?, maxBytes: Int): ByteArray? {
         body ?: return null
         if (body.contentLength() > maxBytes) return null
         val output = ByteArrayOutputStream(minOf(maxBytes, 16 * 1024))
@@ -5303,11 +5553,19 @@ class WaybackPriceHistoryClient(
                 total += count
             }
         }
-        // Old retailer snapshots may use ISO-8859-1 or another declared HTML charset.
-        // Decode using the HTTP Content-Type instead of forcing UTF-8, which can corrupt product
-        // names/accents and make exact title verification reject a valid capture.
-        val charset = body.contentType()?.charset(Charsets.UTF_8) ?: Charsets.UTF_8
-        return output.toString(charset.name())
+        return output.toByteArray()
+    }
+
+    private fun readBodyLimited(body: ResponseBody?, maxBytes: Int): String? {
+        body ?: return null
+        val bytes = readBodyBytesLimited(body, maxBytes) ?: return null
+        return decodeArchiveContent(bytes, body.contentType()?.toString()).text
+    }
+
+    private fun readArchivedHtmlLimited(body: ResponseBody?, maxBytes: Int): DecodedArchiveContent? {
+        body ?: return null
+        val bytes = readBodyBytesLimited(body, maxBytes) ?: return null
+        return decodeArchiveContent(bytes, body.contentType()?.toString())
     }
 
     /**
@@ -5451,7 +5709,9 @@ class WaybackPriceHistoryClient(
         private val GLOBAL_BACKFILL_MUTEX = Mutex()
         private const val MAX_CDX_BODY_BYTES = 256 * 1024
         private const val MAX_SNAPSHOT_BODY_BYTES = 2 * 1024 * 1024
-        private const val SNAPSHOT_DNS_RETRY_DELAY_MS = 250L
+        private const val MAX_EMBEDDED_PRODUCT_STATE_CHARS = 512 * 1024
+        private const val MAX_ARCHIVED_STRUCTURED_SCRIPTS = 24
+        private const val SNAPSHOT_TRANSPORT_RETRY_DELAY_MS = 350L
         const val DAY_MS = 24L * 60L * 60L * 1000L
         const val MIN_HISTORICAL_PRICE = 0.50
         const val MAX_HISTORICAL_PRICE = 10_000.0

@@ -141,9 +141,7 @@ class MementoClient(
         if (!uri.host.equals(ARCHIVE_HOST, ignoreCase = true)) return null
         val replayPrefix = Regex("""^/wayback/(\d{14})(?:id_|mp_)?/""")
         if (!replayPrefix.containsMatchIn(uri.rawPath.orEmpty())) return null
-        return snapshotUrl.replaceFirst(Regex("""(/wayback/\d{14})(?:id_|mp_)?/""")) { match ->
-            "${match.groupValues[1]}mp_/"
-        }
+        return snapshotUrl.replaceFirst(Regex("""(/wayback/\d{14})(?:id_|mp_)?/"""), "$1mp_/")
     }
 
     /** Strip tracking-only query fields while retaining functional SKU/variant parameters. */

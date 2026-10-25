@@ -131,6 +131,21 @@ class MementoClient(
         }
     }
 
+    /**
+     * Arquivo.pt's normal replay URL serves a wrapper page whose iframe contains the archived
+     * document. Parse the archived document itself (mp_) so the product title and JSON-LD offers
+     * are visible to the same strict validator used for Wayback captures.
+     */
+    internal fun toContentSnapshotUrl(snapshotUrl: String): String? {
+        val uri = parseHttpUri(snapshotUrl) ?: return null
+        if (!uri.host.equals(ARCHIVE_HOST, ignoreCase = true)) return null
+        val replayPrefix = Regex("""^/wayback/(\d{14})(?:id_|mp_)?/""")
+        if (!replayPrefix.containsMatchIn(uri.rawPath.orEmpty())) return null
+        return snapshotUrl.replaceFirst(Regex("""(/wayback/\d{14})(?:id_|mp_)?/""")) { match ->
+            "${match.groupValues[1]}mp_/"
+        }
+    }
+
     /** Strip tracking-only query fields while retaining functional SKU/variant parameters. */
     internal fun canonicalizeArchiveLookupUrl(originalUrl: String): String? {
         val uri = parseHttpUri(originalUrl) ?: return null
@@ -265,6 +280,12 @@ class MementoClient(
         var requestFailed = false
         for (capture in captures) {
             val quoteCountBeforeCapture = quotes.size
+            val contentSnapshotUrl = toContentSnapshotUrl(capture.snapshotUrl)
+            if (contentSnapshotUrl == null) {
+                requestFailed = true
+                diagnostics += "MEMENTO_SNAPSHOT_URL_INVALID"
+                continue
+            }
             try {
                 http.newBuilder()
                     .callTimeout(SNAPSHOT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -272,7 +293,7 @@ class MementoClient(
                     .build()
                     .newCall(
                         Request.Builder()
-                            .url(capture.snapshotUrl)
+                            .url(contentSnapshotUrl)
                             .header("User-Agent", USER_AGENT)
                             .get()
                             .build()
@@ -583,12 +604,12 @@ class MementoClient(
                 !uri.host.equals(ARCHIVE_HOST, ignoreCase = true) ||
                 uri.userInfo != null
             ) continue
-            val rawTimestamp = Regex("""^/wayback/(\d{14})(?:id_)?/""")
+            val rawTimestamp = Regex("""^/wayback/(\d{14})(?:id_|mp_)?/""")
                 .find(uri.rawPath.orEmpty())?.groupValues?.getOrNull(1) ?: continue
             val timestamp = runCatching { formatter.parse(rawTimestamp)?.time }.getOrNull() ?: continue
             if (timestamp !in earliest..now) continue
 
-            val targetInLink = Regex("""^https://arquivo\.pt/wayback/(\d{14})(?:id_)?/(https://.+)$""")
+            val targetInLink = Regex("""^https://arquivo\.pt/wayback/(\d{14})(?:id_|mp_)?/(https://.+)$""")
                 .find(secureLink)?.groupValues?.getOrNull(2) ?: continue
             if (!sameOriginalUrl(targetInLink, originalUrl)) continue
             output += MementoCapture(rawTimestamp, timestamp, secureLink, target.toString())

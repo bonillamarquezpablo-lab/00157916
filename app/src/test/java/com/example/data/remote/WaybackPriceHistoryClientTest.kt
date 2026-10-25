@@ -544,7 +544,7 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun exactHistoryStopsAfterThreeVerifiedDatesAndKeepsTheNewestCaptures() = runBlocking {
+    fun exactHistoryContinuesPrefixScanAfterThreeVerifiedDates() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
         preferences.edit()
@@ -614,7 +614,7 @@ class WaybackPriceHistoryClientTest {
                     lookbackDays = 2_920
                 )
             }
-            assertEquals("A sufficient exact series should not trigger the prefix fallback", listOf("exact"), cdxMatchTypes.toList())
+            assertEquals("The prefix route must still be checked because the exact dates may already exist in Room", listOf("exact", "prefix"), cdxMatchTypes.toList())
             assertEquals("The lookup should stop after three verified dates instead of downloading all five", 3, result.quotes.size)
             assertEquals(3, result.quotes.map { Math.floorDiv(it.observedAt, WaybackPriceHistoryClient.DAY_MS) }.distinct().size)
             assertEquals("The three newest captures should be enough", 3, requestUrls.count { it.startsWith("web.archive.org/web/") })

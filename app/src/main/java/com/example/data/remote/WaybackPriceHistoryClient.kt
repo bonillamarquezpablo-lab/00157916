@@ -2167,7 +2167,32 @@ class WaybackPriceHistoryClient(
         return false
     }
 
-    internal suspend fun <T> retrySnapshotDnsOnce(
+    /**
+     * Internet Archive occasionally resets an HTTP/2 stream while sending a snapshot body.
+     * Retry only those known transient transport failures (and DNS resolution) once; do not retry
+     * ordinary validation errors, HTTP 4xx/429 responses, cancellation, or slow read timeouts.
+     */
+    internal fun isRetryableSnapshotTransportFailure(failure: Throwable): Boolean {
+        val seen = mutableSetOf<Throwable>()
+        var current: Throwable? = failure
+        while (current != null && seen.add(current)) {
+            if (isDnsResolutionFailure(current)) return true
+            val type = current.javaClass.simpleName.lowercase(Locale.ROOT)
+            val message = current.message.orEmpty().lowercase(Locale.ROOT)
+            if (
+                type.contains("streamresetexception") ||
+                type.contains("connectionshutdownexception") ||
+                message.contains("stream was reset") ||
+                message.contains("connection reset") ||
+                message.contains("connection shutdown") ||
+                message.contains("unexpected end of stream")
+            ) return true
+            current = current.cause
+        }
+        return false
+    }
+
+    internal suspend fun <T> retrySnapshotTransientOnce(
         request: suspend () -> T,
         beforeRetry: suspend () -> Boolean
     ): T {
@@ -2178,7 +2203,7 @@ class WaybackPriceHistoryClient(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
-                if (!isDnsResolutionFailure(failure)) throw failure
+                if (!isRetryableSnapshotTransportFailure(failure)) throw failure
                 if (retried) throw failure
                 if (!beforeRetry()) throw SnapshotRetryBlockedException("WAYBACK_RATE_LIMITED")
                 retried = true
@@ -2228,13 +2253,13 @@ class WaybackPriceHistoryClient(
                 return@withPermit SnapshotFetch(false, null, gate)
             }
             try {
-                retrySnapshotDnsOnce(
+                retrySnapshotTransientOnce(
                     request = {
                         snapshotRequestAttempts++
                         snapshotHttp.newCall(request).execute()
                     },
                     beforeRetry = {
-                        delay(SNAPSHOT_DNS_RETRY_DELAY_MS)
+                        delay(SNAPSHOT_TRANSPORT_RETRY_DELAY_MS)
                         awaitArchiveRequestTurn() == null
                     }
                 ).use { response ->
@@ -2330,7 +2355,7 @@ class WaybackPriceHistoryClient(
             } catch (blocked: SnapshotRetryBlockedException) {
                 emitWaybackTrace(
                     captureTrace, downloadStep, WaybackTraceStatus.SKIPPED,
-                    "Reintento DNS omitido porque la pausa global de Internet Archive está activa."
+                    "Reintento de red omitido porque la pausa global de Internet Archive está activa."
                 )
                 emitWaybackTrace(captureTrace, evaluateStep, WaybackTraceStatus.SKIPPED, "No hubo HTML que evaluar.")
                 skipArchiveValidationTrace(captureTrace, "El reintento quedó bloqueado por el control de ritmo.")
@@ -5451,7 +5476,7 @@ class WaybackPriceHistoryClient(
         private val GLOBAL_BACKFILL_MUTEX = Mutex()
         private const val MAX_CDX_BODY_BYTES = 256 * 1024
         private const val MAX_SNAPSHOT_BODY_BYTES = 2 * 1024 * 1024
-        private const val SNAPSHOT_DNS_RETRY_DELAY_MS = 250L
+        private const val SNAPSHOT_TRANSPORT_RETRY_DELAY_MS = 350L
         const val DAY_MS = 24L * 60L * 60L * 1000L
         const val MIN_HISTORICAL_PRICE = 0.50
         const val MAX_HISTORICAL_PRICE = 10_000.0

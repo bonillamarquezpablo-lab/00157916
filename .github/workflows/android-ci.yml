@@ -126,12 +126,12 @@ jobs:
             echo "::error::versionCode calculado ($VERSION_CODE) no supera la versión instalada 6296."
             exit 1
           fi
-          gradle :app:assembleDebug --stacktrace -PVERSION_CODE="$VERSION_CODE" -PVERSION_NAME="$VERSION_NAME"
+          gradle :app:assembleDebug --stacktrace -PVERSION_CODE="$VERSION_CODE" -PVERSION_NAME="$VERSION_NAME" -PPARALLEL_DEBUG_APP_ID_SUFFIX=.debug
 
-      - name: Publicar APK de depuración como artefacto descargable
+      - name: Publicar APK de diagnóstico instalable junto a la app existente
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: minimo-debug-chucker
+          name: minimo-debug-chucker-parallel
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7

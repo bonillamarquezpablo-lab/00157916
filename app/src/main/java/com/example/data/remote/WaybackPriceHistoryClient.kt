@@ -439,7 +439,8 @@ class WaybackPriceHistoryClient(
         onTrace: ((WaybackTraceEvent) -> Unit)? = null,
         knownProductTitlesById: Map<String, String> = emptyMap(),
         onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null,
-        forceRefresh: Boolean = false
+        forceRefresh: Boolean = false,
+        stopWhenEnoughNewPoints: (() -> Boolean)? = null
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
         if (!preferences.getBoolean("enabled", true)) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("WAYBACK_DISABLED"))
@@ -505,12 +506,24 @@ class WaybackPriceHistoryClient(
                     onTrace = onTrace,
                     knownProductTitlesById = knownProductTitlesById,
                     snapshotResultsCache = snapshotResultsCache,
-                    onVerifiedQuotes = onVerifiedQuotes
+                    onVerifiedQuotes = onVerifiedQuotes,
+                    stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                 )
             }
             if (exactResult.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) {
                 rememberAttempt(attempt, now, hasQuotes = false, failed = true, rateLimited = true)
                 return@serializedArchiveLookup exactResult
+            }
+            if (stopWhenEnoughNewPoints?.invoke() == true) {
+                emitWaybackTrace(
+                    onTrace, 6, WaybackTraceStatus.SKIPPED,
+                    "Cortocircuito inteligente: ya se guardaron suficientes fechas históricas nuevas; se omiten prefijo, bloques anuales y consultas adicionales."
+                )
+                rememberAttempt(attempt, now, hasQuotes = exactResult.quotes.isNotEmpty(), failed = false)
+                return@serializedArchiveLookup exactResult.copy(
+                    requestFailed = false,
+                    diagnosticCodes = emptySet()
+                )
             }
 
             // Tracking parameters and trailing slashes can change the URL string indexed by CDX.
@@ -580,7 +593,8 @@ class WaybackPriceHistoryClient(
                 knownProductTitlesById = knownProductTitlesById,
                 snapshotResultsCache = snapshotResultsCache,
                 onVerifiedQuotes = onVerifiedQuotes,
-                primarySeedQuotes = exactPrimaryQuotes
+                primarySeedQuotes = exactPrimaryQuotes,
+                stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
             )
 
             val yearlyResults = mutableListOf<WaybackBackfillResult>()
@@ -627,7 +641,8 @@ class WaybackPriceHistoryClient(
                         snapshotResultsCache = snapshotResultsCache,
                         onVerifiedQuotes = onVerifiedQuotes,
                         primarySeedQuotes = exactPrimaryQuotes + prefixResult.quotes +
-                            yearlyResults.flatMap { it.quotes }
+                            yearlyResults.flatMap { it.quotes },
+                        stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                     )
                     yearlyResults += yearly
                     val hitRateLimit = yearly.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ||
@@ -2116,18 +2131,27 @@ class WaybackPriceHistoryClient(
         )
     }
 
+    internal fun buildAvailabilityUrl(originalUrl: String, targetDate: String): HttpUrl? {
+        val archiveTargetUrl = canonicalPreferredArchiveUrl(originalUrl)
+            ?.takeIf(::isEligibleDirectUrl)
+            ?: originalUrl.takeIf(::isEligibleDirectUrl)
+            ?: return null
+        return HttpUrl.Builder()
+            .scheme("https")
+            .host("archive.org")
+            .addPathSegments("wayback/available")
+            .addQueryParameter("url", archiveTargetUrl)
+            .addQueryParameter("timestamp", targetDate)
+            .build()
+    }
+
     private suspend fun queryAvailability(
         originalUrl: String,
         targetDate: String,
         stage: String
     ): AvailabilityProbe {
-        val endpoint = HttpUrl.Builder()
-            .scheme("https")
-            .host("archive.org")
-            .addPathSegments("wayback/available")
-            .addQueryParameter("url", originalUrl)
-            .addQueryParameter("timestamp", targetDate)
-            .build()
+        val endpoint = buildAvailabilityUrl(originalUrl, targetDate)
+            ?: return AvailabilityProbe(requestFailed = true, diagnosticCode = "${stage}_INVALID_TARGET")
         // The previous 4-second budget expired on the product-domain fallback even when
         // the archive had valid data. Keep the probe count bounded but allow up to 6 seconds for
         // slow public Archive.org responses.
@@ -2153,7 +2177,7 @@ class WaybackPriceHistoryClient(
                     if (body == null) {
                         AvailabilityProbe(requestFailed = true, diagnosticCode = "${stage}_BODY_EMPTY_OR_LIMIT")
                     } else {
-                        val capture = parseAvailabilityCapture(body, originalUrl)
+                        val capture = parseAvailabilityCapture(body, endpoint.queryParameter("url") ?: originalUrl)
                         if (runCatching { JSONObject(body) }.isFailure) {
                             AvailabilityProbe(requestFailed = true, diagnosticCode = "${stage}_INVALID_RESPONSE")
                         } else {
@@ -3534,7 +3558,8 @@ class WaybackPriceHistoryClient(
         snapshotResultsCache: MutableMap<String, SnapshotFetch>? = null,
         onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null,
         stopAfterDistinctPrimaryDates: Int? = null,
-        primarySeedQuotes: List<ArchivedPriceQuote> = emptyList()
+        primarySeedQuotes: List<ArchivedPriceQuote> = emptyList(),
+        stopWhenEnoughNewPoints: (() -> Boolean)? = null
     ): WaybackBackfillResult {
         emitWaybackTrace(onTrace, 4, WaybackTraceStatus.RUNNING,
             "$cdxStage: petición CDX preparada; URL completa omitida.")
@@ -3700,6 +3725,7 @@ class WaybackPriceHistoryClient(
             )
             fetched += snapshot
             if (snapshot.diagnosticCode == "WAYBACK_RATE_LIMITED") break
+            if (stopWhenEnoughNewPoints?.invoke() == true) break
             val requiredPrimaryDates = stopAfterDistinctPrimaryDates
             if (requiredPrimaryDates != null && requiredPrimaryDates > 0) {
                 val verifiedPrimaryDates = (
@@ -3829,7 +3855,18 @@ class WaybackPriceHistoryClient(
         maxRetries: Int = MAX_CDX_HTTP_RETRIES
     ): okhttp3.Response {
         repeat(maxRetries + 1) { attempt ->
-            val response = client.newCall(request).execute()
+            val response = try {
+                client.newCall(request).execute()
+            } catch (failure: IOException) {
+                val retryableTransport = isDnsResolutionFailure(failure) ||
+                    snapshotTransportResetKind(failure) != null
+                if (!retryableTransport || attempt >= maxRetries) throw failure
+                // Retry one known transient transport failure; preserve coroutine cancellation,
+                // call-timeout expiry and HTTP 429 as terminal states.
+                val jitterMs = (System.nanoTime().ushr(1) % (CDX_RETRY_JITTER_MS + 1))
+                delay(CDX_RETRY_DELAY_MS + (attempt * CDX_RETRY_DELAY_MS) + jitterMs)
+                return@repeat
+            }
             val shouldRetry = response.code in RETRYABLE_CDX_HTTP_CODES &&
                 attempt < maxRetries
             if (!shouldRetry) return response
@@ -3986,6 +4023,10 @@ class WaybackPriceHistoryClient(
         lookbackDays: Int,
         matchType: String = "prefix"
     ): HttpUrl? {
+        val archiveTargetUrl = canonicalPreferredArchiveUrl(originalUrl)
+            ?.takeIf(::isEligibleDirectUrl)
+            ?: originalUrl.takeIf(::isEligibleDirectUrl)
+            ?: return null
         val start = historyWindowStartTimestamp(now, lookbackDays)
         val from = formatUtc(start, "yyyyMMdd")
         val to = formatUtc(now, "yyyyMMdd")
@@ -3993,7 +4034,7 @@ class WaybackPriceHistoryClient(
             .scheme("https")
             .host("web.archive.org")
             .addPathSegments("cdx/search/cdx")
-            .addQueryParameter("url", originalUrl)
+            .addQueryParameter("url", archiveTargetUrl)
             // Prefix matching handles archived canonical variants such as a trailing slash,
             // locale folder or child variant URL. The HTML product-title + EUR-price verifier is
             // still mandatory, so a neighbouring product cannot be accepted by URL similarity.
@@ -5685,8 +5726,25 @@ class WaybackPriceHistoryClient(
         return null
     }
 
+    internal fun isCanceledHttpCallFailure(failure: Throwable): Boolean {
+        val seen = mutableSetOf<Throwable>()
+        var current: Throwable? = failure
+        while (current != null && seen.add(current)) {
+            val message = current.message.orEmpty().trim().lowercase(Locale.ROOT)
+            if (current is IOException && (
+                    message == "canceled" || message == "cancelled" ||
+                        message.contains("call canceled by timeout") ||
+                        message.contains("call cancelled by timeout")
+                    )
+            ) return true
+            current = current.cause
+        }
+        return false
+    }
+
     internal fun classifyNetworkFailure(stage: String, failure: Exception): String {
         if (isDnsResolutionFailure(failure)) return "${stage}_DNS"
+        if (isCanceledHttpCallFailure(failure)) return "${stage}_TIMEOUT"
         snapshotTransportResetKind(failure)?.let { return "${stage}_$it" }
         return when (failure) {
             is SocketTimeoutException, is InterruptedIOException -> "${stage}_TIMEOUT"
@@ -5790,12 +5848,39 @@ class WaybackPriceHistoryClient(
     internal fun sampleCaptures(
         captures: List<WaybackCapture>,
         max: Int
-    ): List<WaybackCapture> = sampleByQuarter(
-        items = captures,
-        max = max,
-        timestampOf = { it.timestamp },
-        keyOf = { it.rawTimestamp to it.originalUrl }
-    )
+    ): List<WaybackCapture> {
+        if (max <= 0 || captures.isEmpty()) return emptyList()
+        val unique = captures.distinctBy { it.rawTimestamp to it.originalUrl }
+        val httpEraCaptures = unique.filter { capture ->
+            runCatching { URI(capture.originalUrl).scheme.equals("http", ignoreCase = true) }
+                .getOrDefault(false)
+        }
+        // Legacy HTTP captures are often the only pre-HTTPS price evidence for a product.
+        // Reserve a slot for each such capture while it fits the download budget, then sample
+        // the remaining HTTPS rows across quarters. Identity and price checks remain mandatory.
+        if (httpEraCaptures.isEmpty()) return sampleByQuarter(
+            items = unique,
+            max = max,
+            timestampOf = { it.timestamp },
+            keyOf = { it.rawTimestamp to it.originalUrl }
+        )
+        if (httpEraCaptures.size >= max) return sampleByQuarter(
+            items = httpEraCaptures,
+            max = max,
+            timestampOf = { it.timestamp },
+            keyOf = { it.rawTimestamp to it.originalUrl }
+        )
+        val httpKeys = httpEraCaptures.map { it.rawTimestamp to it.originalUrl }.toSet()
+        val remaining = sampleByQuarter(
+            items = unique.filterNot { (it.rawTimestamp to it.originalUrl) in httpKeys },
+            max = max - httpEraCaptures.size,
+            timestampOf = { it.timestamp },
+            keyOf = { it.rawTimestamp to it.originalUrl }
+        )
+        return (httpEraCaptures + remaining)
+            .distinctBy { it.rawTimestamp to it.originalUrl }
+            .sortedBy { it.timestamp }
+    }
 
     /**
      * When exact-URL and prefix CDX results overlap, sample captures that have not already been

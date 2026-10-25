@@ -3,7 +3,6 @@ package com.example
 import android.app.Application
 import android.os.Process
 import android.util.Log
-import com.chuckerteam.chucker.api.ChuckerInterceptor
 import kotlin.system.exitProcess
 
 /**
@@ -11,15 +10,6 @@ import kotlin.system.exitProcess
  * are never uploaded or written to public Downloads.
  */
 class MinimoApplication : Application() {
-    /**
-     * Development-only HTTP inspector. Consumers must request this accessor explicitly;
-     * release/sideload builds never install the interceptor into their network clients.
-     */
-    fun createDebugNetworkInspector(): ChuckerInterceptor {
-        check(BuildConfig.DEBUG) { "HTTP inspection is only available in debug builds." }
-        return ChuckerInterceptor.Builder(applicationContext).build()
-    }
-
     override fun onCreate() {
         super.onCreate()
         val previous = Thread.getDefaultUncaughtExceptionHandler()

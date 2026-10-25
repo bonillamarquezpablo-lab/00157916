@@ -14,6 +14,7 @@ import com.example.data.remote.MementoClient
 import com.example.data.remote.shouldAttemptMementoFallback
 import com.example.data.remote.hasMatchingExplicitStorageCapacity
 import com.example.data.remote.shouldSkipDomainFallbackAfterSnapshotTimeout
+import com.example.data.remote.shouldSkipDomainFallbackAfterRepeatedCdxTimeouts
 import com.example.data.remote.WaybackPriceHistoryClient
 import com.example.data.remote.diagnosticIndexForWaybackTrace
 import com.example.data.remote.summarizeCdxStep5Events
@@ -2925,13 +2926,26 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     )
                     val rateLimitedAtDirectStage =
                         attempts.any { it.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") }
+                    val priorDirectCdxDiagnostics = attempts.flatMap { it.diagnosticCodes }.toSet()
+                    val repeatedCdxTimeouts =
+                        shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(priorDirectCdxDiagnostics)
                     val allDirectSnapshotsTimedOut =
                         shouldSkipDomainFallbackAfterSnapshotTimeout(attempts)
                     val merchantDomainForFallback = candidate.merchantDomain
+                    if (repeatedCdxTimeouts) {
+                        diagnosticCodes.add("CDX_DOMAIN_FALLBACK_SKIPPED_AFTER_REPEATED_TIMEOUTS")
+                        if (diagnosticProductId != null) {
+                            reportWaybackDiagnostic(
+                                diagnosticProductId, 7, WaybackTraceStatus.SKIPPED,
+                                "Se omite otra ronda de consultas a Internet Archive: la búsqueda directa y los bloques anuales CDX agotaron el tiempo. Se conserva el histórico verificado y el cursor permitirá continuar por años en una búsqueda posterior, sin provocar más peticiones durante este intento."
+                            )
+                        }
+                    }
                     val shouldTryDomainFallback = merchantDomainForFallback != null &&
                         !hasSufficientHistoryBeforeDomain &&
                         !rateLimitedAtDirectStage &&
-                        !allDirectSnapshotsTimedOut
+                        !allDirectSnapshotsTimedOut &&
+                        !repeatedCdxTimeouts
                     if (shouldTryDomainFallback && merchantDomainForFallback != null) {
                         if (diagnosticProductId != null) {
                             reportWaybackDiagnostic(
@@ -3347,6 +3361,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             "CANDIDATE_TIMEOUT" -> "$code (se agotó el tiempo total de la búsqueda de esta tienda)"
                             "CDX_URL_PREFIX_CANDIDATE_TIMEOUT" -> "$code (la consulta por prefijo superó su límite de tiempo)"
                             "CDX_DOMAIN_CANDIDATE_TIMEOUT" -> "$code (la búsqueda amplia por dominio superó su límite de tiempo)"
+                            "CDX_DOMAIN_FALLBACK_SKIPPED_AFTER_REPEATED_TIMEOUTS" -> "Se pausó la alternativa por dominio porque CDX agotó el tiempo en la búsqueda directa y en los bloques anuales; se evitaron más peticiones al archivo."
                             "CDX_EARLY_EXIT_VALID_PRICE" -> "CDX_EARLY_EXIT_VALID_PRICE (se cancelaron alternativas al confirmar un precio)"
                             else -> code
                         }

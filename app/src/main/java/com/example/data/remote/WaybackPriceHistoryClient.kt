@@ -2173,25 +2173,8 @@ class WaybackPriceHistoryClient(
      * Retry only those known transient transport failures (and DNS resolution) once; do not retry
      * ordinary validation errors, HTTP 4xx/429 responses, cancellation, or slow read timeouts.
      */
-    internal fun isRetryableSnapshotTransportFailure(failure: Throwable): Boolean {
-        val seen = mutableSetOf<Throwable>()
-        var current: Throwable? = failure
-        while (current != null && seen.add(current)) {
-            if (isDnsResolutionFailure(current)) return true
-            val type = current.javaClass.simpleName.lowercase(Locale.ROOT)
-            val message = current.message.orEmpty().lowercase(Locale.ROOT)
-            if (
-                type.contains("streamresetexception") ||
-                type.contains("connectionshutdownexception") ||
-                message.contains("stream was reset") ||
-                message.contains("connection reset") ||
-                message.contains("connection shutdown") ||
-                message.contains("unexpected end of stream")
-            ) return true
-            current = current.cause
-        }
-        return false
-    }
+    internal fun isRetryableSnapshotTransportFailure(failure: Throwable): Boolean =
+        isDnsResolutionFailure(failure) || snapshotTransportResetKind(failure) != null
 
     internal suspend fun <T> retrySnapshotTransientOnce(
         request: suspend () -> T,
@@ -5456,12 +5439,38 @@ class WaybackPriceHistoryClient(
         return true
     }
 
-    /** Read bounded response bodies so unexpectedly large archived pages cannot spike app memory. */
-    internal fun classifyNetworkFailure(stage: String, failure: Exception): String = when {
-        failure is SocketTimeoutException || failure is InterruptedIOException -> "${stage}_TIMEOUT"
-        isDnsResolutionFailure(failure) -> "${stage}_DNS"
-        failure is IOException -> "${stage}_NETWORK"
-        else -> "${stage}_UNEXPECTED_ERROR"
+    /**
+     * Classify common archive transport failures without leaking exception messages or URLs.
+     * In particular, OkHttp's outer timeout can wrap a more useful HTTP/2 StreamResetException;
+     * inspect the cause chain first so the diagnostic points at the interrupted stream.
+     */
+    internal fun snapshotTransportResetKind(failure: Throwable): String? {
+        val seen = mutableSetOf<Throwable>()
+        var current: Throwable? = failure
+        while (current != null && seen.add(current)) {
+            val type = current.javaClass.simpleName.lowercase(Locale.ROOT)
+            val message = current.message.orEmpty().lowercase(Locale.ROOT)
+            when {
+                type.contains("streamresetexception") || message.contains("stream was reset") ->
+                    return "STREAM_RESET"
+                type.contains("connectionshutdownexception") || message.contains("connection shutdown") ->
+                    return "CONNECTION_SHUTDOWN"
+                message.contains("connection reset") -> return "CONNECTION_RESET"
+                message.contains("unexpected end of stream") -> return "EARLY_EOF"
+            }
+            current = current.cause
+        }
+        return null
+    }
+
+    internal fun classifyNetworkFailure(stage: String, failure: Exception): String {
+        if (isDnsResolutionFailure(failure)) return "${stage}_DNS"
+        snapshotTransportResetKind(failure)?.let { return "${stage}_$it" }
+        return when (failure) {
+            is SocketTimeoutException, is InterruptedIOException -> "${stage}_TIMEOUT"
+            is IOException -> "${stage}_NETWORK"
+            else -> "${stage}_UNEXPECTED_ERROR"
+        }
     }
 
     internal data class DecodedArchiveContent(

@@ -100,7 +100,20 @@ jobs:
         run: gradle :app:compileDebugAndroidTestKotlin --stacktrace
 
       - name: Compilar APK de depuración para probar Chucker (sin clave de firma de distribución)
-        run: gradle :app:assembleDebug --stacktrace
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Version única por ejecución y reintento, siguiendo la convención de las APK verificadas.
+          VERSION_CODE=$((10000 + GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))
+          VERSION_NAME="1.7.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          if [ "$VERSION_CODE" -le 6296 ]; then
+            echo "::error::versionCode calculado ($VERSION_CODE) no supera la versión instalada 6296."
+            exit 1
+          fi
+          gradle :app:assembleDebug --stacktrace -PVERSION_CODE="$VERSION_CODE" -PVERSION_NAME="$VERSION_NAME"
 
       - name: Publicar APK de depuración como artefacto descargable
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

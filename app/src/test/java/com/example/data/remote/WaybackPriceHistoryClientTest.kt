@@ -21,6 +21,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import com.example.ui.viewmodel.mergeWaybackDiagnosticStatus
+import com.example.ui.viewmodel.hasEnoughVerifiedArchiveDates
 import com.example.ui.viewmodel.isSupersededWaybackSkipDetail
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -30,6 +31,23 @@ import java.util.concurrent.CopyOnWriteArrayList
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class WaybackPriceHistoryClientTest {
+    @Test
+    fun enoughVerifiedDatesStopSecondaryArchiveLookups() {
+        val day = WaybackPriceHistoryClient.DAY_MS
+        assertFalse(
+            "Duplicate captures on the same day must not count as separate historical dates",
+            hasEnoughVerifiedArchiveDates(listOf(10L * day, 10L * day, 11L * day))
+        )
+        assertTrue(
+            "Three distinct UTC dates are enough to stop inferred backup destinations",
+            hasEnoughVerifiedArchiveDates(listOf(10L * day, 11L * day, 12L * day))
+        )
+        assertFalse(
+            "An invalid zero-date threshold should not declare a complete history",
+            hasEnoughVerifiedArchiveDates(listOf(10L * day, 11L * day, 12L * day), minimumDistinctDates = 0)
+        )
+    }
+
     @Test
     fun repeatedWaybackAttemptsCannotDowngradeAnAlreadyExecutedDiagnosticStage() {
         assertEquals(

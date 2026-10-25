@@ -154,7 +154,7 @@ dependencies {
   // Chucker is used in debug tests and the private sideload diagnostic APK only.
   // The regular release build stays free of the HTTP inspector.
   debugImplementation(libs.chucker)
-  sideloadImplementation(libs.chucker)
+  add("sideloadImplementation", libs.chucker)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
   implementation(libs.jsoup)

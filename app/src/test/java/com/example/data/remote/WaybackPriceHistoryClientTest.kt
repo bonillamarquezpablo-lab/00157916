@@ -4997,6 +4997,50 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun archivedHtmlDecoderUsesMetaCharsetWhenHttpHeaderOmitsIt() {
+        val client = newClient()
+        val html = """<html><head><meta charset="windows-1252"></head><body><h1>Cámara clásica</h1></body></html>"""
+        val bytes = html.toByteArray(java.nio.charset.Charset.forName("windows-1252"))
+
+        val decoded = client.decodeArchiveContent(bytes, "text/html")
+
+        assertEquals("windows-1252", decoded.charsetName.lowercase(java.util.Locale.ROOT))
+        assertTrue("Legacy page titles must retain accented characters", decoded.text.contains("Cámara clásica"))
+    }
+
+    @Test
+    fun archivedHtmlDecoderPrefersBomThenExplicitHttpCharsetOverMetaHint() {
+        val client = newClient()
+        val html = """<html><head><meta charset="windows-1252"></head><body>Cámara</body></html>"""
+        val utf8Bytes = html.toByteArray(Charsets.UTF_8)
+
+        val headerDecoded = client.decodeArchiveContent(utf8Bytes, "text/html; charset=UTF-8")
+        assertEquals("UTF-8", headerDecoded.charsetName)
+        assertTrue(headerDecoded.text.contains("Cámara"))
+
+        val bomBytes = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) + utf8Bytes
+        val bomDecoded = client.decodeArchiveContent(bomBytes, "text/html; charset=windows-1252")
+        assertEquals("UTF-8", bomDecoded.charsetName)
+        assertTrue(bomDecoded.text.contains("Cámara"))
+    }
+
+    @Test
+    fun explicitArchiveDiagnosticPhaseNumbersIncludeTheTwoExtractorStages() {
+        assertEquals(
+            21,
+            diagnosticIndexForWaybackTrace(
+                WaybackTraceEvent(16, WaybackTraceStatus.PASSED, "HTML profile", diagnosticStep = 21)
+            )
+        )
+        assertEquals(
+            22,
+            diagnosticIndexForWaybackTrace(
+                WaybackTraceEvent(17, WaybackTraceStatus.FAILED, "Extractor result", diagnosticStep = 22)
+            )
+        )
+    }
+
+    @Test
     fun snapshotDnsFailureRetriesAtMostOnceAndCanRecover() = runBlocking {
         val client = newClient()
         var attempts = 0

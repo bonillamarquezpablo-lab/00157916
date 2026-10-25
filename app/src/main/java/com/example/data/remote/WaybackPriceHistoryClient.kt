@@ -2616,13 +2616,13 @@ class WaybackPriceHistoryClient(
             when {
                 matchingJsonLdOffers.isNotEmpty() ->
                     "Se encontraron " + matchingJsonLdOffers.size +
-                        " oferta(s) JSON-LD con importe y modelo compatibles."
+                        " oferta(s) estructurada(s) con importe y modelo compatibles."
                 matchingIdentityJsonLdOffers.isNotEmpty() ->
                     "La identidad coincide en " + matchingIdentityJsonLdOffers.size +
                         " oferta(s) JSON-LD, pero ninguna supera los límites de importe y moneda aceptados."
                 jsonLd.isNotEmpty() ->
                     "Hay " + jsonLd.size +
-                        " oferta(s) JSON-LD, pero ninguna se ha confirmado para esta variante; no cuentan como precio encontrado."
+                        " oferta(s) estructurada(s), pero ninguna se ha confirmado para esta variante; no cuentan como precio encontrado."
                 metaPrice != null -> "Precio numérico detectado en metadatos de la página."
                 visiblePrice != null -> "Importe detectado en un selector específico de precio visible."
                 quote != null -> "Precio histórico verificado para el producto."
@@ -2659,6 +2659,7 @@ class WaybackPriceHistoryClient(
             it.attr("type").substringBefore(';').trim()
                 .equals("application/ld+json", ignoreCase = true)
         }
+        val embeddedStateScriptCount = document.select("script[type]").count(::isEmbeddedProductStateScript)
         val priceMetadataCount = document.select("meta[property], meta[name], meta[itemprop]").count { element ->
             listOf(element.attr("property"), element.attr("name"), element.attr("itemprop"))
                 .any { it.contains("price", ignoreCase = true) }
@@ -2680,7 +2681,8 @@ class WaybackPriceHistoryClient(
             "Perfil HTML: " + decodedHtmlLength + " caracteres; decodificado como " + decodedCharsetName +
                 (if (declaredCharset == null) " (sin charset HTTP explícito)" else " (charset HTTP declarado: " + declaredCharset + ")") +
                 "; " + allElements.size + " elementos DOM; " + jsonLdScriptCount +
-                " scripts JSON-LD; " + pageTitles.size + " títulos candidatos; " + priceMetadataCount +
+                " scripts JSON-LD; " + embeddedStateScriptCount + " bloques JSON de estado de tienda; " +
+                pageTitles.size + " títulos candidatos; " + priceMetadataCount +
                 " metadatos de precio; " + priceElementCount +
                 " campos itemprop/data-price. No se guarda el HTML.",
             diagnosticStep = 21
@@ -2694,7 +2696,7 @@ class WaybackPriceHistoryClient(
             matchingJsonLdOffers.any {
                 kotlin.math.abs(it.second - sourceQuote.price) < 0.011 &&
                     it.third.equals(sourceQuote.currency, ignoreCase = true)
-            } -> "oferta JSON-LD compatible"
+            } -> "oferta estructurada compatible"
             metaPrice != null && kotlin.math.abs(metaPrice - sourceQuote.price) < 0.011 &&
                 (metaCurrency.isNullOrBlank() || metaCurrency.equals(sourceQuote.currency, ignoreCase = true)) ->
                 "metadatos de precio"
@@ -2713,7 +2715,7 @@ class WaybackPriceHistoryClient(
             onTrace, 17,
             if (quote != null) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
             "Resultado del extractor: ruta=" + sourceMethod +
-                "; ofertas JSON-LD=" + jsonLd.size +
+                "; ofertas estructuradas=" + jsonLd.size +
                 "; ofertas compatibles=" + matchingJsonLdOffers.size +
                 "; ofertas con identidad=" + matchingIdentityJsonLdOffers.size +
                 "; meta precio=" + (if (metaPrice != null) "sí" else "no") +

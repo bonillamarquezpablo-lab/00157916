@@ -5316,7 +5316,63 @@ class WaybackPriceHistoryClient(
         else -> "${stage}_UNEXPECTED_ERROR"
     }
 
-    private fun readBodyLimited(body: ResponseBody?, maxBytes: Int): String? {
+    internal data class DecodedArchiveContent(
+        val text: String,
+        val charsetName: String
+    )
+
+    /**
+     * Decode archived bytes deterministically. A BOM wins, then the HTTP charset, then an HTML
+     * meta charset, and finally UTF-8. Old snapshots often omit the HTTP charset even though the
+     * original page declared windows-1252 or ISO-8859-1; decoding those bytes as UTF-8 corrupts
+     * accented model names and can cause an otherwise valid product match to be rejected.
+     */
+    internal fun decodeArchiveContent(
+        bytes: ByteArray,
+        contentTypeHeader: String? = null
+    ): DecodedArchiveContent {
+        var byteOffset = 0
+        val bomCharset = when {
+            bytes.size >= 3 &&
+                bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte() -> {
+                byteOffset = 3
+                Charsets.UTF_8
+            }
+            bytes.size >= 2 && bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte() -> {
+                byteOffset = 2
+                java.nio.charset.Charset.forName("UTF-16BE")
+            }
+            bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte() -> {
+                byteOffset = 2
+                java.nio.charset.Charset.forName("UTF-16LE")
+            }
+            else -> null
+        }
+        fun safeCharset(name: String?): java.nio.charset.Charset? =
+            name?.trim()?.takeIf { it.isNotBlank() }?.let {
+                runCatching { java.nio.charset.Charset.forName(it) }.getOrNull()
+            }
+
+        val headerCharsetName = Regex("""(?i)\\bcharset\\s*=\\s*[\"']?\\s*([a-z0-9._:-]+)""")
+            .find(contentTypeHeader.orEmpty())?.groupValues?.getOrNull(1)
+        val probeStart = byteOffset.coerceAtMost(bytes.size)
+        val probeEnd = minOf(bytes.size, probeStart + 8192)
+        // Charset labels and the meta element syntax are ASCII-compatible in legacy HTML
+        // encodings, so ISO-8859-1 is a safe byte-preserving view for this short sniff window.
+        val probe = String(bytes, probeStart, probeEnd - probeStart, Charsets.ISO_8859_1)
+        val metaCharsetName = Regex("""(?is)<meta\\b[^>]*\\bcharset\\s*=\\s*[\"']?\\s*([a-z0-9._:-]+)""")
+            .find(probe)?.groupValues?.getOrNull(1)
+            ?: Regex("""(?is)<meta\\b[^>]*\\bcontent\\s*=\\s*[\"'][^\"']*charset\\s*=\\s*([a-z0-9._:-]+)""")
+                .find(probe)?.groupValues?.getOrNull(1)
+        val charset = bomCharset ?: safeCharset(headerCharsetName) ?: safeCharset(metaCharsetName)
+            ?: Charsets.UTF_8
+        return DecodedArchiveContent(
+            text = String(bytes, byteOffset, bytes.size - byteOffset, charset),
+            charsetName = charset.name()
+        )
+    }
+
+    private fun readBodyBytesLimited(body: ResponseBody?, maxBytes: Int): ByteArray? {
         body ?: return null
         if (body.contentLength() > maxBytes) return null
         val output = ByteArrayOutputStream(minOf(maxBytes, 16 * 1024))
@@ -5331,11 +5387,19 @@ class WaybackPriceHistoryClient(
                 total += count
             }
         }
-        // Old retailer snapshots may use ISO-8859-1 or another declared HTML charset.
-        // Decode using the HTTP Content-Type instead of forcing UTF-8, which can corrupt product
-        // names/accents and make exact title verification reject a valid capture.
-        val charset = body.contentType()?.charset(Charsets.UTF_8) ?: Charsets.UTF_8
-        return output.toString(charset.name())
+        return output.toByteArray()
+    }
+
+    private fun readBodyLimited(body: ResponseBody?, maxBytes: Int): String? {
+        body ?: return null
+        val bytes = readBodyBytesLimited(body, maxBytes) ?: return null
+        return decodeArchiveContent(bytes, body.contentType()?.toString()).text
+    }
+
+    private fun readArchivedHtmlLimited(body: ResponseBody?, maxBytes: Int): DecodedArchiveContent? {
+        body ?: return null
+        val bytes = readBodyBytesLimited(body, maxBytes) ?: return null
+        return decodeArchiveContent(bytes, body.contentType()?.toString())
     }
 
     /**

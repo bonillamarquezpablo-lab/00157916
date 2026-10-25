@@ -99,7 +99,10 @@ internal fun shouldSkipDomainFallbackAfterSnapshotTimeout(
  */
 internal fun shouldSkipPrefixAfterSufficientExactHistory(
     quotes: Iterable<ArchivedPriceQuote>
-): Boolean = hasSufficientHistoricalCoverage(quotes, minimumDistinctDates = 3)
+): Boolean = hasSufficientHistoricalCoverage(
+    quotes.filter { it.targetProductId.isNullOrBlank() && !it.isDiscoveryCandidate },
+    minimumDistinctDates = 3
+)
 
 /**
  * After the direct lookup, a broad prefix index timeout followed by a calendar-year index timeout

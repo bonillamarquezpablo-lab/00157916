@@ -2274,8 +2274,9 @@ class WaybackPriceHistoryClient(
                         skipArchiveValidationTrace(captureTrace, "La descarga devolvió un código HTTP no satisfactorio.")
                         SnapshotFetch(false, null, code)
                     } else {
-                        val html = readBodyLimited(response.body, MAX_SNAPSHOT_BODY_BYTES)
-                        if (html == null) {
+                        val decodedHtml = readArchivedHtmlLimited(response.body, MAX_SNAPSHOT_BODY_BYTES)
+                        val html = decodedHtml?.text
+                        if (html == null || decodedHtml == null) {
                             emitWaybackTrace(captureTrace, downloadStep, WaybackTraceStatus.FAILED, "HTTP ${response.code}; contenido vacío o por encima del límite permitido.", elapsed)
                             emitWaybackTrace(captureTrace, evaluateStep, WaybackTraceStatus.FAILED, "No se pudo evaluar el HTML descargado.")
                             skipArchiveValidationTrace(captureTrace, "El cuerpo HTML estaba vacío o superaba el límite seguro.")
@@ -2314,7 +2315,10 @@ class WaybackPriceHistoryClient(
                                 }
                                 reportArchiveFieldTrace(
                                     captureTrace, document, expectedTitle, capture.originalUrl, quote, sourceQuote,
-                                    jsonLdRoots = jsonLdRoots
+                                    jsonLdRoots = jsonLdRoots,
+                                    decodedCharsetName = decodedHtml.charsetName,
+                                    decodedHtmlLength = html.length,
+                                    responseContentType = response.body?.contentType()?.toString()
                                 )
                                 val secondarySourceQuotes = parseArchivedPricesForKnownProducts(
                                     document = document,

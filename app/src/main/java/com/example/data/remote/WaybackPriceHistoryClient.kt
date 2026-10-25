@@ -3490,7 +3490,7 @@ class WaybackPriceHistoryClient(
         // The caller queryCdxAndFetchPrices applies the shared persisted 429 cooldown and
         // 1.5-second pacing gate before entering this response parser. Do not gate twice here.
         return try {
-            executeCdxWithTransientRetry(cdxHttp, request, maxRetries = 0).use { response ->
+            executeCdxWithTransientRetry(cdxHttp, request, maxRetries = MAX_CDX_HTTP_RETRIES).use { response ->
                 if (response.code == 429) {
                     activateRateLimit(response.header("Retry-After"), System.currentTimeMillis())
                     return CdxIndexOutcome(

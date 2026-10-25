@@ -115,6 +115,14 @@ internal fun shouldUseAlternateUrlForPrefix(
     !result.requestFailed &&
     !result.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
 
+/**
+ * A timed-out broad prefix query can be retried as bounded calendar-year ranges. HTTP 429 is
+ * never retried by this path; the shared cooldown remains authoritative.
+ */
+internal fun shouldRetryPrefixInYearBlocks(diagnosticCodes: Set<String>): Boolean =
+    diagnosticCodes.contains("CDX_URL_PREFIX_TIMEOUT") &&
+        !diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
+
 /** Common UTC boundary for eight-calendar-year discovery, archive fallbacks and local persistence. */
 internal fun archiveHistoryWindowStartTimestampUtc(now: Long, lookbackDays: Int): Long {
     val safeNow = now.coerceAtLeast(0L)
@@ -492,8 +500,7 @@ class WaybackPriceHistoryClient(
                     onTrace = onTrace,
                     knownProductTitlesById = knownProductTitlesById,
                     snapshotResultsCache = snapshotResultsCache,
-                    onVerifiedQuotes = onVerifiedQuotes,
-                    stopAfterDistinctPrimaryDates = MIN_HISTORICAL_DATES_BEFORE_EARLY_STOP
+                    onVerifiedQuotes = onVerifiedQuotes
                 )
             }
             if (exactResult.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) {
@@ -536,13 +543,8 @@ class WaybackPriceHistoryClient(
             val exactPrimaryQuotes = exactResult.quotes.filter {
                 it.targetProductId.isNullOrBlank() && !it.isDiscoveryCandidate
             }
-            if (hasSufficientHistoricalCoverage(exactPrimaryQuotes)) {
-                rememberAttempt(attempt, now, hasQuotes = true, failed = false)
-                // The exact CDX path already supplies a meaningful series for the selected SKU.
-                // Otherwise continue to prefix matching so one isolated capture cannot stop the
-                // historical engine before it searches other archived URL forms.
-                return@serializedArchiveLookup exactResult.copy(diagnosticCodes = emptySet())
-            }
+            // Existing Room dates are filtered during persistence, not by the remote client.
+            // Three valid captures may all be repeats; still query the prefix route for missing dates.
 
             // Adaptive budget: if the exact URL already found a valid price, this is a quick
             // supplement to add one or two more dated points, not another full historical crawl.
@@ -579,30 +581,106 @@ class WaybackPriceHistoryClient(
                 } else null,
                 primarySeedQuotes = exactPrimaryQuotes
             )
-            val mergedQuotes = (exactResult.quotes + prefixResult.quotes)
+
+            val yearlyResults = mutableListOf<WaybackBackfillResult>()
+            if (shouldRetryPrefixInYearBlocks(prefixResult.diagnosticCodes)) {
+                val earliestYear = formatUtc(
+                    historyWindowStartTimestamp(now, lookbackDays), "yyyy"
+                ).toIntOrNull() ?: (formatUtc(now, "yyyy").toInt() - 8)
+                val currentYear = formatUtc(now, "yyyy").toIntOrNull() ?: earliestYear
+                val cursorKey = attemptKey("prefix-year-cursor-v1|$directUrl|$expectedTitle|$lookbackDays")
+                var nextYear = preferences.getInt(cursorKey, currentYear).coerceAtMost(currentYear)
+                if (nextYear < earliestYear) nextYear = currentYear
+                emitWaybackTrace(
+                    onTrace, 6, WaybackTraceStatus.RUNNING,
+                    "La consulta global por prefijo agotó el tiempo; se dividirá en bloques anuales, con el mismo control de ritmo y sin reintentar tras HTTP 429."
+                )
+                for (blockIndex in 0 until MAX_PREFIX_YEARLY_BLOCKS_PER_LOOKUP) {
+                    if (nextYear < earliestYear || activeRateLimitUntil(System.currentTimeMillis()) != null) break
+                    val year = nextYear
+                    val yearlyCdxUrl = buildCdxUrlForYear(
+                        originalUrl = directUrl,
+                        year = year,
+                        now = now,
+                        lookbackDays = lookbackDays,
+                        matchType = "prefix"
+                    )
+                    if (yearlyCdxUrl == null) {
+                        nextYear = year - 1
+                        if (nextYear >= earliestYear) preferences.edit().putInt(cursorKey, nextYear).apply()
+                        else preferences.edit().remove(cursorKey).apply()
+                        continue
+                    }
+                    val yearly = queryCdxAndFetchPrices(
+                        cdxUrl = yearlyCdxUrl,
+                        expectedTitle = expectedTitle,
+                        cacheKey = attemptKey("prefix-year-v1|$directUrl|$expectedTitle|$year"),
+                        now = now,
+                        lookbackDays = lookbackDays,
+                        maxSnapshots = MAX_PREFIX_YEARLY_SNAPSHOTS,
+                        cdxTimeoutSeconds = PREFIX_YEARLY_CDX_TIMEOUT_SECONDS,
+                        cdxStage = "CDX_URL_PREFIX_YEAR",
+                        snapshotTimeoutSeconds = PREFIX_YEARLY_SNAPSHOT_TIMEOUT_SECONDS,
+                        onTrace = onTrace,
+                        knownProductTitlesById = knownProductTitlesById,
+                        snapshotResultsCache = snapshotResultsCache,
+                        onVerifiedQuotes = onVerifiedQuotes,
+                        primarySeedQuotes = exactPrimaryQuotes + prefixResult.quotes +
+                            yearlyResults.flatMap { it.quotes }
+                    )
+                    yearlyResults += yearly
+                    val hitRateLimit = yearly.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ||
+                        activeRateLimitUntil(System.currentTimeMillis()) != null
+                    if (hitRateLimit) {
+                        // Do not advance the cursor for a year whose request hit 429; retry only
+                        // after the server cooldown expires.
+                        break
+                    }
+                    if (year <= earliestYear) {
+                        preferences.edit().remove(cursorKey).apply()
+                        nextYear = earliestYear - 1
+                    } else {
+                        nextYear = year - 1
+                        preferences.edit().putInt(cursorKey, nextYear).apply()
+                    }
+                }
+                val annualQuotes = yearlyResults.sumOf { it.quotes.size }
+                emitWaybackTrace(
+                    onTrace, 6,
+                    if (annualQuotes > 0) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
+                    "Respaldo anual finalizado: ${yearlyResults.size} bloque(s) consultado(s), $annualQuotes precio(s) verificado(s). Se conserva el cursor para continuar por años anteriores en otra ejecución."
+                )
+            }
+
+            val yearlyQuotes = yearlyResults.flatMap { it.quotes }
+            val mergedQuotes = (exactResult.quotes + prefixResult.quotes + yearlyQuotes)
                 .distinctBy { listOf(it.originalUrl, it.observedAt.toString(), it.price.toString(), it.currency) }
                 .sortedBy { it.observedAt }
             val mergedPrimaryQuotes = mergedQuotes.filter {
                 it.targetProductId.isNullOrBlank() && !it.isDiscoveryCandidate
             }
             val mergedHasSufficientHistory = hasSufficientHistoricalCoverage(mergedPrimaryQuotes)
-            val combinedDiagnostics = exactResult.diagnosticCodes + prefixResult.diagnosticCodes
+            val combinedDiagnostics = exactResult.diagnosticCodes + prefixResult.diagnosticCodes +
+                yearlyResults.flatMap { it.diagnosticCodes }
             val rateLimited = combinedDiagnostics.contains("WAYBACK_RATE_LIMITED")
-            val partialRequestFailed = exactResult.requestFailed || prefixResult.requestFailed
-            // A quote from the exact route does not turn a failed prefix request into a completed
-            // historical lookup. Keep the transport diagnosis and retry state when the combined
-            // primary series is still too sparse, and honor the global 429 cooldown even with quotes.
-            val incompleteLookupFailed = rateLimited ||
-                (partialRequestFailed && !mergedHasSufficientHistory)
+            val partialRequestFailed = exactResult.requestFailed || prefixResult.requestFailed ||
+                yearlyResults.any { it.requestFailed }
+            // A partial series remains retryable when an index request timed out, even if old
+            // prices were recovered. Those dates may already exist in Room and are not completion.
+            val incompleteLookupFailed = rateLimited || partialRequestFailed
             val merged = prefixResult.copy(
                 quotes = mergedQuotes,
-                capturesFound = maxOf(exactResult.capturesFound, prefixResult.capturesFound),
-                capturesChecked = exactResult.capturesChecked + prefixResult.capturesChecked,
-                available = exactResult.available || prefixResult.available,
+                capturesFound = maxOf(
+                    exactResult.capturesFound,
+                    prefixResult.capturesFound,
+                    yearlyResults.maxOfOrNull { it.capturesFound } ?: 0
+                ),
+                capturesChecked = exactResult.capturesChecked + prefixResult.capturesChecked +
+                    yearlyResults.sumOf { it.capturesChecked },
+                available = exactResult.available || prefixResult.available ||
+                    yearlyResults.any { it.available },
                 requestFailed = incompleteLookupFailed,
-                diagnosticCodes = if (
-                    mergedQuotes.isEmpty() || incompleteLookupFailed
-                ) {
+                diagnosticCodes = if (mergedQuotes.isEmpty() || incompleteLookupFailed) {
                     combinedDiagnostics
                 } else {
                     emptySet()
@@ -3930,6 +4008,44 @@ class WaybackPriceHistoryClient(
     }
 
     /**
+     * Build a prefix query limited to one UTC calendar year while respecting the configured
+     * historical window and the current timestamp.
+     */
+    internal fun buildCdxUrlForYear(
+        originalUrl: String,
+        year: Int,
+        now: Long,
+        lookbackDays: Int,
+        matchType: String = "prefix"
+    ): HttpUrl? {
+        val earliest = historyWindowStartTimestamp(now, lookbackDays)
+        val yearStart = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT).apply {
+            clear()
+            set(Calendar.YEAR, year)
+            set(Calendar.MONTH, Calendar.JANUARY)
+            set(Calendar.DAY_OF_MONTH, 1)
+        }.timeInMillis
+        val yearEnd = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT).apply {
+            clear()
+            set(Calendar.YEAR, year)
+            set(Calendar.MONTH, Calendar.DECEMBER)
+            set(Calendar.DAY_OF_MONTH, 31)
+            set(Calendar.HOUR_OF_DAY, 23)
+            set(Calendar.MINUTE, 59)
+            set(Calendar.SECOND, 59)
+        }.timeInMillis
+        val from = maxOf(yearStart, earliest)
+        val to = minOf(yearEnd, now)
+        if (from > to || year < 1970) return null
+        val base = buildCdxUrl(originalUrl, now, lookbackDays, matchType) ?: return null
+        return base.newBuilder()
+            .setQueryParameter("from", formatUtc(from, "yyyyMMdd"))
+            .setQueryParameter("to", formatUtc(to, "yyyyMMdd"))
+            .setQueryParameter("limit", "-120")
+            .build()
+    }
+
+    /**
      * Build a product-filtered CDX query for a single host. Discovery uses host scope and
      * avoids urlkey collapsing; dated captures are fetched later through exact-URL queries.
      */
@@ -5729,7 +5845,12 @@ class WaybackPriceHistoryClient(
         // Keep one product-specific retry route but let the public index respond for up to 10s.
         private const val QUICK_SUPPLEMENTAL_PREFIX_CDX_TIMEOUT_SECONDS = 10L
         private const val QUICK_SUPPLEMENTAL_PREFIX_SNAPSHOT_TIMEOUT_SECONDS = 12L
-        private const val MIN_HISTORICAL_DATES_BEFORE_EARLY_STOP = 3
+        // Recover a slow broad query in at most two annual blocks per attempt.
+        // Each request still goes through the persisted global pacing/cooldown gate.
+        private const val MAX_PREFIX_YEARLY_BLOCKS_PER_LOOKUP = 2
+        private const val MAX_PREFIX_YEARLY_SNAPSHOTS = 2
+        private const val PREFIX_YEARLY_CDX_TIMEOUT_SECONDS = 6L
+        private const val PREFIX_YEARLY_SNAPSHOT_TIMEOUT_SECONDS = 8L
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 8
         // Used only by historical backfill, never by the primary shopping search.
         private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 12L

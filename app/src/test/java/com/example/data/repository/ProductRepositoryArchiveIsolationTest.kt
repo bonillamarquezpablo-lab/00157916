@@ -299,6 +299,37 @@ class ProductRepositoryArchiveIsolationTest {
                     .count { it.sourceUrl == validSnapshotUrl }
             )
 
+            // A different, lower-priced capture on the same local date must not replace
+            // the saved archive point. The backfill's contract is append-only by store/day.
+            val sameDayLater = mismatchedCaptureTime + 60_000L
+            val sameDayTimestamp = java.text.SimpleDateFormat(
+                "yyyyMMddHHmmss", java.util.Locale.ROOT
+            ).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.format(java.util.Date(sameDayLater))
+            val sameDayLowerQuote = validQuote.copy(
+                observedAt = sameDayLater,
+                price = 15.99,
+                snapshotUrl = "https://web.archive.org/web/${sameDayTimestamp}id_/https://shop.example/product/anker-prime"
+            )
+            assertEquals(
+                "a verified daily history point is immutable to repeated lower-priced captures",
+                0,
+                repository.recordArchivedPriceHistory(
+                    expectedTitle = title,
+                    originalUrl = "https://shop.example/product/anker-prime",
+                    storeName = "Tienda de prueba",
+                    quotes = listOf(sameDayLowerQuote)
+                )
+            )
+            val savedSameDayRows = database.priceObservationDao().observeVerifiedHistory(productId).first()
+                .filter {
+                    it.sourcePageUrl == "https://shop.example/product/anker-prime" &&
+                        kotlin.math.abs(it.observedAt - mismatchedCaptureTime) < 12L * 60L * 60L * 1000L
+                }
+            assertEquals("same-day imports must not create or replace the existing point", 1, savedSameDayRows.size)
+            assertEquals(19.99, savedSameDayRows.single().price, 0.0)
+
             val sevenYearsAgo = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT)
                 .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
                 .parse("20191001000000")!!

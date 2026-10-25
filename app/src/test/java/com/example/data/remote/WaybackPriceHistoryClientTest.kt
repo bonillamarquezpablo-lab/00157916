@@ -4922,11 +4922,11 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun snapshotHttpClientAppliesTimeoutToConnectReadAndWholeCall() {
-        val configured = newClient().buildSnapshotHttpClient(8L)
-        assertEquals("Connection timeout must not remain at the base client's 4 seconds", 8_000, configured.connectTimeoutMillis)
-        assertEquals("HTML read timeout must use the same bounded budget", 8_000, configured.readTimeoutMillis)
-        assertEquals("Whole snapshot call timeout must use the same bounded budget", 8_000, configured.callTimeoutMillis)
+    fun snapshotHttpClientAppliesTwelveSecondBoundToConnectReadAndWholeCall() {
+        val configured = newClient().buildSnapshotHttpClient(12L)
+        assertEquals("Connection timeout must use the bounded archive budget", 12_000, configured.connectTimeoutMillis)
+        assertEquals("HTML read timeout must use the same bounded budget", 12_000, configured.readTimeoutMillis)
+        assertEquals("Whole snapshot call timeout must use the same bounded budget", 12_000, configured.callTimeoutMillis)
     }
 
     @Test

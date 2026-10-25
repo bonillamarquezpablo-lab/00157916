@@ -2827,6 +2827,37 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun repeatedWaybackPrefixAndYearTimeoutsTripDomainFallbackCircuitBreaker() {
+        assertTrue(
+            shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
+                setOf("CDX_URL_PREFIX_TIMEOUT", "CDX_URL_PREFIX_YEAR_TIMEOUT")
+            )
+        )
+        assertFalse(
+            "A single timeout should still allow the bounded independent fallback",
+            shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
+                setOf("CDX_URL_PREFIX_TIMEOUT")
+            )
+        )
+        assertFalse(
+            "An HTTP 429 is handled by the global cooldown instead",
+            shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
+                setOf(
+                    "CDX_URL_PREFIX_TIMEOUT",
+                    "CDX_URL_PREFIX_YEAR_TIMEOUT",
+                    "WAYBACK_RATE_LIMITED"
+                )
+            )
+        )
+        assertFalse(
+            "Other stages must not accidentally trip the Wayback-prefix circuit breaker",
+            shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
+                setOf("CDX_DOMAIN_TIMEOUT", "CDX_URL_PREFIX_YEAR_TIMEOUT")
+            )
+        )
+    }
+
+    @Test
     fun directCdxRequestKeepsTheNewestBoundedMonthlyWindow() {
         val client = newClient()
         val now = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {

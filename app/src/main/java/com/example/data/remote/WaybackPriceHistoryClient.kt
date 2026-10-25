@@ -20,6 +20,7 @@ import org.json.JSONObject
 import org.json.JSONTokener
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
+import org.jsoup.nodes.Element
 import java.net.URI
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
@@ -4630,18 +4631,50 @@ class WaybackPriceHistoryClient(
             .containsMatchIn(normalized)
     }
 
+    /**
+     * Read JSON-LD plus a small, bounded set of embedded product-state JSON blocks used by
+     * modern shop front ends (for example Next.js/Nuxt pages). These blocks are not trusted as
+     * prices by themselves: every extracted offer still passes the same model/variant, EUR and
+     * amount checks as ordinary JSON-LD.
+     */
+    private fun isEmbeddedProductStateScript(script: Element): Boolean {
+        val type = script.attr("type").substringBefore(';').trim()
+            .lowercase(Locale.ROOT)
+        if (type != "application/json" && type != "text/json") return false
+        val payload = script.data().ifBlank { script.html() }.trim()
+        if (payload.isBlank() || payload.length > MAX_EMBEDDED_PRODUCT_STATE_CHARS) return false
+        val id = script.id().lowercase(Locale.ROOT)
+        val knownStateContainer = listOf(
+            "__next_data__", "__nuxt", "product-state", "product_state",
+            "product-data", "product_data", "product-details", "product_details",
+            "product-offer", "product_offer", "offer-data", "offer_data"
+        ).any { id.contains(it) }
+        if (knownStateContainer) return true
+        val hasPriceField = Regex(
+            """(?i)["'](?:price|currentPrice|salePrice|productPrice|priceCurrency|lowPrice)["']\\s*:"""
+        ).containsMatchIn(payload)
+        val hasProductContext = Regex(
+            """(?i)["'](?:offers|product|productName|name|title|sku|itemOffered)["']\\s*:"""
+        ).containsMatchIn(payload)
+        return hasPriceField && hasProductContext
+    }
+
     private fun extractJsonLdRoots(document: Document): List<Any> =
         document.select("script").asSequence()
-            .filter { script ->
-                script.attr("type").substringBefore(';').trim()
-                    .equals("application/ld+json", ignoreCase = true)
-            }
             .mapNotNull { script ->
+                val type = script.attr("type").substringBefore(';').trim()
+                val isJsonLd = type.equals("application/ld+json", ignoreCase = true)
+                val isProductState = isEmbeddedProductStateScript(script)
+                if (!isJsonLd && !isProductState) return@mapNotNull null
                 val payload = script.data().ifBlank { script.html() }
                     .trim()
                     .removePrefix("<!--").removeSuffix("-->").trim()
+                if (payload.isBlank() || payload.length > MAX_EMBEDDED_PRODUCT_STATE_CHARS) {
+                    return@mapNotNull null
+                }
                 try { JSONTokener(payload).nextValue() } catch (_: Exception) { null }
             }
+            .take(MAX_ARCHIVED_STRUCTURED_SCRIPTS)
             .toList()
 
     private fun extractJsonLdProductOffers(document: Document): List<Triple<String, Double, String>> =
@@ -5656,6 +5689,8 @@ class WaybackPriceHistoryClient(
         private val GLOBAL_BACKFILL_MUTEX = Mutex()
         private const val MAX_CDX_BODY_BYTES = 256 * 1024
         private const val MAX_SNAPSHOT_BODY_BYTES = 2 * 1024 * 1024
+        private const val MAX_EMBEDDED_PRODUCT_STATE_CHARS = 512 * 1024
+        private const val MAX_ARCHIVED_STRUCTURED_SCRIPTS = 24
         private const val SNAPSHOT_TRANSPORT_RETRY_DELAY_MS = 350L
         const val DAY_MS = 24L * 60L * 60L * 1000L
         const val MIN_HISTORICAL_PRICE = 0.50

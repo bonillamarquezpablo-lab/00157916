@@ -7,8 +7,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import com.chuckerteam.chucker.api.ChuckerInterceptor
-import com.example.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -210,7 +208,11 @@ private fun createSerpApiHttpClient(): OkHttpClient {
 }
 
 class SerpApiClient(
-    private val http: OkHttpClient = createSerpApiHttpClient()
+    private val http: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .writeTimeout(8, TimeUnit.SECONDS)
+        .build()
         .callTimeout(12, TimeUnit.SECONDS)
         .build()
 ) {

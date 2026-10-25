@@ -5655,11 +5655,11 @@ class WaybackPriceHistoryClient(
         // Broad host scans are a last resort; retain a short bound so they cannot starve
         // Availability fallback or delay the primary shopping-search experience.
         private const val CDX_FALLBACK_TIMEOUT_SECONDS = 3L
-        // Historical snapshots sometimes establish the archive connection slowly. The connect,
-        // read and whole-call budgets are aligned at 8 seconds; archive work remains bounded and
-        // does not run in the live shopping-search request path.
-        private const val CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS = 8L
-        private const val DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS = 8L
+        // Archived product pages can be close to 1 MB, and this device trace showed a valid
+        // third capture timing out at exactly 8 seconds after two faster downloads. Give one
+        // snapshot a 12-second ceiling while keeping capture counts and the full lookup bounded.
+        private const val CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS = 12L
+        private const val DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS = 12L
         private const val MAX_AVAILABILITY_BODY_BYTES = 64 * 1024
         private const val CDX_RETRY_DELAY_MS = 500L
         private const val CDX_RETRY_JITTER_MS = 350L
@@ -5674,18 +5674,20 @@ class WaybackPriceHistoryClient(
         // Product-specific CDX lookup is narrower than scanning every URL on a retailer host.
         // A short host-index fallback can discover changed product slugs after path lookups fail.
         private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 7L
-        private const val ALTERNATE_PRODUCT_CDX_TIMEOUT_SECONDS = 5L
+        private const val ALTERNATE_PRODUCT_CDX_TIMEOUT_SECONDS = 8L
         private const val MAX_DOMAIN_PRODUCT_URL_CANDIDATES = 2
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 12
         // When an exact URL already returned a verified point, limit the prefix fallback to a
         // few snapshots. With the early-stop threshold below this normally adds only 1–2 dates.
         private const val MAX_QUICK_SUPPLEMENTAL_SNAPSHOTS = 3
-        private const val QUICK_SUPPLEMENTAL_PREFIX_CDX_TIMEOUT_SECONDS = 3L
-        private const val QUICK_SUPPLEMENTAL_PREFIX_SNAPSHOT_TIMEOUT_SECONDS = 5L
+        // The previous 3-second prefix ceiling repeatedly expired while CDX was still responding
+        // to a valid direct lookup. This remains one narrow, bounded supplement rather than a host scan.
+        private const val QUICK_SUPPLEMENTAL_PREFIX_CDX_TIMEOUT_SECONDS = 6L
+        private const val QUICK_SUPPLEMENTAL_PREFIX_SNAPSHOT_TIMEOUT_SECONDS = 8L
         private const val MIN_HISTORICAL_DATES_BEFORE_EARLY_STOP = 3
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 8
         // Used only by historical backfill, never by the primary shopping search.
-        private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 7L
+        private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 12L
         private const val MAX_DOMAIN_INDEX_ROWS = 20
         private const val MAX_CONCURRENT_SNAPSHOT_REQUESTS = 4
         const val RETRY_INTERVAL_MS = 30L * 24L * 60L * 60L * 1000L

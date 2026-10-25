@@ -151,8 +151,10 @@ dependencies {
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.logging.interceptor)
-  // HTTP inspector is debug-only; the sideload/release APK excludes Chucker.
+  // Chucker is used in debug tests and the private sideload diagnostic APK only.
+  // The regular release build stays free of the HTTP inspector.
   debugImplementation(libs.chucker)
+  sideloadImplementation(libs.chucker)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
   implementation(libs.jsoup)

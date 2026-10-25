@@ -387,8 +387,9 @@ internal fun summarizeCdxStep5Events(
  * matching the searched item. Archive gaps are expected; this client never invents prices.
  */
 /**
- * Chucker is installed only for debug builds. The release/sideload variant keeps the same
- * network timeouts and retry policy but never records HTTP traffic.
+ * HTTP inspection is controlled by the build-specific helper: debug and the private sideload
+ * diagnostic APK can record archive requests; the release helper is a no-op. Network timeouts,
+ * throttling, and retry policy stay identical across variants.
  */
 private fun createWaybackHttpClient(context: Context): OkHttpClient {
     val builder = OkHttpClient.Builder()

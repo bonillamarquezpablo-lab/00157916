@@ -164,25 +164,18 @@ jobs:
           keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey >/dev/null
           echo "Clave estable encontrada y validada."
 
-      - name: Calcular versión nueva a partir del APK publicado anteriormente
+      - name: Mantener la versión instalada para la actualización de Chucker
         id: version
-        env:
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
-          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
         shell: bash
         run: |
           set -euo pipefail
-          # Unique version per workflow run AND retry. Run number is monotonic per workflow;
-          # run_attempt prevents re-runs of the same run from reusing an APK version.
-          VERSION_CODE=$((10000 + GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))
-          VERSION_NAME="1.7.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
-          if [ "$VERSION_CODE" -le 6296 ]; then
-            echo "::error::versionCode calculado ($VERSION_CODE) no supera la versión instalada 6296."
-            exit 1
-          fi
+          # User requested a diagnostic replacement without changing package/version/signature.
+          # The current installed stable sideload is 1.7.796.1 (versionCode 89601).
+          VERSION_CODE=89601
+          VERSION_NAME="1.7.796.1"
           echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
           echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
-          echo "Construyendo Mínimo $VERSION_NAME (versionCode $VERSION_CODE)"
+          echo "Construyendo actualización diagnóstica Mínimo $VERSION_NAME (versionCode $VERSION_CODE)"
 
       - name: Compilar APK
         timeout-minutes: 20
@@ -221,6 +214,27 @@ jobs:
           echo "Certificado de firma coincide con la huella estable autorizada."
           sha256sum "$APK_PATH"
 
+      - name: Verificar que Chucker está integrado en la APK de distribución directa
+        run: |
+          python3 - "app/build/outputs/apk/sideload/app-sideload.apk" <<'PY'
+          import re
+          import sys
+          import zipfile
+
+          apk = sys.argv[1]
+          with zipfile.ZipFile(apk) as archive:
+              dex_files = [
+                  name for name in archive.namelist()
+                  if re.fullmatch(r"classes\\d*\\.dex", name)
+              ]
+              found = any(
+                  b"com/chuckerteam/chucker/api/ChuckerInterceptor" in archive.read(name)
+                  for name in dex_files
+              )
+          if not found:
+              raise SystemExit("ChuckerInterceptor no aparece en los DEX de la APK sideload.")
+          print(f"Chucker verificado en {len(dex_files)} archivo(s) DEX de la APK sideload.")
+
       - name: Guardar el APK durante 7 días
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -240,15 +254,11 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Setup Java 17
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
-        with:
-          gradle-version: '9.8.1'
-      - name: Setup Java 17
+      - name: Setup Java 21
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0

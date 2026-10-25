@@ -88,7 +88,7 @@ internal fun shouldAttemptMementoFallback(
     rateLimited: Boolean
 ): Boolean = !alreadyAttempted && hasEligibleDirectUrl && !hasSufficientHistory && !rateLimited
 
-/** Capture Memento traffic only in debug builds; never log it from sideload/release. */
+/** Capture Memento traffic in debug and private sideload diagnostics; release remains no-op. */
 private fun createMementoHttpClient(context: Context): OkHttpClient {
     val builder = OkHttpClient.Builder()
         .connectTimeout(3, TimeUnit.SECONDS)

@@ -5546,6 +5546,39 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun fallbackCanonicalUrlDropsTrackingParametersAndPreservesVariantIdentity() {
+        val client = newClient()
+        val tracked = "https://www.shop.example/product/iphone-15?srsltid=track123&utm_source=shopping&sku=iphone15-yellow-256"
+        assertEquals(
+            "https://www.shop.example/product/iphone-15?sku=iphone15-yellow-256",
+            client.canonicalPreferredArchiveUrl(tracked)
+        )
+    }
+
+    @Test
+    fun parseCaptureIndexKeepsMatchingHttpEraCaptureButRejectsOtherTargets() {
+        val client = newClient()
+        val target = "https://www.shop.example/products/iphone-15"
+        val body = """
+            [
+              ["timestamp","original","statuscode","mimetype"],
+              ["20241204071100","http://www.shop.example/products/iphone-15","200","text/html"],
+              ["20241205071100","http://evil.example/products/iphone-15","200","text/html"],
+              ["20241206071100","http://www.shop.example/products/iphone-16","200","text/html"],
+              ["20241207071100","https://www.shop.example/products/iphone-15","200","text/html"]
+            ]
+        """.trimIndent()
+
+        val captures = client.parseCaptureIndex(body, requestedUrl = target)
+        assertEquals(2, captures.size)
+        assertEquals("20241204071100", captures.first().rawTimestamp)
+        assertEquals("http://www.shop.example/products/iphone-15", captures.first().originalUrl)
+        assertTrue(client.buildSnapshotUrl(captures.first())!!.startsWith(
+            "https://web.archive.org/web/20241204071100id_/http://www.shop.example/products/iphone-15"
+        ))
+    }
+
+    @Test
     fun accessoryOffersAreNeverReturnedAsDiscoveryCandidates() {
         val client = newClient()
         val primaryUrl = "https://www.pccomponentes.com/apple-iphone-15-256gb-amarillo"

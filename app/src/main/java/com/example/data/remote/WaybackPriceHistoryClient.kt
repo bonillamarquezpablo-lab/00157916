@@ -721,9 +721,7 @@ class WaybackPriceHistoryClient(
         // Merchant metadata can be incomplete even when the offer has a valid direct URL.
         // Recover the host from that URL before rejecting the fallback; this adds no network call
         // and the normalizer still rejects search-engine/archive hosts.
-        val resolvedPreferredUrl = preferredUrl?.let { raw ->
-            decomposeProductUrl(raw)?.resolvedUrl ?: raw.takeIf(::isEligibleDirectUrl)
-        }
+        val resolvedPreferredUrl = preferredUrl?.let(::canonicalPreferredArchiveUrl)
         val normalizedDomain = normalizeMerchantDomain(domain)
             ?: resolvedPreferredUrl?.let { decomposeProductUrl(it)?.merchantDomain }
             ?: run {
@@ -2985,6 +2983,10 @@ class WaybackPriceHistoryClient(
             java.net.URLDecoder.decode(value.replace("+", "%2B"), Charsets.UTF_8.name())
         }.getOrDefault(value)
 
+    /** Canonical direct retailer URL for fallback lookups; retain SKU/variant queries, drop tracking. */
+    internal fun canonicalPreferredArchiveUrl(raw: String): String? =
+        decomposeProductUrl(raw)?.canonicalUrl ?: raw.takeIf(::isEligibleDirectUrl)
+
     internal fun buildDirectUrlCandidates(originalUrl: String): List<String> {
         val parts = decomposeProductUrl(originalUrl) ?: return emptyList()
         val uri = runCatching { URI(parts.resolvedUrl) }.getOrNull() ?: return emptyList()
@@ -3491,7 +3493,10 @@ class WaybackPriceHistoryClient(
                         diagnosticCodes = setOf("${cdxStage}_INVALID_RESPONSE")
                     )
                 }
-                CdxIndexOutcome(captures = parseCaptureIndex(body), available = true)
+                CdxIndexOutcome(
+                    captures = parseCaptureIndex(body, requestedUrl = cdxUrl.queryParameter("url")),
+                    available = true
+                )
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -4253,9 +4258,57 @@ class WaybackPriceHistoryClient(
             .take(6)
     }
 
-    private fun buildSnapshotUrl(capture: WaybackCapture): String? {
-        if (capture.timestamp <= 0L || !isEligibleDirectUrl(capture.originalUrl)) return null
+    internal fun buildSnapshotUrl(capture: WaybackCapture): String? {
+        if (capture.timestamp <= 0L || !isEligibleArchiveCaptureUrl(capture.originalUrl)) return null
         return "https://web.archive.org/web/" + capture.rawTimestamp + "id_/" + capture.originalUrl
+    }
+
+    /**
+     * A capture may have been saved under HTTP years before the retailer moved to HTTPS.
+     * We only admit such a row when its canonical host, path and functional query exactly match
+     * the HTTPS URL used for the CDX query. The app still downloads the replay over HTTPS.
+     */
+    private fun isEquivalentHttpCapture(captureUrl: String, requestedUrl: String?): Boolean {
+        if (requestedUrl.isNullOrBlank()) return false
+        val captureUri = runCatching { URI(captureUrl) }.getOrNull() ?: return false
+        val requestedUri = runCatching { URI(requestedUrl) }.getOrNull() ?: return false
+        if (!captureUri.scheme.equals("http", ignoreCase = true) ||
+            !requestedUri.scheme.equals("https", ignoreCase = true) ||
+            captureUri.rawUserInfo != null || requestedUri.rawUserInfo != null
+        ) return false
+
+        val secureEquivalent = buildString {
+            append("https://")
+            append(captureUri.rawAuthority)
+            append(captureUri.rawPath?.ifBlank { "/" } ?: "/")
+            captureUri.rawQuery?.let { append("?"); append(it) }
+        }
+        if (!isEligibleDirectUrl(secureEquivalent) || !isEligibleDirectUrl(requestedUrl)) return false
+        val captureParts = decomposeProductUrl(secureEquivalent) ?: return false
+        val requestedParts = decomposeProductUrl(requestedUrl) ?: return false
+        val sameHost = captureParts.host.removePrefix("www.") ==
+            requestedParts.host.removePrefix("www.")
+        val samePath = captureParts.path.trimEnd('/').ifBlank { "/" } ==
+            requestedParts.path.trimEnd('/').ifBlank { "/" }
+        fun canonicalQuery(url: String): List<String> =
+            runCatching { URI(url).rawQuery.orEmpty().split('&').filter { it.isNotBlank() }.sorted() }
+                .getOrDefault(emptyList())
+        return sameHost && samePath &&
+            canonicalQuery(captureParts.canonicalUrl) == canonicalQuery(requestedParts.canonicalUrl)
+    }
+
+    /** Only the archived replay may use an HTTP original; direct network requests remain HTTPS-only. */
+    private fun isEligibleArchiveCaptureUrl(value: String): Boolean {
+        val uri = runCatching { URI(value) }.getOrNull() ?: return false
+        if (uri.scheme.equals("https", ignoreCase = true)) return isEligibleDirectUrl(value)
+        if (!uri.scheme.equals("http", ignoreCase = true) || uri.rawUserInfo != null) return false
+        val secureEquivalent = buildString {
+            append("https://")
+            append(uri.rawAuthority)
+            append(uri.rawPath?.ifBlank { "/" } ?: "/")
+            uri.rawQuery?.let { append("?"); append(it) }
+        }
+        return isEligibleDirectUrl(secureEquivalent)
     }
 
     internal fun isValidCaptureIndexResponse(body: String): Boolean {
@@ -4266,7 +4319,7 @@ class WaybackPriceHistoryClient(
         return "timestamp" in fields && "original" in fields
     }
 
-    internal fun parseCaptureIndex(body: String): List<WaybackCapture> {
+    internal fun parseCaptureIndex(body: String, requestedUrl: String? = null): List<WaybackCapture> {
         val root = try { JSONArray(body) } catch (_: JSONException) { return emptyList() }
         if (root.length() < 2) return emptyList()
         val header = root.optJSONArray(0) ?: return emptyList()
@@ -4286,7 +4339,10 @@ class WaybackPriceHistoryClient(
             if (!rawTs.matches(Regex("""\d{14}"""))) continue
             if (statusCol >= 0 && row.optString(statusCol) != "200") continue
             if (mimeCol >= 0 && !row.optString(mimeCol).contains("text/html", ignoreCase = true)) continue
-            val original = row.optString(urlCol).takeIf(::isEligibleDirectUrl) ?: continue
+            val rawOriginal = row.optString(urlCol)
+            val original = rawOriginal.takeIf(::isEligibleDirectUrl)
+                ?: rawOriginal.takeIf { isEquivalentHttpCapture(it, requestedUrl) }
+                ?: continue
             val timestamp = runCatching {
                 SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
                     isLenient = false

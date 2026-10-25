@@ -130,6 +130,15 @@ class MementoClient(
             preferences.edit().putLong(KEY_COOLDOWN_UNTIL, wallClockMillis + RATE_LIMIT_COOLDOWN_MS).commit()
         }
     }
+
+    /** Strip tracking-only query fields while retaining functional SKU/variant parameters. */
+    internal fun canonicalizeArchiveLookupUrl(originalUrl: String): String? {
+        val uri = parseHttpUri(originalUrl) ?: return null
+        if (isArchiveOrSearchHost(uri.host.orEmpty())) return null
+        return priceParser.buildDirectUrlCandidates(originalUrl).lastOrNull()
+            ?: originalUrl.substringBefore('#')
+    }
+
     suspend fun fetchHistory(
         originalUrl: String,
         expectedTitle: String,
@@ -139,8 +148,10 @@ class MementoClient(
         knownProductTitlesById: Map<String, String> = emptyMap(),
         onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
-        val originalUri = parseHttpUri(originalUrl)
-        if (originalUri == null || !originalUri.scheme.equals("https", true) ||
+        val archiveTargetUrl = canonicalizeArchiveLookupUrl(originalUrl)
+        val originalUri = archiveTargetUrl?.let(::parseHttpUri)
+        if (archiveTargetUrl.isNullOrBlank() || originalUri == null ||
+            !originalUri.scheme.equals("https", true) ||
             originalUri.host.isNullOrBlank() || expectedTitle.isBlank() ||
             isArchiveOrSearchHost(originalUri.host)
         ) {
@@ -159,7 +170,7 @@ class MementoClient(
             )
         }
 
-        val timeMapUrl = buildTimeMapUrl(originalUrl)
+        val timeMapUrl = buildTimeMapUrl(archiveTargetUrl)
             ?: return@withContext WaybackBackfillResult(
                 requestFailed = true,
                 diagnosticCodes = setOf("MEMENTO_TIMEMAP_URL_INVALID")
@@ -201,7 +212,7 @@ class MementoClient(
         }
 
         var captureCandidates = timeMapBody
-            ?.let { parseTimeMap(it, originalUrl, now, lookbackDays) }
+            ?.let { parseTimeMap(it, archiveTargetUrl, now, lookbackDays) }
             .orEmpty()
         var cdxAvailable = false
         var cdxRequestFailed = false
@@ -214,7 +225,7 @@ class MementoClient(
         if (captureCandidates.isEmpty() && shouldTryCdx) {
             usedCdxFallback = true
             val cdx = fetchCdxCaptures(
-                originalUrl = originalUrl,
+                originalUrl = archiveTargetUrl,
                 now = now,
                 lookbackDays = lookbackDays
             )
@@ -289,7 +300,7 @@ class MementoClient(
                                     val primarySource = priceParser.parseArchivedPrice(
                                         document = org.jsoup.Jsoup.parse(html),
                                         expectedTitle = expectedTitle,
-                                        originalUrl = originalUrl,
+                                        originalUrl = archiveTargetUrl,
                                         snapshotUrl = capture.snapshotUrl,
                                         observedAt = capture.timestamp,
                                         acceptedCurrencies = setOf("EUR", "USD")
@@ -306,7 +317,7 @@ class MementoClient(
                                         document = org.jsoup.Jsoup.parse(html),
                                         primaryExpectedTitle = expectedTitle,
                                         knownProductTitlesById = knownProductTitlesById,
-                                        originalUrl = originalUrl,
+                                        originalUrl = archiveTargetUrl,
                                         snapshotUrl = capture.snapshotUrl,
                                         observedAt = capture.timestamp,
                                         acceptedCurrencies = setOf("EUR", "USD")

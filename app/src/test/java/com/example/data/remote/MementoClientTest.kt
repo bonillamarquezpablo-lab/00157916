@@ -58,6 +58,17 @@ class MementoClientTest {
     }
 
     @Test
+    fun canonicalizeArchiveLookupUrlDropsTrackingButPreservesVariantParameters() {
+        val client = newClient()
+        assertEquals(
+            "https://www.shop.example/product/item?sku=blue&size=256",
+            client.canonicalizeArchiveLookupUrl(
+                "https://www.shop.example/product/item?srsltid=tracking123&utm_source=shopping&sku=blue&size=256"
+            )
+        )
+    }
+
+    @Test
     fun buildTimeMapUrlRejectsSearchEnginesAndEncodesNestedQuerySeparators() {
         val client = newClient()
         val url = client.buildTimeMapUrl("https://shop.example/product/item?sku=blue&size=256#offer")

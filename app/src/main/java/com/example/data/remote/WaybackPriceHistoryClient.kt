@@ -5460,16 +5460,16 @@ class WaybackPriceHistoryClient(
                 runCatching { java.nio.charset.Charset.forName(it) }.getOrNull()
             }
 
-        val headerCharsetName = Regex("""(?i)\\bcharset\\s*=\\s*[\"']?\\s*([a-z0-9._:-]+)""")
+        val headerCharsetName = Regex("""(?i)\bcharset\s*=\s*[\"']?\s*([a-z0-9._:-]+)""")
             .find(contentTypeHeader.orEmpty())?.groupValues?.getOrNull(1)
         val probeStart = byteOffset.coerceAtMost(bytes.size)
         val probeEnd = minOf(bytes.size, probeStart + 8192)
         // Charset labels and the meta element syntax are ASCII-compatible in legacy HTML
         // encodings, so ISO-8859-1 is a safe byte-preserving view for this short sniff window.
         val probe = String(bytes, probeStart, probeEnd - probeStart, Charsets.ISO_8859_1)
-        val metaCharsetName = Regex("""(?is)<meta\\b[^>]*\\bcharset\\s*=\\s*[\"']?\\s*([a-z0-9._:-]+)""")
+        val metaCharsetName = Regex("""(?is)<meta\b[^>]*\bcharset\s*=\s*[\"']?\s*([a-z0-9._:-]+)""")
             .find(probe)?.groupValues?.getOrNull(1)
-            ?: Regex("""(?is)<meta\\b[^>]*\\bcontent\\s*=\\s*[\"'][^\"']*charset\\s*=\\s*([a-z0-9._:-]+)""")
+            ?: Regex("""(?is)<meta\b[^>]*\bcontent\s*=\s*[\"'][^\"']*charset\s*=\s*([a-z0-9._:-]+)""")
                 .find(probe)?.groupValues?.getOrNull(1)
         val charset = bomCharset ?: safeCharset(headerCharsetName) ?: safeCharset(metaCharsetName)
             ?: Charsets.UTF_8

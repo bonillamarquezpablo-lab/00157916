@@ -4922,11 +4922,20 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun snapshotHttpClientAppliesTwelveSecondBoundToConnectReadAndWholeCall() {
+    fun snapshotHttpClientAppliesConfiguredBoundToConnectReadAndWholeCall() {
         val configured = newClient().buildSnapshotHttpClient(12L)
         assertEquals("Connection timeout must use the bounded archive budget", 12_000, configured.connectTimeoutMillis)
         assertEquals("HTML read timeout must use the same bounded budget", 12_000, configured.readTimeoutMillis)
         assertEquals("Whole snapshot call timeout must use the same bounded budget", 12_000, configured.callTimeoutMillis)
+    }
+
+    @Test
+    fun onlySnapshotTimeoutGetsOneRetryAndRateLimitAlwaysStopsIt() {
+        assertTrue(shouldRetrySnapshotTimeoutOnce("SNAPSHOT_TIMEOUT", rateLimited = false))
+        assertFalse(shouldRetrySnapshotTimeoutOnce("SNAPSHOT_TIMEOUT", rateLimited = true))
+        assertFalse(shouldRetrySnapshotTimeoutOnce("WAYBACK_RATE_LIMITED", rateLimited = false))
+        assertFalse(shouldRetrySnapshotTimeoutOnce("SNAPSHOT_NETWORK", rateLimited = false))
+        assertFalse(shouldRetrySnapshotTimeoutOnce(null, rateLimited = false))
     }
 
     @Test

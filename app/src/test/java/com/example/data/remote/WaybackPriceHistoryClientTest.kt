@@ -5001,7 +5001,7 @@ class WaybackPriceHistoryClientTest {
         val client = newClient()
         var attempts = 0
         var retryChecks = 0
-        val result = client.retrySnapshotDnsOnce(
+        val result = client.retrySnapshotTransientOnce(
             request = {
                 attempts++
                 if (attempts == 1) throw java.net.UnknownHostException("temporary DNS failure")
@@ -5019,7 +5019,7 @@ class WaybackPriceHistoryClientTest {
         attempts = 0
         retryChecks = 0
         try {
-            client.retrySnapshotDnsOnce(
+            client.retrySnapshotTransientOnce(
                 request = {
                     attempts++
                     throw java.net.UnknownHostException("persistent DNS failure")
@@ -5038,7 +5038,7 @@ class WaybackPriceHistoryClientTest {
 
         attempts = 0
         retryChecks = 0
-        val wrappedResult = client.retrySnapshotDnsOnce(
+        val wrappedResult = client.retrySnapshotTransientOnce(
             request = {
                 attempts++
                 if (attempts == 1) throw java.io.IOException(
@@ -5058,11 +5058,76 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun snapshotStreamResetRetriesOnceButReadTimeoutDoesNotGetAnExtraRetry() = runBlocking {
+        val client = newClient()
+        var attempts = 0
+        var retryChecks = 0
+        val recovered = client.retrySnapshotTransientOnce(
+            request = {
+                attempts++
+                if (attempts == 1) throw java.io.IOException("stream was reset: CANCEL")
+                "recovered after stream reset"
+            },
+            beforeRetry = {
+                retryChecks++
+                true
+            }
+        )
+
+        assertEquals("recovered after stream reset", recovered)
+        assertEquals("One failed stream gets at most one retry", 2, attempts)
+        assertEquals(1, retryChecks)
+
+        assertTrue(
+            "An HTTP/2 stream reset should be considered a transient snapshot transport error",
+            client.isRetryableSnapshotTransportFailure(java.io.IOException("stream was reset"))
+        )
+        assertFalse(
+            "A slow response should not silently double the timeout budget",
+            client.isRetryableSnapshotTransportFailure(java.net.SocketTimeoutException("timeout"))
+        )
+
+        attempts = 0
+        try {
+            client.retrySnapshotTransientOnce(
+                request = {
+                    attempts++
+                    throw java.io.IOException("stream was reset")
+                },
+                beforeRetry = { true }
+            )
+            throw AssertionError("A persistent stream reset must fail after one retry")
+        } catch (_: java.io.IOException) {
+            // Expected: one original request plus exactly one retry.
+        }
+        assertEquals(2, attempts)
+    }
+
+    @Test
+    fun ordinarySnapshotErrorsAreNotRetried() = runBlocking {
+        val client = newClient()
+        var attempts = 0
+        try {
+            client.retrySnapshotTransientOnce(
+                request = {
+                    attempts++
+                    throw IllegalStateException("validation problem")
+                },
+                beforeRetry = { true }
+            )
+            throw AssertionError("Non-transport errors must be propagated without retry")
+        } catch (_: IllegalStateException) {
+            // Expected.
+        }
+        assertEquals(1, attempts)
+    }
+
+    @Test
     fun snapshotDnsRetryIsCancelledWhenGlobalArchiveGateBlocksIt() = runBlocking {
         val client = newClient()
         var attempts = 0
         try {
-            client.retrySnapshotDnsOnce(
+            client.retrySnapshotTransientOnce(
                 request = {
                     attempts++
                     throw java.net.UnknownHostException("temporary DNS failure")

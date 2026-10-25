@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -101,11 +102,22 @@ fun MarketScreen(
         uiState.onlyHistoricalMinimumFilter
     val shouldShowCategoryHome = uiState.selectedCategory == ProductCategory.ALL &&
         !hasActiveMarketFilter && !forceShowAllProducts
-    val canReturnToCategoryHome = uiState.searchQuery.isBlank() &&
-        uiState.selectedStoreName == null &&
-        !uiState.onlyAthFilter &&
-        !uiState.onlyHistoricalMinimumFilter &&
-        (uiState.selectedCategory != ProductCategory.ALL || forceShowAllProducts)
+    // Returning from a category should always take the user back to the category home.
+    // Clear only the search and market filters that would otherwise keep the list visible.
+    val returnToCategoryHome = {
+        forceShowAllProducts = false
+        if (uiState.searchQuery.isNotBlank()) onSearchChange("")
+        if (uiState.selectedStoreName != null) onStoreFilterSelect(null)
+        if (uiState.onlyAthFilter) onToggleOnlyAth()
+        if (uiState.onlyHistoricalMinimumFilter) onToggleOnlyHistoricalMinimum()
+        if (uiState.selectedCategory != ProductCategory.ALL) {
+            onCategorySelect(ProductCategory.ALL)
+        }
+    }
+
+    BackHandler(enabled = !shouldShowCategoryHome) {
+        returnToCategoryHome()
+    }
 
     // Repeated products stay tucked away until the user chooses a family, version, then capacity.
     var expandedFamilyKeys by remember { mutableStateOf(emptySet<String>()) }
@@ -161,22 +173,15 @@ fun MarketScreen(
             .testTag("market_screen_list"),
         contentPadding = PaddingValues(bottom = 24.dp)
     ) {
-        if (canReturnToCategoryHome) {
-            item {
-                OutlinedButton(
-                    onClick = {
-                        forceShowAllProducts = false
-                        if (uiState.selectedCategory != ProductCategory.ALL) {
-                            onCategorySelect(ProductCategory.ALL)
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                        .testTag("return_to_categories_button")
-                ) {
-                    Text("Volver a categorías")
-                }
+        item {
+            OutlinedButton(
+                onClick = { returnToCategoryHome() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .testTag("return_to_categories_button")
+            ) {
+                Text("Volver a categorías")
             }
         }
 

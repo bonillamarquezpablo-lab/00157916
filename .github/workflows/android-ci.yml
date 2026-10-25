@@ -99,6 +99,19 @@ jobs:
       - name: Compilar pruebas instrumentadas Android
         run: gradle :app:compileDebugAndroidTestKotlin --stacktrace
 
+      - name: Generar clave temporal de depuración para firmar la APK de pruebas
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Esta clave solo sirve para la APK de depuración de CI y no se guarda en el repositorio.
+          keytool -genkeypair -v \
+            -keystore debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US" \
+            -keyalg RSA -keysize 2048 -validity 10000
+
       - name: Compilar APK de depuración para probar Chucker (sin clave de firma de distribución)
         env:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}

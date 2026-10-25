@@ -93,6 +93,15 @@ internal fun shouldSkipDomainFallbackAfterSnapshotTimeout(
 }
 
 /**
+ * Exact CDX captures already establish a usable historical series once there are three distinct
+ * verified dates. Avoid broad prefix/year scans that repeat those captures and can trigger 429.
+ * Discovery-only candidates do not count as history for the selected product.
+ */
+internal fun shouldSkipPrefixAfterSufficientExactHistory(
+    quotes: Iterable<ArchivedPriceQuote>
+): Boolean = hasSufficientHistoricalCoverage(quotes, minimumDistinctDates = 3)
+
+/**
  * After the direct lookup, a broad prefix index timeout followed by a calendar-year index timeout
  * means the same Wayback CDX backend has failed on two bounded routes. In that case the next
  * merchant-domain Availability probes are likely to add traffic while the archive is struggling.
@@ -569,13 +578,24 @@ class WaybackPriceHistoryClient(
                 )
                 return@serializedArchiveLookup exactResult
             }
-            // Existing Room dates are checked when persistence runs, not by the remote client.
-            // Three captures from CDX may all repeat dates already stored locally.
+            if (shouldSkipPrefixAfterSufficientExactHistory(exactResult.quotes)) {
+                emitWaybackTrace(
+                    onTrace, 6, WaybackTraceStatus.SKIPPED,
+                    "La búsqueda exacta ya verificó precios en tres fechas distintas; se reutilizan esas capturas y se omiten prefijo y búsqueda anual para evitar consultas repetidas."
+                )
+                rememberAttempt(attempt, now, hasQuotes = true, failed = false)
+                return@serializedArchiveLookup exactResult.copy(
+                    requestFailed = false,
+                    diagnosticCodes = exactResult.diagnosticCodes +
+                        "CDX_PREFIX_SKIPPED_EXACT_HISTORY_SUFFICIENT"
+                )
+            }
+
+            // Existing Room dates are filtered during persistence, not by the remote client.
+            // If exact history is sparse, keep the prefix scan as a bounded supplement.
             val exactPrimaryQuotes = exactResult.quotes.filter {
                 it.targetProductId.isNullOrBlank() && !it.isDiscoveryCandidate
             }
-            // Existing Room dates are filtered during persistence, not by the remote client.
-            // Three valid captures may all be repeats; still query the prefix route for missing dates.
 
             // Adaptive budget: if the exact URL already found a valid price, this is a quick
             // supplement to add one or two more dated points, not another full historical crawl.

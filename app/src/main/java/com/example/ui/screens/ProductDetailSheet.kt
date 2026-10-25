@@ -790,7 +790,7 @@ fun ProductDetailSheet(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                "20 fases generales más registros por captura: fecha, ruta, tienda, causa de red y duración. Sin consultas extra; URL completas, parámetros y HTML se ocultan.",
+                                "22 fases generales más registros por captura: fecha, ruta, tienda, causa de red, decodificación y resultado del extractor. Sin consultas extra; URL completas, parámetros, precios candidatos y HTML se ocultan.",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

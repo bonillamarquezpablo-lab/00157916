@@ -166,16 +166,27 @@ jobs:
 
       - name: Mantener la versión instalada para la actualización de Chucker
         id: version
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         shell: bash
         run: |
           set -euo pipefail
-          # User requested a diagnostic replacement without changing package/version/signature.
-          # The current installed stable sideload is 1.7.796.1 (versionCode 89601).
-          VERSION_CODE=89601
-          VERSION_NAME="1.7.796.1"
+          if [[ "${HEAD_COMMIT_MESSAGE:-}" == *"Chucker"* ]]; then
+            # One diagnostic replacement is intentionally kept at the installed version.
+            # The current installed stable sideload is 1.7.796.1 (versionCode 89601).
+            VERSION_CODE=89601
+            VERSION_NAME="1.7.796.1"
+            echo "Building same-version Chucker diagnostic update."
+          else
+            # Preserve monotonic versioning for future unrelated releases.
+            VERSION_CODE=$((10000 + GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))
+            VERSION_NAME="1.7.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          fi
           echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
           echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
-          echo "Construyendo actualización diagnóstica Mínimo $VERSION_NAME (versionCode $VERSION_CODE)"
+          echo "Construyendo Mínimo $VERSION_NAME (versionCode $VERSION_CODE)"
 
       - name: Compilar APK
         timeout-minutes: 20

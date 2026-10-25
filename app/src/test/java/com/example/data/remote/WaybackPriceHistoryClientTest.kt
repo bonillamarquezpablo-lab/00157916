@@ -3777,6 +3777,33 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun extractsVerifiedPriceFromEmbeddedStoreStateJsonWithoutJsonLdType() {
+        val client = newClient()
+        val html = """
+            <html><head>
+              <title>Anker Prime 27K Power Bank</title>
+              <script type="application/json">
+                {"page":{"product":{"name":"Anker Prime 27K Power Bank",
+                 "offers":{"price":"88.49","priceCurrency":"EUR"}}}}
+              </script>
+            </head><body></body></html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "Anker Prime 27K Power Bank",
+            originalUrl = "https://shop.example/products/anker-prime-27k",
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/https://shop.example/products/anker-prime-27k",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("A bounded embedded product-state JSON block should be considered", quote)
+        assertEquals(88.49, quote!!.price, 0.001)
+        assertEquals("EUR", quote.currency)
+        assertEquals("Anker Prime 27K Power Bank", quote.productTitle)
+    }
+
+    @Test
     fun explicitProductPriceMetadataTakesPrecedenceOverConflictingJsonLdOffers() {
         val client = newClient()
         val html = """
@@ -5145,6 +5172,24 @@ class WaybackPriceHistoryClientTest {
             // Expected: one original request plus exactly one retry.
         }
         assertEquals(2, attempts)
+    }
+
+    @Test
+    fun streamResetDiagnosticIsMoreSpecificThanTheOuterTimeout() {
+        val client = newClient()
+        val reset = java.io.IOException(
+            "call failed",
+            java.io.IOException("stream was reset: CANCEL")
+        )
+        assertEquals("SNAPSHOT_STREAM_RESET", client.classifyNetworkFailure("SNAPSHOT", reset))
+        assertEquals(
+            "CDX_ALTERNATE_PREFIX_STREAM_RESET",
+            client.classifyNetworkFailure("CDX_ALTERNATE_PREFIX", reset)
+        )
+        assertEquals(
+            "SNAPSHOT_TIMEOUT",
+            client.classifyNetworkFailure("SNAPSHOT", java.net.SocketTimeoutException("timeout"))
+        )
     }
 
     @Test

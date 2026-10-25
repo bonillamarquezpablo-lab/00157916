@@ -247,7 +247,7 @@ internal fun buildWaybackDiagnosticExportReport(
     report.appendLine("Generado: " + generatedAt)
     report.appendLine("Versión de Mínimo: " + appVersion)
     report.appendLine("Android: " + androidVersion)
-    report.appendLine("Producto: " + productTitle.replace(Regex("""[\r\n]+"""), " ").trim().take(180))
+    report.appendLine("Producto: " + safeDetail(productTitle.replace(Regex("""[\r\n]+"""), " ").trim().take(180)))
     report.appendLine("Resultado comunicado por la app: " + safeDetail(statusText))
     report.appendLine("Resumen del diagnóstico: " + safeDetail(summary))
     report.appendLine(
@@ -266,7 +266,7 @@ internal fun buildWaybackDiagnosticExportReport(
             report.appendLine(step.toString() + ". SIN REGISTRO")
             continue
         }
-        report.appendLine(step.toString() + ". " + entry.title + " — " + statusLabel(entry.status))
+        report.appendLine(step.toString() + ". " + safeDetail(entry.title) + " — " + statusLabel(entry.status))
         entry.durationMs?.let { report.appendLine("   Duración registrada: " + it + " ms") }
         val detailLines = entry.detail.lines().filter { it.isNotBlank() }
         if (detailLines.isEmpty()) {
@@ -821,6 +821,7 @@ fun ProductDetailSheet(
                 OutlinedButton(
                     onClick = {
                         showWaybackDiagnostics = true
+                        diagnosticReportCopyStatus = ""
                         onSearchFreeHistory()
                     },
                     enabled = !isSearchingFreeHistory && !isComparingStores,

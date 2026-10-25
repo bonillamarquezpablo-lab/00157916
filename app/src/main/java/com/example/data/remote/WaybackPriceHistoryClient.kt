@@ -250,9 +250,9 @@ private fun emitCachedLookupSkippedTrace(
     )
 }
 
-/** Translate stable client phase IDs into the clearer 20-stage on-device diagnostic. */
+/** Translate stable client phase IDs into the clearer 22-stage on-device diagnostic. */
 internal fun diagnosticIndexForWaybackTrace(event: WaybackTraceEvent): Int {
-    event.diagnosticStep?.takeIf { it in 1..20 }?.let { return it }
+    event.diagnosticStep?.takeIf { it in 1..22 }?.let { return it }
     return when (event.step) {
         4 -> 5  // CDX request sent
         5 -> 6  // CDX response classified
@@ -265,7 +265,7 @@ internal fun diagnosticIndexForWaybackTrace(event: WaybackTraceEvent): Int {
         12 -> 15 // product identity
         13 -> 16 // price extraction
         14 -> 17 // amount/currency validation
-        else -> event.step.coerceIn(1, 20)
+        else -> event.step.coerceIn(1, 22)
     }
 }
 
@@ -2725,6 +2725,16 @@ class WaybackPriceHistoryClient(
         emitWaybackTrace(onTrace, 12, WaybackTraceStatus.SKIPPED, detail)
         emitWaybackTrace(onTrace, 13, WaybackTraceStatus.SKIPPED, detail)
         emitWaybackTrace(onTrace, 14, WaybackTraceStatus.SKIPPED, detail)
+        emitWaybackTrace(
+            onTrace, 16, WaybackTraceStatus.SKIPPED,
+            "No ejecutado: no hay HTML descargado que perfilar.",
+            diagnosticStep = 21
+        )
+        emitWaybackTrace(
+            onTrace, 17, WaybackTraceStatus.SKIPPED,
+            "No ejecutado: sin documento HTML no puede evaluarse la estrategia de extracción.",
+            diagnosticStep = 22
+        )
     }
 
     private fun diagnoseArchivedPrice(

@@ -69,6 +69,48 @@ class MementoClientTest {
     }
 
     @Test
+    fun arquivoReplayUrlsAreConvertedToArchivedContentUrls() {
+        val client = newClient()
+        val wrapper = "https://arquivo.pt/wayback/20250316233444/https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo-libre"
+        val content = "https://arquivo.pt/wayback/20250316233444mp_/https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo-libre"
+
+        assertEquals(content, client.toContentSnapshotUrl(wrapper))
+        assertEquals(content, client.toContentSnapshotUrl(content))
+        assertNull(client.toContentSnapshotUrl(
+            "https://attacker.example/wayback/20250316233444/https://shop.example/product"
+        ))
+        assertNull(client.toContentSnapshotUrl(
+            "https://arquivo.pt/other/20250316233444/https://shop.example/product"
+        ))
+    }
+
+    @Test
+    fun threeDistinctVerifiedExactDatesSkipTheExpensivePrefixScan() {
+        val base = 1_750_000_000_000L
+        fun quote(day: Int, discovery: Boolean = false) = ArchivedPriceQuote(
+            observedAt = base + day.toLong() * WaybackPriceHistoryClient.DAY_MS,
+            price = 199.99 - day,
+            currency = "EUR",
+            productTitle = "Sony WH-1000XM5",
+            originalUrl = "https://shop.example/sony-wh-1000xm5",
+            snapshotUrl = "https://arquivo.pt/wayback/20260701000000/https://shop.example/sony-wh-1000xm5",
+            isDiscoveryCandidate = discovery
+        )
+
+        val threeDates = listOf(quote(0), quote(1), quote(2))
+        assertTrue(shouldSkipPrefixAfterSufficientExactHistory(threeDates))
+        assertFalse(shouldSkipPrefixAfterSufficientExactHistory(threeDates.take(2)))
+        assertFalse(
+            "Multiple captures on the same UTC date are not enough coverage",
+            shouldSkipPrefixAfterSufficientExactHistory(listOf(quote(0), quote(0), quote(0)))
+        )
+        assertFalse(
+            "New-product discovery candidates are not history of the selected product",
+            shouldSkipPrefixAfterSufficientExactHistory(listOf(quote(0, true), quote(1, true), quote(2, true)))
+        )
+    }
+
+    @Test
     fun buildTimeMapUrlRejectsSearchEnginesAndEncodesNestedQuerySeparators() {
         val client = newClient()
         val url = client.buildTimeMapUrl("https://shop.example/product/item?sku=blue&size=256#offer")

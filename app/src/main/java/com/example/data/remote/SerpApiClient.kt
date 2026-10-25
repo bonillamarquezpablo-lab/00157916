@@ -7,6 +7,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import com.chuckerteam.chucker.api.ChuckerInterceptor
+import com.example.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -187,11 +189,28 @@ class SerpApiException(
  * suitable only for a private single-device prototype: a public/multi-user release needs a
  * backend proxy and must not expose one user's API key in the APK.
  */
-class SerpApiClient(
-    private val http: OkHttpClient = OkHttpClient.Builder()
+/** Capture online search HTTP traffic only in debug builds. */
+private fun createSerpApiHttpClient(): OkHttpClient {
+    val builder = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(8, TimeUnit.SECONDS)
         .writeTimeout(8, TimeUnit.SECONDS)
+    if (BuildConfig.DEBUG) {
+        // Application clients that create SerpApiClient should use the context-aware Wayback
+        // factory in debug builds; this standalone client has no Context parameter to pass.
+        // Attach Chucker from the active application only when available in the process.
+        runCatching {
+            val app = Class.forName("android.app.ActivityThread")
+                .getMethod("currentApplication")
+                .invoke(null) as? android.app.Application
+            if (app != null) builder.addInterceptor(ChuckerInterceptor.Builder(app).build())
+        }
+    }
+    return builder.build()
+}
+
+class SerpApiClient(
+    private val http: OkHttpClient = createSerpApiHttpClient()
         .callTimeout(12, TimeUnit.SECONDS)
         .build()
 ) {

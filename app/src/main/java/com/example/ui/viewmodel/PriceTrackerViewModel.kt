@@ -155,6 +155,23 @@ internal fun mergeWaybackDiagnosticStatus(
     else -> incoming
 }
 
+/**
+ * Stops trying secondary retailer destinations once the selected product already has enough
+ * verified dates. Extra inferred URLs can trigger redundant Availability calls and HTTP 429 even
+ * after the direct CDX route has completed a usable three-date history.
+ */
+internal fun hasEnoughVerifiedArchiveDates(
+    timestamps: Iterable<Long>,
+    minimumDistinctDates: Int = 3
+): Boolean {
+    if (minimumDistinctDates <= 0) return false
+    return timestamps.asSequence()
+        .map { Math.floorDiv(it, WaybackPriceHistoryClient.DAY_MS) }
+        .distinct()
+        .take(minimumDistinctDates)
+        .count() >= minimumDistinctDates
+}
+
 internal fun isSupersededWaybackSkipDetail(detailLine: String): Boolean {
     val message = detailLine.substringAfter("] ", detailLine).trim().lowercase(Locale.ROOT)
     return message.startsWith("no ejecutado:") ||
@@ -2767,6 +2784,18 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     repository.allProductsStream.first().associate { it.id to it.title }
                 }.orEmpty()
                 for (candidate in candidates) {
+                    // Once three distinct dates have been verified for the selected product,
+                    // do not continue with inferred/secondary store URLs. Those calls cannot
+                    // improve the minimum usable history and may trigger unnecessary HTTP 429s.
+                    if (hasEnoughVerifiedArchiveDates(archiveDates)) {
+                        if (diagnosticProductId != null) {
+                            reportWaybackDiagnostic(
+                                diagnosticProductId, 7, WaybackTraceStatus.SKIPPED,
+                                "Se detienen los destinos secundarios: ya hay tres fechas distintas verificadas para el producto seleccionado; no se envían consultas de respaldo innecesarias."
+                            )
+                        }
+                        break
+                    }
                     // Bound each candidate's direct + merchant-domain lookup so slow public
                     // archive responses cannot leave the detail sheet spinning indefinitely.
                     // Prefer the exact retailer URL because it is much cheaper than scanning

@@ -2780,9 +2780,9 @@ class WaybackPriceHistoryClientTest {
 
     @Test
     fun annualPrefixQueriesStayInsideOneUtcCalendarYearAndTheHistoryWindow() {
-        val now = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+        val now = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {
             isLenient = false
-            timeZone = TimeZone.getTimeZone("UTC")
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
         }.parse("20261025120000")!!.time
         val client = newClient()
 

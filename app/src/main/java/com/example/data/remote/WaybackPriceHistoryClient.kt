@@ -537,9 +537,8 @@ class WaybackPriceHistoryClient(
                 )
                 return@serializedArchiveLookup exactResult
             }
-            // A single exact-URL quote is useful, but it is not a usable historical series.
-            // Only skip prefix matching when the selected product already has at least three
-            // distinct UTC dates; sibling-product and quarantined discovery quotes do not count.
+            // Existing Room dates are checked when persistence runs, not by the remote client.
+            // Three captures from CDX may all repeat dates already stored locally.
             val exactPrimaryQuotes = exactResult.quotes.filter {
                 it.targetProductId.isNullOrBlank() && !it.isDiscoveryCandidate
             }
@@ -576,9 +575,6 @@ class WaybackPriceHistoryClient(
                 knownProductTitlesById = knownProductTitlesById,
                 snapshotResultsCache = snapshotResultsCache,
                 onVerifiedQuotes = onVerifiedQuotes,
-                stopAfterDistinctPrimaryDates = if (foundExactPrimaryQuote) {
-                    MIN_HISTORICAL_DATES_BEFORE_EARLY_STOP
-                } else null,
                 primarySeedQuotes = exactPrimaryQuotes
             )
 
@@ -659,7 +655,6 @@ class WaybackPriceHistoryClient(
             val mergedPrimaryQuotes = mergedQuotes.filter {
                 it.targetProductId.isNullOrBlank() && !it.isDiscoveryCandidate
             }
-            val mergedHasSufficientHistory = hasSufficientHistoricalCoverage(mergedPrimaryQuotes)
             val combinedDiagnostics = exactResult.diagnosticCodes + prefixResult.diagnosticCodes +
                 yearlyResults.flatMap { it.diagnosticCodes }
             val rateLimited = combinedDiagnostics.contains("WAYBACK_RATE_LIMITED")

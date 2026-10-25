@@ -602,6 +602,9 @@ private fun SavedProductFamilyGridTile(
     onToggleTrack: (Product) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Keep the available model versions visible at all times. Only the detailed SKU/offer
+    // list is expandable, so the user never has to open a hidden "choose version" control
+    // just to discover which editions exist.
     val representative = family.products.firstOrNull {
         it.imageUrl.isNotBlank() || !it.imageResName.isNullOrBlank()
     } ?: family.products.firstOrNull()
@@ -614,14 +617,10 @@ private fun SavedProductFamilyGridTile(
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f), shape)
             .padding(10.dp)
             .testTag("saved_family_card_${family.key.hashCode()}"),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(7.dp)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .clickable(onClick = onToggleFamily)
-                .padding(2.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Top
         ) {
             if (representative != null) {
@@ -655,87 +654,83 @@ private fun SavedProductFamilyGridTile(
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold
                 )
-                Text(
-                    text = if (expanded) "Ocultar ▴" else "Elegir versión ▾",
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold
-                )
             }
         }
 
-        if (expanded) {
-            family.variants.forEach { variant ->
-                val variantKey = "${family.key}::${variant.key}"
-                val variantExpanded = variantKey in expandedVariantKeys
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(9.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainer)
-                            .clickable { onToggleVariant(variantKey, variantExpanded) }
-                            .padding(horizontal = 8.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
+        family.variants.forEach { variant ->
+            val variantKey = "${family.key}::${variant.key}"
+            val variantExpanded = variantKey in expandedVariantKeys
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainer)
+                        .clickable { onToggleVariant(variantKey, variantExpanded) }
+                        .padding(horizontal = 8.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = variant.label,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = variant.storages.joinToString(" · ") { it.label }.ifBlank { "Configuración no indicada" },
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Text(
+                        text = if (variantExpanded) "Ocultar fichas ▴" else "Ver fichas ▾",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                if (variantExpanded) {
+                    variant.storages.forEach { storage ->
+                        val storageKey = "${variantKey}::${storage.label}"
+                        val storageExpanded = storageKey in expandedStorageKeys
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                                .clickable { onToggleStorage(storageKey, storageExpanded) }
+                                .padding(horizontal = 8.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Text(
-                                text = variant.label,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 12.sp,
+                                text = storage.label,
+                                modifier = Modifier.weight(1f),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = if (variant.storages.size == 1) "1 configuración" else "${variant.storages.size} configuraciones",
+                                text = "${storage.products.size} fichas ${if (storageExpanded) "▴" else "▾"}",
                                 fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
-                        Text(text = if (variantExpanded) "▴" else "▾", color = MaterialTheme.colorScheme.primary)
-                    }
-
-                    if (variantExpanded) {
-                        variant.storages.forEach { storage ->
-                            val storageKey = "${variantKey}::${storage.label}"
-                            val storageExpanded = storageKey in expandedStorageKeys
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
-                                        .clickable { onToggleStorage(storageKey, storageExpanded) }
-                                        .padding(horizontal = 8.dp, vertical = 7.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = storage.label,
-                                        modifier = Modifier.weight(1f),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "${storage.products.size} fichas ${if (storageExpanded) "▴" else "▾"}",
-                                        fontSize = 10.sp,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                                if (storageExpanded) {
-                                    storage.products.forEach { product ->
-                                        ProductCard(
-                                            product = product,
-                                            onClick = { onProductClick(product) },
-                                            onToggleTrack = { onToggleTrack(product) },
-                                            modifier = Modifier.padding(top = 3.dp),
-                                            compact = true
-                                        )
-                                    }
-                                }
+                        if (storageExpanded) {
+                            storage.products.forEach { product ->
+                                ProductCard(
+                                    product = product,
+                                    onClick = { onProductClick(product) },
+                                    onToggleTrack = { onToggleTrack(product) },
+                                    modifier = Modifier.padding(top = 3.dp),
+                                    compact = true
+                                )
                             }
                         }
                     }
@@ -744,4 +739,3 @@ private fun SavedProductFamilyGridTile(
         }
     }
 }
-

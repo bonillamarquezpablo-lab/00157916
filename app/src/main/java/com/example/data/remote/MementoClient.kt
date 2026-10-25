@@ -4,8 +4,6 @@ import android.content.Context
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import com.chuckerteam.chucker.api.ChuckerInterceptor
-import com.example.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.ResponseBody
@@ -97,9 +95,7 @@ private fun createMementoHttpClient(context: Context): OkHttpClient {
         .readTimeout(4, TimeUnit.SECONDS)
         .callTimeout(5, TimeUnit.SECONDS)
         .followRedirects(true)
-    if (BuildConfig.DEBUG) {
-        builder.addInterceptor(ChuckerInterceptor.Builder(context.applicationContext).build())
-    }
+    addDebugNetworkInspector(context.applicationContext, builder)
     return builder.build()
 }
 

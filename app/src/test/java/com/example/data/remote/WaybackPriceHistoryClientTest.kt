@@ -2814,7 +2814,10 @@ class WaybackPriceHistoryClientTest {
         assertEquals("20181231", oldestPartialYear.queryParameter("to"))
 
         assertTrue(shouldRetryPrefixInYearBlocks(setOf("CDX_URL_PREFIX_TIMEOUT")))
+        assertTrue(shouldRetryPrefixInYearBlocks(setOf("CDX_URL_PREFIX_CANDIDATE_TIMEOUT")))
+        assertTrue(shouldRetryPrefixInYearBlocks(setOf("CANDIDATE_TIMEOUT_PARTIAL_QUOTES")))
         assertFalse(shouldRetryPrefixInYearBlocks(setOf("CDX_URL_PREFIX_TIMEOUT", "WAYBACK_RATE_LIMITED")))
+        assertFalse(shouldRetryPrefixInYearBlocks(setOf("CDX_URL_PREFIX_CANDIDATE_TIMEOUT", "WAYBACK_RATE_LIMITED")))
         assertFalse(shouldRetryPrefixInYearBlocks(setOf("CDX_URL_PREFIX_DNS")))
     }
 

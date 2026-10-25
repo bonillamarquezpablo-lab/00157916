@@ -2256,13 +2256,10 @@ class WaybackPriceHistoryClient(
                 retrySnapshotTransientOnce(
                     request = {
                         snapshotRequestAttempts++
-                        snapshotHttp.newCall(request).execute()
-                    },
-                    beforeRetry = {
-                        delay(SNAPSHOT_TRANSPORT_RETRY_DELAY_MS)
-                        awaitArchiveRequestTurn() == null
-                    }
-                ).use { response ->
+                        // Keep response-body consumption inside the retry boundary. OkHttp may
+                        // return headers successfully and then fail while reading a reset HTTP/2
+                        // stream; retrying only execute() would miss the failure seen in the trace.
+                        snapshotHttp.newCall(request).execute().use { response ->
                     val elapsed = ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(0L)
                     if (response.code == 429) {
                         activateRateLimit(response.header("Retry-After"), System.currentTimeMillis())
@@ -2350,6 +2347,12 @@ class WaybackPriceHistoryClient(
                         }
                     }
                 }
+                    },
+                    beforeRetry = {
+                        delay(SNAPSHOT_TRANSPORT_RETRY_DELAY_MS)
+                        awaitArchiveRequestTurn() == null
+                    }
+                )
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (blocked: SnapshotRetryBlockedException) {

@@ -57,7 +57,7 @@ class ProductDetailSheetDiagnosticTest {
         assertTrue(report.contains("DETALLE DE CAPTURAS E INTENTOS"))
         assertTrue(report.contains("SNAPSHOT_STREAM_RESET"))
         assertTrue(report.contains("captura 1 de 1"))
-        assertTrue(report.contains("5. SIN REGISTRO").not())
+        assertTrue(report.contains("1. SIN REGISTRO"))
         assertTrue(report.contains("14. Evaluación HTML de capturas — FALLÓ"))
         assertTrue(report.contains("[contenido HTML ocultado]"))
         assertTrue(report.contains("[URL ocultada]"))

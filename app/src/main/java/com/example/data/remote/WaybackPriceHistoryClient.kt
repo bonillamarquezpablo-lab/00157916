@@ -10,6 +10,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import com.chuckerteam.chucker.api.ChuckerInterceptor
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -377,13 +378,24 @@ internal fun summarizeCdxStep5Events(
  * A capture is accepted only when structured metadata exposes a EUR price and a product title
  * matching the searched item. Archive gaps are expected; this client never invents prices.
  */
-class WaybackPriceHistoryClient(
-    context: Context,
-    private val http: OkHttpClient = OkHttpClient.Builder()
+/**
+ * Chucker is installed only for debug builds. The release/sideload variant keeps the same
+ * network timeouts and retry policy but never records HTTP traffic.
+ */
+private fun createWaybackHttpClient(context: Context): OkHttpClient {
+    val builder = OkHttpClient.Builder()
         .connectTimeout(4, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS)
         .callTimeout(5, TimeUnit.SECONDS)
-        .build(),
+    if (BuildConfig.DEBUG) {
+        builder.addInterceptor(ChuckerInterceptor.Builder(context.applicationContext).build())
+    }
+    return builder.build()
+}
+
+class WaybackPriceHistoryClient(
+    context: Context,
+    private val http: OkHttpClient = createWaybackHttpClient(context),
     private val fxHttp: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(2, TimeUnit.SECONDS)
         .readTimeout(3, TimeUnit.SECONDS)

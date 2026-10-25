@@ -201,6 +201,29 @@ interface PriceObservationDao {
     }
 
     /**
+     * Insert an archived history point only when this product/store/local day has no verified
+     * archived observation yet. Historical backfill must not replace an already-recorded day:
+     * repeated captures are useful evidence for deciding to continue discovery, not new points.
+     * Unverified legacy rows and live observations do not block a validated archive import.
+     */
+    @Transaction
+    suspend fun insertArchivedObservationIfAbsent(
+        observation: PriceObservationEntity,
+        dayStart: Long,
+        dayEnd: Long
+    ): Boolean {
+        val existing = getArchivedObservationForStoreProductDay(
+            observation.productId,
+            observation.storeId,
+            dayStart,
+            dayEnd
+        )
+        if (existing != null) return false
+        insert(observation)
+        return true
+    }
+
+    /**
      * Keep the lowest verified archived price per product/store/day. A repeated import does not
      * create duplicate rows; live observations use their separate save path below.
      */

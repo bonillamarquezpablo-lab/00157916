@@ -98,3 +98,6 @@ jobs:
 
       - name: Compilar pruebas instrumentadas Android
         run: gradle :app:compileDebugAndroidTestKotlin --stacktrace
+
+      - name: Compilar APK de depuración para probar Chucker (sin clave de firma de distribución)
+        run: gradle :app:assembleDebug --stacktrace

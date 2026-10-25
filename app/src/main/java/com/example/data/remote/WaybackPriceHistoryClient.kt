@@ -93,6 +93,15 @@ internal fun shouldSkipDomainFallbackAfterSnapshotTimeout(
 }
 
 /**
+ * A slow archived HTML response may time out transiently even when its URL is valid.
+ * Retry exactly once at the snapshot-fetch boundary; never retry HTTP 429 or another failure type.
+ */
+internal fun shouldRetrySnapshotTimeoutOnce(
+    diagnosticCode: String?,
+    rateLimited: Boolean
+): Boolean = diagnosticCode == "SNAPSHOT_TIMEOUT" && !rateLimited
+
+/**
  * Probe an alternate direct URL only when the exact index answered cleanly but found no captures.
  * Network errors and 429s are handled by retry/cooldown logic, not by fanning out more requests.
  */
@@ -2042,9 +2051,13 @@ class WaybackPriceHistoryClient(
             .addQueryParameter("url", originalUrl)
             .addQueryParameter("timestamp", targetDate)
             .build()
+        // The previous 4-second budget expired on the product-domain fallback even when
+        // the archive had valid data. Keep the probe count bounded but allow up to 6 seconds for
+        // slow public Archive.org responses.
         val availabilityHttp = http.newBuilder()
-            .readTimeout(4, TimeUnit.SECONDS)
-            .callTimeout(4, TimeUnit.SECONDS)
+            .connectTimeout(AVAILABILITY_REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .readTimeout(AVAILABILITY_REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .callTimeout(AVAILABILITY_REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .build()
         val request = Request.Builder().url(endpoint).header("User-Agent", USER_AGENT).get().build()
         return try {
@@ -2140,7 +2153,7 @@ class WaybackPriceHistoryClient(
             )
             return cached.copy(reused = true)
         }
-        val snapshot = fetchAndVerifySnapshot(
+        var snapshot = fetchAndVerifySnapshot(
             capture = capture,
             expectedTitle = expectedTitle,
             snapshotTimeoutSeconds = snapshotTimeoutSeconds,
@@ -2150,6 +2163,33 @@ class WaybackPriceHistoryClient(
             onTrace = onTrace,
             knownProductTitlesById = knownProductTitlesById
         )
+        // Retry one timed-out capture only once. The first result is not cached until this
+        // bounded retry finishes, so later CDX routes can reuse the final outcome without
+        // triggering a retry loop. The archive pacing gate runs again inside the next fetch.
+        if (shouldRetrySnapshotTimeoutOnce(
+                diagnosticCode = snapshot.diagnosticCode,
+                rateLimited = activeRateLimitUntil(System.currentTimeMillis()) != null
+            )
+        ) {
+            emitWaybackTrace(
+                onTrace,
+                if (snapshotOrdinal <= 1) 8 else 10,
+                WaybackTraceStatus.RUNNING,
+                "${snapshotDiagnosticLabel(capture, snapshotOrdinal, snapshotTotal, captureSourceStage)} agotó el tiempo; se hará un único reintento acotado.",
+                diagnosticStep = if (snapshotOrdinal <= 1) 11 else 13
+            )
+            delay(SNAPSHOT_TIMEOUT_RETRY_DELAY_MS)
+            snapshot = fetchAndVerifySnapshot(
+                capture = capture,
+                expectedTitle = expectedTitle,
+                snapshotTimeoutSeconds = snapshotTimeoutSeconds,
+                snapshotOrdinal = snapshotOrdinal,
+                snapshotTotal = snapshotTotal,
+                captureSourceStage = captureSourceStage,
+                onTrace = onTrace,
+                knownProductTitlesById = knownProductTitlesById
+            )
+        }
         snapshotResultsCache?.set(key, snapshot)
         val verifiedQuotes = listOfNotNull(snapshot.quote) + snapshot.additionalQuotes
         if (verifiedQuotes.isNotEmpty()) onVerifiedQuotes?.invoke(verifiedQuotes)
@@ -5661,6 +5701,8 @@ class WaybackPriceHistoryClient(
         private const val CDX_FALLBACK_SNAPSHOT_TIMEOUT_SECONDS = 12L
         private const val DIRECT_CDX_SNAPSHOT_TIMEOUT_SECONDS = 12L
         private const val MAX_AVAILABILITY_BODY_BYTES = 64 * 1024
+        private const val AVAILABILITY_REQUEST_TIMEOUT_SECONDS = 6L
+        private const val SNAPSHOT_TIMEOUT_RETRY_DELAY_MS = 1_000L
         private const val CDX_RETRY_DELAY_MS = 500L
         private const val CDX_RETRY_JITTER_MS = 350L
         private val RETRYABLE_CDX_HTTP_CODES = setOf(500, 502, 503, 504)
@@ -5674,7 +5716,7 @@ class WaybackPriceHistoryClient(
         // Product-specific CDX lookup is narrower than scanning every URL on a retailer host.
         // A short host-index fallback can discover changed product slugs after path lookups fail.
         private const val DOMAIN_EXACT_CDX_TIMEOUT_SECONDS = 7L
-        private const val ALTERNATE_PRODUCT_CDX_TIMEOUT_SECONDS = 8L
+        private const val ALTERNATE_PRODUCT_CDX_TIMEOUT_SECONDS = 12L
         private const val MAX_DOMAIN_PRODUCT_URL_CANDIDATES = 2
         private const val MAX_DIRECT_SNAPSHOTS_PER_URL = 12
         // When an exact URL already returned a verified point, limit the prefix fallback to a
@@ -5682,8 +5724,10 @@ class WaybackPriceHistoryClient(
         private const val MAX_QUICK_SUPPLEMENTAL_SNAPSHOTS = 3
         // The previous 3-second prefix ceiling repeatedly expired while CDX was still responding
         // to a valid direct lookup. This remains one narrow, bounded supplement rather than a host scan.
-        private const val QUICK_SUPPLEMENTAL_PREFIX_CDX_TIMEOUT_SECONDS = 6L
-        private const val QUICK_SUPPLEMENTAL_PREFIX_SNAPSHOT_TIMEOUT_SECONDS = 8L
+        // Recent diagnostics still show CDX prefix queries timing out at 6 seconds.
+        // Keep one product-specific retry route but let the public index respond for up to 10s.
+        private const val QUICK_SUPPLEMENTAL_PREFIX_CDX_TIMEOUT_SECONDS = 10L
+        private const val QUICK_SUPPLEMENTAL_PREFIX_SNAPSHOT_TIMEOUT_SECONDS = 12L
         private const val MIN_HISTORICAL_DATES_BEFORE_EARLY_STOP = 3
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 8
         // Used only by historical backfill, never by the primary shopping search.

@@ -107,6 +107,37 @@ internal fun shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
         !diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
 
 /**
+ * Open a search-wide circuit breaker when direct archive recovery is already unhealthy.
+ * A new retailer/domain candidate must not immediately repeat the same expensive fallback
+ * after a previous candidate exhausted its CDX budget or all snapshot downloads timed out.
+ */
+internal fun shouldOpenArchiveDomainFallbackCircuit(
+    repeatedCdxTimeouts: Boolean,
+    rateLimited: Boolean,
+    allDirectSnapshotsTimedOut: Boolean,
+    directLookupTimedOut: Boolean
+): Boolean = repeatedCdxTimeouts ||
+    rateLimited ||
+    allDirectSnapshotsTimedOut ||
+    directLookupTimedOut
+
+/**
+ * Decide whether a merchant-domain fallback is worthwhile for the current candidate.
+ * The search-wide circuit breaker has priority over per-candidate eligibility.
+ */
+internal fun shouldTryDomainFallbackForArchiveCandidate(
+    hasMerchantDomain: Boolean,
+    hasSufficientHistory: Boolean,
+    rateLimited: Boolean,
+    allDirectSnapshotsTimedOut: Boolean,
+    searchCircuitOpen: Boolean
+): Boolean = hasMerchantDomain &&
+    !hasSufficientHistory &&
+    !rateLimited &&
+    !allDirectSnapshotsTimedOut &&
+    !searchCircuitOpen
+
+/**
  * A slow archived HTML response may time out transiently even when its URL is valid.
  * Retry exactly once at the snapshot-fetch boundary; never retry HTTP 429 or another failure type.
  */

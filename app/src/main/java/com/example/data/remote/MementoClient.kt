@@ -4,6 +4,8 @@ import android.content.Context
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.chuckerteam.chucker.api.ChuckerInterceptor
+import com.example.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.ResponseBody
@@ -88,6 +90,19 @@ internal fun shouldAttemptMementoFallback(
     rateLimited: Boolean
 ): Boolean = !alreadyAttempted && hasEligibleDirectUrl && !hasSufficientHistory && !rateLimited
 
+/** Capture Memento traffic only in debug builds; never log it from sideload/release. */
+private fun createMementoHttpClient(context: Context): OkHttpClient {
+    val builder = OkHttpClient.Builder()
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(4, TimeUnit.SECONDS)
+        .callTimeout(5, TimeUnit.SECONDS)
+        .followRedirects(true)
+    if (BuildConfig.DEBUG) {
+        builder.addInterceptor(ChuckerInterceptor.Builder(context.applicationContext).build())
+    }
+    return builder.build()
+}
+
 /**
  * Independent history source for Arquivo.pt's native Memento TimeMap API.
  *
@@ -97,12 +112,7 @@ internal fun shouldAttemptMementoFallback(
 class MementoClient(
     context: Context,
     private val priceParser: WaybackPriceHistoryClient = WaybackPriceHistoryClient(context),
-    private val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(3, TimeUnit.SECONDS)
-        .readTimeout(4, TimeUnit.SECONDS)
-        .callTimeout(5, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .build()
+    private val http: OkHttpClient = createMementoHttpClient(context)
 ) {
     private val preferences = context.applicationContext.getSharedPreferences(
         "minimo_memento_history", Context.MODE_PRIVATE

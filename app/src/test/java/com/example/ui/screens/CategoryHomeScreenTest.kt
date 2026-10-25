@@ -78,6 +78,61 @@ class CategoryHomeScreenTest {
     }
 
     @Test
+    fun returnToCategoriesRemainsAvailableWithActiveSearchAndFilters() {
+        val state = mutableStateOf(
+            TrackerUiState(
+                selectedCategory = ProductCategory.SMARTPHONES,
+                searchQuery = "iphone",
+                selectedStoreName = "Amazon España",
+                onlyAthFilter = true
+            )
+        )
+
+        composeRule.setContent {
+            MaterialTheme {
+                MarketScreen(
+                    productsForCategory = { MutableStateFlow<List<Product>>(emptyList()) },
+                    filteredProductsForCategory = { MutableStateFlow<List<Product>>(emptyList()) },
+                    categorySummaries = ProductCategory.values()
+                        .filter { it != ProductCategory.ALL }
+                        .map { MarketplaceCategorySummary(it, productCount = 0, storeCount = 0) },
+                    uiState = state.value,
+                    onSearchChange = { query -> state.value = state.value.copy(searchQuery = query) },
+                    onCategorySelect = { category -> state.value = state.value.copy(selectedCategory = category) },
+                    onToggleOnlyAth = {
+                        state.value = state.value.copy(onlyAthFilter = !state.value.onlyAthFilter)
+                    },
+                    onToggleOnlyHistoricalMinimum = {
+                        state.value = state.value.copy(
+                            onlyHistoricalMinimumFilter = !state.value.onlyHistoricalMinimumFilter
+                        )
+                    },
+                    onStoreFilterSelect = { store ->
+                        state.value = state.value.copy(selectedStoreName = store)
+                    },
+                    onSortChange = { sort -> state.value = state.value.copy(sortOption = sort) },
+                    onProductClick = {},
+                    onToggleTrack = {},
+                    onPrepareTrackedRefresh = {},
+                    modifier = Modifier
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("return_to_categories_button")
+            .assertIsDisplayed()
+            .performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("category_home_screen").assertIsDisplayed()
+        assertEquals(ProductCategory.ALL, state.value.selectedCategory)
+        assertEquals("", state.value.searchQuery)
+        assertEquals(null, state.value.selectedStoreName)
+        assertFalse(state.value.onlyAthFilter)
+        assertFalse(state.value.onlyHistoricalMinimumFilter)
+    }
+
+    @Test
     fun categoryHomeDoesNotRequestProductRowsUntilAListIsOpened() {
         val state = mutableStateOf(TrackerUiState())
         var productFlowRequested = false

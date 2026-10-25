@@ -108,6 +108,16 @@ class MementoClientTest {
             "New-product discovery candidates are not history of the selected product",
             shouldSkipPrefixAfterSufficientExactHistory(listOf(quote(0, true), quote(1, true), quote(2, true)))
         )
+        assertFalse(
+            "Quotes matched to other products do not establish coverage for this product",
+            shouldSkipPrefixAfterSufficientExactHistory(
+                listOf(
+                    quote(0).copy(targetProductId = "other-product"),
+                    quote(1).copy(targetProductId = "other-product"),
+                    quote(2).copy(targetProductId = "other-product")
+                )
+            )
+        )
     }
 
     @Test

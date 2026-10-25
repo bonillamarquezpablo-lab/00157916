@@ -93,6 +93,20 @@ internal fun shouldSkipDomainFallbackAfterSnapshotTimeout(
 }
 
 /**
+ * After the direct lookup, a broad prefix index timeout followed by a calendar-year index timeout
+ * means the same Wayback CDX backend has failed on two bounded routes. In that case the next
+ * merchant-domain Availability probes are likely to add traffic while the archive is struggling.
+ * Keep the already verified quotes and let a later lookup resume from its saved year cursor.
+ * A 429 remains the stronger global stop signal.
+ */
+internal fun shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
+    diagnosticCodes: Set<String>
+): Boolean =
+    diagnosticCodes.contains("CDX_URL_PREFIX_TIMEOUT") &&
+        diagnosticCodes.contains("CDX_URL_PREFIX_YEAR_TIMEOUT") &&
+        !diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
+
+/**
  * A slow archived HTML response may time out transiently even when its URL is valid.
  * Retry exactly once at the snapshot-fetch boundary; never retry HTTP 429 or another failure type.
  */

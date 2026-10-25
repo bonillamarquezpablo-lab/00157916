@@ -4651,10 +4651,10 @@ class WaybackPriceHistoryClient(
         ).any { id.contains(it) }
         if (knownStateContainer) return true
         val hasPriceField = Regex(
-            """(?i)["'](?:price|currentPrice|salePrice|productPrice|priceCurrency|lowPrice)["']\\s*:"""
+            """(?i)["'](?:price|currentPrice|salePrice|productPrice|priceCurrency|lowPrice)["']\s*:"""
         ).containsMatchIn(payload)
         val hasProductContext = Regex(
-            """(?i)["'](?:offers|product|productName|name|title|sku|itemOffered)["']\\s*:"""
+            """(?i)["'](?:offers|product|productName|name|title|sku|itemOffered)["']\s*:"""
         ).containsMatchIn(payload)
         return hasPriceField && hasProductContext
     }

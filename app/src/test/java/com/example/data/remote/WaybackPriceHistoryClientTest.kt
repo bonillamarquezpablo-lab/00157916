@@ -615,9 +615,9 @@ class WaybackPriceHistoryClientTest {
                 )
             }
             assertEquals("The prefix route must still be checked because the exact dates may already exist in Room", listOf("exact", "prefix"), cdxMatchTypes.toList())
-            assertEquals("The lookup should stop after three verified dates instead of downloading all five", 3, result.quotes.size)
-            assertEquals(3, result.quotes.map { Math.floorDiv(it.observedAt, WaybackPriceHistoryClient.DAY_MS) }.distinct().size)
-            assertEquals("The three newest captures should be enough", 3, requestUrls.count { it.startsWith("web.archive.org/web/") })
+            assertEquals("The prefix fallback should discover dates beyond the exact-query budget", 5, result.quotes.size)
+            assertEquals(5, result.quotes.map { Math.floorDiv(it.observedAt, WaybackPriceHistoryClient.DAY_MS) }.distinct().size)
+            assertEquals("The exact and prefix searches should validate all five available captures", 5, requestUrls.count { it.startsWith("web.archive.org/web/") })
             assertTrue("The three saved dates should include the newest captured year",
                 result.quotes.any { java.text.SimpleDateFormat("yyyy", java.util.Locale.ROOT).format(java.util.Date(it.observedAt)) == "2026" })
         } finally {

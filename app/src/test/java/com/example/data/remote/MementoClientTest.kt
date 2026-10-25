@@ -262,7 +262,7 @@ class MementoClientTest {
         }
         val now = formatter.parse("20261021000000")!!.time
         val target = "https://shop.example/products/phone?sku=yellow&capacity=256"
-        val body = """<https://arquivo.pt/wayback/20260701000000/$target>; rel="memento"; datetime="Wed, 01 Jul 2026 00:00:00 GMT""""
+        val body = """<https://arquivo.pt/wayback/20260701000000/$target>; rel="memento"; datetime="Wed, 01 Jul 2026 00:00:00 GMT"""
 
         val captures = client.parseTimeMap(body, target, now, lookbackDays = 365)
 

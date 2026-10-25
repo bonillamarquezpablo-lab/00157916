@@ -2599,11 +2599,13 @@ class WaybackPriceHistoryClient(
 
         // A structured Offer belonging to a different model is not evidence that this product's
         // price was found. Keep "candidate exists" separate from "candidate matches this SKU".
-        val matchingJsonLdOffers = jsonLd.filter { candidate ->
+        val matchingIdentityJsonLdOffers = jsonLd.filter { candidate ->
+            isMatchingArchivedOfferIdentity(document, expectedTitle, candidate, originalUrl, jsonLdRoots)
+        }
+        val matchingJsonLdOffers = matchingIdentityJsonLdOffers.filter { candidate ->
             candidate.second.isFinite() &&
                 candidate.second in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE &&
-                candidate.third.uppercase(Locale.ROOT) in setOf("EUR", "USD") &&
-                isMatchingArchivedOfferIdentity(document, expectedTitle, candidate, originalUrl, jsonLdRoots)
+                candidate.third.uppercase(Locale.ROOT) in setOf("EUR", "USD")
         }
         val hasPriceCandidate = matchingJsonLdOffers.isNotEmpty() || metaPrice != null ||
             visiblePrice != null || quote != null || sourceQuote != null
@@ -2614,6 +2616,9 @@ class WaybackPriceHistoryClient(
                 matchingJsonLdOffers.isNotEmpty() ->
                     "Se encontraron " + matchingJsonLdOffers.size +
                         " oferta(s) JSON-LD con importe y modelo compatibles."
+                matchingIdentityJsonLdOffers.isNotEmpty() ->
+                    "La identidad coincide en " + matchingIdentityJsonLdOffers.size +
+                        " oferta(s) JSON-LD, pero ninguna supera los límites de importe y moneda aceptados."
                 jsonLd.isNotEmpty() ->
                     "Hay " + jsonLd.size +
                         " oferta(s) JSON-LD, pero ninguna se ha confirmado para esta variante; no cuentan como precio encontrado."
@@ -2709,9 +2714,10 @@ class WaybackPriceHistoryClient(
             "Resultado del extractor: ruta=" + sourceMethod +
                 "; ofertas JSON-LD=" + jsonLd.size +
                 "; ofertas compatibles=" + matchingJsonLdOffers.size +
-                "; meta precio=" + if (metaPrice != null) "sí" else "no" +
-                "; selector visible=" + if (visibleCandidate != null) "sí" else "no" +
-                "; identidad de título=" + if (titleMatches) "compatible" else "sin confirmar" +
+                "; ofertas con identidad=" + matchingIdentityJsonLdOffers.size +
+                "; meta precio=" + (if (metaPrice != null) "sí" else "no") +
+                "; selector visible=" + (if (visibleCandidate != null) "sí" else "no") +
+                "; identidad de título=" + (if (titleMatches) "compatible" else "sin confirmar") +
                 "; causa=" + extractionFailureCode +
                 (if (quote != null) "; precio aceptado y validado." else "; no se guarda el candidato."),
             diagnosticStep = 22

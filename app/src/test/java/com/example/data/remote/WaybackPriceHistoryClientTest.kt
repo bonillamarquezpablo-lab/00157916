@@ -5612,4 +5612,164 @@ class WaybackPriceHistoryClientTest {
         assertTrue("Accessory pages must not pollute the discovery quarantine", quotes.isEmpty())
     }
 
+    @Test
+    fun cdxAndAvailabilityUrlsStripTrackingButKeepVariantIdentity() {
+        val client = newClient()
+        val trackedUrl = "https://www.shop.example/products/iphone-15-plus-256gb-yellow" +
+            "?utm_source=shopping&srsltid=tracking123&sku=yellow-256&variant_id=yellow-256"
+        val expected = "https://www.shop.example/products/iphone-15-plus-256gb-yellow" +
+            "?sku=yellow-256&variant_id=yellow-256"
+        val now = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.parse("20261025220000")!!.time
+
+        val cdxUrl = client.buildCdxUrl(
+            originalUrl = trackedUrl,
+            now = now,
+            lookbackDays = 730,
+            matchType = "exact"
+        )
+        val availabilityUrl = client.buildAvailabilityUrl(trackedUrl, "20261025")
+
+        assertEquals("CDX must use the canonical product URL", expected, cdxUrl?.queryParameter("url"))
+        assertEquals(
+            "Availability must use the same canonical product URL",
+            expected,
+            availabilityUrl?.queryParameter("url")
+        )
+        assertTrue(cdxUrl.toString().contains("sku"))
+        assertFalse(cdxUrl.toString().contains("srsltid"))
+        assertFalse(availabilityUrl.toString().contains("utm_source"))
+    }
+
+    @Test
+    fun canceledOkHttpCallIsClassifiedAsTimeoutForBoundedRecovery() {
+        val client = newClient()
+        val failure = java.io.IOException("Canceled")
+
+        assertTrue(client.isCanceledHttpCallFailure(failure))
+        assertEquals(
+            "CDX_URL_PREFIX_TIMEOUT",
+            client.classifyNetworkFailure("CDX_URL_PREFIX", failure)
+        )
+        assertFalse(
+            "An actual coroutine cancellation must still be propagated, not treated as a retry",
+            client.isCanceledHttpCallFailure(kotlinx.coroutines.CancellationException("cancelled"))
+        )
+    }
+
+    @Test
+    fun directLookupRetriesTransientCdxResetRescuesHttpEraCaptureAndShortCircuitsAfterNewDates() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val client = newClient()
+        client.clearRateLimitForTests()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .remove("wayback_last_availability_request_at")
+            .commit()
+
+        val nonce = System.currentTimeMillis()
+        val title = "Anker Prime 27K universal archive test $nonce"
+        val productUrl = "https://www.shop.example/products/anker-prime-27k"
+        val httpEraUrl = "http://www.shop.example/products/anker-prime-27k"
+        val cdxBody = """
+            [
+              ["timestamp","original","statuscode","mimetype"],
+              ["20241204071100","$httpEraUrl","200","text/html"],
+              ["20250124124812","$productUrl","200","text/html"],
+              ["20250703120625","$productUrl","200","text/html"],
+              ["20250910012349","$productUrl","200","text/html"]
+            ]
+        """.trimIndent()
+        val requests = CopyOnWriteArrayList<String>()
+        val cdxTypes = CopyOnWriteArrayList<String>()
+        var firstCdxAttempt = true
+        val archivedHtml = """
+            <html><head>
+              <title>$title</title>
+              <script type="application/ld+json">
+                {"@context":"https://schema.org","@type":"Product","name":"$title",
+                 "offers":{"@type":"Offer","price":"79.99","priceCurrency":"EUR"}}
+              </script>
+            </head><body></body></html>
+        """.trimIndent()
+        val mockHttp = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            requests += request.url.toString()
+            when {
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/cdx/search/cdx") -> {
+                    cdxTypes += request.url.queryParameter("matchType").orEmpty()
+                    if (firstCdxAttempt) {
+                        firstCdxAttempt = false
+                        throw java.io.IOException("stream was reset: CANCEL")
+                    }
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .body(cdxBody.toResponseBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+                }
+                request.url.host == "web.archive.org" &&
+                    request.url.encodedPath.startsWith("/web/") ->
+                    Response.Builder()
+                        .request(request)
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .header("Content-Type", "text/html; charset=utf-8")
+                        .body(archivedHtml.toResponseBody("text/html; charset=utf-8".toMediaType()))
+                        .build()
+                else -> throw AssertionError("Unexpected archive request host/path: ${request.url.host}${request.url.encodedPath}")
+            }
+        }.build()
+
+        val savedDates = linkedSetOf<Long>()
+        val now = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.parse("20261025220000")!!.time
+        try {
+            val lookup = withTimeout(25_000L) {
+                WaybackPriceHistoryClient(context, mockHttp).fetchHistory(
+                    originalUrl = productUrl,
+                    expectedTitle = title,
+                    now = now,
+                    lookbackDays = 1000,
+                    forceRefresh = true,
+                    onVerifiedQuotes = { batch ->
+                        batch.filter { !it.isDiscoveryCandidate }.forEach {
+                            savedDates += Math.floorDiv(it.observedAt, WaybackPriceHistoryClient.DAY_MS)
+                        }
+                    },
+                    stopWhenEnoughNewPoints = { savedDates.size >= 3 }
+                )
+            }
+
+            assertTrue("The direct exact index must recover verified historical prices", lookup.quotes.size >= 3)
+            assertTrue(
+                "The HTTP-era December 2024 capture must be downloaded, not silently omitted",
+                requests.any { it.contains("/web/20241204071100id_/http://www.shop.example/products/anker-prime-27k") }
+            )
+            assertEquals("One transient stream reset should receive exactly one retry", 2, cdxTypes.size)
+            assertTrue("The retry must remain on the direct exact query", cdxTypes.all { it == "exact" })
+            assertEquals(
+                "Once three new dates have been saved, the slow prefix scan should be skipped",
+                2,
+                requests.count { it.contains("/cdx/search/cdx") }
+            )
+            assertTrue("The first legacy HTTP capture should be one of the recovered dates", lookup.quotes.any {
+                SimpleDateFormat("yyyyMMdd", Locale.ROOT).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }.format(Date(it.observedAt)) == "20241204"
+            })
+        } finally {
+            client.clearRateLimitForTests()
+        }
+    }
+
+
 }

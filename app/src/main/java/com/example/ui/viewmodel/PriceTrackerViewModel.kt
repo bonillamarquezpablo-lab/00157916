@@ -11,7 +11,6 @@ import com.example.data.remote.formatOnlineSnapshotAge
 import com.example.data.remote.OnlineSearchQuotaGuard
 import com.example.data.remote.ArchivedPriceQuote
 import com.example.data.remote.MementoClient
-import com.example.data.remote.hasSufficientHistoricalCoverage
 import com.example.data.remote.shouldAttemptMementoFallback
 import com.example.data.remote.hasMatchingExplicitStorageCapacity
 import com.example.data.remote.shouldSkipDomainFallbackAfterSnapshotTimeout
@@ -2827,9 +2826,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             attempts += direct
                         }
                     }
-                    // A single historical point is useful but not a trend. Use Memento once
-                    // when fewer than three distinct UTC dates were recovered for the selected
-                    // product; sibling-variant quotes do not count toward its historical coverage.
+                    // Use Memento when Wayback did not add at least three new dates to Room.
+                    // Three recovered timestamps are not completion when they already existed locally.
                     val currentCandidateQuotes = attempts.flatMap { it.quotes }.filter {
                         !it.isDiscoveryCandidate &&
                             (it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId)
@@ -2903,9 +2901,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         }
                     }
 
-                    // Prefer the direct URL and the independent Memento index before the slower
-                    // merchant-wide fallback. If either source supplies only a sparse series, the
-                    // bounded domain pass may still fill missing historical dates.
+                    // Prefer the direct URL and Memento before the slower merchant-wide fallback.
+                    // Domain discovery remains eligible when prior results were repeated Room dates.
                     val quotesBeforeDomain = (
                         attempts.flatMap { it.quotes } + candidateQuotesObserved.values
                     ).distinctBy { archiveQuoteIdentity(candidate, it) }.filter {

@@ -15,6 +15,8 @@ import com.example.data.remote.shouldAttemptMementoFallback
 import com.example.data.remote.hasMatchingExplicitStorageCapacity
 import com.example.data.remote.shouldSkipDomainFallbackAfterSnapshotTimeout
 import com.example.data.remote.shouldSkipDomainFallbackAfterRepeatedCdxTimeouts
+import com.example.data.remote.shouldOpenArchiveDomainFallbackCircuit
+import com.example.data.remote.shouldTryDomainFallbackForArchiveCandidate
 import com.example.data.remote.WaybackPriceHistoryClient
 import com.example.data.remote.diagnosticIndexForWaybackTrace
 import com.example.data.remote.summarizeCdxStep5Events
@@ -2604,6 +2606,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 var selectedProductRefreshNeeded = false
                 var selectedProductRefreshTitle: String? = null
                 var mementoAttempted = false
+                // Search-wide circuit breaker: one unhealthy direct CDX route must not be
+                // followed by another candidate's merchant-domain requests in the same run.
+                var skipDomainFallbacksForSearch = false
                 var successfulLookupsCount = 0
                 var requestFailedCount = 0
                 var skippedCount = 0
@@ -2932,6 +2937,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     val allDirectSnapshotsTimedOut =
                         shouldSkipDomainFallbackAfterSnapshotTimeout(attempts)
                     val merchantDomainForFallback = candidate.merchantDomain
+                    val circuitWasAlreadyOpen = skipDomainFallbacksForSearch
+                    val openCircuitNow = shouldOpenArchiveDomainFallbackCircuit(
+                        repeatedCdxTimeouts = repeatedCdxTimeouts,
+                        rateLimited = rateLimitedAtDirectStage,
+                        allDirectSnapshotsTimedOut = allDirectSnapshotsTimedOut,
+                        directLookupTimedOut = candidateTimedOut
+                    )
+                    if (openCircuitNow) skipDomainFallbacksForSearch = true
                     if (repeatedCdxTimeouts) {
                         diagnosticCodes.add("CDX_DOMAIN_FALLBACK_SKIPPED_AFTER_REPEATED_TIMEOUTS")
                         if (diagnosticProductId != null) {
@@ -2940,12 +2953,27 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 "Se omite otra ronda de consultas a Internet Archive: la búsqueda directa y los bloques anuales CDX agotaron el tiempo. Se conserva el histórico verificado y el cursor permitirá continuar por años en una búsqueda posterior, sin provocar más peticiones durante este intento."
                             )
                         }
+                    } else if (!circuitWasAlreadyOpen && skipDomainFallbacksForSearch &&
+                        diagnosticProductId != null
+                    ) {
+                        val reason = when {
+                            rateLimitedAtDirectStage -> "Internet Archive indicó una pausa HTTP 429"
+                            candidateTimedOut -> "la búsqueda directa alcanzó su límite de tiempo"
+                            allDirectSnapshotsTimedOut -> "todas las descargas de capturas directas agotaron el tiempo"
+                            else -> "la consulta directa no está respondiendo de forma fiable"
+                        }
+                        reportWaybackDiagnostic(
+                            diagnosticProductId, 7, WaybackTraceStatus.SKIPPED,
+                            "Se detienen las búsquedas por dominio restantes de esta ejecución: $reason. Se conservan los precios verificados y se evita generar más peticiones."
+                        )
                     }
-                    val shouldTryDomainFallback = merchantDomainForFallback != null &&
-                        !hasSufficientHistoryBeforeDomain &&
-                        !rateLimitedAtDirectStage &&
-                        !allDirectSnapshotsTimedOut &&
-                        !repeatedCdxTimeouts
+                    val shouldTryDomainFallback = shouldTryDomainFallbackForArchiveCandidate(
+                        hasMerchantDomain = merchantDomainForFallback != null,
+                        hasSufficientHistory = hasSufficientHistoryBeforeDomain,
+                        rateLimited = rateLimitedAtDirectStage,
+                        allDirectSnapshotsTimedOut = allDirectSnapshotsTimedOut,
+                        searchCircuitOpen = skipDomainFallbacksForSearch
+                    )
                     if (shouldTryDomainFallback && merchantDomainForFallback != null) {
                         if (diagnosticProductId != null) {
                             reportWaybackDiagnostic(

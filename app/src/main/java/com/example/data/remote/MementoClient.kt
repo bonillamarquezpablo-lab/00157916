@@ -612,7 +612,17 @@ class MementoClient(
             val targetInLink = Regex("""^https://arquivo\.pt/wayback/(\d{14})(?:id_|mp_)?/(https://.+)$""")
                 .find(secureLink)?.groupValues?.getOrNull(2) ?: continue
             if (!sameOriginalUrl(targetInLink, originalUrl)) continue
-            output += MementoCapture(rawTimestamp, timestamp, secureLink, target.toString())
+
+            // Build the replay URL from the validated canonical target rather than trusting
+            // whether TimeMap emitted its nested query raw or encoded. Otherwise ?sku=... can
+            // become a query on arquivo.pt itself instead of part of the archived page path.
+            val replayTarget = originalUrl
+                .replace("?", "%3F")
+                .replace("&", "%26")
+                .replace("#", "%23")
+                .replace(" ", "%20")
+            val snapshotUrl = "https://$ARCHIVE_HOST/wayback/$rawTimestamp/$replayTarget"
+            output += MementoCapture(rawTimestamp, timestamp, snapshotUrl, target.toString())
         }
         return output.distinctBy { it.rawTimestamp to it.snapshotUrl }.sortedBy { it.timestamp }
     }

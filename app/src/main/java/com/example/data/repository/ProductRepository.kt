@@ -1256,7 +1256,7 @@ class ProductRepository(
                 sourcePageUrl = originalUrl
             )
             val (dayStart, dayEnd) = localDayBounds(observation.observedAt)
-            if (priceObservationDao.saveArchivedObservationIfLower(
+            if (priceObservationDao.insertArchivedObservationIfAbsent(
                     observation = observation,
                     dayStart = dayStart,
                     dayEnd = dayEnd

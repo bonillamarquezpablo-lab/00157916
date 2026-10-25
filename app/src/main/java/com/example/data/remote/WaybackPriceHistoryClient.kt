@@ -2548,7 +2548,10 @@ class WaybackPriceHistoryClient(
         originalUrl: String,
         quote: ArchivedPriceQuote?,
         sourceQuote: ArchivedPriceQuote? = quote,
-        jsonLdRoots: List<Any> = extractJsonLdRoots(document)
+        jsonLdRoots: List<Any> = extractJsonLdRoots(document),
+        decodedCharsetName: String = "UTF-8",
+        decodedHtmlLength: Int = 0,
+        responseContentType: String? = null
     ) {
         val jsonLd = extractJsonLdProductOffers(jsonLdRoots)
         val pageTitles = extractArchivedPageTitles(document)
@@ -2556,6 +2559,7 @@ class WaybackPriceHistoryClient(
         val expectedTitleForTrace = expectedTitle.replace(Regex("""\s+"""), " ").trim().take(100)
         val detectedTitlesForTrace = titles.take(3)
             .joinToString(" | ") { it.replace(Regex("""\s+"""), " ").trim().take(100) }
+
         val structuredMatch = jsonLd.any { candidate ->
             isMatchingArchivedOfferIdentity(document, expectedTitle, candidate, originalUrl, jsonLdRoots)
         }
@@ -2576,7 +2580,9 @@ class WaybackPriceHistoryClient(
                         "»); el título general de la página no basta para confirmar «" +
                         expectedTitleForTrace + "». No se aceptará su precio."
                 titleMatches -> "Título/modelo de la oferta archivada coincide con el producto seleccionado."
-                else -> "No coincide la identidad. Producto esperado: «$expectedTitleForTrace». Título(s) archivado(s): «$detectedTitlesForTrace». No se aceptará un precio de otra variante."
+                else -> "No coincide la identidad. Producto esperado: «" + expectedTitleForTrace +
+                    "». Título(s) archivado(s): «" + detectedTitlesForTrace +
+                    "». No se aceptará un precio de otra variante."
             }
         )
 
@@ -2588,22 +2594,38 @@ class WaybackPriceHistoryClient(
             .firstNotNullOfOrNull { key ->
                 readMeta(document, setOf(key)) ?: readItemPropValue(document, key)
             }?.uppercase(Locale.ROOT)
-        val visiblePrice = if (quote == null) {
-            extractVisibleProductPrice(document, metaCurrency, setOf("EUR", "USD"))?.first
-        } else null
-        val hasPriceCandidate = jsonLd.isNotEmpty() || metaPrice != null || visiblePrice != null || quote != null || sourceQuote != null
+        val visibleCandidate = extractVisibleProductPrice(document, metaCurrency, setOf("EUR", "USD"))
+        val visiblePrice = visibleCandidate?.first
+
+        // A structured Offer belonging to a different model is not evidence that this product's
+        // price was found. Keep "candidate exists" separate from "candidate matches this SKU".
+        val matchingJsonLdOffers = jsonLd.filter { candidate ->
+            candidate.second.isFinite() &&
+                candidate.second in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE &&
+                candidate.third.uppercase(Locale.ROOT) in setOf("EUR", "USD") &&
+                isMatchingArchivedOfferIdentity(document, expectedTitle, candidate, originalUrl, jsonLdRoots)
+        }
+        val hasPriceCandidate = matchingJsonLdOffers.isNotEmpty() || metaPrice != null ||
+            visiblePrice != null || quote != null || sourceQuote != null
         emitWaybackTrace(
             onTrace, 13,
             if (hasPriceCandidate) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
             when {
-                jsonLd.isNotEmpty() -> "Precio detectado en metadatos JSON-LD (${jsonLd.size} oferta(s))."
+                matchingJsonLdOffers.isNotEmpty() ->
+                    "Se encontraron " + matchingJsonLdOffers.size +
+                        " oferta(s) JSON-LD con importe y modelo compatibles."
+                jsonLd.isNotEmpty() ->
+                    "Hay " + jsonLd.size +
+                        " oferta(s) JSON-LD, pero ninguna se ha confirmado para esta variante; no cuentan como precio encontrado."
                 metaPrice != null -> "Precio numérico detectado en metadatos de la página."
-                visiblePrice != null -> "Precio visible detectado en un bloque de precio del producto y con moneda EUR."
+                visiblePrice != null -> "Importe detectado en un selector específico de precio visible."
                 quote != null -> "Precio histórico verificado para el producto."
-                else -> "No se encontró precio numérico en datos estructurados, metadatos ni bloques de precio reconocidos."
+                sourceQuote != null -> "Se extrajo un candidato, pero falta conversión o validación final."
+                else -> "No se encontró un precio candidato en datos estructurados, metadatos ni selectores reconocidos."
             }
         )
-        val prices = jsonLd.map { it.second } + listOfNotNull(metaPrice, visiblePrice, sourceQuote?.price, quote?.price)
+        val prices = matchingJsonLdOffers.map { it.second } +
+            listOfNotNull(metaPrice, visiblePrice, sourceQuote?.price, quote?.price)
         val numericValid = prices.any { it.isFinite() && it in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE }
         val valid = numericValid && quote != null &&
             quote.currency.equals("EUR", ignoreCase = true) &&
@@ -2622,6 +2644,77 @@ class WaybackPriceHistoryClient(
                 !numericValid -> "No hay importe numérico positivo dentro del rango permitido."
                 else -> "Se detectó un importe, pero no se confirmó EUR ni una conversión histórica válida."
             }
+        )
+
+        // Phase 21 profiles the actual archived document. It records counts and decoding choice,
+        // never page contents, complete URLs, search terms or extracted monetary amounts.
+        val allElements = document.getAllElements()
+        val jsonLdScriptCount = document.select("script[type]").count {
+            it.attr("type").substringBefore(';').trim()
+                .equals("application/ld+json", ignoreCase = true)
+        }
+        val priceMetadataCount = document.select("meta[property], meta[name], meta[itemprop]").count { element ->
+            listOf(element.attr("property"), element.attr("name"), element.attr("itemprop"))
+                .any { it.contains("price", ignoreCase = true) }
+        }
+        val priceElementCount = allElements.count { element ->
+            val itemProps = element.attr("itemprop").lowercase(Locale.ROOT)
+                .split(Regex("""\s+""")).filter { it.isNotBlank() }
+            itemProps.any { it == "price" || it == "lowprice" } ||
+                element.hasAttr("data-price") ||
+                element.hasAttr("data-price-amount") ||
+                element.hasAttr("data-product-price")
+        }
+        val declaredCharset = Regex("""(?i)\bcharset\s*=\s*["']?\s*([a-z0-9._:-]+)""")
+            .find(responseContentType.orEmpty())?.groupValues?.getOrNull(1)
+        val profileIsReadable = decodedHtmlLength > 0 && allElements.size > 3
+        emitWaybackTrace(
+            onTrace, 16,
+            if (profileIsReadable) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
+            "Perfil HTML: " + decodedHtmlLength + " caracteres; decodificado como " + decodedCharsetName +
+                (if (declaredCharset == null) " (sin charset HTTP explícito)" else " (charset HTTP declarado: " + declaredCharset + ")") +
+                "; " + allElements.size + " elementos DOM; " + jsonLdScriptCount +
+                " scripts JSON-LD; " + pageTitles.size + " títulos candidatos; " + priceMetadataCount +
+                " metadatos de precio; " + priceElementCount +
+                " campos itemprop/data-price. No se guarda el HTML.",
+            diagnosticStep = 21
+        )
+
+        // Phase 22 explains the chosen extraction path or why no quote was accepted. This is
+        // distinct from the transport error: the page may download perfectly and still have no
+        // parseable, matching, EUR-verifiable price.
+        val sourceMethod = when {
+            sourceQuote == null -> "ningún candidato aceptado"
+            matchingJsonLdOffers.any {
+                kotlin.math.abs(it.second - sourceQuote.price) < 0.011 &&
+                    it.third.equals(sourceQuote.currency, ignoreCase = true)
+            } -> "oferta JSON-LD compatible"
+            metaPrice != null && kotlin.math.abs(metaPrice - sourceQuote.price) < 0.011 &&
+                (metaCurrency.isNullOrBlank() || metaCurrency.equals(sourceQuote.currency, ignoreCase = true)) ->
+                "metadatos de precio"
+            visibleCandidate != null && kotlin.math.abs(visibleCandidate.first - sourceQuote.price) < 0.011 &&
+                visibleCandidate.second.equals(sourceQuote.currency, ignoreCase = true) ->
+                "selector de precio visible"
+            else -> "candidato extraído por ruta secundaria"
+        }
+        val extractionFailureCode = when {
+            quote != null -> "NONE"
+            sourceQuote?.currency?.equals("USD", ignoreCase = true) == true ->
+                "ARCHIVE_USD_FX_UNAVAILABLE"
+            else -> diagnoseArchivedPrice(document, expectedTitle, originalUrl, jsonLdRoots)
+        }
+        emitWaybackTrace(
+            onTrace, 17,
+            if (quote != null) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
+            "Resultado del extractor: ruta=" + sourceMethod +
+                "; ofertas JSON-LD=" + jsonLd.size +
+                "; ofertas compatibles=" + matchingJsonLdOffers.size +
+                "; meta precio=" + if (metaPrice != null) "sí" else "no" +
+                "; selector visible=" + if (visibleCandidate != null) "sí" else "no" +
+                "; identidad de título=" + if (titleMatches) "compatible" else "sin confirmar" +
+                "; causa=" + extractionFailureCode +
+                (if (quote != null) "; precio aceptado y validado." else "; no se guarda el candidato."),
+            diagnosticStep = 22
         )
     }
 

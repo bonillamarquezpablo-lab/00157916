@@ -10,7 +10,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import com.chuckerteam.chucker.api.ChuckerInterceptor
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -387,9 +386,7 @@ private fun createWaybackHttpClient(context: Context): OkHttpClient {
         .connectTimeout(4, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS)
         .callTimeout(5, TimeUnit.SECONDS)
-    if (BuildConfig.DEBUG) {
-        builder.addInterceptor(ChuckerInterceptor.Builder(context.applicationContext).build())
-    }
+    addDebugNetworkInspector(context.applicationContext, builder)
     return builder.build()
 }
 

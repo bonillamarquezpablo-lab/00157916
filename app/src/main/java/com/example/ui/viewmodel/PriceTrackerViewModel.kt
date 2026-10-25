@@ -2808,7 +2808,17 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 onTrace = traceCallback,
                                 knownProductTitlesById = knownProductTitlesById,
                                 onVerifiedQuotes = persistQuotesAsTheyArrive,
-                                forceRefresh = forceRefresh
+                                forceRefresh = forceRefresh,
+                                stopWhenEnoughNewPoints = {
+                                    val currentPrimaryQuotes = candidateQuotesObserved.values.filter {
+                                        !it.isDiscoveryCandidate &&
+                                            (it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId)
+                                    }
+                                    hasSufficientNewVerifiedArchiveHistory(
+                                        timestamps = currentPrimaryQuotes.map { it.observedAt },
+                                        newPointsSaved = (savedCount - savedCountBeforeCandidate).coerceAtLeast(0)
+                                    )
+                                }
                             )
                         }
                         if (direct == null) {

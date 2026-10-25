@@ -2883,6 +2883,54 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun domainFallbackCircuitBreakerPersistsAcrossCandidatesAfterCdxFailures() {
+        val circuitOpen = shouldOpenArchiveDomainFallbackCircuit(
+            repeatedCdxTimeouts = true,
+            rateLimited = false,
+            allDirectSnapshotsTimedOut = false,
+            directLookupTimedOut = false
+        )
+        assertTrue("Two CDX timeouts must open the search-wide circuit", circuitOpen)
+        assertFalse(
+            "A later domain-only candidate must not start more archive requests after that failure",
+            shouldTryDomainFallbackForArchiveCandidate(
+                hasMerchantDomain = true,
+                hasSufficientHistory = false,
+                rateLimited = false,
+                allDirectSnapshotsTimedOut = false,
+                searchCircuitOpen = circuitOpen
+            )
+        )
+        assertTrue(
+            "A healthy search may still use a bounded domain fallback",
+            shouldTryDomainFallbackForArchiveCandidate(
+                hasMerchantDomain = true,
+                hasSufficientHistory = false,
+                rateLimited = false,
+                allDirectSnapshotsTimedOut = false,
+                searchCircuitOpen = false
+            )
+        )
+        assertTrue(
+            "A rate limit or an outer direct-lookup timeout must also stop remaining domain fallbacks",
+            shouldOpenArchiveDomainFallbackCircuit(
+                repeatedCdxTimeouts = false,
+                rateLimited = true,
+                allDirectSnapshotsTimedOut = false,
+                directLookupTimedOut = false
+            )
+        )
+        assertTrue(
+            shouldOpenArchiveDomainFallbackCircuit(
+                repeatedCdxTimeouts = false,
+                rateLimited = false,
+                allDirectSnapshotsTimedOut = false,
+                directLookupTimedOut = true
+            )
+        )
+    }
+
+    @Test
     fun directCdxRequestKeepsTheNewestBoundedMonthlyWindow() {
         val client = newClient()
         val now = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {

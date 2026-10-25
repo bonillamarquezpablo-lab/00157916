@@ -148,6 +148,24 @@ class WaybackPriceHistoryClientTest {
                 "[00:40:02] Verificación del producto omitida: Availability no devolvió una captura para descargar."
             )
         )
+        assertTrue(
+            "A failed HTML profile must remain failed even if another route later emits a skip",
+            mergeWaybackDiagnosticStatus(
+                WaybackTraceStatus.PASSED,
+                WaybackTraceStatus.FAILED,
+                21,
+                "No se detectó un DOM legible."
+            ) == WaybackTraceStatus.FAILED
+        )
+        assertTrue(
+            "An extractor rejection must not be hidden by a later successful capture from another route",
+            mergeWaybackDiagnosticStatus(
+                WaybackTraceStatus.PASSED,
+                WaybackTraceStatus.FAILED,
+                22,
+                "Resultado del extractor: causa=ARCHIVE_PRODUCT_TITLE_MISMATCH"
+            ) == WaybackTraceStatus.FAILED
+        )
         assertFalse(
             "A real product-identity mismatch must remain visible",
             isSupersededWaybackSkipDetail(

@@ -225,7 +225,7 @@ jobs:
           with zipfile.ZipFile(apk) as archive:
               dex_files = [
                   name for name in archive.namelist()
-                  if re.fullmatch(r"classes\\d*\\.dex", name)
+                  if re.fullmatch(r"classes\d*\.dex", name)
               ]
               found = any(
                   b"com/chuckerteam/chucker/api/ChuckerInterceptor" in archive.read(name)

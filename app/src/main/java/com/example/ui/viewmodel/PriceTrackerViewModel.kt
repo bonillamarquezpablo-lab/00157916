@@ -172,6 +172,18 @@ internal fun hasEnoughVerifiedArchiveDates(
         .count() >= minimumDistinctDates
 }
 
+/**
+ * A historical series is sufficient to skip alternate sources only when it contains both
+ * distinct verified dates and at least that many newly inserted Room points. Old dates replayed
+ * by Wayback must never be treated as completion.
+ */
+internal fun hasSufficientNewVerifiedArchiveHistory(
+    timestamps: Iterable<Long>,
+    newPointsSaved: Int,
+    minimumDistinctDates: Int = 3
+): Boolean = newPointsSaved >= minimumDistinctDates &&
+    hasEnoughVerifiedArchiveDates(timestamps, minimumDistinctDates)
+
 internal fun isSupersededWaybackSkipDetail(detailLine: String): Boolean {
     val message = detailLine.substringAfter("] ", detailLine).trim().lowercase(Locale.ROOT)
     return message.startsWith("no ejecutado:") ||
@@ -296,7 +308,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         // Historical lookup is a user-triggered background action. Reserve time for the
         // CDX query and a representative set of dated captures; a too-short outer timeout
         // cancels useful HTML downloads before they can be validated and saved.
-        const val MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS = 85_000L
+        const val MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS = 130_000L
         // Domain recovery may include paced Availability probes and up to eight dated snapshots.
         // This is separate from live shopping search and still bounded per retailer.
         const val MAX_ARCHIVE_DOMAIN_FALLBACK_MS = 90_000L
@@ -2589,6 +2601,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 var foundSecondaryCount = 0
                 var capturesFoundCount = 0
                 var selectedProductRefreshed = false
+                var selectedProductRefreshNeeded = false
+                var selectedProductRefreshTitle: String? = null
                 var mementoAttempted = false
                 var successfulLookupsCount = 0
                 var requestFailedCount = 0
@@ -2753,29 +2767,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             (it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId)
                     }
                     if (hasPrimaryProductQuote) {
-                        val targetIdentity = onlineProductIdentityKey(candidate.title)
-                        val refreshedProduct = runCatching {
-                            withTimeout(10_000L) {
-                                repository.allProductsStream.first { products ->
-                                    products.any { product ->
-                                        (targetProductId?.let { product.id == it }
-                                            ?: (onlineProductIdentityKey(product.title) == targetIdentity)) &&
-                                            product.priceHistory.any { it.isArchiveEvidence }
-                                    }
-                                }.first { product ->
-                                    (targetProductId?.let { product.id == it }
-                                        ?: (onlineProductIdentityKey(product.title) == targetIdentity)) &&
-                                        product.priceHistory.any { it.isArchiveEvidence }
-                                }
-                            }
-                        }.getOrNull()
-                        if (refreshedProduct != null) {
-                            selectedProductRefreshed = true
-                            val currentState = _uiState.value
-                            if (currentState.selectedProduct?.id == refreshedProduct.id) {
-                                _uiState.value = currentState.copy(selectedProduct = refreshedProduct)
-                            }
-                        }
+                        // Room writes are already durable here. Refresh the selected catalogue
+                        // card once after all bounded routes finish, not once per capture; the
+                        // repeated Flow wait used to consume most of the candidate timeout.
+                        selectedProductRefreshNeeded = true
+                        selectedProductRefreshTitle = candidate.title
                     }
                 }
                 // Use persisted catalogue titles to harvest other structured offers from the same
@@ -2784,18 +2780,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     repository.allProductsStream.first().associate { it.id to it.title }
                 }.orEmpty()
                 for (candidate in candidates) {
-                    // Once three distinct dates have been verified for the selected product,
-                    // do not continue with inferred/secondary store URLs. Those calls cannot
-                    // improve the minimum usable history and may trigger unnecessary HTTP 429s.
-                    if (hasEnoughVerifiedArchiveDates(archiveDates)) {
-                        if (diagnosticProductId != null) {
-                            reportWaybackDiagnostic(
-                                diagnosticProductId, 7, WaybackTraceStatus.SKIPPED,
-                                "Se detienen los destinos secundarios: ya hay tres fechas distintas verificadas para el producto seleccionado; no se envían consultas de respaldo innecesarias."
-                            )
-                        }
-                        break
-                    }
+                    // Decide whether a route completed the job from newly inserted Room points,
+                    // not from the number of captures returned by CDX. Repeated dates must not
+                    // suppress Memento, annual CDX blocks or alternate retailer URLs.
+                    val savedCountBeforeCandidate = savedCount
                     // Bound each candidate's direct + merchant-domain lookup so slow public
                     // archive responses cannot leave the detail sheet spinning indefinitely.
                     // Prefer the exact retailer URL because it is much cheaper than scanning
@@ -2846,8 +2834,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         !it.isDiscoveryCandidate &&
                             (it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId)
                     }
-                    val sufficientHistoricalCoverage =
-                        hasSufficientHistoricalCoverage(currentCandidateQuotes)
+                    val sufficientHistoricalCoverage = hasSufficientNewVerifiedArchiveHistory(
+                        timestamps = currentCandidateQuotes.map { it.observedAt },
+                        newPointsSaved = (savedCount - savedCountBeforeCandidate).coerceAtLeast(0)
+                    )
                     if (candidate.directUrl != null && shouldAttemptMementoFallback(
                             alreadyAttempted = mementoAttempted,
                             hasEligibleDirectUrl = true,
@@ -2922,7 +2912,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         !it.isDiscoveryCandidate &&
                             (it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId)
                     }
-                    val hasSufficientHistoryBeforeDomain = hasSufficientHistoricalCoverage(quotesBeforeDomain)
+                    val hasSufficientHistoryBeforeDomain = hasSufficientNewVerifiedArchiveHistory(
+                        timestamps = quotesBeforeDomain.map { it.observedAt },
+                        newPointsSaved = (savedCount - savedCountBeforeCandidate).coerceAtLeast(0)
+                    )
                     val rateLimitedAtDirectStage =
                         attempts.any { it.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") }
                     val allDirectSnapshotsTimedOut =
@@ -3095,6 +3088,34 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     // must not prevent collecting history for the remaining candidates.
                     if (attempts.any { it.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") }) {
                         break
+                    }
+                }
+
+                if (selectedProductRefreshNeeded) {
+                    val targetIdentity = selectedProductRefreshTitle?.let(::onlineProductIdentityKey)
+                    val refreshedProduct = runCatching {
+                        withTimeout(10_000L) {
+                            repository.allProductsStream.first { products ->
+                                products.any { product ->
+                                    (targetProductId?.let { product.id == it }
+                                        ?: (targetIdentity != null &&
+                                            onlineProductIdentityKey(product.title) == targetIdentity)) &&
+                                        product.priceHistory.any { it.isArchiveEvidence }
+                                }
+                            }.first { product ->
+                                (targetProductId?.let { product.id == it }
+                                    ?: (targetIdentity != null &&
+                                        onlineProductIdentityKey(product.title) == targetIdentity)) &&
+                                    product.priceHistory.any { it.isArchiveEvidence }
+                            }
+                        }
+                    }.getOrNull()
+                    if (refreshedProduct != null) {
+                        selectedProductRefreshed = true
+                        val currentState = _uiState.value
+                        if (currentState.selectedProduct?.id == refreshedProduct.id) {
+                            _uiState.value = currentState.copy(selectedProduct = refreshedProduct)
+                        }
                     }
                 }
 

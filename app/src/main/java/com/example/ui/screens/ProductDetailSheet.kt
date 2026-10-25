@@ -1,6 +1,10 @@
 package com.example.ui.screens
 
 import android.content.Intent
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.os.Build
 import com.example.security.safeExternalHttpsUrl
 import com.example.security.openExternalHttpsUrl
 import androidx.compose.foundation.background
@@ -197,6 +201,100 @@ internal fun buildWaybackDiagnosticSummary(
     }
 }
 
+
+/**
+ * Builds a copy/paste-ready report from the diagnostics already collected during one lookup.
+ * It performs no network requests. URLs, query strings and accidental raw HTML are removed.
+ */
+internal fun buildWaybackDiagnosticExportReport(
+    productTitle: String,
+    freeHistoryStatus: String?,
+    steps: List<WaybackDiagnosticEntry>,
+    generatedAt: String = SimpleDateFormat("yyyy-MM-dd HH:mm:ss z", Locale.ROOT).format(Date()),
+    appVersion: String = "desconocida",
+    androidVersion: String = "desconocida"
+): String {
+    fun statusLabel(status: WaybackTraceStatus): String = when (status) {
+        WaybackTraceStatus.PENDING -> "PENDIENTE"
+        WaybackTraceStatus.RUNNING -> "EN CURSO"
+        WaybackTraceStatus.PASSED -> "SUPERADO"
+        WaybackTraceStatus.FAILED -> "FALLÓ"
+        WaybackTraceStatus.SKIPPED -> "NO EJECUTADO"
+    }
+
+    fun safeDetail(raw: String): String {
+        if (raw.isBlank()) return "(sin detalle)"
+        if (Regex("""(?is)<\s*(?:!doctype|html|head|body|script)\b""").containsMatchIn(raw)) {
+            return "[contenido HTML ocultado]"
+        }
+        var safe = raw
+            .replace(Regex("""(?i)https?://[^\s<>\"']+"""), "[URL ocultada]")
+            .replace(Regex("""(?i)\b(?:cookie|authorization|access_token|refresh_token|api[_-]?key)\s*[:=]\s*[^\s,;]+"""), "[credencial ocultada]")
+            .replace(Regex("""(?i)([?&][a-z0-9_.~-]+=)[^&\s]+"""), "$1[oculto]")
+            .replace(Regex("""(?is)<[^>]{1,300}>"""), "[etiqueta HTML]")
+            .trim()
+        if (safe.length > 1800) safe = safe.take(1800) + "… [detalle recortado]"
+        return safe.ifBlank { "(detalle ocultado)" }
+    }
+
+    val phaseRows = steps.filterNot { it.isCaptureDetail }.associateBy { it.step }
+    val captures = steps.filter { it.isCaptureDetail }
+    val statuses = phaseRows.values.groupingBy { it.status }.eachCount()
+    val statusText = freeHistoryStatus?.trim().orEmpty().ifBlank { "No se registró un estado final." }
+    val summary = buildWaybackDiagnosticSummary(freeHistoryStatus, steps)
+    val report = StringBuilder(12_000)
+    report.appendLine("INFORME COMPLETO DE DIAGNÓSTICO — MÍNIMO / INTERNET ARCHIVE")
+    report.appendLine("Generado: " + generatedAt)
+    report.appendLine("Versión de Mínimo: " + appVersion)
+    report.appendLine("Android: " + androidVersion)
+    report.appendLine("Producto: " + productTitle.replace(Regex("""[\r\n]+"""), " ").trim().take(180))
+    report.appendLine("Resultado comunicado por la app: " + safeDetail(statusText))
+    report.appendLine("Resumen del diagnóstico: " + safeDetail(summary))
+    report.appendLine(
+        "Estado de fases: " + (statuses[WaybackTraceStatus.PASSED] ?: 0) + " superadas, " +
+            (statuses[WaybackTraceStatus.FAILED] ?: 0) + " fallidas, " +
+            (statuses[WaybackTraceStatus.SKIPPED] ?: 0) + " no ejecutadas, " +
+            (statuses[WaybackTraceStatus.RUNNING] ?: 0) + " en curso, " +
+            (statuses[WaybackTraceStatus.PENDING] ?: 0) + " pendientes."
+    )
+    report.appendLine()
+    report.appendLine("FASES GENERALES (1–22)")
+    for (step in 1..22) {
+        val entry = phaseRows[step]
+        report.appendLine()
+        if (entry == null) {
+            report.appendLine(step.toString() + ". SIN REGISTRO")
+            continue
+        }
+        report.appendLine(step.toString() + ". " + entry.title + " — " + statusLabel(entry.status))
+        entry.durationMs?.let { report.appendLine("   Duración registrada: " + it + " ms") }
+        val detailLines = entry.detail.lines().filter { it.isNotBlank() }
+        if (detailLines.isEmpty()) {
+            report.appendLine("   Detalle: (sin detalle)")
+        } else {
+            detailLines.forEach { report.appendLine("   " + safeDetail(it)) }
+        }
+    }
+    report.appendLine()
+    report.appendLine("DETALLE DE CAPTURAS E INTENTOS")
+    report.appendLine("Registros individuales: " + captures.size)
+    if (captures.isEmpty()) {
+        report.appendLine("(No se generaron registros individuales de captura.)")
+    } else {
+        captures.forEachIndexed { index, entry ->
+            report.appendLine()
+            report.appendLine((index + 1).toString() + ". " + safeDetail(entry.title) + " — " + statusLabel(entry.status))
+            entry.durationMs?.let { report.appendLine("   Duración registrada: " + it + " ms") }
+            entry.detail.lines().filter { it.isNotBlank() }
+                .forEach { report.appendLine("   " + safeDetail(it)) }
+        }
+    }
+    report.appendLine()
+    report.appendLine("PRIVACIDAD: se han omitido las URL completas, parámetros de URL y contenido HTML.")
+    report.appendLine("Este informe refleja los registros que la app conservó durante la búsqueda; no realiza otra consulta.")
+    return report.toString().trim()
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProductDetailSheet(
@@ -213,6 +311,7 @@ fun ProductDetailSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showWaybackDiagnostics by remember(product.id) { mutableStateOf(false) }
+    var diagnosticReportCopyStatus by remember(product.id) { mutableStateOf("") }
     val context = LocalContext.current
     val scrollState = rememberScrollState()
     val spanishLocale = remember { Locale("es", "ES") }
@@ -790,10 +889,50 @@ fun ProductDetailSheet(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                "22 fases generales más registros por captura: fecha, ruta, tienda, causa de red, decodificación y resultado del extractor. Sin consultas extra; URL completas, parámetros, precios candidatos y HTML se ocultan.",
+                                "22 fases generales más registros por captura: fecha, ruta, tienda, causa de red, decodificación y resultado del extractor. Sin consultas extra; URL completas, parámetros y HTML se ocultan en el informe copiable.",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            OutlinedButton(
+                                onClick = {
+                                    val appVersion = runCatching {
+                                        context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                                    }.getOrNull() ?: "desconocida"
+                                    val report = buildWaybackDiagnosticExportReport(
+                                        productTitle = product.title,
+                                        freeHistoryStatus = freeHistoryStatus,
+                                        steps = waybackDiagnosticSteps,
+                                        appVersion = appVersion,
+                                        androidVersion = "Android " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")"
+                                    )
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    if (clipboard != null) {
+                                        clipboard.setPrimaryClip(
+                                            ClipData.newPlainText("Informe de diagnóstico Mínimo", report)
+                                        )
+                                        diagnosticReportCopyStatus =
+                                            "Informe copiado. Pégalo en el chat para revisar el fallo."
+                                    } else {
+                                        diagnosticReportCopyStatus =
+                                            "No se pudo acceder al portapapeles. Inténtalo de nuevo."
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(42.dp)
+                                    .testTag("copy_wayback_diagnostic_report_button"),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("Copiar informe completo para revisar")
+                            }
+                            if (diagnosticReportCopyStatus.isNotBlank()) {
+                                Text(
+                                    diagnosticReportCopyStatus,
+                                    modifier = Modifier.testTag("wayback_diagnostic_copy_status"),
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                             waybackDiagnosticSteps.forEach { entry ->
                                 val statusLabel = when (entry.status) {
                                     WaybackTraceStatus.PENDING -> "PENDIENTE"

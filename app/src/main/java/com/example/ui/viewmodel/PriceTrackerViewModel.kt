@@ -3402,10 +3402,13 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     when {
                         code.startsWith("CDX_ALTERNATE_PREFIX_HTTP_") -> "$code (respuesta HTTP al consultar una ruta alternativa del producto)"
                         code.startsWith("CDX_DOMAIN_EXACT_HTTP_") -> "$code (respuesta HTTP de la consulta exacta de una URL candidata)"
+                        code.startsWith("CDX_URL_PREFIX_QUARTER_HTTP_") -> "$code (respuesta HTTP de una ventana trimestral CDX)"
                         code.startsWith("CDX_URL_PREFIX_HTTP_") -> "$code (respuesta HTTP de la búsqueda por prefijo de URL)"
                         code.startsWith("CDX_DOMAIN_HTTP_") -> "$code (respuesta HTTP de la búsqueda por dominio)"
                         code.startsWith("SNAPSHOT_HTTP_") -> "$code (respuesta HTTP de una captura)"
                         else -> when (code) {
+                            "ARCHIVE_AVAILABILITY_API_HTTP_429" -> "$code (HTTP 429 recibido en la Availability API de archive.org; fuente separada de CDX y Memento)"
+                            "CDX_URL_PREFIX_QUARTER_TIMEOUT" -> "$code (agotó el tiempo una ventana trimestral de CDX)"
                             "WAYBACK_RATE_LIMITED" -> "$code (HTTP 429: consultas pausadas temporalmente para respetar el límite de Internet Archive)"
                             "WAYBACK_DISABLED" -> "$code (búsqueda desactivada)"
                             "DIRECT_URL_INVALID" -> "$code (la URL guardada no es una página de comercio válida)"

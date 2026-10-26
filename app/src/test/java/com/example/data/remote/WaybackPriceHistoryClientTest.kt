@@ -2827,6 +2827,55 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun quarterlyCdxWindowsAreBoundedToQuarterAndHistoricalWindow() {
+        val now = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.parse("20261025120000")!!.time
+        val client = newClient()
+
+        val q1 = client.buildCdxUrlForQuarter(
+            originalUrl = "https://www.pccomponentes.com/apple-iphone-15-plus",
+            year = 2025,
+            quarter = 1,
+            now = now,
+            lookbackDays = WaybackPriceHistoryClient.DEFAULT_LOOKBACK_DAYS
+        )!!
+        assertEquals("20250101", q1.queryParameter("from"))
+        assertEquals("20250331", q1.queryParameter("to"))
+        assertEquals("-48", q1.queryParameter("limit"))
+
+        val currentQuarter = client.buildCdxUrlForQuarter(
+            originalUrl = "https://www.pccomponentes.com/apple-iphone-15-plus",
+            year = 2026,
+            quarter = 4,
+            now = now,
+            lookbackDays = WaybackPriceHistoryClient.DEFAULT_LOOKBACK_DAYS
+        )!!
+        assertEquals("20261001", currentQuarter.queryParameter("from"))
+        assertEquals("20261025", currentQuarter.queryParameter("to"))
+
+        val oldestPartialQuarter = client.buildCdxUrlForQuarter(
+            originalUrl = "https://www.pccomponentes.com/apple-iphone-15-plus",
+            year = 2018,
+            quarter = 4,
+            now = now,
+            lookbackDays = WaybackPriceHistoryClient.DEFAULT_LOOKBACK_DAYS
+        )!!
+        assertEquals("20181025", oldestPartialQuarter.queryParameter("from"))
+        assertEquals("20181231", oldestPartialQuarter.queryParameter("to"))
+        assertNull(
+            "Invalid quarter numbers must not build a request",
+            client.buildCdxUrlForQuarter(
+                originalUrl = "https://www.pccomponentes.com/apple-iphone-15-plus",
+                year = 2025,
+                quarter = 5,
+                now = now,
+                lookbackDays = WaybackPriceHistoryClient.DEFAULT_LOOKBACK_DAYS
+            )
+        )
+    }
+
+    @Test
     fun failedYearlyPrefixRequestStopsFurtherAnnualQueriesAndKeepsItsCursor() {
         assertTrue(
             shouldStopYearlyPrefixScanAfterFailure(
@@ -2852,10 +2901,16 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun repeatedWaybackPrefixAndYearTimeoutsTripDomainFallbackCircuitBreaker() {
+    fun repeatedWaybackPrefixAndQuarterTimeoutsTripDomainFallbackCircuitBreaker() {
         assertTrue(
             shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
                 setOf("CDX_URL_PREFIX_TIMEOUT", "CDX_URL_PREFIX_YEAR_TIMEOUT")
+            )
+        )
+        assertTrue(
+            "A narrow quarterly timeout also means the CDX prefix backend is unhealthy",
+            shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
+                setOf("CDX_URL_PREFIX_TIMEOUT", "CDX_URL_PREFIX_QUARTER_TIMEOUT")
             )
         )
         assertFalse(

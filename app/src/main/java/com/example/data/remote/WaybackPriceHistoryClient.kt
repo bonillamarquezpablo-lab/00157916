@@ -1874,7 +1874,9 @@ class WaybackPriceHistoryClient(
         val outsideWindowCount = allAvailabilityCaptures.size - captures.size
         val successfulProbes = probes.count { !it.requestFailed }
         val failedProbeCount = probes.count { it.requestFailed }
-        val probeDiagnostics = probes.mapNotNull { it.diagnosticCode }.toSet()
+        val probeDiagnostics = probes.flatMap { probe ->
+            listOfNotNull(probe.diagnosticCode, probe.serviceDiagnosticCode)
+        }.toSet()
         val availabilityTraceStatus = when {
             probeDiagnostics.contains("WAYBACK_RATE_LIMITED") -> WaybackTraceStatus.SKIPPED
             captures.isNotEmpty() -> WaybackTraceStatus.PASSED
@@ -1884,7 +1886,11 @@ class WaybackPriceHistoryClient(
         }
         val availabilityTraceDetail = when {
             probeDiagnostics.contains("WAYBACK_RATE_LIMITED") ->
+                if (probeDiagnostics.contains("ARCHIVE_AVAILABILITY_API_HTTP_429")) {
+                "La Availability API de archive.org devolvió HTTP 429; se detuvieron las consultas y se activó la pausa global."
+            } else {
                 "Availability se detuvo al recibir HTTP 429; no se enviaron más consultas."
+            }
             captures.isNotEmpty() ->
                 "Availability encontró ${captures.size} captura(s) en ${probes.size} URL(s) probadas; ${failedProbeCount} intento(s) fallido(s): ${probeDiagnostics.joinToString(", ").take(180)}. Se conservan las capturas válidas."
             successfulProbes > 0 ->
@@ -2281,7 +2287,8 @@ class WaybackPriceHistoryClient(
                     activateRateLimit(response.header("Retry-After"), System.currentTimeMillis())
                     AvailabilityProbe(
                         requestFailed = true,
-                        diagnosticCode = "ARCHIVE_AVAILABILITY_API_HTTP_429"
+                        diagnosticCode = "WAYBACK_RATE_LIMITED",
+                        serviceDiagnosticCode = "ARCHIVE_AVAILABILITY_API_HTTP_429"
                     )
                 } else if (!response.isSuccessful) {
                     AvailabilityProbe(requestFailed = true, diagnosticCode = "${stage}_HTTP_${response.code}")
@@ -3435,7 +3442,8 @@ class WaybackPriceHistoryClient(
     private data class AvailabilityProbe(
         val capture: WaybackCapture? = null,
         val requestFailed: Boolean = false,
-        val diagnosticCode: String? = null
+        val diagnosticCode: String? = null,
+        val serviceDiagnosticCode: String? = null
     )
 
 

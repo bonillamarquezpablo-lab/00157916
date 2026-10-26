@@ -624,8 +624,9 @@ fun MarketScreen(
                 val familyExpanded = family.key in expandedFamilyKeys
                 if (family.productCount == 1) {
                     val product = family.products.single()
+                    val displayProduct = product.copy(title = savedProductDisplayTitle(product))
                     ProductCard(
-                        product = product,
+                        product = displayProduct,
                         onClick = { onProductClick(product) },
                         onToggleTrack = { onToggleTrack(product) },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
@@ -800,8 +801,9 @@ private fun SavedProductFamilyGridTile(
                         }
                         if (storageExpanded) {
                             storage.products.forEach { product ->
+                                val displayProduct = product.copy(title = savedProductDisplayTitle(product))
                                 ProductCard(
-                                    product = product,
+                                    product = displayProduct,
                                     onClick = { onProductClick(product) },
                                     onToggleTrack = { onToggleTrack(product) },
                                     modifier = Modifier.padding(top = 3.dp),

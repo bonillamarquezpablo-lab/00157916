@@ -14,14 +14,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
+import androidx.compose.foundation.lazy.staggeredgrid.items as staggeredItems
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -230,13 +231,16 @@ fun MarketScreen(
         expandedStorageKeys = emptySet()
     }
 
-    LazyColumn(
+    LazyVerticalStaggeredGrid(
+        columns = StaggeredGridCells.Fixed(2),
         modifier = modifier
             .fillMaxSize()
             .testTag("market_screen_list"),
-        contentPadding = PaddingValues(bottom = 24.dp)
+        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalItemSpacing = 10.dp
     ) {
-        item {
+        item(span = StaggeredGridItemSpan.FullLine) {
             OutlinedButton(
                 onClick = {
                     if (activeSmartphoneSubcategory != null) returnToSmartphoneSubcategories()
@@ -256,7 +260,7 @@ fun MarketScreen(
 
         // Compact section heading: remove the large decorative banner so products and
         // filters appear sooner, with less drawing and less vertical scrolling.
-        item {
+        item(span = StaggeredGridItemSpan.FullLine) {
             Text(
                 text = activeSmartphoneSubcategory?.title ?: "Productos guardados",
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -267,7 +271,7 @@ fun MarketScreen(
         }
 
         // Search Bar
-        item {
+        item(span = StaggeredGridItemSpan.FullLine) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -317,7 +321,7 @@ fun MarketScreen(
 
         // One compact horizontal filter rail replaces the three separate, cluttered rows.
         // Store options are limited to sellers represented by products from the active category.
-        item {
+        item(span = StaggeredGridItemSpan.FullLine) {
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -498,7 +502,7 @@ fun MarketScreen(
         }
 
         // Manual refresh for followed products; no background work or hidden quota usage.
-        item {
+        item(span = StaggeredGridItemSpan.FullLine) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -542,7 +546,7 @@ fun MarketScreen(
         }
 
         // Section header with counter
-        item {
+        item(span = StaggeredGridItemSpan.FullLine) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -564,7 +568,7 @@ fun MarketScreen(
             products.none { it.isPriceVerified } &&
             uiState.sortOption in setOf(SortOption.PRICE_LOW_HIGH, SortOption.PRICE_HIGH_LOW)
         ) {
-            item {
+            item(span = StaggeredGridItemSpan.FullLine) {
                 Text(
                     text = "La ordenación por precio solo utiliza observaciones reales guardadas en Room.",
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
@@ -576,7 +580,7 @@ fun MarketScreen(
 
         // Product cards are presented as a compact drill-down: family -> version -> capacity -> SKU.
         if (products.isEmpty()) {
-            item {
+            item(span = StaggeredGridItemSpan.FullLine) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -613,63 +617,48 @@ fun MarketScreen(
                 }
             }
         } else {
-            items(
-                items = savedFamilies.chunked(2),
-                key = { row -> row.joinToString("|") { it.key } }
-            ) { familyRow ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        // Keep both cards in a row aligned to the same bottom edge.
-                        // The old wrap-content row left a visible hole under the shorter card.
-                        .height(IntrinsicSize.Max)
-                        .padding(horizontal = 12.dp, vertical = 5.dp)
-                        .testTag("market_product_grid_row"),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    familyRow.forEach { family ->
-                        val familyExpanded = family.key in expandedFamilyKeys
-                        if (family.productCount == 1) {
-                            val product = family.products.single()
-                            ProductCard(
-                                product = product,
-                                onClick = { onProductClick(product) },
-                                onToggleTrack = { onToggleTrack(product) },
-                                modifier = Modifier.weight(1f).fillMaxHeight(),
-                                compact = true
-                            )
-                        } else {
-                            SavedProductFamilyGridTile(
-                                family = family,
-                                expanded = familyExpanded,
-                                expandedVariantKeys = expandedVariantKeys,
-                                expandedStorageKeys = expandedStorageKeys,
-                                onToggleFamily = {
-                                    if (familyExpanded) {
-                                        expandedFamilyKeys = emptySet()
-                                        expandedVariantKeys = emptySet()
-                                        expandedStorageKeys = emptySet()
-                                    } else {
-                                        expandedFamilyKeys = setOf(family.key)
-                                        expandedVariantKeys = emptySet()
-                                        expandedStorageKeys = emptySet()
-                                    }
-                                },
-                                onToggleVariant = { key, isExpanded ->
-                                    expandedVariantKeys = if (isExpanded) emptySet() else setOf(key)
-                                    expandedStorageKeys = emptySet()
-                                },
-                                onToggleStorage = { key, isExpanded ->
-                                    expandedStorageKeys = if (isExpanded) emptySet() else setOf(key)
-                                },
-                                onProductClick = onProductClick,
-                                onToggleTrack = onToggleTrack,
-                                modifier = Modifier.weight(1f).fillMaxHeight()
-                            )
-                        }
-                    }
-                    if (familyRow.size == 1) Spacer(modifier = Modifier.weight(1f).fillMaxHeight())
+            staggeredItems(
+                items = savedFamilies,
+                key = { family -> family.key }
+            ) { family ->
+                val familyExpanded = family.key in expandedFamilyKeys
+                if (family.productCount == 1) {
+                    val product = family.products.single()
+                    ProductCard(
+                        product = product,
+                        onClick = { onProductClick(product) },
+                        onToggleTrack = { onToggleTrack(product) },
+                        modifier = Modifier.fillMaxWidth(),
+                        compact = true
+                    )
+                } else {
+                    SavedProductFamilyGridTile(
+                        family = family,
+                        expanded = familyExpanded,
+                        expandedVariantKeys = expandedVariantKeys,
+                        expandedStorageKeys = expandedStorageKeys,
+                        onToggleFamily = {
+                            if (familyExpanded) {
+                                expandedFamilyKeys = emptySet()
+                                expandedVariantKeys = emptySet()
+                                expandedStorageKeys = emptySet()
+                            } else {
+                                expandedFamilyKeys = setOf(family.key)
+                                expandedVariantKeys = emptySet()
+                                expandedStorageKeys = emptySet()
+                            }
+                        },
+                        onToggleVariant = { key, isExpanded ->
+                            expandedVariantKeys = if (isExpanded) emptySet() else setOf(key)
+                            expandedStorageKeys = emptySet()
+                        },
+                        onToggleStorage = { key, isExpanded ->
+                            expandedStorageKeys = if (isExpanded) emptySet() else setOf(key)
+                        },
+                        onProductClick = onProductClick,
+                        onToggleTrack = onToggleTrack,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
         }

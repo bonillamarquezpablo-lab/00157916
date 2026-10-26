@@ -185,7 +185,17 @@ class CategoryHomeScreenTest {
 
         composeRule.onNodeWithTag("category_card_SMARTPHONES").performClick()
         composeRule.waitForIdle()
-        assertTrue("Opening a category must request that category's product flow", productFlowRequested)
+        composeRule.onNodeWithTag("smartphone_subcategory_home").assertIsDisplayed()
+        assertFalse(
+            "Opening Móviles & Tablets should not load product rows before a subcategory is chosen",
+            productFlowRequested
+        )
+
+        composeRule.onNodeWithTag("smartphone_subcategory_home")
+            .performScrollToNode(androidx.compose.ui.test.hasTestTag("subcategory_card_PHONES"))
+        composeRule.onNodeWithTag("subcategory_card_PHONES").performClick()
+        composeRule.waitForIdle()
+        assertTrue("Opening a subcategory must request its product flow", productFlowRequested)
     }
 
     @Test
@@ -252,7 +262,7 @@ class CategoryHomeScreenTest {
             )
         )
         val family = buildSavedProductFamilyBuckets(products).first { it.productCount > 1 }
-        val state = mutableStateOf(TrackerUiState(selectedCategory = ProductCategory.SMARTPHONES))
+        val state = mutableStateOf(TrackerUiState(selectedCategory = ProductCategory.SMARTPHONES, searchQuery = "iphone"))
 
         composeRule.setContent {
             MaterialTheme {
@@ -335,7 +345,7 @@ class CategoryHomeScreenTest {
             ProductCategory.SMARTPHONES to listOf(phone),
             ProductCategory.TV_AUDIO to listOf(television)
         )
-        val state = mutableStateOf(TrackerUiState(selectedCategory = ProductCategory.SMARTPHONES))
+        val state = mutableStateOf(TrackerUiState(selectedCategory = ProductCategory.SMARTPHONES, searchQuery = "phone"))
 
         composeRule.setContent {
             MaterialTheme {

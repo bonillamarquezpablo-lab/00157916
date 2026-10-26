@@ -398,6 +398,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         return "Internet Archive ha pedido una pausa temporal (HTTP 429). Mínimo no enviará más peticiones al archivo hasta aproximadamente las ${retryAt} (en unos ${remainingMinutes} min). El respaldo del precio actual, si se activa y SerpApi tiene saldo, puede consumir una búsqueda de SerpApi."
     }
 
+    private fun mementoRateLimitNotice(now: Long = System.currentTimeMillis()): String {
+        val until = mementoClient.activeRateLimitUntil(now)
+            ?: return "Arquivo.pt (Memento) devolvió HTTP 429, pero no hay una pausa Memento activa confirmada. Esto no significa que la pausa global de Wayback esté activa."
+        val remainingMinutes = ((until - now + 59_999L) / 60_000L).coerceAtLeast(1L)
+        val retryAt = SimpleDateFormat("HH:mm", Locale("es", "ES")).format(Date(until))
+        return "Arquivo.pt (Memento) devolvió HTTP 429. Mínimo pausará las consultas a esa fuente hasta aproximadamente las ${retryAt} (en unos ${remainingMinutes} min). Esta pausa es independiente de la pausa global de Internet Archive/Wayback."
+    }
+
     private fun startWaybackDiagnostic(product: Product) {
         val initial = WAYBACK_DIAGNOSTIC_TITLES.mapIndexed { index, title ->
             WaybackDiagnosticEntry(step = index + 1, title = title)
@@ -2941,9 +2949,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                     diagnosticProductId, 7, mementoStatus,
                                     when {
                                         mementoResult.quotes.isNotEmpty() ->
-                                            "Memento recuperó ${mementoResult.quotes.size} precio(s) archivado(s) que aún deben guardarse en su ficha exacta."
+                                            "Memento recuperó ${mementoResult.quotes.size} precio(s) archivado(s) y los envió al guardado durante esta búsqueda. La fase 19 confirma cuántos se añadieron y cuántos ya existían." +
+                                                if (mementoResult.diagnosticCodes.contains("MEMENTO_RATE_LIMITED")) {
+                                                    " Arquivo.pt también devolvió HTTP 429 y activó su pausa independiente de Memento; esto no implica una pausa global de Wayback."
+                                                } else {
+                                                    ""
+                                                }
                                         mementoResult.diagnosticCodes.contains("MEMENTO_RATE_LIMITED") ->
-                                            "Arquivo.pt pidió limitar las consultas; Mínimo detuvo el respaldo Memento."
+                                            "Arquivo.pt pidió limitar las consultas; Mínimo detuvo el respaldo Memento y aplica una pausa propia, independiente de Wayback."
                                         mementoResult.capturesFound == 0 && !mementoResult.requestFailed ->
                                             "Memento respondió correctamente, pero no encontró capturas para esta URL."
                                         else ->
@@ -3311,6 +3324,17 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             else ->
                                 " Esto no significa que no existan capturas."
                         }
+                    mementoClient.activeRateLimitUntil() != null ->
+                        mementoRateLimitNotice() + when {
+                            savedCount > 0 ->
+                                " Se conservaron ${savedCount} punto(s) nuevo(s) del producto seleccionado antes de la pausa de Memento."
+                            foundPrimaryCount > 0 ->
+                                " Se verificaron ${foundPrimaryCount} punto(s) del producto seleccionado; la fase 19 indica si eran nuevos o ya existían."
+                            else ->
+                                " Esto no significa que no existan capturas en Arquivo.pt ni en Wayback."
+                        }
+                    diagnosticCodes.contains("MEMENTO_RATE_LIMITED") ->
+                        mementoRateLimitNotice() + " Esto no significa que no existan capturas."
                     skippedCount == candidates.size && diagnosticCodes.contains("CACHE_SKIPPED_AFTER_FAILURE") ->
                         "Internet Archive no respondió en el intento anterior. Mínimo evita repetir enseguida una consulta que agotó el tiempo; vuelve a probar dentro de unos minutos. Esto no significa que no existan capturas."
                     skippedCount == candidates.size ->

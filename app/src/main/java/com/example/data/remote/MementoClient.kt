@@ -131,6 +131,10 @@ class MementoClient(
         }
     }
 
+    /** Returns Arquivo.pt's independent persisted HTTP 429 cooldown, if it is still active. */
+    internal fun activeRateLimitUntil(now: Long = System.currentTimeMillis()): Long? =
+        preferences.getLong(KEY_COOLDOWN_UNTIL, 0L).takeIf { it > now }
+
     /**
      * Arquivo.pt's normal replay URL serves a wrapper page whose iframe contains the archived
      * document. Parse the archived document itself (mp_) so the product title and JSON-LD offers

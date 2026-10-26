@@ -148,6 +148,31 @@ class ProductDetailSheetDiagnosticTest {
     }
 
     @Test
+    fun mementoRateLimitIsReportedSeparatelyFromWaybackGlobalPause() {
+        val status = "Arquivo.pt (Memento) devolvió HTTP 429. Mínimo pausará las consultas a esa fuente hasta aproximadamente las 03:55 (en unos 14 min). Esta pausa es independiente de la pausa global de Internet Archive/Wayback."
+        val rows = listOf(
+            WaybackDiagnosticEntry(
+                step = 4,
+                title = "Precontrol de pausa global y preparación de consulta",
+                status = WaybackTraceStatus.PASSED,
+                detail = "[03:40:07] Precontrol completado: no hay pausa global activa."
+            ),
+            WaybackDiagnosticEntry(
+                step = 7,
+                title = "Fallback CDX alternativo / Availability API",
+                status = WaybackTraceStatus.PASSED,
+                detail = "[03:40:42] Memento recuperó 2 precios archivados y los envió al guardado. Arquivo.pt también devolvió HTTP 429 y activó su pausa independiente de Memento; esto no implica una pausa global de Wayback."
+            )
+        )
+
+        val summary = buildWaybackDiagnosticSummary(status, rows)
+        assertTrue(summary.contains("Se detectó HTTP 429 en la alternativa Memento/Arquivo.pt"))
+        assertTrue(summary.contains("independiente", ignoreCase = true))
+        assertTrue(summary.contains("no demuestra que esté activa", ignoreCase = true))
+        assertFalse(summary.contains("el HTTP 429 del resumen pertenece a un intento anterior", ignoreCase = true))
+    }
+
+    @Test
     fun oldRateLimitTraceDoesNotClaimThatThePauseIsStillActiveWhenStatusShowsCache() {
         val status = "Estas consultas gratuitas ya se comprobaron recientemente. La caché evita repetir búsquedas completadas sin resultados útiles."
         val rows = listOf(

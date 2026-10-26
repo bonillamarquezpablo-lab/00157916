@@ -89,38 +89,64 @@ internal fun buildWaybackDiagnosticSummary(
         precheck.detail.contains("no hay pausa global activa", ignoreCase = true)
     val precheckConfirmsPause = precheck?.status == WaybackTraceStatus.SKIPPED &&
         precheck.detail.contains("pausa global", ignoreCase = true)
-    // Status and capture rows can survive a cache-only retry. When step 4 says that
-    // no global pause was active, only a rate-limit event logged AFTER that precheck
-    // belongs to this run. An older 429 row must not resurrect a stale pause banner.
-    fun diagnosticSeconds(entry: WaybackDiagnosticEntry): Int? =
+
+    fun diagnosticSeconds(detailLine: String): Int? =
         Regex("""\[(\d{2}):(\d{2}):(\d{2})]""")
-            .find(entry.detail)
+            .find(detailLine)
             ?.destructured
             ?.let { (hour, minute, second) ->
                 hour.toInt() * 3600 + minute.toInt() * 60 + second.toInt()
             }
-    val precheckSeconds = precheck?.let(::diagnosticSeconds)
+
+    fun isMementoRateLimitLine(entry: WaybackDiagnosticEntry, detailLine: String): Boolean {
+        if (detailLine.contains("MEMENTO_RATE_LIMITED", ignoreCase = true)) return true
+        val namesMemento = detailLine.contains("Memento", ignoreCase = true) ||
+            detailLine.contains("Arquivo.pt", ignoreCase = true)
+        val namesRateLimit = detailLine.contains("HTTP 429", ignoreCase = true) ||
+            detailLine.contains("limitar", ignoreCase = true) ||
+            detailLine.contains("pausa propia", ignoreCase = true)
+        return namesMemento && namesRateLimit &&
+            (entry.step == 7 || detailLine.contains("MEMENTO", ignoreCase = true))
+    }
+
+    fun isWaybackRateLimitLine(entry: WaybackDiagnosticEntry, detailLine: String): Boolean {
+        if (isMementoRateLimitLine(entry, detailLine)) return false
+        return detailLine.contains("WAYBACK_RATE_LIMITED", ignoreCase = true) ||
+            detailLine.contains("HTTP 429", ignoreCase = true) ||
+            (detailLine.contains("pausa global", ignoreCase = true) &&
+                (detailLine.contains("bloqueó", ignoreCase = true) ||
+                    detailLine.contains("activa", ignoreCase = true)))
+    }
+
+    val precheckSeconds = precheck?.let { diagnosticSeconds(it.detail) }
+    val currentTraceMementoRateLimit = steps.any { entry ->
+        entry.detail.lines().any { detailLine -> isMementoRateLimitLine(entry, detailLine) }
+    }
     val currentTraceRateLimit = steps.any { entry ->
-        if (entry.step == 4) return@any false
-        val mentionsRateLimit =
-            entry.detail.contains("HTTP 429", ignoreCase = true) ||
-                entry.detail.contains("WAYBACK_RATE_LIMITED", ignoreCase = true) ||
-                (entry.detail.contains("pausa global", ignoreCase = true) &&
-                    (entry.detail.contains("bloqueó", ignoreCase = true) ||
-                        entry.detail.contains("activa", ignoreCase = true)))
-        if (!mentionsRateLimit) return@any false
-        val eventSeconds = diagnosticSeconds(entry)
-        when {
-            precheckSeconds != null && eventSeconds != null ->
-                eventSeconds > precheckSeconds
-            precheckConfirmsNoPause -> false
-            else -> true
+        entry.step != 4 && entry.detail.lines().any { detailLine ->
+            if (!isWaybackRateLimitLine(entry, detailLine)) {
+                false
+            } else {
+                val eventSeconds = diagnosticSeconds(detailLine)
+                when {
+                    precheckSeconds != null && eventSeconds != null ->
+                        eventSeconds > precheckSeconds
+                    precheckConfirmsNoPause -> false
+                    else -> true
+                }
+            }
         }
     }
     val hasActivePauseCountdown =
         statusText.contains("HTTP 429", ignoreCase = true) &&
+            !statusText.contains("Memento", ignoreCase = true) &&
+            !statusText.contains("Arquivo.pt", ignoreCase = true) &&
             statusText.contains("hasta aproximadamente", ignoreCase = true) &&
             Regex("""(?i)\ben unos \d+\s+min\b""").containsMatchIn(statusText)
+    val statusTextMentionsMemento429 =
+        statusText.contains("HTTP 429", ignoreCase = true) &&
+            (statusText.contains("Memento", ignoreCase = true) ||
+                statusText.contains("Arquivo.pt", ignoreCase = true))
     val statusRepeatsStaleRateLimit = statusText.contains("HTTP 429", ignoreCase = true) ||
         statusText.contains("pausa temporal", ignoreCase = true) ||
         statusText.contains("internet archive pidió frenar", ignoreCase = true)
@@ -134,9 +160,9 @@ internal fun buildWaybackDiagnosticSummary(
     } ?: steps.firstOrNull { it.status == WaybackTraceStatus.RUNNING }
     val rateLimitReported = statusText.contains("HTTP 429", ignoreCase = true) ||
         steps.any { entry ->
-            entry.detail.contains("HTTP 429", ignoreCase = true) ||
-                entry.detail.contains("WAYBACK_RATE_LIMITED", ignoreCase = true) ||
-                entry.detail.contains("pausa global", ignoreCase = true)
+            entry.detail.lines().any { detailLine ->
+                isMementoRateLimitLine(entry, detailLine) || isWaybackRateLimitLine(entry, detailLine)
+            }
         }
     val firstFailedCapture = steps.firstOrNull {
         it.isCaptureDetail && it.status == WaybackTraceStatus.FAILED
@@ -146,8 +172,15 @@ internal fun buildWaybackDiagnosticSummary(
     }
 
     return when {
+        (currentTraceMementoRateLimit || statusTextMentionsMemento429) && !currentTraceRateLimit -> {
+            val currentStatus = statusText.takeIf { it.isNotBlank() }
+                ?: "No hay una pausa global de Wayback confirmada en este informe."
+            "Se detectó HTTP 429 en la alternativa Memento/Arquivo.pt. Esta limitación es independiente " +
+                "de la pausa global de Wayback y no demuestra que esté activa. Estado actual: " +
+                currentStatus
+        }
         // If this run's current precheck says the pause is gone and this run has not seen a
-        // fresh 429, don't show a countdown copied from an earlier attempt.
+        // fresh Wayback 429, don't show a countdown copied from an earlier attempt.
         precheckConfirmsNoPause && !currentTraceRateLimit -> {
             val currentStatus = statusText.takeIf {
                 it.isNotBlank() && !hasActivePauseCountdown && !statusRepeatsStaleRateLimit
@@ -174,7 +207,7 @@ internal fun buildWaybackDiagnosticSummary(
             val currentStatus = statusText.takeIf { it.isNotBlank() }
                 ?.let { " Estado actual: " + it }
                 ?: " Este informe no contiene una hora de reanudación confirmada."
-            "Se recibió HTTP 429 durante esta búsqueda, pero el estado actual no confirma que la pausa siga activa." + cause + currentStatus
+            "Se recibió HTTP 429 de Internet Archive/Wayback durante esta búsqueda, pero el estado actual no confirma que la pausa siga activa." + cause + currentStatus
         }
         activeStep != null -> if (activeStep.isCaptureDetail) {
             "Captura en curso: " + activeStep.title
@@ -200,7 +233,6 @@ internal fun buildWaybackDiagnosticSummary(
         else -> "Esperando resultado del diagnóstico."
     }
 }
-
 
 /**
  * Builds a copy/paste-ready report from the diagnostics already collected during one lookup.

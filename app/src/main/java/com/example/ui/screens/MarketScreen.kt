@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -609,6 +611,9 @@ fun MarketScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        // Keep both cards in a row aligned to the same bottom edge.
+                        // The old wrap-content row left a visible hole under the shorter card.
+                        .height(IntrinsicSize.Max)
                         .padding(horizontal = 12.dp, vertical = 5.dp)
                         .testTag("market_product_grid_row"),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -622,7 +627,7 @@ fun MarketScreen(
                                 product = product,
                                 onClick = { onProductClick(product) },
                                 onToggleTrack = { onToggleTrack(product) },
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.weight(1f).fillMaxHeight(),
                                 compact = true
                             )
                         } else {
@@ -651,11 +656,11 @@ fun MarketScreen(
                                 },
                                 onProductClick = onProductClick,
                                 onToggleTrack = onToggleTrack,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f).fillMaxHeight()
                             )
                         }
                     }
-                    if (familyRow.size == 1) Spacer(modifier = Modifier.weight(1f))
+                    if (familyRow.size == 1) Spacer(modifier = Modifier.weight(1f).fillMaxHeight())
                 }
             }
         }

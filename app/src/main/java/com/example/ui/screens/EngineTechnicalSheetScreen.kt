@@ -110,13 +110,16 @@ private val engineMeasurements = listOf(
 )
 
 private val engineRoadmap = listOf(
-    Triple("1. Ficha técnica visible y estados honestos", "Hecha en esta primera versión", "HECHO"),
-    Triple("2. Informes completos por captura y causa de rechazo", "Mejorar el diagnóstico para localizar el punto exacto del fallo", "EN CURSO"),
-    Triple("3. Recuperar más fechas históricas útiles", "Mejorar el muestreo temporal, los fallbacks y la recuperación tras bloqueos", "PENDIENTE"),
-    Triple("4. Extracción y variantes más fiables", "Ampliar casos reales y evitar mezclar modelos, capacidades y colores", "EN CURSO"),
-    Triple("5. Pruebas de regresión del motor", "Cubrir éxitos, cero resultados, duplicados, fallos de red y datos ambiguos", "EN CURSO"),
-    Triple("6. Métricas de eficacia y rendimiento", "Medir éxito, latencia, cobertura, falsos positivos y consumo", "PENDIENTE"),
-    Triple("7. Verificación de APK y diagnóstico de red", "Comprobar compilación, firma e inclusión de Chucker en la versión de diagnóstico", "EN CÓDIGO")
+    Triple("1. Ficha técnica viva y línea base", "Registrar capacidades, límites conocidos y cifras vacías hasta medirlas. La ficha ya está accesible desde Ajustes.", "HECHO"),
+    Triple("2. Subcategorías y filtros locales", "Comprobar móviles, tablets, baterías, cargadores, cables y fundas; cada filtro debe actuar solo dentro de su sección y nunca ocultar silenciosamente productos sin clasificar.", "EN REVISIÓN"),
+    Triple("3. Chucker e inspección de red", "Validar en el APK sideload las llamadas archivísticas, tiempos, respuestas y redacción de cabeceras sensibles.", "EN CÓDIGO"),
+    Triple("4. Informes completos por fase y captura", "Registrar duración, intentos, HTTP, causa de rechazo, duplicados y puntos nuevos guardados; exportar un informe copiable y seguro.", "EN CURSO"),
+    Triple("5. Mínimo histórico y gráfica fiables", "Separar precio actual de histórico, validar fechas y variantes y no afirmar un mínimo con observaciones insuficientes.", "EN CURSO"),
+    Triple("6. Muestreo temporal de Wayback CDX", "Mejorar cobertura por años y trimestres, paginación y límites de tiempo sin disparar peticiones repetidas ni 429.", "EN INVESTIGACIÓN"),
+    Triple("7. Memento y Arquivo.pt", "Validar el documento archivado real, las rutas mp_, las fechas y los parámetros de seguimiento.", "EN CURSO"),
+    Triple("8. Extracción y variantes", "Probar páginas con varias ofertas y modelos/capacidades/colores para medir falsos positivos y rechazos correctos.", "EN CURSO"),
+    Triple("9. Estabilidad, regresiones y rendimiento", "Medir duración, memoria, errores de red y cierres; comparar los resultados con una batería fija de productos reales.", "PENDIENTE"),
+    Triple("10. Validación final y APK", "Ejecutar unitarias e integración, revisar firma y paquete, comprobar Chucker en el APK de diagnóstico y anotar la prueba en dispositivo.", "PENDIENTE")
 )
 
 @Composable

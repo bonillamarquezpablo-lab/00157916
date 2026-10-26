@@ -660,7 +660,7 @@ class WaybackPriceHistoryClient(
                 if (nextYear < earliestYear) nextYear = currentYear
                 emitWaybackTrace(
                     onTrace, 6, WaybackTraceStatus.RUNNING,
-                    "La consulta global por prefijo agotó el tiempo; se revisará el año $nextYear y, como máximo, ${MAX_PREFIX_YEARLY_BLOCKS_PER_LOOKUP} bloque(s) anual(es) en esta ejecución. El control global de ritmo se mantiene; HTTP 429 detiene los reintentos."
+                    "La consulta global por prefijo agotó el tiempo; se revisará el año $nextYear y, como máximo, ${MAX_PREFIX_YEARLY_BLOCKS_PER_LOOKUP} bloque(s) anual(es) en esta ejecución. El control global de ritmo se mantiene; cualquier respuesta de límite detiene los reintentos."
                 )
                 for (blockIndex in 0 until MAX_PREFIX_YEARLY_BLOCKS_PER_LOOKUP) {
                     if (nextYear < earliestYear || activeRateLimitUntil(System.currentTimeMillis()) != null) break

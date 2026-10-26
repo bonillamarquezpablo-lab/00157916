@@ -173,6 +173,36 @@ class ProductDetailSheetDiagnosticTest {
     }
 
     @Test
+    fun explanatoryHttp429MentionDoesNotMasqueradeAsAnActualResponse() {
+        val status = "Se encontraron capturas con precios previos del producto seleccionado, pero ya existían esos registros diarios y no se añadieron puntos nuevos. Diagnóstico Wayback: MEMENTO_RECOVERED_QUOTES."
+        val rows = listOf(
+            WaybackDiagnosticEntry(
+                step = 4,
+                title = "Precontrol de pausa global y preparación de consulta",
+                status = WaybackTraceStatus.PASSED,
+                detail = "[13:15:07] Precontrol completado: no hay pausa global activa."
+            ),
+            WaybackDiagnosticEntry(
+                step = 6,
+                title = "Respuesta CDX",
+                status = WaybackTraceStatus.PASSED,
+                detail = "[13:15:40] CDX_URL_PREFIX_TIMEOUT · 10000 ms; [13:15:46] CDX_URL_PREFIX_YEAR_TIMEOUT · 6001 ms."
+            ),
+            WaybackDiagnosticEntry(
+                step = 7,
+                title = "Fallback CDX alternativo / Availability API",
+                status = WaybackTraceStatus.SKIPPED,
+                detail = "[13:15:40] La consulta global por prefijo agotó el tiempo; se revisará el año 2022. El control global de ritmo se mantiene; HTTP 429 detiene los reintentos."
+            )
+        )
+
+        val summary = buildWaybackDiagnosticSummary(status, rows)
+        assertTrue(summary.contains("El precontrol confirma que no hay pausa global activa"))
+        assertFalse(summary.contains("Se recibió HTTP 429 de Internet Archive/Wayback durante esta búsqueda"))
+        assertFalse(summary.contains("El HTTP 429 del resumen pertenece a un intento anterior"))
+    }
+
+    @Test
     fun oldRateLimitTraceDoesNotClaimThatThePauseIsStillActiveWhenStatusShowsCache() {
         val status = "Estas consultas gratuitas ya se comprobaron recientemente. La caché evita repetir búsquedas completadas sin resultados útiles."
         val rows = listOf(

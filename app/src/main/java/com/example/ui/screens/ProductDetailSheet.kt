@@ -111,10 +111,17 @@ internal fun buildWaybackDiagnosticSummary(
 
     fun isWaybackRateLimitLine(entry: WaybackDiagnosticEntry, detailLine: String): Boolean {
         if (isMementoRateLimitLine(entry, detailLine)) return false
+        // Count HTTP 429 only when the diagnostic records an actual response/code.
+        // Explanatory guidance ("HTTP 429 detiene los reintentos") is not a network event.
+        val explicitHttp429 = Regex("""(?i)\bHTTP\s+429\s*[:;)]""")
+            .containsMatchIn(detailLine) ||
+            detailLine.contains("devolvió HTTP 429", ignoreCase = true) ||
+            detailLine.contains("recibió HTTP 429", ignoreCase = true)
         return detailLine.contains("WAYBACK_RATE_LIMITED", ignoreCase = true) ||
-            detailLine.contains("HTTP 429", ignoreCase = true) ||
+            explicitHttp429 ||
             (detailLine.contains("pausa global", ignoreCase = true) &&
                 (detailLine.contains("bloqueó", ignoreCase = true) ||
+                    detailLine.contains("activó", ignoreCase = true) ||
                     detailLine.contains("activa", ignoreCase = true)))
     }
 
@@ -158,7 +165,12 @@ internal fun buildWaybackDiagnosticSummary(
     val activeStep = steps.firstOrNull {
         it.isCaptureDetail && it.status == WaybackTraceStatus.RUNNING
     } ?: steps.firstOrNull { it.status == WaybackTraceStatus.RUNNING }
-    val rateLimitReported = statusText.contains("HTTP 429", ignoreCase = true) ||
+    val statusTextHasExplicit429 =
+        statusText.contains("WAYBACK_RATE_LIMITED", ignoreCase = true) ||
+            Regex("""(?i)\bHTTP\s+429\s*[:;)]""").containsMatchIn(statusText) ||
+            statusText.contains("devolvió HTTP 429", ignoreCase = true) ||
+            statusText.contains("recibió HTTP 429", ignoreCase = true)
+    val rateLimitReported = statusTextMentionsMemento429 || statusTextHasExplicit429 ||
         steps.any { entry ->
             entry.detail.lines().any { detailLine ->
                 isMementoRateLimitLine(entry, detailLine) || isWaybackRateLimitLine(entry, detailLine)

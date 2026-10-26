@@ -60,6 +60,7 @@ import com.example.ui.screens.AlertsScreen
 import com.example.ui.screens.DealsScreen
 import com.example.ui.screens.DiscoveryRadarScreen
 import com.example.ui.screens.MarketScreen
+import com.example.ui.screens.HistoricalEngineSpecScreen
 import com.example.ui.screens.OnlineSearchScreen
 import com.example.ui.screens.ProductDetailSheet
 import com.example.ui.screens.SettingsScreen
@@ -89,6 +90,7 @@ fun MainScreen(
     var currentTab by rememberSaveable { mutableStateOf(MainTab.MARKET) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showOnlineSearch by rememberSaveable { mutableStateOf(false) }
+    var showHistoricalEngineSpec by rememberSaveable { mutableStateOf(false) }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val categorySummaries by viewModel.marketplaceCategorySummaries.collectAsStateWithLifecycle()
     val trackedProductCount by viewModel.trackedProductCount.collectAsStateWithLifecycle()
@@ -104,8 +106,9 @@ fun MainScreen(
     }
 
     // Return from settings before leaving the current marketplace section.
-    BackHandler(enabled = showSettings || showOnlineSearch || currentTab != MainTab.MARKET) {
+    BackHandler(enabled = showSettings || showOnlineSearch || showHistoricalEngineSpec || currentTab != MainTab.MARKET) {
         when {
+            showHistoricalEngineSpec -> showHistoricalEngineSpec = false
             showSettings -> showSettings = false
             showOnlineSearch -> showOnlineSearch = false
             else -> currentTab = MainTab.MARKET
@@ -116,8 +119,14 @@ fun MainScreen(
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    if (showSettings || showOnlineSearch) {
-                        IconButton(onClick = { if (showSettings) showSettings = false else showOnlineSearch = false }) {
+                    if (showSettings || showOnlineSearch || showHistoricalEngineSpec) {
+                        IconButton(onClick = {
+                            when {
+                                showHistoricalEngineSpec -> showHistoricalEngineSpec = false
+                                showSettings -> showSettings = false
+                                else -> showOnlineSearch = false
+                            }
+                        }) {
                             Icon(Icons.Default.ArrowBack, contentDescription = "Volver")
                         }
                     }
@@ -125,6 +134,7 @@ fun MainScreen(
                 title = {
                     Text(
                         text = when {
+                            showHistoricalEngineSpec -> "Ficha del motor histórico"
                             showSettings -> "Ajustes"
                             showOnlineSearch -> "Buscador online"
                             else -> "Mínimo"
@@ -135,7 +145,7 @@ fun MainScreen(
                     )
                 },
                 actions = {
-                    if (!showSettings && !showOnlineSearch) {
+                    if (!showSettings && !showOnlineSearch && !showHistoricalEngineSpec) {
                         IconButton(
                             onClick = { showOnlineSearch = true },
                             modifier = Modifier.padding(end = 1.dp)
@@ -178,7 +188,7 @@ fun MainScreen(
             )
         },
         bottomBar = {
-            if (!showSettings && !showOnlineSearch) {
+            if (!showSettings && !showOnlineSearch && !showHistoricalEngineSpec) {
             NavigationBar(
                 // NavigationBar already applies navigation-bar insets. Applying them twice
                 // leaves an oversized empty strip at the bottom on gesture-navigation devices.
@@ -267,7 +277,9 @@ fun MainScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            if (showSettings) {
+            if (showHistoricalEngineSpec) {
+                HistoricalEngineSpecScreen()
+            } else if (showSettings) {
                 val spanishStores by viewModel.spanishStores.collectAsStateWithLifecycle()
                 SettingsScreen(
                     storeCount = spanishStores.size,
@@ -278,7 +290,8 @@ fun MainScreen(
                     isCheckingSerpApiAccount = uiState.isCheckingSerpApiAccount,
                     serpApiAccountStatus = uiState.serpApiAccountStatus,
                     onCheckSerpApiAccount = viewModel::checkSerpApiAccount,
-                    onOpenCrashReport = onOpenCrashReport
+                    onOpenCrashReport = onOpenCrashReport,
+                    onOpenHistoricalEngineSpec = { showHistoricalEngineSpec = true }
                 )
             } else if (showOnlineSearch) {
                 OnlineSearchScreen(

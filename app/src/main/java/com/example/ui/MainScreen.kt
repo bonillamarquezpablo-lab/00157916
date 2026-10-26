@@ -301,6 +301,8 @@ fun MainScreen(
                     MarketScreen(
                         productsForCategory = viewModel::productsForCategory,
                         filteredProductsForCategory = viewModel::filteredProductsForCategory,
+                        productsForSmartphoneSubcategory = viewModel::productsForSmartphoneSubcategory,
+                        filteredProductsForSmartphoneSubcategory = viewModel::filteredProductsForSmartphoneSubcategory,
                         categorySummaries = categorySummaries,
                         uiState = uiState,
                         onSearchChange = viewModel::onSearchQueryChange,

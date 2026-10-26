@@ -228,7 +228,7 @@ class ProductDetailSheetDiagnosticTest {
         )
 
         val summary = buildWaybackDiagnosticSummary(staleStatus, rows)
-        assertTrue(summary.contains("El precontrol confirma que no hay pausa global activa"))
+        assertTrue(summary.contains("no había una pausa global activa"))
         assertTrue(summary.contains("HTTP 429 del resumen pertenece a un intento anterior"))
         assertFalse(summary.contains("Se recibió HTTP 429 de Internet Archive/Wayback durante esta búsqueda"))
     }

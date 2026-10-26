@@ -108,7 +108,10 @@ fun MainScreen(
     // Return from settings before leaving the current marketplace section.
     BackHandler(enabled = showSettings || showOnlineSearch || showHistoricalEngineSpec || currentTab != MainTab.MARKET) {
         when {
-            showHistoricalEngineSpec -> showHistoricalEngineSpec = false
+            showHistoricalEngineSpec -> {
+                showHistoricalEngineSpec = false
+                showSettings = true
+            }
             showSettings -> showSettings = false
             showOnlineSearch -> showOnlineSearch = false
             else -> currentTab = MainTab.MARKET
@@ -122,7 +125,10 @@ fun MainScreen(
                     if (showSettings || showOnlineSearch || showHistoricalEngineSpec) {
                         IconButton(onClick = {
                             when {
-                                showHistoricalEngineSpec -> showHistoricalEngineSpec = false
+                                showHistoricalEngineSpec -> {
+                                    showHistoricalEngineSpec = false
+                                    showSettings = true
+                                }
                                 showSettings -> showSettings = false
                                 else -> showOnlineSearch = false
                             }
@@ -278,7 +284,10 @@ fun MainScreen(
                 .padding(innerPadding)
         ) {
             if (showHistoricalEngineSpec) {
-                EngineTechnicalSheetScreen(onBack = { showHistoricalEngineSpec = false })
+                EngineTechnicalSheetScreen(onBack = {
+                    showHistoricalEngineSpec = false
+                    showSettings = true
+                })
             } else if (showSettings) {
                 val spanishStores by viewModel.spanishStores.collectAsStateWithLifecycle()
                 SettingsScreen(

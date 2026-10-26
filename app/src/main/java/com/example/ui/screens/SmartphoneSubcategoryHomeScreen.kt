@@ -40,7 +40,7 @@ fun SmartphoneSubcategoryHomeScreen(
     onSelect: (SmartphoneSubcategory) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val subcategories = SmartphoneSubcategory.values()
+    val subcategories = SmartphoneSubcategory.values().toList()
 
     LazyColumn(
         modifier = modifier

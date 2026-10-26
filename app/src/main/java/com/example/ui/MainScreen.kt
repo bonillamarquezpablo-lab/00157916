@@ -60,7 +60,7 @@ import com.example.ui.screens.AlertsScreen
 import com.example.ui.screens.DealsScreen
 import com.example.ui.screens.DiscoveryRadarScreen
 import com.example.ui.screens.MarketScreen
-import com.example.ui.screens.HistoricalEngineSpecScreen
+import com.example.ui.screens.EngineTechnicalSheetScreen
 import com.example.ui.screens.OnlineSearchScreen
 import com.example.ui.screens.ProductDetailSheet
 import com.example.ui.screens.SettingsScreen
@@ -278,7 +278,7 @@ fun MainScreen(
                 .padding(innerPadding)
         ) {
             if (showHistoricalEngineSpec) {
-                HistoricalEngineSpecScreen()
+                EngineTechnicalSheetScreen(onBack = { showHistoricalEngineSpec = false })
             } else if (showSettings) {
                 val spanishStores by viewModel.spanishStores.collectAsStateWithLifecycle()
                 SettingsScreen(

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -84,7 +85,7 @@ fun SmartphoneSubcategoryHomeScreen(
             key = { row -> row.joinToString("-") { it.name } }
         ) { rowSubcategories ->
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Max),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.Top
             ) {
@@ -93,6 +94,7 @@ fun SmartphoneSubcategoryHomeScreen(
                     Column(
                         modifier = Modifier
                             .weight(1f)
+                            .fillMaxHeight()
                             .heightIn(min = 150.dp)
                             .clip(shape)
                             .background(MaterialTheme.colorScheme.surfaceContainerLow)
@@ -144,7 +146,7 @@ fun SmartphoneSubcategoryHomeScreen(
                             fontSize = 11.sp,
                             lineHeight = 15.sp
                         )
-                        Spacer(modifier = Modifier.weight(1f))
+                        Spacer(modifier = Modifier.weight(1f).fillMaxHeight())
                         Text(
                             text = "Ver productos  ›",
                             style = MaterialTheme.typography.labelMedium,

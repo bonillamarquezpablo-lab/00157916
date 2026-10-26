@@ -204,4 +204,98 @@ class SavedProductFamilyBrowserTest {
         assertEquals("Xiaomi Redmi Note 10", families.single { it.label == "Xiaomi Redmi Note 10" }.label)
     }
 
+
+    @Test
+    fun retailerMarketingTailDoesNotCreateDuplicateCardsForTheSameCharger() {
+        val template = SpanishMarketData.getInitialProducts().first()
+        fun product(id: String, title: String) = template.copy(
+            id = id,
+            title = title,
+            brand = "UGREEN",
+            category = ProductCategory.ACCESSORIES,
+            priceHistory = emptyList()
+        )
+        val rows = listOf(
+            product(
+                "ugreen-nexode-a",
+                "UGREEN Nexode Air 65W Cargador USB C Rápida con Cable USB C (Gray) | AVS GAN charger"
+            ),
+            product(
+                "ugreen-nexode-b",
+                "UGREEN Nexode Air 65W Cargador USB C Rápida con Cable USB C (Gray) | GAN II AliExpress"
+            )
+        )
+        val family = buildSavedProductFamilyBuckets(rows).single()
+        assertEquals("The same SKU with seller SEO tails should render as one product", 1, family.productCount)
+        assertEquals(
+            "The visible title should omit the different marketing tails",
+            "UGREEN Nexode Air 65W Cargador USB C Rápida con Cable USB C (Gray)",
+            family.products.single().title
+        )
+    }
+
+    @Test
+    fun unsupportedXiaomiProUltraTitleIsNotPresentedAsAnAuthenticVariant() {
+        val template = SpanishMarketData.getInitialProducts().first()
+        fun product(id: String, title: String) = template.copy(
+            id = id,
+            title = title,
+            brand = "Xiaomi",
+            category = ProductCategory.SMARTPHONES,
+            priceHistory = emptyList()
+        )
+        val uncertain = product(
+            "redmi17-pro-ultra",
+            "Xiaomi Redmi 17 Pro Ultra 4G 12GB + 512GB"
+        )
+        val family = buildSavedProductFamilyBuckets(
+            listOf(
+                product("redmi17-base", "Xiaomi Redmi 17 6GB/128GB"),
+                uncertain
+            )
+        ).single()
+        assertEquals("Xiaomi Redmi 17", family.label)
+        assertTrue(family.variants.any { it.label == "Modelo por confirmar 4G" })
+        org.junit.Assert.assertFalse(family.variants.any { it.label.contains("Pro Ultra", ignoreCase = true) })
+        assertTrue(savedProductDisplayTitle(uncertain).contains("modelo por confirmar", ignoreCase = true))
+    }
+
+
+    @Test
+    fun bestDealSortPutsFreshPricesBeforeStaleSavedQuotes() {
+        val template = SpanishMarketData.getInitialProducts().first()
+        val now = System.currentTimeMillis()
+        val tenDaysAgo = now - 10L * 24L * 60L * 60L * 1000L
+
+        fun product(id: String, title: String, price: Double, observedAt: Long) =
+            template.copy(
+                id = id,
+                title = title,
+                brand = title.substringBefore(' '),
+                category = ProductCategory.ACCESSORIES,
+                currentPrice = price,
+                isPriceVerified = true,
+                priceObservedAt = observedAt,
+                savedHistoricalPrice = null,
+                priceHistory = emptyList()
+            )
+
+        val rows = listOf(
+            product("stale-anker", "Anker 735 Cargador USB C 65W", 29.99, tenDaysAgo),
+            product("fresh-ugreen", "UGREEN Nexode Air 65W Cargador USB C", 27.54, now),
+            product("stale-pixel", "Google Pixel 10 Pro 5G 128GB", 673.99, tenDaysAgo)
+        )
+        val sorted = buildSavedProductFamilyBuckets(rows, SortOption.BEST_ATH_DISCOUNT)
+        assertEquals(
+            "A fresh verified quote should outrank stale saved amounts",
+            "UGREEN Nexode Air 65W Cargador USB C",
+            sorted.first().label
+        )
+        assertEquals(
+            "Cards with only stale quotes should keep a predictable alphabetical order",
+            listOf("Anker 735 Cargador USB C 65W", "Google Pixel 10"),
+            sorted.drop(1).map { it.label }
+        )
+    }
+
 }

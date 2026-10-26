@@ -310,7 +310,8 @@ internal fun buildWaybackDiagnosticExportReport(
     report.appendLine("RESULTADOS SEPARADOS POR SERVICIO")
     val serviceGroups: List<Pair<String, (WaybackDiagnosticEntry, String) -> Boolean>> = listOf(
         "Índice CDX de Internet Archive" to { entry, line ->
-            (entry.title + " " + line).contains("CDX", ignoreCase = true) &&
+            !entry.isCaptureDetail &&
+                (entry.title + " " + line).contains("CDX", ignoreCase = true) &&
                 !(entry.title + " " + line).contains("Memento", ignoreCase = true)
         },
         "Availability API de archive.org" to { entry, line ->
@@ -321,10 +322,10 @@ internal fun buildWaybackDiagnosticExportReport(
             val combined = entry.title + " " + line
             (entry.isCaptureDetail || combined.contains("captura", ignoreCase = true) ||
                 combined.contains("HTML", ignoreCase = true)) &&
+                (!combined.contains("CDX", ignoreCase = true) || entry.isCaptureDetail) &&
                 !combined.contains("Memento", ignoreCase = true) &&
                 !combined.contains("Arquivo.pt", ignoreCase = true) &&
-                !combined.contains("Availability", ignoreCase = true) &&
-                !combined.contains("CDX", ignoreCase = true)
+                !combined.contains("Availability", ignoreCase = true)
         },
         "Arquivo.pt / Memento" to { entry, line ->
             (entry.title + " " + line).contains("Memento", ignoreCase = true) ||

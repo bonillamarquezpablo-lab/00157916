@@ -326,7 +326,9 @@ fun MarketScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(vertical = 2.dp)
             ) {
-                items(ProductCategory.values(), key = { it.name }) { category ->
+                if (activeSmartphoneSubcategory == null) {
+                    items(ProductCategory.values(), key = { it.name }) {
+                        category ->
                     FilterChip(
                         selected = uiState.selectedCategory == category,
                         onClick = {
@@ -348,6 +350,7 @@ fun MarketScreen(
                         ),
                         modifier = Modifier.testTag("category_chip_${category.name}")
                     )
+                    }
                 }
 
                 item {
@@ -590,13 +593,19 @@ fun MarketScreen(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "Tu Mercado está vacío",
+                            text = activeSmartphoneSubcategory?.let {
+                                "No hay productos de ${it.title.lowercase(java.util.Locale.ROOT)}"
+                            } ?: "Tu Mercado está vacío",
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Pulsa la lupa, busca un producto real y Mínimo lo añadirá automáticamente a este escaparate.",
+                            text = if (activeSmartphoneSubcategory != null) {
+                                "Todavía no hay fichas guardadas que encajen en este apartado. No se ha borrado ningún producto."
+                            } else {
+                                "Pulsa la lupa, busca un producto real y Mínimo lo añadirá automáticamente a este escaparate."
+                            },
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

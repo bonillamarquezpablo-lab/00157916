@@ -236,8 +236,42 @@ fun EngineTechnicalSheetScreen(
             }
         }
 
+
         SectionHeading(
-            "3. Hoja de ruta de evolución",
+            "3. Evidencia real de referencia",
+            "Son casos concretos, no estadísticas generales. Se conservan para comparar futuras versiones sin exagerar los resultados."
+        )
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.elevatedCardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(15.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text("26/10/2026 · Mínimo 1.7.838.1", fontWeight = FontWeight.Bold)
+                StatePill("PAUSA HTTP 429")
+                Text(
+                    "El control de pausa se activó antes de consultar CDX. Se completaron 2 de las 22 fases; las otras 20 quedaron sin ejecutar. Esto confirma la parada preventiva, pero no prueba la capacidad de extracción en ese intento.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                HorizontalDivider()
+                Text("26/10/2026 · informe completo anterior · Mínimo 1.7.835.1", fontWeight = FontWeight.Bold)
+                StatePill("CAPTURAS VÁLIDAS · 0 PUNTOS NUEVOS")
+                Text(
+                    "Se descargaron y evaluaron 4 capturas Wayback con coincidencia de producto y oferta estructurada. Se comprobaron 5 observaciones, pero ya existían en la base local. Memento aportó 2 observaciones más, también duplicadas. El resultado demuestra recuperación y validación en ese caso, no una tasa general de éxito.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        SectionHeading(
+            "4. Hoja de ruta de evolución",
             "Cada fase cambiará de estado solo cuando exista código y evidencia suficiente."
         )
         engineRoadmap.forEach { (title, detail, status) ->

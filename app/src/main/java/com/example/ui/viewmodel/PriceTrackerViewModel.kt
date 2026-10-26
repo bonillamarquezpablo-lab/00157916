@@ -43,6 +43,7 @@ import com.example.data.remote.extractGoogleShoppingProductId
 import com.example.data.model.Product
 import com.example.data.model.PriceBadgeType
 import com.example.data.model.ProductCategory
+import com.example.data.model.SmartphoneSubcategory
 import com.example.data.model.MarketplaceCategorySummary
 import com.example.data.model.Store
 import com.example.data.repository.ProductRepository
@@ -635,6 +636,42 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
     fun filteredProductsForCategory(category: ProductCategory): StateFlow<List<Product>> =
         marketplaceFilteredProductFlows.getOrPut(category) {
             combine(productsForCategory(category), _uiState) { products, state ->
+                filterMarketplaceProductsForState(products, state)
+            }.flowOn(Dispatchers.Default)
+                .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        }
+
+    private val marketplaceSubcategoryProductFlows =
+        mutableMapOf<SmartphoneSubcategory, StateFlow<List<Product>>>()
+    private val marketplaceFilteredSubcategoryProductFlows =
+        mutableMapOf<SmartphoneSubcategory, StateFlow<List<Product>>>()
+
+    /**
+     * Load only the parent category streams required by the selected smartphone subcategory.
+     * The home screen never calls this, so it does not load product rows merely to draw the cards.
+     */
+    @Synchronized
+    fun productsForSmartphoneSubcategory(
+        subcategory: SmartphoneSubcategory
+    ): StateFlow<List<Product>> = marketplaceSubcategoryProductFlows.getOrPut(subcategory) {
+        val sourceFlows = subcategory.sourceCategories.map(::productsForCategory)
+        combine(sourceFlows) { categoryRows ->
+            categoryRows.asSequence()
+                .flatten()
+                .distinctBy { it.id }
+                .filter(subcategory::matches)
+                .toList()
+        }.flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    }
+
+    /** Search, seller, price and sorting controls operate on only the selected subcategory. */
+    @Synchronized
+    fun filteredProductsForSmartphoneSubcategory(
+        subcategory: SmartphoneSubcategory
+    ): StateFlow<List<Product>> =
+        marketplaceFilteredSubcategoryProductFlows.getOrPut(subcategory) {
+            combine(productsForSmartphoneSubcategory(subcategory), _uiState) { products, state ->
                 filterMarketplaceProductsForState(products, state)
             }.flowOn(Dispatchers.Default)
                 .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())

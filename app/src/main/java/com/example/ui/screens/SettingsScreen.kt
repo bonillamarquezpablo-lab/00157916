@@ -71,7 +71,8 @@ fun SettingsScreen(
     serpApiAccountStatus: String?,
     onCheckSerpApiAccount: () -> Unit,
     onOpenCrashReport: () -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onOpenHistoricalEngineSpec: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val preferences = remember(context) {
@@ -644,6 +645,15 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                OutlinedButton(
+                    onClick = onOpenHistoricalEngineSpec,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("open_historical_engine_spec_button")
+                ) {
+                    Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(17.dp))
+                    Text("  Ficha técnica del motor histórico")
+                }
                 OutlinedButton(
                     onClick = onOpenCrashReport,
                     modifier = Modifier

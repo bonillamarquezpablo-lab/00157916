@@ -103,7 +103,8 @@ internal fun shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
     diagnosticCodes: Set<String>
 ): Boolean =
     diagnosticCodes.contains("CDX_URL_PREFIX_TIMEOUT") &&
-        diagnosticCodes.contains("CDX_URL_PREFIX_YEAR_TIMEOUT") &&
+        (diagnosticCodes.contains("CDX_URL_PREFIX_YEAR_TIMEOUT") ||
+            diagnosticCodes.contains("CDX_URL_PREFIX_QUARTER_TIMEOUT")) &&
         !diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
 
 /**
@@ -649,98 +650,139 @@ class WaybackPriceHistoryClient(
                 stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
             )
 
-            val yearlyResults = mutableListOf<WaybackBackfillResult>()
+            val quarterlyResults = mutableListOf<WaybackBackfillResult>()
             if (shouldRetryPrefixInYearBlocks(prefixResult.diagnosticCodes)) {
-                val earliestYear = formatUtc(
-                    historyWindowStartTimestamp(now, lookbackDays), "yyyy"
-                ).toIntOrNull() ?: (formatUtc(now, "yyyy").toInt() - 8)
-                val currentYear = formatUtc(now, "yyyy").toIntOrNull() ?: earliestYear
-                val cursorKey = attemptKey("prefix-year-cursor-v1|$directUrl|$expectedTitle|$lookbackDays")
-                var nextYear = preferences.getInt(cursorKey, currentYear).coerceAtMost(currentYear)
-                if (nextYear < earliestYear) nextYear = currentYear
+                val earliestWindow = historyWindowStartTimestamp(now, lookbackDays)
+                val earliestCalendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT).apply {
+                    timeInMillis = earliestWindow
+                }
+                val currentCalendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT).apply {
+                    timeInMillis = now
+                }
+                val earliestYear = earliestCalendar.get(Calendar.YEAR)
+                val currentYear = currentCalendar.get(Calendar.YEAR)
+                val earliestQuarterIndex = earliestYear * 4 + earliestCalendar.get(Calendar.MONTH) / 3
+                val currentQuarterIndex = currentYear * 4 + currentCalendar.get(Calendar.MONTH) / 3
+                val cursorKey = attemptKey("prefix-quarter-cursor-v2|$directUrl|$expectedTitle|$lookbackDays")
+                val legacyYearCursorKey = attemptKey("prefix-year-cursor-v1|$directUrl|$expectedTitle|$lookbackDays")
+                var nextQuarterIndex = preferences.getInt(cursorKey, Int.MIN_VALUE)
+                if (nextQuarterIndex == Int.MIN_VALUE) {
+                    // Carry forward the cursor stored by older builds at the last failed year.
+                    // Start at that year's Q4 and then walk backwards using smaller time windows.
+                    val legacyYear = preferences.getInt(legacyYearCursorKey, currentYear)
+                    nextQuarterIndex = legacyYear * 4 + 3
+                }
+                if (nextQuarterIndex > currentQuarterIndex) nextQuarterIndex = currentQuarterIndex
+                if (nextQuarterIndex < earliestQuarterIndex) nextQuarterIndex = currentQuarterIndex
                 emitWaybackTrace(
                     onTrace, 6, WaybackTraceStatus.RUNNING,
-                    "La consulta global por prefijo agotó el tiempo; se revisará el año $nextYear y, como máximo, ${MAX_PREFIX_YEARLY_BLOCKS_PER_LOOKUP} bloque(s) anual(es) en esta ejecución. El control global de ritmo se mantiene; cualquier respuesta de límite detiene los reintentos."
+                    "La consulta CDX por prefijo agotó el tiempo; se probarán ventanas trimestrales acotadas desde Q${Math.floorMod(nextQuarterIndex, 4) + 1} ${Math.floorDiv(nextQuarterIndex, 4)}, con un máximo de ${MAX_PREFIX_QUARTERLY_BLOCKS_PER_LOOKUP} ventana(s) por búsqueda."
                 )
-                for (blockIndex in 0 until MAX_PREFIX_YEARLY_BLOCKS_PER_LOOKUP) {
-                    if (nextYear < earliestYear || activeRateLimitUntil(System.currentTimeMillis()) != null) break
-                    val year = nextYear
-                    val yearlyCdxUrl = buildCdxUrlForYear(
+                for (blockIndex in 0 until MAX_PREFIX_QUARTERLY_BLOCKS_PER_LOOKUP) {
+                    if (nextQuarterIndex < earliestQuarterIndex ||
+                        activeRateLimitUntil(System.currentTimeMillis()) != null
+                    ) break
+                    val quarterIndex = nextQuarterIndex
+                    val year = Math.floorDiv(quarterIndex, 4)
+                    val quarter = Math.floorMod(quarterIndex, 4) + 1
+                    val quarterlyCdxUrl = buildCdxUrlForQuarter(
                         originalUrl = directUrl,
                         year = year,
+                        quarter = quarter,
                         now = now,
                         lookbackDays = lookbackDays,
                         matchType = "prefix"
                     )
-                    if (yearlyCdxUrl == null) {
-                        nextYear = year - 1
-                        if (nextYear >= earliestYear) preferences.edit().putInt(cursorKey, nextYear).apply()
-                        else preferences.edit().remove(cursorKey).apply()
+                    if (quarterlyCdxUrl == null) {
+                        nextQuarterIndex = quarterIndex - 1
+                        if (nextQuarterIndex >= earliestQuarterIndex) {
+                            preferences.edit().putInt(cursorKey, nextQuarterIndex).apply()
+                        } else {
+                            preferences.edit().remove(cursorKey).remove(legacyYearCursorKey).apply()
+                        }
                         continue
                     }
-                    val yearly = queryCdxAndFetchPrices(
-                        cdxUrl = yearlyCdxUrl,
+                    val quarterly = queryCdxAndFetchPrices(
+                        cdxUrl = quarterlyCdxUrl,
                         expectedTitle = expectedTitle,
-                        cacheKey = attemptKey("prefix-year-v1|$directUrl|$expectedTitle|$year"),
+                        cacheKey = attemptKey("prefix-quarter-v2|$directUrl|$expectedTitle|$year|$quarter"),
                         now = now,
                         lookbackDays = lookbackDays,
-                        maxSnapshots = MAX_PREFIX_YEARLY_SNAPSHOTS,
-                        cdxTimeoutSeconds = PREFIX_YEARLY_CDX_TIMEOUT_SECONDS,
-                        cdxStage = "CDX_URL_PREFIX_YEAR",
-                        snapshotTimeoutSeconds = PREFIX_YEARLY_SNAPSHOT_TIMEOUT_SECONDS,
+                        maxSnapshots = MAX_PREFIX_QUARTERLY_SNAPSHOTS,
+                        cdxTimeoutSeconds = PREFIX_QUARTERLY_CDX_TIMEOUT_SECONDS,
+                        cdxStage = "CDX_URL_PREFIX_QUARTER",
+                        snapshotTimeoutSeconds = PREFIX_QUARTERLY_SNAPSHOT_TIMEOUT_SECONDS,
                         onTrace = onTrace,
                         knownProductTitlesById = knownProductTitlesById,
                         snapshotResultsCache = snapshotResultsCache,
                         onVerifiedQuotes = onVerifiedQuotes,
                         primarySeedQuotes = exactPrimaryQuotes + prefixResult.quotes +
-                            yearlyResults.flatMap { it.quotes },
+                            quarterlyResults.flatMap { it.quotes },
                         stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                     )
-                    yearlyResults += yearly
-                    val hitRateLimit = yearly.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ||
+                    quarterlyResults += quarterly
+                    val hitRateLimit = quarterly.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ||
                         activeRateLimitUntil(System.currentTimeMillis()) != null
-                    if (hitRateLimit || shouldStopYearlyPrefixScanAfterFailure(yearly)) {
-                        // Do not advance past a failed year. If it timed out, a later lookup should
-                        // retry this same block after the backend recovers instead of spending its
-                        // remaining request budget on another year immediately.
-                        if (year >= earliestYear) {
-                            preferences.edit().putInt(cursorKey, year).apply()
+                    if (hitRateLimit || shouldStopYearlyPrefixScanAfterFailure(quarterly)) {
+                        // Retry one failed window on the next manual lookup; if it fails again,
+                        // continue into older quarters rather than starving the rest of the history.
+                        val failureKey = attemptKey(
+                            "prefix-quarter-failure-v1|$directUrl|$expectedTitle|$lookbackDays|$quarterIndex"
+                        )
+                        if (!hitRateLimit) {
+                            val failureCount = preferences.getInt(failureKey, 0)
+                            if (failureCount >= 1) {
+                                nextQuarterIndex = quarterIndex - 1
+                                preferences.edit().remove(failureKey).apply()
+                                if (nextQuarterIndex >= earliestQuarterIndex) {
+                                    preferences.edit().putInt(cursorKey, nextQuarterIndex).apply()
+                                } else {
+                                    preferences.edit().remove(cursorKey).remove(legacyYearCursorKey).apply()
+                                }
+                            } else {
+                                preferences.edit().putInt(failureKey, failureCount + 1)
+                                    .putInt(cursorKey, quarterIndex).apply()
+                            }
+                        } else {
+                            preferences.edit().putInt(cursorKey, quarterIndex).apply()
                         }
                         emitWaybackTrace(
                             onTrace, 6, WaybackTraceStatus.SKIPPED,
                             if (hitRateLimit) {
-                                "El archivo aplicó el límite de peticiones; se detienen las búsquedas anuales y se conserva el año $year para reintentarlo tras la pausa."
+                                "Internet Archive devolvió un límite de peticiones en Q$quarter $year; se detienen los reintentos y se conserva esa ventana tras la pausa."
                             } else {
-                                "El bloque anual $year falló o agotó el tiempo; se detienen las consultas anuales adicionales y se conserva ese año para reintentarlo más adelante."
+                                "La consulta CDX de Q$quarter $year falló o agotó el tiempo; se conserva la ventana para un reintento y, si vuelve a fallar, se avanzará a trimestres anteriores."
                             }
                         )
                         break
                     }
-                    if (year <= earliestYear) {
-                        preferences.edit().remove(cursorKey).apply()
-                        nextYear = earliestYear - 1
+                    preferences.edit().remove(
+                        attemptKey("prefix-quarter-failure-v1|$directUrl|$expectedTitle|$lookbackDays|$quarterIndex")
+                    ).apply()
+                    nextQuarterIndex = quarterIndex - 1
+                    if (nextQuarterIndex >= earliestQuarterIndex) {
+                        preferences.edit().putInt(cursorKey, nextQuarterIndex).apply()
                     } else {
-                        nextYear = year - 1
-                        preferences.edit().putInt(cursorKey, nextYear).apply()
+                        preferences.edit().remove(cursorKey).remove(legacyYearCursorKey).apply()
                     }
                 }
-                val annualQuotes = yearlyResults.sumOf { it.quotes.size }
+                val quarterlyQuotesFound = quarterlyResults.sumOf { it.quotes.size }
                 emitWaybackTrace(
                     onTrace, 6,
-                    if (annualQuotes > 0) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
-                    "Respaldo anual finalizado: ${yearlyResults.size} bloque(s) consultado(s), $annualQuotes precio(s) verificado(s). Se conserva el cursor para continuar por años anteriores en otra ejecución."
+                    if (quarterlyQuotesFound > 0) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
+                    "Respaldo por trimestres finalizado: ${quarterlyResults.size} ventana(s) consultada(s), ${quarterlyQuotesFound} precio(s) verificado(s). El cursor permite continuar por trimestres anteriores sin repetir toda la consulta."
                 )
             }
 
-            val yearlyQuotes = yearlyResults.flatMap { it.quotes }
-            val mergedQuotes = (exactResult.quotes + prefixResult.quotes + yearlyQuotes)
+            val quarterlyQuotes = quarterlyResults.flatMap { it.quotes }            val yearlyQuotes = yearlyResults.flatMap { it.quotes }
+            val mergedQuotes = (exactResult.quotes + prefixResult.quotes + quarterlyQuotes)
                 .distinctBy { listOf(it.originalUrl, it.observedAt.toString(), it.price.toString(), it.currency) }
                 .sortedBy { it.observedAt }
             val mergedPrimaryQuotes = mergedQuotes.filter {
                 it.targetProductId.isNullOrBlank() && !it.isDiscoveryCandidate
             }
             val combinedDiagnostics = exactResult.diagnosticCodes + prefixResult.diagnosticCodes +
-                yearlyResults.flatMap { it.diagnosticCodes }
+                quarterlyResults.flatMap { it.diagnosticCodes }
             val rateLimited = combinedDiagnostics.contains("WAYBACK_RATE_LIMITED")
             val partialRequestFailed = exactResult.requestFailed || prefixResult.requestFailed ||
                 yearlyResults.any { it.requestFailed }
@@ -752,12 +794,12 @@ class WaybackPriceHistoryClient(
                 capturesFound = maxOf(
                     exactResult.capturesFound,
                     prefixResult.capturesFound,
-                    yearlyResults.maxOfOrNull { it.capturesFound } ?: 0
+                    quarterlyResults.maxOfOrNull { it.capturesFound } ?: 0
                 ),
                 capturesChecked = exactResult.capturesChecked + prefixResult.capturesChecked +
-                    yearlyResults.sumOf { it.capturesChecked },
+                    quarterlyResults.sumOf { it.capturesChecked },
                 available = exactResult.available || prefixResult.available ||
-                    yearlyResults.any { it.available },
+                    quarterlyResults.any { it.available },
                 requestFailed = incompleteLookupFailed,
                 diagnosticCodes = if (mergedQuotes.isEmpty() || incompleteLookupFailed) {
                     combinedDiagnostics
@@ -1240,7 +1282,11 @@ class WaybackPriceHistoryClient(
             },
             when {
                 fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ->
-                    "Pausa temporal de Internet Archive (HTTP 429). Mínimo ha detenido las consultas; no se puede concluir si existen capturas."
+                    if (fallback.diagnosticCodes.contains("ARCHIVE_AVAILABILITY_API_HTTP_429")) {
+                        "La Availability API de archive.org devolvió HTTP 429. Se activa la pausa global de Internet Archive; no se puede concluir si existen capturas."
+                    } else {
+                        "Internet Archive devolvió HTTP 429 en una consulta CDX/captura. Se activa la pausa global del archivo; no se puede concluir si existen capturas."
+                    }
                 fallback.quotes.isNotEmpty() ->
                     "Fallback completado: se recuperó un precio verificable."
                 fallback.capturesFound > 0 ->
@@ -2233,7 +2279,10 @@ class WaybackPriceHistoryClient(
             availabilityHttp.newCall(request).execute().use { response ->
                 if (response.code == 429) {
                     activateRateLimit(response.header("Retry-After"), System.currentTimeMillis())
-                    AvailabilityProbe(requestFailed = true, diagnosticCode = "WAYBACK_RATE_LIMITED")
+                    AvailabilityProbe(
+                        requestFailed = true,
+                        diagnosticCode = "ARCHIVE_AVAILABILITY_API_HTTP_429"
+                    )
                 } else if (!response.isSuccessful) {
                     AvailabilityProbe(requestFailed = true, diagnosticCode = "${stage}_HTTP_${response.code}")
                 } else {
@@ -3559,7 +3608,7 @@ class WaybackPriceHistoryClient(
                     activateRateLimit(response.header("Retry-After"), System.currentTimeMillis())
                     return CdxIndexOutcome(
                         requestFailed = true,
-                        diagnosticCodes = setOf("WAYBACK_RATE_LIMITED")
+                        diagnosticCodes = setOf("WAYBACK_RATE_LIMITED", "${cdxStage}_HTTP_429")
                     )
                 }
                 if (!response.isSuccessful) {
@@ -4152,6 +4201,45 @@ class WaybackPriceHistoryClient(
             .setQueryParameter("from", formatUtc(from, "yyyyMMdd"))
             .setQueryParameter("to", formatUtc(to, "yyyyMMdd"))
             .setQueryParameter("limit", "-120")
+            .build()
+    }
+
+    /**
+     * Build a bounded prefix query for one UTC calendar quarter. Smaller windows can respond
+     * when the all-years prefix request or an entire year repeatedly times out. Returned pages
+     * still pass through the same strict product-identity and price validation.
+     */
+    internal fun buildCdxUrlForQuarter(
+        originalUrl: String,
+        year: Int,
+        quarter: Int,
+        now: Long,
+        lookbackDays: Int,
+        matchType: String = "prefix"
+    ): HttpUrl? {
+        if (quarter !in 1..4 || year < 1970) return null
+        val earliest = historyWindowStartTimestamp(now, lookbackDays)
+        val quarterStart = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT).apply {
+            clear()
+            set(Calendar.YEAR, year)
+            set(Calendar.MONTH, (quarter - 1) * 3)
+            set(Calendar.DAY_OF_MONTH, 1)
+        }.timeInMillis
+        val quarterEnd = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT).apply {
+            clear()
+            set(Calendar.YEAR, year)
+            set(Calendar.MONTH, quarter * 3)
+            set(Calendar.DAY_OF_MONTH, 1)
+            add(Calendar.MILLISECOND, -1)
+        }.timeInMillis
+        val from = maxOf(quarterStart, earliest)
+        val to = minOf(quarterEnd, now)
+        if (from > to) return null
+        val base = buildCdxUrl(originalUrl, now, lookbackDays, matchType) ?: return null
+        return base.newBuilder()
+            .setQueryParameter("from", formatUtc(from, "yyyyMMdd"))
+            .setQueryParameter("to", formatUtc(to, "yyyyMMdd"))
+            .setQueryParameter("limit", "-48")
             .build()
     }
 
@@ -6052,10 +6140,10 @@ class WaybackPriceHistoryClient(
         private const val QUICK_SUPPLEMENTAL_PREFIX_SNAPSHOT_TIMEOUT_SECONDS = 12L
         // Recover a slow broad query in at most two annual blocks per attempt.
         // Each request still goes through the persisted global pacing/cooldown gate.
-        private const val MAX_PREFIX_YEARLY_BLOCKS_PER_LOOKUP = 2
-        private const val MAX_PREFIX_YEARLY_SNAPSHOTS = 2
-        private const val PREFIX_YEARLY_CDX_TIMEOUT_SECONDS = 6L
-        private const val PREFIX_YEARLY_SNAPSHOT_TIMEOUT_SECONDS = 8L
+        private const val MAX_PREFIX_QUARTERLY_BLOCKS_PER_LOOKUP = 2
+        private const val MAX_PREFIX_QUARTERLY_SNAPSHOTS = 2
+        private const val PREFIX_QUARTERLY_CDX_TIMEOUT_SECONDS = 7L
+        private const val PREFIX_QUARTERLY_SNAPSHOT_TIMEOUT_SECONDS = 8L
         private const val MAX_DOMAIN_SNAPSHOTS_PER_LOOKUP = 8
         // Used only by historical backfill, never by the primary shopping search.
         private const val SNAPSHOT_CALL_TIMEOUT_SECONDS = 12L

@@ -2828,8 +2828,8 @@ class WaybackPriceHistoryClientTest {
 
     @Test
     fun quarterlyCdxWindowsAreBoundedToQuarterAndHistoricalWindow() {
-        val now = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
+        val now = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
         }.parse("20261025120000")!!.time
         val client = newClient()
 

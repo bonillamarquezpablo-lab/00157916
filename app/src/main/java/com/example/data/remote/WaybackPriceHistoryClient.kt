@@ -774,7 +774,7 @@ class WaybackPriceHistoryClient(
                 )
             }
 
-            val quarterlyQuotes = quarterlyResults.flatMap { it.quotes }            val yearlyQuotes = yearlyResults.flatMap { it.quotes }
+            val quarterlyQuotes = quarterlyResults.flatMap { it.quotes }
             val mergedQuotes = (exactResult.quotes + prefixResult.quotes + quarterlyQuotes)
                 .distinctBy { listOf(it.originalUrl, it.observedAt.toString(), it.price.toString(), it.currency) }
                 .sortedBy { it.observedAt }
@@ -785,7 +785,7 @@ class WaybackPriceHistoryClient(
                 quarterlyResults.flatMap { it.diagnosticCodes }
             val rateLimited = combinedDiagnostics.contains("WAYBACK_RATE_LIMITED")
             val partialRequestFailed = exactResult.requestFailed || prefixResult.requestFailed ||
-                yearlyResults.any { it.requestFailed }
+                quarterlyResults.any { it.requestFailed }
             // A partial series remains retryable when an index request timed out, even if old
             // prices were recovered. Those dates may already exist in Room and are not completion.
             val incompleteLookupFailed = rateLimited || partialRequestFailed

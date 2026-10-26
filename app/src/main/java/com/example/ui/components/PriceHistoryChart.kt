@@ -206,7 +206,7 @@ fun PriceHistoryChart(
             selectedPointIndex = -1
         }
     }
-    val selectedHistory = when (selectedSeries) {    val selectedHistory = when (selectedSeries) {
+    val selectedHistory = when (selectedSeries) {
         HistoryEvidenceSeries.LIVE -> priceHistory
         HistoryEvidenceSeries.WAYBACK -> archiveHistory
         HistoryEvidenceSeries.GOOGLE_INSIGHTS -> googleInsightHistory

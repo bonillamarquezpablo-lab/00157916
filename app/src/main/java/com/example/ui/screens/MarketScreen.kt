@@ -236,8 +236,8 @@ fun MarketScreen(
         modifier = modifier
             .fillMaxSize()
             .testTag("market_screen_list"),
-        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(bottom = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalItemSpacing = 10.dp
     ) {
         item(span = StaggeredGridItemSpan.FullLine) {
@@ -628,7 +628,7 @@ fun MarketScreen(
                         product = product,
                         onClick = { onProductClick(product) },
                         onToggleTrack = { onToggleTrack(product) },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                         compact = true
                     )
                 } else {
@@ -657,7 +657,7 @@ fun MarketScreen(
                         },
                         onProductClick = onProductClick,
                         onToggleTrack = onToggleTrack,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
                     )
                 }
             }

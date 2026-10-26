@@ -162,40 +162,51 @@ fun PriceHistoryChart(
         if (archiveHistory.isNotEmpty()) add(HistoryEvidenceSeries.WAYBACK)
         if (googleInsightHistory.isNotEmpty()) add(HistoryEvidenceSeries.GOOGLE_INSIGHTS)
     }
+    val validLivePointsForDefault = remember(priceHistory) {
+        priceHistory.filter { it.timestamp > 0L && it.price.isFinite() && it.price > 0.0 }
+    }
+    val validArchivePointsForDefault = remember(archiveHistory) {
+        archiveHistory.filter { it.timestamp > 0L && it.price.isFinite() && it.price > 0.0 }
+    }
+    val validGooglePointsForDefault = remember(googleInsightHistory) {
+        googleInsightHistory.filter { it.timestamp > 0L && it.price.isFinite() && it.price > 0.0 }
+    }
+    val liveOldestForDefault = validLivePointsForDefault.minOfOrNull { it.timestamp }
+    val archiveOldestForDefault = validArchivePointsForDefault.minOfOrNull { it.timestamp }
+    val googleOldestForDefault = validGooglePointsForDefault.minOfOrNull { it.timestamp }
+    val archiveExtendsTimeline = archiveOldestForDefault != null &&
+        (liveOldestForDefault == null || archiveOldestForDefault < liveOldestForDefault)
+    val googleExtendsTimeline = googleOldestForDefault != null &&
+        (liveOldestForDefault == null || googleOldestForDefault < liveOldestForDefault)
+
     LaunchedEffect(
         availableSeries,
         selectedSeries,
         userSelectedSeries,
-        priceHistory.isEmpty(),
-        archiveHistory.isNotEmpty(),
-        googleInsightHistory.isNotEmpty()
+        validLivePointsForDefault.size,
+        archiveOldestForDefault,
+        googleOldestForDefault
     ) {
+        val liveCount = validLivePointsForDefault.size
+        val preferredSeries = when {
+            archiveHistory.isNotEmpty() && (liveCount < 2 || archiveExtendsTimeline) ->
+                HistoryEvidenceSeries.WAYBACK
+            googleInsightHistory.isNotEmpty() && (liveCount < 2 || googleExtendsTimeline) ->
+                HistoryEvidenceSeries.GOOGLE_INSIGHTS
+            else -> HistoryEvidenceSeries.LIVE
+        }
         if (selectedSeries !in availableSeries) {
-            selectedSeries = when {
-                archiveHistory.isNotEmpty() -> HistoryEvidenceSeries.WAYBACK
-                googleInsightHistory.isNotEmpty() -> HistoryEvidenceSeries.GOOGLE_INSIGHTS
-                else -> HistoryEvidenceSeries.LIVE
-            }
+            selectedSeries = preferredSeries
             userSelectedSeries = false
             selectedPointIndex = -1
-        } else if (!userSelectedSeries &&
-            // One live quote is enough to show today's price, but not enough to establish a
-            // useful price history. If external captures exist, show them by default instead
-            // of leaving the chart on a nearly empty live series while hiding recovered history.
-            priceHistory.count { it.timestamp > 0L && it.price.isFinite() && it.price > 0.0 } < 2
-        ) {
-            val preferredSeries = when {
-                archiveHistory.isNotEmpty() -> HistoryEvidenceSeries.WAYBACK
-                googleInsightHistory.isNotEmpty() -> HistoryEvidenceSeries.GOOGLE_INSIGHTS
-                else -> HistoryEvidenceSeries.LIVE
-            }
-            if (selectedSeries != preferredSeries) {
-                selectedSeries = preferredSeries
-                selectedPointIndex = -1
-            }
+        } else if (!userSelectedSeries && selectedSeries != preferredSeries) {
+            // Prefer the longest available timeline automatically. A user's explicit series
+            // selection always wins, and archives never merge into the live-price calculations.
+            selectedSeries = preferredSeries
+            selectedPointIndex = -1
         }
     }
-    val selectedHistory = when (selectedSeries) {
+    val selectedHistory = when (selectedSeries) {    val selectedHistory = when (selectedSeries) {
         HistoryEvidenceSeries.LIVE -> priceHistory
         HistoryEvidenceSeries.WAYBACK -> archiveHistory
         HistoryEvidenceSeries.GOOGLE_INSIGHTS -> googleInsightHistory

@@ -203,6 +203,37 @@ class ProductDetailSheetDiagnosticTest {
     }
 
     @Test
+    fun staleStatusHeadlineCannotOverrideFreshNoPausePrecheckWhenOnlyCdxtimeoutsWereSeen() {
+        val staleStatus =
+            "Se recibió HTTP 429 de Internet Archive/Wayback durante esta búsqueda, pero el estado actual no confirma que la pausa siga activa."
+        val rows = listOf(
+            WaybackDiagnosticEntry(
+                step = 4,
+                title = "Precontrol de pausa global y preparación de consulta",
+                status = WaybackTraceStatus.PASSED,
+                detail = "[13:15:07] Precontrol completado: no hay pausa global activa."
+            ),
+            WaybackDiagnosticEntry(
+                step = 6,
+                title = "Respuesta CDX",
+                status = WaybackTraceStatus.FAILED,
+                detail = "[13:15:40] CDX_URL_PREFIX_TIMEOUT · 10000 ms; [13:15:46] CDX_URL_PREFIX_YEAR_TIMEOUT · 6001 ms."
+            ),
+            WaybackDiagnosticEntry(
+                step = 7,
+                title = "Fallback CDX alternativo / Availability API",
+                status = WaybackTraceStatus.SKIPPED,
+                detail = "[13:15:40] La consulta por prefijo agotó el tiempo. El control global de ritmo se mantiene; cualquier respuesta de límite detiene los reintentos."
+            )
+        )
+
+        val summary = buildWaybackDiagnosticSummary(staleStatus, rows)
+        assertTrue(summary.contains("El precontrol confirma que no hay pausa global activa"))
+        assertTrue(summary.contains("HTTP 429 del resumen pertenece a un intento anterior"))
+        assertFalse(summary.contains("Se recibió HTTP 429 de Internet Archive/Wayback durante esta búsqueda"))
+    }
+
+    @Test
     fun oldRateLimitTraceDoesNotClaimThatThePauseIsStillActiveWhenStatusShowsCache() {
         val status = "Estas consultas gratuitas ya se comprobaron recientemente. La caché evita repetir búsquedas completadas sin resultados útiles."
         val rows = listOf(

@@ -115,18 +115,22 @@ internal fun buildWaybackDiagnosticSummary(
         if (detailLine.contains("no hay pausa global activa", ignoreCase = true) ||
             detailLine.contains("la pausa global no está activa", ignoreCase = true)
         ) return false
-        // Count HTTP 429 only when the diagnostic records an actual response/code.
-        // Explanatory guidance ("HTTP 429 detiene los reintentos") is not a network event.
+        val normalizedLine = detailLine.lowercase(Locale.ROOT)
+        // The trace can retain explanatory text or a previous attempt. Neither proves that this
+        // run received HTTP 429 from Wayback.
+        if (normalizedLine.contains("intento anterior") ||
+            normalizedLine.contains("detiene los reintentos") ||
+            normalizedLine.contains("cualquier respuesta de límite") ||
+            normalizedLine.contains("si recibe") ||
+            normalizedLine.contains("cuando se reciba")
+        ) return false
         val explicitHttp429 = Regex("""(?i)\bHTTP\s+429\s*[:;)]""")
             .containsMatchIn(detailLine) ||
             detailLine.contains("devolvió HTTP 429", ignoreCase = true) ||
-            detailLine.contains("recibió HTTP 429", ignoreCase = true)
-        return detailLine.contains("WAYBACK_RATE_LIMITED", ignoreCase = true) ||
-            explicitHttp429 ||
-            (detailLine.contains("pausa global", ignoreCase = true) &&
-                (detailLine.contains("bloqueó", ignoreCase = true) ||
-                    detailLine.contains("activó", ignoreCase = true) ||
-                    detailLine.contains("activa", ignoreCase = true)))
+            detailLine.contains("recibió HTTP 429", ignoreCase = true) ||
+            Regex("""(?i)\b(?:CDX_[A-Z0-9_]+|ARCHIVE_AVAILABILITY_API)_HTTP_429\b""")
+                .containsMatchIn(detailLine)
+        return detailLine.contains("WAYBACK_RATE_LIMITED", ignoreCase = true) || explicitHttp429
     }
 
     val precheckSeconds = precheck?.let { diagnosticSeconds(it.detail) }
@@ -141,7 +145,9 @@ internal fun buildWaybackDiagnosticSummary(
                 val eventSeconds = diagnosticSeconds(detailLine)
                 when {
                     precheckSeconds != null && eventSeconds != null ->
-                        eventSeconds > precheckSeconds
+                        eventSeconds > precheckSeconds ||
+                            // Reports use local HH:mm:ss. A short run can cross midnight.
+                            (precheckSeconds - eventSeconds > 12 * 60 * 60)
                     precheckConfirmsNoPause -> false
                     else -> true
                 }
@@ -300,6 +306,52 @@ internal fun buildWaybackDiagnosticExportReport(
     report.appendLine("Producto: " + safeDetail(productTitle.replace(Regex("""[\r\n]+"""), " ").trim().take(180)))
     report.appendLine("Resultado comunicado por la app: " + safeDetail(statusText))
     report.appendLine("Resumen del diagnóstico: " + safeDetail(summary))
+    report.appendLine()
+    report.appendLine("RESULTADOS SEPARADOS POR SERVICIO")
+    val serviceGroups: List<Pair<String, (WaybackDiagnosticEntry, String) -> Boolean>> = listOf(
+        "Índice CDX de Internet Archive" to { entry, line ->
+            (entry.title + " " + line).contains("CDX", ignoreCase = true) &&
+                !(entry.title + " " + line).contains("Memento", ignoreCase = true)
+        },
+        "Availability API de archive.org" to { entry, line ->
+            (entry.title + " " + line).contains("Availability", ignoreCase = true) ||
+                line.contains("ARCHIVE_AVAILABILITY_API", ignoreCase = true)
+        },
+        "Descarga y validación de capturas Wayback" to { entry, line ->
+            val combined = entry.title + " " + line
+            (entry.isCaptureDetail || combined.contains("captura", ignoreCase = true) ||
+                combined.contains("HTML", ignoreCase = true)) &&
+                !combined.contains("Memento", ignoreCase = true) &&
+                !combined.contains("Arquivo.pt", ignoreCase = true) &&
+                !combined.contains("Availability", ignoreCase = true) &&
+                !combined.contains("CDX", ignoreCase = true)
+        },
+        "Arquivo.pt / Memento" to { entry, line ->
+            (entry.title + " " + line).contains("Memento", ignoreCase = true) ||
+                (entry.title + " " + line).contains("Arquivo.pt", ignoreCase = true) ||
+                line.contains("MEMENTO_", ignoreCase = true)
+        },
+        "Guardado local y actualización del gráfico" to { entry, line ->
+            entry.step == 19 || entry.step == 20 ||
+                (entry.title + " " + line).contains("gráfico", ignoreCase = true) ||
+                (entry.title + " " + line).contains("persistencia", ignoreCase = true)
+        }
+    )
+    for ((serviceName, matches) in serviceGroups) {
+        report.appendLine()
+        report.appendLine(serviceName)
+        val serviceEvents = steps.flatMap { entry ->
+            entry.detail.lines().filter { it.isNotBlank() && matches(entry, it) }.map { line ->
+                "Fase ${entry.step} — " + safeDetail(entry.title) + ": " + safeDetail(line)
+            }
+        }.distinct().take(18)
+        if (serviceEvents.isEmpty()) {
+            report.appendLine("   No hay eventos etiquetados para este servicio en esta búsqueda.")
+        } else {
+            serviceEvents.forEach { report.appendLine("   " + it) }
+        }
+    }
+    report.appendLine()
     report.appendLine(
         "Estado de fases: " + (statuses[WaybackTraceStatus.PASSED] ?: 0) + " superadas, " +
             (statuses[WaybackTraceStatus.FAILED] ?: 0) + " fallidas, " +
@@ -382,8 +434,25 @@ fun ProductDetailSheet(
         summarizePriceHistory(product.priceHistory)
     }
     val observedMinimumPoint = observedHistorySummary.minimumObservedPoint
-    val oldestArchivedDate = remember(archivedHistoryPoints, savedDateFormatter) {
-        archivedHistoryPoints.minByOrNull { it.timestamp }?.let {
+    val mementoHistoryPoints = remember(archivedHistoryPoints) {
+        archivedHistoryPoints.filter {
+            it.eventLabel?.contains("Memento", ignoreCase = true) == true ||
+                it.eventLabel?.contains("Arquivo.pt", ignoreCase = true) == true
+        }
+    }
+    val waybackHistoryPoints = remember(archivedHistoryPoints) {
+        archivedHistoryPoints.filterNot {
+            it.eventLabel?.contains("Memento", ignoreCase = true) == true ||
+                it.eventLabel?.contains("Arquivo.pt", ignoreCase = true) == true
+        }
+    }
+    val oldestWaybackDate = remember(waybackHistoryPoints, savedDateFormatter) {
+        waybackHistoryPoints.minByOrNull { it.timestamp }?.let {
+            savedDateFormatter.format(Date(it.timestamp))
+        }
+    }
+    val oldestMementoDate = remember(mementoHistoryPoints, savedDateFormatter) {
+        mementoHistoryPoints.minByOrNull { it.timestamp }?.let {
             savedDateFormatter.format(Date(it.timestamp))
         }
     }
@@ -393,7 +462,8 @@ fun ProductDetailSheet(
         }
     }
     val historicalSourceSummary = remember(
-        googleInsightPoints, archivedHistoryPoints, oldestArchivedDate, oldestGoogleInsightDate
+        googleInsightPoints, archivedHistoryPoints, waybackHistoryPoints, mementoHistoryPoints,
+        oldestWaybackDate, oldestMementoDate, oldestGoogleInsightDate
     ) {
         buildString {
             if (googleInsightPoints.isNotEmpty()) {
@@ -401,14 +471,20 @@ fun ProductDetailSheet(
                 oldestGoogleInsightDate?.let { append(" desde $it") }
                 append(".")
             }
-            if (archivedHistoryPoints.isNotEmpty()) {
+            if (waybackHistoryPoints.isNotEmpty()) {
                 if (isNotEmpty()) append(" ")
-                val convertedUsdPoints = archivedHistoryPoints.count {
+                val convertedUsdPoints = waybackHistoryPoints.count {
                     it.eventLabel?.contains("USD→EUR convertido", ignoreCase = true) == true
                 }
-                append("Internet Archive: ${archivedHistoryPoints.size} capturas")
+                append("Internet Archive/Wayback: ${waybackHistoryPoints.size} capturas")
                 if (convertedUsdPoints > 0) append(" (incluye ${convertedUsdPoints} convertidas de USD a EUR)")
-                oldestArchivedDate?.let { append(" desde $it") }
+                oldestWaybackDate?.let { append(" desde $it") }
+                append(".")
+            }
+            if (mementoHistoryPoints.isNotEmpty()) {
+                if (isNotEmpty()) append(" ")
+                append("Arquivo.pt/Memento: ${mementoHistoryPoints.size} capturas")
+                oldestMementoDate?.let { append(" desde $it") }
                 append(".")
             }
             if (isEmpty()) {

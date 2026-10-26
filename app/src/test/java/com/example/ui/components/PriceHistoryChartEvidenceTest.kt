@@ -54,6 +54,34 @@ class PriceHistoryChartEvidenceTest {
     }
 
     @Test
+    fun archivedHistoryExtendingTimelineIsShownByDefaultEvenWhenSeveralLivePricesExist() {
+        val now = System.currentTimeMillis()
+        composeRule.setContent {
+            MaterialTheme {
+                PriceHistoryChart(
+                    priceHistory = listOf(
+                        point(now - 2L * 24L * 60L * 60L * 1000L, 599.99, "Tienda anterior", "live"),
+                        point(now - 1L * 24L * 60L * 60L * 1000L, 499.99, "Tienda reciente", "live")
+                    ),
+                    avg90dPrice = 0.0,
+                    archiveHistory = listOf(
+                        point(now - 150L * 24L * 60L * 60L * 1000L, 399.99, "Internet Archive", "archive")
+                    )
+                )
+            }
+        }
+
+        composeRule.waitUntil(3_000L) {
+            composeRule.onAllNodesWithText("Histórico externo · Wayback")
+                .fetchSemanticsNodes().isNotEmpty() &&
+                composeRule.onAllNodesWithText("399,99 €").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("Histórico externo · Wayback").assertIsDisplayed()
+        composeRule.onNodeWithText("399,99 €").assertIsDisplayed()
+        composeRule.onNodeWithText("01/01/2026 en Tienda de prueba").assertIsDisplayed()
+    }
+
+    @Test
     fun multipleSavedLiveObservationsShowLatestExactPriceAndDateImmediately() {
         val now = System.currentTimeMillis()
         composeRule.setContent {

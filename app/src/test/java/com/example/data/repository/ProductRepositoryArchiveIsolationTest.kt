@@ -84,10 +84,35 @@ class ProductRepositoryArchiveIsolationTest {
 
             val archiveUrl1 = "https://web.archive.org/web/20251001000000id_/https://shop.example/product/anker-prime"
             val archiveUrl2 = "https://web.archive.org/web/20260201000000id_/https://shop.example/product/anker-prime"
+            val sameDayArchiveAt = todayStart - 12L * 60L * 60L * 1000L
+            val sameDayArchiveStamp = java.text.SimpleDateFormat(
+                "yyyyMMddHHmmss", java.util.Locale.ROOT
+            ).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.format(java.util.Date(sameDayArchiveAt))
+            val sameDayArchiveUrl =
+                "https://web.archive.org/web/${sameDayArchiveStamp}id_/https://shop.example/product/anker-prime"
             val observations = listOf(
                 live(220.0, todayStart - 36L * 60L * 60L * 1000L, "old"),
-                live(190.0, todayStart - 12L * 60L * 60L * 1000L, "middle"),
+                live(190.0, sameDayArchiveAt, "middle"),
                 live(200.0, now, "current"),
+                PriceObservationEntity(
+                    productId = productId,
+                    storeId = "sample-store-archive-same-day",
+                    price = 175.0,
+                    currency = "EUR",
+                    observedAt = sameDayArchiveAt,
+                    sourceUrl = sameDayArchiveUrl,
+                    sourceName = "Internet Archive (Wayback Machine)",
+                    isVerified = true,
+                    productTitle = title,
+                    storeName = "Tienda de prueba",
+                    sourceType = "Internet Archive",
+                    linkType = "Archivo histórico",
+                    collectedAt = now,
+                    evidenceType = "archive",
+                    sourcePageUrl = "https://shop.example/product/anker-prime"
+                ),
                 // Simulate a row saved by an older v8 build before its provenance marker was repaired.
                 PriceObservationEntity(
                     productId = productId,
@@ -140,8 +165,17 @@ class ProductRepositoryArchiveIsolationTest {
             assertEquals("live provider's current quote remains current", 200.0, product.currentPrice, 0.001)
             assertEquals("archive prices cannot set the observed minimum", 190.0, product.athMinPrice, 0.001)
             assertEquals("archive prices cannot set the observed maximum", 220.0, product.athMaxPrice, 0.001)
-            assertEquals("both archived rows remain available for the separate archive section", 2,
-                product.priceHistory.count { it.isArchiveEvidence })
+            assertEquals(
+                "archive rows remain in their own series, including a day that also has a live quote",
+                3,
+                product.priceHistory.count { it.isArchiveEvidence }
+            )
+            assertTrue(
+                "a same-day archived observation must not be filtered out by a live observation",
+                product.priceHistory.any {
+                    it.isArchiveEvidence && it.sourceUrl == sameDayArchiveUrl && it.price == 175.0
+                }
+            )
             assertFalse("archive dates must not create a 90-day live history", product.hasSufficientHistory)
 
             val liveOnly = product.copy(priceHistory = product.priceHistory.filterNot { it.isArchiveEvidence })

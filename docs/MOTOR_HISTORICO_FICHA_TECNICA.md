@@ -81,7 +81,7 @@ No rellenar estas celdas con estimaciones. Cada cifra debe llevar método de cá
 
 | Fase | Trabajo | Entrega verificable | Estado |
 |---|---|---|---|
-| 1 | Ficha viva y línea base de métricas | Esta ficha, con métricas vacías y criterios de evidencia | En curso |
+| 1 | Ficha viva y línea base de métricas | Ficha consultable desde Ajustes y documento versionado; métricas aún vacías hasta instrumentarlas | Base creada; métricas pendientes |
 | 2 | Subcategorías y filtros locales | Móviles, tablets, power banks, cargadores, cables, fundas y otros accesorios; filtros aplicados solo a la sección seleccionada; clasificación de casos dudosos sin perderlos | En revisión |
 | 3 | Chucker y diagnóstico de red | Verificar captura de tráfico en sideload/debug, identificar la llamada fallida y proteger tokens, cookies y datos sensibles en informes/exportaciones | Integración en código; validación pendiente |
 | 4 | Informe de búsqueda completo | 22 fases, eventos individuales por captura, tiempos, intentos, respuesta HTTP, motivo de rechazo, duplicados y puntos realmente guardados en un informe copiable y redactado | Parcial: el informe actual ya tiene 22 fases y detalle por captura |
@@ -94,7 +94,18 @@ No rellenar estas celdas con estimaciones. Cada cifra debe llevar método de cá
 
 Las fases no se declaran completadas porque el código compile únicamente: cada entrega necesita pruebas y evidencia. Si aparece un defecto, se corrige y se repite la prueba afectada antes de avanzar.
 
-## 5. Formato obligatorio para cada nuevo hito
+## 5. Hito registrado — ficha visible en la aplicación
+
+**Fecha:** 26 de octubre de 2026  
+**Capacidad que cambia:** seguimiento visible de la evolución del motor.  
+**Antes:** las capacidades y limitaciones se repartían entre código e informes de diagnóstico; no había una pantalla dedicada a consultarlas.  
+**Cambio realizado:** se añadió una ficha en la aplicación, accesible desde Ajustes, con fuentes y capacidades detectadas en el código, problemas abiertos, métricas sin medir, evidencia de los dos informes disponibles y hoja de ruta.  
+**Prueba ejecutada:** integración de la navegación y compilación pendiente de confirmación en GitHub Actions.  
+**Resultado:** el código de la ficha está integrado; todavía no se marca como APK validada hasta que termine la compilación.  
+**Impacto medido:** ninguno todavía. La ficha no inventa puntuaciones ni cifras de eficacia; deja explícitos los campos pendientes.  
+**Siguiente limitación pendiente:** instrumentar el motor para calcular automáticamente capturas, precios aceptados, duplicados, puntos nuevos y duración por fase.
+
+## 6. Formato obligatorio para cada nuevo hito
 
 Al cerrar un cambio, añadir una entrada con:
 
@@ -109,7 +120,7 @@ Al cerrar un cambio, añadir una entrada con:
 - **Enlace a commit, ejecución de CI e informe:**
 - **Siguiente limitación pendiente:**
 
-## 6. Próximas tareas prioritarias
+## 7. Próximas tareas prioritarias
 
 1. Confirmar el comportamiento de las tarjetas y subcategorías y probar que los filtros no cruzan familias de productos.
 2. Instrumentar el diagnóstico para que distinga capturas encontradas, HTML descargado, precios válidos, duplicados y puntos nuevos guardados.

@@ -111,6 +111,10 @@ internal fun buildWaybackDiagnosticSummary(
 
     fun isWaybackRateLimitLine(entry: WaybackDiagnosticEntry, detailLine: String): Boolean {
         if (isMementoRateLimitLine(entry, detailLine)) return false
+        // This is an explicit precheck result, not an HTTP error event.
+        if (detailLine.contains("no hay pausa global activa", ignoreCase = true) ||
+            detailLine.contains("la pausa global no está activa", ignoreCase = true)
+        ) return false
         // Count HTTP 429 only when the diagnostic records an actual response/code.
         // Explanatory guidance ("HTTP 429 detiene los reintentos") is not a network event.
         val explicitHttp429 = Regex("""(?i)\bHTTP\s+429\s*[:;)]""")

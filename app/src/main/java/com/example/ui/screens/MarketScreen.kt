@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
+import com.example.data.model.SmartphoneSubcategory
 import com.example.data.model.MarketplaceCategorySummary
 import kotlinx.coroutines.flow.StateFlow
 import com.example.data.model.Store
@@ -91,20 +92,36 @@ fun MarketScreen(
     onProductClick: (Product) -> Unit,
     onToggleTrack: (Product) -> Unit,
     onPrepareTrackedRefresh: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    productsForSmartphoneSubcategory: ((SmartphoneSubcategory) -> StateFlow<List<Product>>)? = null,
+    filteredProductsForSmartphoneSubcategory: ((SmartphoneSubcategory) -> StateFlow<List<Product>>)? = null
 ) {
     var showSortMenu by remember { mutableStateOf(false) }
     var showStoreMenu by remember { mutableStateOf(false) }
     var forceShowAllProducts by rememberSaveable { mutableStateOf(false) }
+    var selectedSmartphoneSubcategoryName by rememberSaveable { mutableStateOf<String?>(null) }
+    val selectedSmartphoneSubcategory = remember(selectedSmartphoneSubcategoryName) {
+        SmartphoneSubcategory.values().firstOrNull { it.name == selectedSmartphoneSubcategoryName }
+    }
+    val activeSmartphoneSubcategory = selectedSmartphoneSubcategory.takeIf {
+        uiState.selectedCategory == ProductCategory.SMARTPHONES
+    }
 
     val hasActiveMarketFilter = uiState.selectedStoreName != null ||
         uiState.onlyAthFilter ||
         uiState.onlyHistoricalMinimumFilter
     val shouldShowCategoryHome = uiState.selectedCategory == ProductCategory.ALL &&
         !hasActiveMarketFilter && !forceShowAllProducts
+    val shouldShowSmartphoneSubcategoryHome =
+        uiState.selectedCategory == ProductCategory.SMARTPHONES &&
+            activeSmartphoneSubcategory == null &&
+            uiState.searchQuery.isBlank() &&
+            !hasActiveMarketFilter &&
+            !forceShowAllProducts
     // Returning from a category should always take the user back to the category home.
     // Clear only the search and market filters that would otherwise keep the list visible.
     val returnToCategoryHome = {
+        selectedSmartphoneSubcategoryName = null
         forceShowAllProducts = false
         if (uiState.searchQuery.isNotBlank()) onSearchChange("")
         if (uiState.selectedStoreName != null) onStoreFilterSelect(null)
@@ -114,9 +131,21 @@ fun MarketScreen(
             onCategorySelect(ProductCategory.ALL)
         }
     }
+    val returnToSmartphoneSubcategories = {
+        selectedSmartphoneSubcategoryName = null
+        forceShowAllProducts = false
+        if (uiState.searchQuery.isNotBlank()) onSearchChange("")
+        if (uiState.selectedStoreName != null) onStoreFilterSelect(null)
+        if (uiState.onlyAthFilter) onToggleOnlyAth()
+        if (uiState.onlyHistoricalMinimumFilter) onToggleOnlyHistoricalMinimum()
+    }
 
     BackHandler(enabled = !shouldShowCategoryHome) {
-        returnToCategoryHome()
+        if (activeSmartphoneSubcategory != null) {
+            returnToSmartphoneSubcategories()
+        } else {
+            returnToCategoryHome()
+        }
     }
 
     // Repeated products stay tucked away until the user chooses a family, version, then capacity.
@@ -132,19 +161,46 @@ fun MarketScreen(
             onSearchChange = onSearchChange,
             onSearchSubmit = { forceShowAllProducts = true },
             onCategorySelect = { category ->
+                selectedSmartphoneSubcategoryName = null
                 forceShowAllProducts = false
                 onCategorySelect(category)
             },
-            onViewAllProducts = { forceShowAllProducts = true },
+            onViewAllProducts = {
+                selectedSmartphoneSubcategoryName = null
+                forceShowAllProducts = true
+            },
             modifier = modifier
         )
         return
     }
 
-    // This branch is only reached after opening a category or explicitly requesting all results.
-    // The StateFlow is scoped to the selected category and remains cached after first use.
-    val loadedProducts by productsForCategory(uiState.selectedCategory).collectAsStateWithLifecycle()
-    val products by filteredProductsForCategory(uiState.selectedCategory).collectAsStateWithLifecycle()
+    if (shouldShowSmartphoneSubcategoryHome) {
+        SmartphoneSubcategoryHomeScreen(
+            onBack = { returnToCategoryHome() },
+            onSelect = { subcategory ->
+                forceShowAllProducts = false
+                selectedSmartphoneSubcategoryName = subcategory.name
+            },
+            modifier = modifier
+        )
+        return
+    }
+
+    // Only the chosen category/subcategory is queried; the subcategory home itself loads no rows.
+    val loadedProductsFlow = if (activeSmartphoneSubcategory != null) {
+        productsForSmartphoneSubcategory?.invoke(activeSmartphoneSubcategory)
+            ?: productsForCategory(activeSmartphoneSubcategory.sourceCategories.first())
+    } else {
+        productsForCategory(uiState.selectedCategory)
+    }
+    val filteredProductsFlow = if (activeSmartphoneSubcategory != null) {
+        filteredProductsForSmartphoneSubcategory?.invoke(activeSmartphoneSubcategory)
+            ?: filteredProductsForCategory(activeSmartphoneSubcategory.sourceCategories.first())
+    } else {
+        filteredProductsForCategory(uiState.selectedCategory)
+    }
+    val loadedProducts by loadedProductsFlow.collectAsStateWithLifecycle()
+    val products by filteredProductsFlow.collectAsStateWithLifecycle()
 
     // Store choices are derived from the same cached, visible category flow, never the global directory.
     val displayStores = remember(loadedProducts) {
@@ -161,7 +217,12 @@ fun MarketScreen(
 
     // Keep Mercado as a drill-down, not a wall of expanded cards. Changing filters
     // resets the selection so expansions from a previous result set cannot reappear.
-    LaunchedEffect(uiState.selectedCategory, uiState.searchQuery, uiState.selectedStoreName) {
+    LaunchedEffect(
+        uiState.selectedCategory,
+        uiState.searchQuery,
+        uiState.selectedStoreName,
+        activeSmartphoneSubcategory
+    ) {
         expandedFamilyKeys = emptySet()
         expandedVariantKeys = emptySet()
         expandedStorageKeys = emptySet()
@@ -175,13 +236,19 @@ fun MarketScreen(
     ) {
         item {
             OutlinedButton(
-                onClick = { returnToCategoryHome() },
+                onClick = {
+                    if (activeSmartphoneSubcategory != null) returnToSmartphoneSubcategories()
+                    else returnToCategoryHome()
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 4.dp)
                     .testTag("return_to_categories_button")
             ) {
-                Text("Volver a categorías")
+                Text(
+                    if (activeSmartphoneSubcategory != null) "Volver a subcategorías"
+                    else "Volver a categorías"
+                )
             }
         }
 
@@ -189,7 +256,7 @@ fun MarketScreen(
         // filters appear sooner, with less drawing and less vertical scrolling.
         item {
             Text(
-                text = "Productos guardados",
+                text = activeSmartphoneSubcategory?.title ?: "Productos guardados",
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
@@ -261,6 +328,7 @@ fun MarketScreen(
                     FilterChip(
                         selected = uiState.selectedCategory == category,
                         onClick = {
+                            selectedSmartphoneSubcategoryName = null
                             if (category != uiState.selectedCategory) onStoreFilterSelect(null)
                             onCategorySelect(category)
                         },

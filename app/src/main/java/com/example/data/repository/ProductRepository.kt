@@ -78,7 +78,9 @@ data class ArchivedHistoryPersistenceResult(
     val confirmedExistingDuplicates: Int = 0,
     val invalidExistingRowIds: Set<Long> = emptySet(),
     val rejectedQuotes: Int = 0,
-    val duplicateQuotesInInput: Int = 0
+    val duplicateQuotesInInput: Int = 0,
+    /** Sanitized reason-code counts for every rejected quote or rejected batch. */
+    val rejectionReasons: Map<String, Int> = emptyMap()
 )
 
 class ProductRepository(
@@ -1117,18 +1119,19 @@ class ProductRepository(
         startupCleanupCompleted.await()
         val uniqueQuotes = quotes.distinctBy { it.observedAt to it.price }
         val duplicateQuotesInInput = (quotes.size - uniqueQuotes.size).coerceAtLeast(0)
-        fun rejectAllQuotes() = ArchivedHistoryPersistenceResult(
+        fun rejectAllQuotes(reason: String) = ArchivedHistoryPersistenceResult(
             rejectedQuotes = uniqueQuotes.size,
-            duplicateQuotesInInput = duplicateQuotesInInput
+            duplicateQuotesInInput = duplicateQuotesInInput,
+            rejectionReasons = if (uniqueQuotes.isEmpty()) emptyMap() else mapOf(reason to uniqueQuotes.size)
         )
-        if (expectedTitle.isBlank() || originalUrl.isBlank() || quotes.isEmpty()) return rejectAllQuotes()
-        val originalUri = parseHttpUri(originalUrl) ?: return rejectAllQuotes()
-        if (!originalUri.scheme.equals("https", ignoreCase = true)) return rejectAllQuotes()
+        if (expectedTitle.isBlank() || originalUrl.isBlank() || quotes.isEmpty()) return rejectAllQuotes("INVALID_INPUT")
+        val originalUri = parseHttpUri(originalUrl) ?: return rejectAllQuotes("INVALID_ORIGINAL_URL")
+        if (!originalUri.scheme.equals("https", ignoreCase = true)) return rejectAllQuotes("ORIGINAL_URL_NOT_HTTPS")
         val originalHost = normalizeHost(originalUri.host.orEmpty())
         if (originalHost == "web.archive.org" || originalHost == "archive.org" ||
             isGoogleShoppingUrl(originalUrl) || originalHost.startsWith("google.") ||
             originalHost == "bing.com" || originalHost.endsWith(".bing.com")
-        ) return rejectAllQuotes()
+        ) return rejectAllQuotes("ARCHIVE_OR_SEARCH_INTERMEDIARY_URL")
 
         val products = productDao.getAllProductsSnapshot()
         val identity = onlineProductIdentityKey(expectedTitle)
@@ -1141,8 +1144,8 @@ class ProductRepository(
         val matchingProducts = products.filter {
             onlineProductIdentityKey(it.title) == identity
         }
-        val originalUrlKey = normalizedProductPageKey(originalUrl) ?: return rejectAllQuotes()
-        val originalPathKey = normalizedProductPagePathKey(originalUrl) ?: return rejectAllQuotes()
+        val originalUrlKey = normalizedProductPageKey(originalUrl) ?: return rejectAllQuotes("ORIGINAL_URL_NOT_CANONICAL")
+        val originalPathKey = normalizedProductPagePathKey(originalUrl) ?: return rejectAllQuotes("ORIGINAL_PATH_NOT_CANONICAL")
         val verifiedUrlMatches = matchingProducts.filter { candidate ->
             normalizedProductPageKey(candidate.storeUrl) == originalUrlKey ||
                 priceObservationDao.getVerifiedLiveObservationsForProduct(candidate.id).any { observation ->
@@ -1158,11 +1161,11 @@ class ProductRepository(
         val explicitlyTargetedProduct = targetProductId?.let { id ->
             matchingProducts.singleOrNull { it.id == id }
         }
-        if (targetProductId != null && explicitlyTargetedProduct == null) return rejectAllQuotes()
+        if (targetProductId != null && explicitlyTargetedProduct == null) return rejectAllQuotes("TARGET_PRODUCT_ID_NOT_MATCHING_EXPECTED_TITLE")
         val product = when {
             explicitlyTargetedProduct != null -> explicitlyTargetedProduct
             verifiedUrlMatches.size == 1 -> verifiedUrlMatches.single()
-            verifiedUrlMatches.size > 1 -> return rejectAllQuotes()
+            verifiedUrlMatches.size > 1 -> return rejectAllQuotes("AMBIGUOUS_VERIFIED_URL_MATCH")
             else -> {
                 // Query or fragment values can identify a purchasable variant. Do not fall back
                 // to a title/host match when the same page path has a conflicting variant key.
@@ -1170,7 +1173,7 @@ class ProductRepository(
                     normalizedProductPagePathKey(candidate.storeUrl) == originalPathKey &&
                         normalizedProductPageKey(candidate.storeUrl) != originalUrlKey
                 }
-                if (conflictingPageVariant) return rejectAllQuotes()
+                if (conflictingPageVariant) return rejectAllQuotes("CONFLICTING_PRODUCT_URL_VARIANT")
 
                 if (matchingProducts.size == 1) {
                     matchingProducts.single()
@@ -1179,7 +1182,7 @@ class ProductRepository(
                     matchingProducts.filter { candidate ->
                         parseHttpUri(candidate.storeUrl)?.host
                             ?.let(::normalizeHost) == originalHost
-                    }.singleOrNull() ?: return rejectAllQuotes()
+                    }.singleOrNull() ?: return rejectAllQuotes("NO_UNAMBIGUOUS_PRODUCT_MATCH")
                 }
             }
         }
@@ -1203,7 +1206,7 @@ class ProductRepository(
             targetProductId != null && explicitlyTargetedProduct?.id == product.id
         if (!hasVerifiedLiveQuote && !productOwnsArchiveUrl &&
             !uniqueGoogleOnlyProduct && !archiveCandidateBelongsToSelectedProduct
-        ) return rejectAllQuotes()
+        ) return rejectAllQuotes("PRODUCT_OWNERSHIP_NOT_CONFIRMED")
 
         val now = System.currentTimeMillis()
         // Keep the persistence horizon aligned with CDX/Memento discovery. A shorter
@@ -1216,45 +1219,61 @@ class ProductRepository(
         if (!isEligibleHistoryTitle(expectedTitle) ||
             isPromotionalBulkListing(expectedTitle, "") ||
             !isEligibleSeller(merchantName, originalUrl)
-        ) return rejectAllQuotes()
+        ) return rejectAllQuotes("INELIGIBLE_PRODUCT_OR_SELLER")
         var inserted = 0
         var confirmedExistingDuplicates = 0
         var rejectedQuotes = 0
+        val rejectionReasonCounts = linkedMapOf<String, Int>()
+        fun rejectQuote(reason: String) {
+            rejectedQuotes++
+            rejectionReasonCounts[reason] = (rejectionReasonCounts[reason] ?: 0) + 1
+        }
         val invalidExistingRowIds = linkedSetOf<Long>()
 
         for (quote in uniqueQuotes) {
             val snapshotIdentity = parseArchivedSnapshotIdentity(quote.snapshotUrl)
             if (snapshotIdentity == null) {
-                rejectedQuotes++
+                rejectQuote("INVALID_ARCHIVE_SNAPSHOT_URL")
                 continue
             }
             if (normalizedArchivedTargetPageKey(snapshotIdentity.targetUrl) != originalUrlKey) {
-                rejectedQuotes++
+                rejectQuote("ARCHIVE_TARGET_URL_MISMATCH")
                 continue
             }
             if (kotlin.math.abs(snapshotIdentity.timestampMillis - quote.observedAt) > 1_000L) {
-                rejectedQuotes++
+                rejectQuote("SNAPSHOT_TIMESTAMP_MISMATCH")
                 continue
             }
             if (!quote.originalUrl.trimEnd('/').equals(originalUrl.trimEnd('/'), ignoreCase = true)) {
-                rejectedQuotes++
+                rejectQuote("QUOTE_ORIGINAL_URL_MISMATCH")
                 continue
             }
             if (!isEuroCurrency(quote.currency) ||
                 !quote.price.isFinite() ||
                 quote.price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR ||
                 quote.observedAt < earliestAllowed ||
-                quote.observedAt >= now ||
-                quote.productTitle.isBlank() ||
+                quote.observedAt >= now
+            ) {
+                rejectQuote("INVALID_PRICE_CURRENCY_OR_DATE")
+                continue
+            }
+            if (quote.productTitle.isBlank() ||
                 (
                     onlineProductIdentityKey(quote.productTitle) != identity &&
                         !quote.variantIdentityConfirmedByUrl
-                ) ||
-                !isEligibleHistoryTitle(quote.productTitle) ||
-                isPromotionalBulkListing(quote.productTitle, "") ||
-                !isPlausibleHistoryPrice(quote.productTitle, quote.price)
+                )
             ) {
-                rejectedQuotes++
+                rejectQuote("PRODUCT_IDENTITY_MISMATCH")
+                continue
+            }
+            if (!isEligibleHistoryTitle(quote.productTitle) ||
+                isPromotionalBulkListing(quote.productTitle, "")
+            ) {
+                rejectQuote("INELIGIBLE_PRODUCT_TITLE")
+                continue
+            }
+            if (!isPlausibleHistoryPrice(quote.productTitle, quote.price)) {
+                rejectQuote("IMPLAUSIBLE_PRODUCT_PRICE")
                 continue
             }
 
@@ -1338,7 +1357,8 @@ class ProductRepository(
             confirmedExistingDuplicates = confirmedExistingDuplicates,
             invalidExistingRowIds = invalidExistingRowIds,
             rejectedQuotes = rejectedQuotes,
-            duplicateQuotesInInput = duplicateQuotesInInput
+            duplicateQuotesInInput = duplicateQuotesInInput,
+            rejectionReasons = rejectionReasonCounts.toMap()
         )
     }
 

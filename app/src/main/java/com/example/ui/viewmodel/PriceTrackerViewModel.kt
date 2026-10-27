@@ -170,10 +170,9 @@ internal fun mergeWaybackDiagnosticStatus(
 internal fun archivePersistenceStatus(
     savedPoints: Int,
     rejectedQuotes: Int = 0,
-    confirmedDuplicates: Int = 0,
     attempted: Boolean = false
 ): WaybackTraceStatus = when {
-    savedPoints > 0 || confirmedDuplicates > 0 -> WaybackTraceStatus.PASSED
+    savedPoints > 0 -> WaybackTraceStatus.PASSED
     attempted && rejectedQuotes > 0 -> WaybackTraceStatus.FAILED
     else -> WaybackTraceStatus.SKIPPED
 }
@@ -3275,7 +3274,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     val persistenceStatus = archivePersistenceStatus(
                         savedPoints = savedCount,
                         rejectedQuotes = rejectedArchiveQuoteCount,
-                        confirmedDuplicates = confirmedDuplicateTotal,
                         attempted = persistenceCompleted && (foundPrimaryCount > 0 || foundSecondaryCount > 0)
                     )
                     val persistenceDetail = when {

@@ -3424,16 +3424,15 @@ class WaybackPriceHistoryClientTest {
         val selectedYellow = "Apple iPhone 15 Plus 256GB Amarillo"
         val blackTitle = "Apple iPhone 15 Plus 256GB Negro Libre"
         val blackUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-negro-libre"
-        assertNull(
-            "An explicitly different colour must still be rejected",
-            client.parseArchivedPrice(
-                html = html(blackTitle, blackUrl),
-                expectedTitle = selectedYellow,
-                originalUrl = blackUrl,
-                snapshotUrl = "https://web.archive.org/web/20250101120000id_/$blackUrl",
-                observedAt = timestamp
-            )
+        val differentColourQuote = client.parseArchivedPrice(
+            html = html(blackTitle, blackUrl),
+            expectedTitle = selectedYellow,
+            originalUrl = blackUrl,
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/$blackUrl",
+            observedAt = timestamp
         )
+        assertNotNull("A matching model/capacity price must be usable across colours", differentColourQuote)
+        assertEquals(624.0, differentColourQuote!!.price, 0.001)
     }
 
     @Test
@@ -4259,7 +4258,7 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun rejectsXiaomiMi10ProCaptureWithExplicitlyDifferentColour() {
+    fun acceptsXiaomiMi10ProCaptureWithDifferentColour() {
         val client = newClient()
         val quote = client.parseArchivedPrice(
             html = """
@@ -4275,7 +4274,8 @@ class WaybackPriceHistoryClientTest {
             observedAt = 1_735_732_800_000L
         )
 
-        assertNull("A grey product must not accept a capture explicitly labelled black", quote)
+        assertNotNull("A matching Xiaomi model can use its historical price in another colour", quote)
+        assertEquals(183.71, quote!!.price, 0.001)
     }
 
     @Test

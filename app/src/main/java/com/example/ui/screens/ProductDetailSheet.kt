@@ -424,10 +424,10 @@ internal fun buildWaybackDiagnosticExportReport(
     report.appendLine("INDICIOS CLASIFICADOS POR TIPO")
     val categories = listOf(
         "Red, proveedor o límite de consultas" to Regex(
-            """(?i)(HTTP\\s*429|WAYBACK_RATE_LIMITED|MEMENTO_RATE_LIMITED|TIMEOUT|TIMED_OUT|SOCKET|DNS|SSL|CONNECTION|STREAM_RESET|CDX_\\w+_TIMEOUT|NETWORK)"""
+            """(?i)(HTTP\s*429|WAYBACK_RATE_LIMITED|MEMENTO_RATE_LIMITED|TIMEOUT|TIMED_OUT|SOCKET|DNS|SSL|CONNECTION|STREAM_RESET|CDX_\w+_TIMEOUT|NETWORK)"""
         ),
         "Identidad del producto o URL" to Regex(
-            """(?i)(IDENTITY|PRODUCT_IDENTITY_MISMATCH|URL_\\w*(MISMATCH|HTTPS|CANONICAL)|TARGET_PRODUCT|ORIGINAL_URL_NOT_HTTPS|ARCHIVE_TARGET_URL_MISMATCH|QUOTE_ORIGINAL_URL_MISMATCH)"""
+            """(?i)(IDENTITY|PRODUCT_IDENTITY_MISMATCH|URL_\w*(MISMATCH|HTTPS|CANONICAL)|TARGET_PRODUCT|ORIGINAL_URL_NOT_HTTPS|ARCHIVE_TARGET_URL_MISMATCH|QUOTE_ORIGINAL_URL_MISMATCH)"""
         ),
         "Extracción, HTML o metadatos" to Regex(
             """(?i)(EXTRACTOR|EXTRACTION|HTML|METADATA|PARSER|DECODE|PRICE_NOT_FOUND|NO_PRICE|ARCHIVE_PRICE_METADATA_MISSING|PROFILE)"""
@@ -1164,7 +1164,7 @@ fun ProductDetailSheet(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                "22 fases generales más registros por captura: fecha, ruta, tienda, causa de red, decodificación y resultado del extractor. Sin consultas extra; URL completas, parámetros y HTML se ocultan en el informe copiable.",
+                                "30 fases generales más registros por captura: fecha, ruta, tienda, causa de red, decodificación y resultado del extractor. Sin consultas extra; URL completas, parámetros y HTML se ocultan en el informe copiable.",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1214,7 +1214,7 @@ fun ProductDetailSheet(
                                     WaybackTraceStatus.RUNNING -> "EN CURSO"
                                     WaybackTraceStatus.PASSED -> "SUPERADO"
                                     WaybackTraceStatus.FAILED -> "FALLÓ"
-                                    WaybackTraceStatus.SKIPPED -> "NO EJECUTADO"
+                                    WaybackTraceStatus.SKIPPED -> "NO EJECUTADO / OMITIDO"
                                 }
                                 val statusColor = when (entry.status) {
                                     WaybackTraceStatus.PASSED -> Color(0xFF047857)

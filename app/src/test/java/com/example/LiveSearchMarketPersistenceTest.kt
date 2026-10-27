@@ -397,7 +397,7 @@ class LiveSearchMarketPersistenceTest {
             AppDatabase::class.java
         ).allowMainThreadQueries().build()
         try {
-            val title = "Victoria Hyde New English Bandolera Mujer"
+            val title = "Apple iPhone 15 Plus 256GB"
             val repository = ProductRepository(
                 storeDao = database.storeDao(),
                 productDao = database.productDao(),
@@ -407,9 +407,9 @@ class LiveSearchMarketPersistenceTest {
             )
             val originalListing = SerpApiShoppingResult(
                 title = title,
-                price = 49.95,
+                price = 899.95,
                 storeName = "Google Shopping",
-                sourceUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=Victoria+Hyde",
+                sourceUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=Apple+iPhone+15+Plus+256GB",
                 observedAt = System.currentTimeMillis(),
                 condition = "new"
             )
@@ -417,14 +417,14 @@ class LiveSearchMarketPersistenceTest {
             val savedBeforeOverlay = repository.awaitProductForOnlineIdentity(onlineProductIdentityKey(title))
 
             val transientFicha = savedBeforeOverlay.withUnverifiedLiveSearchListing(
-                listedPrice = 39.95,
+                listedPrice = 849.95,
                 observedAt = System.currentTimeMillis(),
-                sourceUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=Victoria+Hyde",
+                sourceUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=Apple+iPhone+15+Plus+256GB",
                 sourceName = "Google Shopping",
                 sourceStore = Store.findByName("Google Shopping")
             )
 
-            assertEquals(39.95, transientFicha.currentPrice, 0.001)
+            assertEquals(849.95, transientFicha.currentPrice, 0.001)
             assertFalse(transientFicha.isPriceVerified)
             assertTrue(transientFicha.isUnverifiedLiveListing)
             assertEquals(
@@ -432,7 +432,7 @@ class LiveSearchMarketPersistenceTest {
                 transientFicha.priceDisplayStatus
             )
             val savedAfterOverlay = repository.awaitProductForOnlineIdentity(onlineProductIdentityKey(title))
-            assertEquals("Showing a new search price must not write it over the Room row", 49.95, savedAfterOverlay.currentPrice, 0.001)
+            assertEquals("Showing a new search price must not write it over the Room row", 899.95, savedAfterOverlay.currentPrice, 0.001)
             assertFalse(savedAfterOverlay.isPriceVerified)
         } finally {
             database.close()

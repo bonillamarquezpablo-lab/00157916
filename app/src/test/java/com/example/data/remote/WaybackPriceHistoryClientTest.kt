@@ -3493,16 +3493,18 @@ class WaybackPriceHistoryClientTest {
                 observedAt = 1_735_732_800_000L
             )
         )
-        assertNull(
-            "A generic colour heading requires the URL to prove the requested colour as well",
-            client.parseArchivedPrice(
-                html = html,
-                expectedTitle = "Apple iPhone 15 Plus 256GB Amarillo",
-                originalUrl = originalUrl,
-                snapshotUrl = snapshotUrl,
-                observedAt = 1_735_732_800_000L
-            )
+        val colourNeutralQuote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "Apple iPhone 15 Plus 256GB Amarillo",
+            originalUrl = originalUrl,
+            snapshotUrl = snapshotUrl,
+            observedAt = 1_735_732_800_000L
         )
+        assertNotNull(
+            "A same-model, same-capacity historical price must be usable even when colour is absent from the archived title and URL",
+            colourNeutralQuote
+        )
+        assertEquals(799.99, colourNeutralQuote!!.price, 0.001)
         assertNull(
             "A Plus page must never match the base iPhone 15",
             client.parseArchivedPrice(

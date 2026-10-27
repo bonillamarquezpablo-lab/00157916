@@ -1763,12 +1763,8 @@ class WaybackPriceHistoryClient(
         val candidateVariants = productModelVariantTokens(candidate)
         if (candidateVariants.any { it !in expectedVariants }) return true
 
-        val expectedColour = productColourFamily(expected)
-        val candidateColour = productColourFamily(candidate)
-        if (expectedColour != null && candidateColour != null && expectedColour != candidateColour) {
-            return true
-        }
-
+        // Colour is intentionally ignored for historical price matching; the model, edition
+        // and storage-capacity checks below remain strict.
         val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
         val expectedStorage = storagePattern.findAll(expected)
             .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
@@ -4885,18 +4881,11 @@ class WaybackPriceHistoryClient(
                 val savedStorage = knownStorage[productId].orEmpty()
                 val explicitStorageConflict = primaryStorage.isNotEmpty() &&
                     savedStorage.isNotEmpty() && primaryStorage != savedStorage
-                val savedColour = knownColours[productId]
-                // When the selected title omits colour, an archived concrete colour can
-                // still belong to a saved colour-specific sibling. Route it through that
-                // sibling's own Offer URL instead of treating the sibling as the generic primary.
-                val explicitColourConflict =
-                    (primaryColour == null && savedColour != null) ||
-                        (primaryColour != null && savedColour != null &&
-                            primaryColour != savedColour)
+                // Colour does not split historical identity when model and capacity match.
                 val explicitModelVariantConflict =
                     primaryModelVariants != knownModelVariants[productId].orEmpty()
                 val isPrimarySavedProduct = !explicitStorageConflict &&
-                    !explicitColourConflict && !explicitModelVariantConflict && (
+                    !explicitModelVariantConflict && (
                         isMatchingProductTitle(primaryExpectedTitle, savedTitle) ||
                             (isMatchingTitleForArchivedUrl(primaryExpectedTitle, savedTitle, originalUrl) &&
                                 !hasExplicitVariantConflictInProductUrl(primaryExpectedTitle, originalUrl))
@@ -5482,14 +5471,9 @@ class WaybackPriceHistoryClient(
         if (e.isBlank() || a.isBlank()) return false
         if (productConditionKey(e) != productConditionKey(a)) return false
 
-        // Colours are optional in some archived headings, but explicit conflicting colours
-        // must never be treated as the same SKU. Normalize common Spanish/English/Italian names.
-        val expectedColourFamily = productColourFamily(e)
-        val archivedColourFamily = productColourFamily(a)
-        // If the selected title specifies a colour, the archived offer must match it.
-        // If the selected title omits colour, a concrete retailer offer colour is acceptable:
-        // capacity, model/trim and condition are still checked strictly below.
-        if (expectedColourFamily != null && expectedColourFamily != archivedColourFamily) return false
+        // Colour is not a separate identity for historical pricing. A same-model, same-capacity
+        // offer remains useful regardless of colour; product condition, model/edition and storage
+        // remain strict below.
 
         // Trim/model suffixes (Pro, Ultra, Max, etc.) are meaningful for phones and scooters.
         // Require the same explicit trim markers on both titles to avoid cross-variant prices.
@@ -5511,11 +5495,8 @@ class WaybackPriceHistoryClient(
             val expectedVariants = requiredVariantTokens(canonicalizeArchiveTitle(e))
             val archivedVariants = requiredVariantTokens(canonicalizeArchiveTitle(a))
             if (!archivedVariants.containsAll(expectedVariants)) return false
-            val expectedColour = productColourFamily(e)
-            val archivedColour = productColourFamily(a)
-            if (expectedColour != null && archivedColour != null &&
-                expectedColour != archivedColour
-            ) return false
+            // Colour is ignored for archive identity; the Xiaomi model and variant qualifiers
+            // above still have to match.
             return true
         }
 
@@ -5585,9 +5566,8 @@ class WaybackPriceHistoryClient(
         if (productConditionKey(expected) != productConditionKey(archived)) return false
         if (productModelVariantTokens(expected) != productModelVariantTokens(archived)) return false
 
-        val expectedColour = productColourFamily(expected)
-        val archivedColour = productColourFamily(archived)
-        if (expectedColour != null && archivedColour != null && expectedColour != archivedColour) return false
+        // Colour is intentionally ignored for historical pricing. Model/edition and storage
+        // capacity below still prevent matching a different product configuration.
 
         val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
         val expectedStorage = storagePattern.findAll(expected)
@@ -5625,22 +5605,9 @@ class WaybackPriceHistoryClient(
             .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
         if (missingStorage && !urlStorage.containsAll(expectedStorage)) return false
 
-        val urlColour = productColourFamily(urlTitle)
-        val missingColour = expectedColour != null && archivedColour == null
-        // A saved title may omit colour while its retailer URL identifies the exact variant
-        // (for example, "...iphone-15-plus-256gb-amarillo-libre"). Let that URL confirm the
-        // colour, but reject any archived title that explicitly contradicts the URL.
-        if (expectedColour == null && (archivedColour != null || urlColour != null)) {
-            // The selected product has no colour: only accept a coloured offer when both the
-            // archived offer title and that offer's own URL explicitly agree. The archived
-            // page's primary URL may belong to a different merchant or sibling SKU.
-            if (archivedColour == null || urlColour == null || archivedColour != urlColour) return false
-        }
-        if (expectedColour != null && urlColour != null && urlColour != expectedColour) return false
         // An offer URL must not silently assign a capacity to a saved product whose
         // storage is unknown; keep those records separate until identity is explicit.
         if (expectedStorage.isEmpty() && urlStorage.isNotEmpty()) return false
-        if (missingColour && urlColour != expectedColour) return false
         fun coreIdentity(value: String): String =
             onlineProductIdentityKey(canonicalizeArchiveTitle(value)).split('|')
                 .filterNot {
@@ -5670,8 +5637,6 @@ class WaybackPriceHistoryClient(
             val urlVariants = productModelVariantTokens(urlTitle)
             if (!urlVariants.containsAll(expectedVariants)) return false
             if (expectedStorage.isNotEmpty() && !urlStorage.containsAll(expectedStorage)) return false
-            if (expectedColour != null && urlColour != expectedColour) return false
-
             // Exact product identity can validate a secondary offer even when the saved
             // title has no SKU fields. Any capacity, colour or model found in its URL was
             // checked above and cannot introduce a conflicting variant.
@@ -5696,13 +5661,6 @@ class WaybackPriceHistoryClient(
         // matching offer URL may confirm them. Reject only qualifiers the title explicitly
         // contradicts, or a specific colour/capacity attached to a product whose variant is unknown.
         if (productConditionKey(e) != productConditionKey(a)) return true
-        val expectedColour = productColourFamily(e)
-        val archivedColour = productColourFamily(a)
-        // A colour present only in the archived offer is not a contradiction when the
-        // selected product title leaves colour unspecified. If the selected title names a
-        // colour, a different archived colour remains a hard conflict.
-        if (expectedColour != null && archivedColour != null && expectedColour != archivedColour) return true
-
         val expectedModelVariants = productModelVariantTokens(e)
         val archivedModelVariants = productModelVariantTokens(a)
         if (archivedModelVariants.isNotEmpty() && expectedModelVariants != archivedModelVariants) return true

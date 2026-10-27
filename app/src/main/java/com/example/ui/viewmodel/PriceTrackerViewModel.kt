@@ -1470,26 +1470,95 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 val selectedOffers = current.onlineSearchResults.filter { offer ->
                     onlineProductIdentityKey(offer.title) == identityKey
                 }
+                val searchQuery = current.onlineSearchQuery.ifBlank {
+                    selectedOffers.firstOrNull()?.title.orEmpty()
+                }
+
                 if (selectedOffers.isNotEmpty()) {
-                    try {
-                        withContext(Dispatchers.IO) {
+                    withContext(Dispatchers.IO) {
+                        // A transient write error during search must not permanently lose the
+                        // seller prices. Retry the normal validated persistence path on tap;
+                        // its daily upsert makes this safe when the first write already worked.
+                        try {
+                            repository.recordOnlineSearchResults(
+                                results = selectedOffers,
+                                sourceType = current.onlineSearchProvider.name,
+                                searchQuery = searchQuery
+                            )
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            // Keep opening the result even if Room is temporarily unavailable.
+                        }
+
+                        try {
                             repository.ensureVisibleOnlineSearchProducts(
                                 results = selectedOffers,
-                                searchQuery = selectedOffers.first().title,
+                                searchQuery = searchQuery,
                                 allowAccessories = true
                             )
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            // A transient save failure must not prevent opening a ficha already
+                            // in Room. The resolution below remains the source of truth.
                         }
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (_: Exception) {
-                        // A transient save failure must not prevent opening a ficha that already
-                        // exists in Room. The resolution below remains the source of truth.
                     }
                 }
-                val product = withTimeout(10_000L) {
+
+                val savedProduct = withTimeout(10_000L) {
                     repository.awaitProductForOnlineIdentity(identityKey)
                 }
-                _uiState.value = _uiState.value.copy(selectedProduct = product)
+
+                // Search cards can contain a perfectly useful price even when the provider only
+                // returns a generic Shopping link. Do not overwrite a trusted Room row with that
+                // weaker evidence; show the just-found amount as a transient, clearly unverified
+                // listing in this detail sheet instead.
+                val displayableOffers = selectedOffers.filter { offer ->
+                    offer.price.isFinite() && offer.price in 0.5..10_000.0 &&
+                        !offer.isSuspiciousPrice &&
+                        !offer.isRentalOrMonthly &&
+                        !offer.isSecondHand &&
+                        !offer.isFitmentUnverified &&
+                        !offer.isCategoryUnverified
+                }
+                val directOffer = displayableOffers
+                    .filterNot { it.isSearchFallbackDestination || it.isGoogleShoppingProductLink }
+                    .minByOrNull { it.price / (it.wheelSetCount ?: 1) }
+                val displayOffer = directOffer ?: displayableOffers
+                    .minByOrNull { it.price / (it.wheelSetCount ?: 1) }
+
+                val detailProduct = if (displayOffer != null) {
+                    val listedPrice = displayOffer.price / (displayOffer.wheelSetCount ?: 1)
+                    val samePriceAlreadySaved = savedProduct.currentPrice.isFinite() &&
+                        kotlin.math.abs(savedProduct.currentPrice - listedPrice) < 0.005
+                    val isGenericShoppingDestination =
+                        displayOffer.isSearchFallbackDestination || displayOffer.isGoogleShoppingProductLink
+                    val shouldShowListing = when {
+                        savedProduct.isPriceFresh && savedProduct.isPriceVerified && samePriceAlreadySaved -> false
+                        isGenericShoppingDestination && savedProduct.isPriceFresh -> false
+                        else -> true
+                    }
+                    if (shouldShowListing) {
+                        val listedStore = Store.findKnownByName(
+                            displayOffer.storeName,
+                            displayOffer.sourceUrl
+                        ) ?: Store.findByName(displayOffer.storeName)
+                        savedProduct.withUnverifiedLiveSearchListing(
+                            listedPrice = listedPrice,
+                            observedAt = displayOffer.observedAt,
+                            sourceUrl = displayOffer.sourceUrl,
+                            sourceName = displayOffer.storeName,
+                            sourceStore = listedStore
+                        )
+                    } else {
+                        savedProduct
+                    }
+                } else {
+                    savedProduct
+                }
+
+                _uiState.value = _uiState.value.copy(selectedProduct = detailProduct)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {

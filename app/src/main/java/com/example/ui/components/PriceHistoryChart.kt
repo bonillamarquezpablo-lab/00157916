@@ -88,9 +88,45 @@ internal fun filterPricePointsForRange(
 
 private enum class HistoryEvidenceSeries(val label: String, val description: String) {
     LIVE("Mínimo", "Observaciones válidas registradas por Mínimo; base de mínimos y medias."),
-    WAYBACK("Wayback", "Capturas externas de Internet Archive; no son ofertas actuales."),
+    WAYBACK("Histórico", "Capturas históricas verificadas de Internet Archive y Arquivo.pt; no son ofertas actuales."),
+    COMBINED("Combinado", "Une observaciones de Mínimo y capturas históricas verificadas, conservando el origen de cada punto."),
     GOOGLE_INSIGHTS("Google histórico", "Datos históricos externos de Google Shopping; no son cotizaciones en vivo.")
 }
+
+/**
+ * Merge live Mínimo observations and verified archive captures into one chronological series.
+ * An exact same timestamp/price/store observation is shown once, preferring the live observation;
+ * different prices at the same timestamp are retained because they are different evidence.
+ */
+internal fun combineLiveAndArchiveHistory(
+    liveHistory: List<PricePoint>,
+    archiveHistory: List<PricePoint>
+): List<PricePoint> = sanitizeCombinedHistoryPoints(
+    liveHistory.filterNot { it.isExternalHistoryEvidence } +
+        archiveHistory.filter { it.isArchiveEvidence }
+)
+
+/**
+ * Combined timelines must preserve distinct prices from different evidence at the same instant.
+ * A simple timestamp-only distinct operation would hide valid evidence from one of the sources.
+ */
+internal fun sanitizeCombinedHistoryPoints(points: List<PricePoint>): List<PricePoint> =
+    points.asSequence()
+        .filter { it.timestamp > 0L && it.price.isFinite() && it.price > 0.0 }
+        // Prefer live Mínimo data when it exactly duplicates an archive quote.
+        .sortedWith(
+            compareBy<PricePoint> { if (it.isArchiveEvidence) 1 else 0 }
+                .thenBy { it.timestamp }
+                .thenBy { it.price }
+        )
+        .distinctBy {
+            "${it.timestamp}|${String.format(Locale.ROOT, "%.2f", it.price)}|${it.storeName.trim().lowercase(Locale.ROOT)}"
+        }
+        .sortedWith(
+            compareBy<PricePoint> { it.timestamp }
+                .thenBy { it.price }
+                .thenBy { if (it.isArchiveEvidence) 1 else 0 }
+        )
 
 /**
  * A monotone cubic Bezier path: smoother than straight segments, with tangent limiting so
@@ -157,11 +193,6 @@ fun PriceHistoryChart(
     var userSelectedSeries by remember { mutableStateOf(false) }
     var selectedPointIndex by remember { mutableIntStateOf(-1) }
 
-    val availableSeries = buildList {
-        add(HistoryEvidenceSeries.LIVE)
-        if (archiveHistory.isNotEmpty()) add(HistoryEvidenceSeries.WAYBACK)
-        if (googleInsightHistory.isNotEmpty()) add(HistoryEvidenceSeries.GOOGLE_INSIGHTS)
-    }
     val validLivePointsForDefault = remember(priceHistory) {
         priceHistory.filter { it.timestamp > 0L && it.price.isFinite() && it.price > 0.0 }
     }
@@ -170,6 +201,17 @@ fun PriceHistoryChart(
     }
     val validGooglePointsForDefault = remember(googleInsightHistory) {
         googleInsightHistory.filter { it.timestamp > 0L && it.price.isFinite() && it.price > 0.0 }
+    }
+    val combinedHistoryPoints = remember(priceHistory, archiveHistory) {
+        combineLiveAndArchiveHistory(priceHistory, archiveHistory)
+    }
+    val availableSeries = buildList {
+        add(HistoryEvidenceSeries.LIVE)
+        if (validArchivePointsForDefault.isNotEmpty()) add(HistoryEvidenceSeries.WAYBACK)
+        if (validLivePointsForDefault.isNotEmpty() && validArchivePointsForDefault.isNotEmpty()) {
+            add(HistoryEvidenceSeries.COMBINED)
+        }
+        if (validGooglePointsForDefault.isNotEmpty()) add(HistoryEvidenceSeries.GOOGLE_INSIGHTS)
     }
     val liveOldestForDefault = validLivePointsForDefault.minOfOrNull { it.timestamp }
     val archiveOldestForDefault = validArchivePointsForDefault.minOfOrNull { it.timestamp }
@@ -209,9 +251,16 @@ fun PriceHistoryChart(
     val selectedHistory = when (selectedSeries) {
         HistoryEvidenceSeries.LIVE -> priceHistory
         HistoryEvidenceSeries.WAYBACK -> archiveHistory
+        HistoryEvidenceSeries.COMBINED -> combinedHistoryPoints
         HistoryEvidenceSeries.GOOGLE_INSIGHTS -> googleInsightHistory
     }
-    val validHistory = remember(selectedHistory, selectedSeries) { sanitizePriceHistory(selectedHistory) }
+    val validHistory = remember(selectedHistory, selectedSeries) {
+        if (selectedSeries == HistoryEvidenceSeries.COMBINED) {
+            sanitizeCombinedHistoryPoints(selectedHistory)
+        } else {
+            sanitizePriceHistory(selectedHistory)
+        }
+    }
     val filteredPoints = remember(validHistory, selectedRange) {
         filterPricePointsForRange(validHistory, selectedRange)
     }
@@ -261,6 +310,7 @@ fun PriceHistoryChart(
     }
     // Follow the app's current theme accent (amber in Mínimo) instead of a fixed emerald line.
     val chartAccent = MaterialTheme.colorScheme.primary
+    val archiveAccent = MaterialTheme.colorScheme.tertiary
 
     Column(
         modifier = modifier
@@ -282,7 +332,8 @@ fun PriceHistoryChart(
                 Text(
                     text = when (selectedSeries) {
                         HistoryEvidenceSeries.LIVE -> "Evolución del precio observado"
-                        HistoryEvidenceSeries.WAYBACK -> "Histórico externo · Wayback"
+                        HistoryEvidenceSeries.WAYBACK -> "Histórico"
+                        HistoryEvidenceSeries.COMBINED -> "Histórico combinado"
                         HistoryEvidenceSeries.GOOGLE_INSIGHTS -> "Histórico externo · Google"
                     },
                     fontWeight = FontWeight.Bold,
@@ -337,10 +388,13 @@ fun PriceHistoryChart(
                             .padding(horizontal = 6.dp, vertical = 3.dp)
                     ) {
                         Text(
-                            text = if (selectedSeries == HistoryEvidenceSeries.LIVE) {
-                                "Media 90 d: ${valid90dAverage?.let { formatChartPrice(it) + " €" } ?: "—"}"
-                            } else {
-                                "Media histórica externa: ${externalHistoricalAverage?.let { formatChartPrice(it) + " €" } ?: "—"}"
+                            text = when (selectedSeries) {
+                                HistoryEvidenceSeries.LIVE ->
+                                    "Media 90 d: ${valid90dAverage?.let { formatChartPrice(it) + " €" } ?: "—"}"
+                                HistoryEvidenceSeries.COMBINED ->
+                                    "Media combinada: ${externalHistoricalAverage?.let { formatChartPrice(it) + " €" } ?: "—"}"
+                                HistoryEvidenceSeries.WAYBACK, HistoryEvidenceSeries.GOOGLE_INSIGHTS ->
+                                    "Media histórica externa: ${externalHistoricalAverage?.let { formatChartPrice(it) + " €" } ?: "—"}"
                             },
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
@@ -371,6 +425,36 @@ fun PriceHistoryChart(
                 }
             }
             Spacer(modifier = Modifier.height(10.dp))
+        }
+
+        if (selectedSeries == HistoryEvidenceSeries.COMBINED) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(chartAccent)
+                    )
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text("Mínimo", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(archiveAccent)
+                    )
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text("Histórico", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
         }
 
         // Time Range Filter Chips
@@ -624,12 +708,15 @@ fun PriceHistoryChart(
                     val isAth = historySummary.minimumObservedPoint?.let { pt.price <= it.price + 0.005 } == true
                     val isSelected = index == selectedPointIndex ||
                         (filteredPoints.size == 1 && selectedPointIndex < 0)
+                    val pointAccent = if (
+                        selectedSeries == HistoryEvidenceSeries.COMBINED && pt.isArchiveEvidence
+                    ) archiveAccent else chartAccent
 
                     when {
                         isSelected && isAth -> {
                             // Keep the green observed-minimum marker visible while selected.
                             drawCircle(
-                                color = chartAccent,
+                                color = pointAccent,
                                 radius = 7.dp.toPx(),
                                 center = coord
                             )
@@ -646,7 +733,7 @@ fun PriceHistoryChart(
                         }
                         isSelected -> {
                             drawCircle(
-                                color = chartAccent,
+                                color = pointAccent,
                                 radius = 7.dp.toPx(),
                                 center = coord
                             )
@@ -671,7 +758,7 @@ fun PriceHistoryChart(
                         }
                         else -> {
                             drawCircle(
-                                color = chartAccent,
+                                color = pointAccent,
                                 radius = 2.5.dp.toPx(),
                                 center = coord
                             )

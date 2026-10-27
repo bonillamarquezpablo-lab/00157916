@@ -2750,7 +2750,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             }
         }
         viewModelScope.launch {
-            var selectedProductHistoricalQuoteFound = false
+            // An extracted quote is not enough to suppress the live-price fallback: only a new
+            // durable point or a confirmed valid duplicate proves the archive result was usable.
+            var selectedProductHistoricalPointPersisted = false
             try {
                 var savedCount = 0
                 // Aggregate per-capture Room write failures outside the inner candidate loop;
@@ -2810,7 +2812,6 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 quote.isDiscoveryCandidate -> Unit
                                 quote.targetProductId.isNullOrBlank() || quote.targetProductId == targetProductId -> {
                                     foundPrimaryCount++
-                                    selectedProductHistoricalQuoteFound = true
                                     // Only the selected product's observations determine the
                                     // "capturas desde" date shown in its own history message.
                                     archiveDates.add(quote.observedAt)
@@ -2849,6 +2850,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 )
                                 savedCount += outcome.insertedPoints
                                 confirmedPrimaryDuplicateCount += outcome.confirmedExistingDuplicates
+                                if (outcome.insertedPoints > 0 || outcome.confirmedExistingDuplicates > 0) {
+                                    selectedProductHistoricalPointPersisted = true
+                                }
                                 invalidArchivedRowIds.addAll(outcome.invalidExistingRowIds)
                                 rejectedArchiveQuoteCount += outcome.rejectedQuotes
                                 outcome.rejectionReasons.forEach { (reason, count) ->
@@ -3799,7 +3803,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }
                 }
                 if (liveFallbackProduct != null &&
-                    shouldTriggerLivePriceFallback(foundPrimaryCount, savedCount)
+                    shouldTriggerLivePriceFallback(savedCount, confirmedPrimaryDuplicateCount)
                 ) {
                     val archiveFailureReason = when {
                         diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ->
@@ -3834,7 +3838,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 )
                 if (shouldTriggerLiveFallbackAfterArchiveException(
                         hasFallbackProduct = liveFallbackProduct != null,
-                        selectedProductHistoricalQuoteFound = selectedProductHistoricalQuoteFound
+                        selectedProductHistoricalPointPersisted = selectedProductHistoricalPointPersisted
                     )
                 ) {
                     runLivePriceFallbackAfterArchiveFailure(
@@ -4022,20 +4026,21 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 }
 
 /**
- * True only when the archive lookup did not find or save any verified point for the selected
- * product. Secondary variants must not suppress a current-price fallback for the selected item.
+ * Trigger a current-price search whenever the archive run did not persist a new point and did
+ * not confirm a valid existing point for the selected product. Extracted-but-rejected quotes do
+ * not count as a successful historical result.
  */
 internal fun shouldTriggerLivePriceFallback(
-    selectedProductHistoricalQuotesFound: Int,
-    selectedProductHistoricalQuotesSaved: Int
-): Boolean = selectedProductHistoricalQuotesFound <= 0 &&
-    selectedProductHistoricalQuotesSaved <= 0
+    selectedProductHistoricalQuotesSaved: Int,
+    selectedProductHistoricalDuplicatesConfirmed: Int
+): Boolean = selectedProductHistoricalQuotesSaved <= 0 &&
+    selectedProductHistoricalDuplicatesConfirmed <= 0
 
 /** A terminal archive exception must not bypass the current-price fallback. */
 internal fun shouldTriggerLiveFallbackAfterArchiveException(
     hasFallbackProduct: Boolean,
-    selectedProductHistoricalQuoteFound: Boolean
-): Boolean = hasFallbackProduct && !selectedProductHistoricalQuoteFound
+    selectedProductHistoricalPointPersisted: Boolean
+): Boolean = hasFallbackProduct && !selectedProductHistoricalPointPersisted
 
 internal const val ARCHIVE_LIVE_FALLBACK_RETRY_COOLDOWN_MS = 15L * 60L * 1000L
 internal const val ARCHIVE_LIVE_FALLBACK_SUCCESS_COOLDOWN_MS = 24L * 60L * 60L * 1000L

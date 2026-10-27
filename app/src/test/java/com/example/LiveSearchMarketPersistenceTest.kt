@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -321,8 +322,10 @@ class LiveSearchMarketPersistenceTest {
             assertEquals(1, savedHistory.size)
             assertEquals(749.99, savedHistory.single().price, 0.001)
 
-            val displayed = repository.allProductsStream.first { rows ->
-                rows.any { it.id == before.id && it.currentPrice == 749.99 }
+            val displayed = withTimeout(10_000L) {
+                repository.allProductsStream.first { rows ->
+                    rows.any { it.id == before.id && it.currentPrice == 749.99 }
+                }
             }.single { it.id == before.id }
             assertEquals(749.99, displayed.currentPrice, 0.001)
             assertEquals("The ficha must expose the refreshed price immediately", 749.99,

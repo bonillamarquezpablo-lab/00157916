@@ -333,8 +333,8 @@ class ProductRepositoryArchiveIsolationTest {
                     .count { it.sourceUrl == validSnapshotUrl }
             )
 
-            // A different, lower-priced capture on the same local date must not replace
-            // the saved archive point. The backfill's contract is append-only by store/day.
+            // Keep one point per product/store/day, but improve it when another validated
+            // capture on that day proves a lower price for the same model/capacity.
             val sameDayLater = mismatchedCaptureTime + 60_000L
             val sameDayTimestamp = java.text.SimpleDateFormat(
                 "yyyyMMddHHmmss", java.util.Locale.ROOT
@@ -347,8 +347,8 @@ class ProductRepositoryArchiveIsolationTest {
                 snapshotUrl = "https://web.archive.org/web/${sameDayTimestamp}id_/https://shop.example/product/anker-prime"
             )
             assertEquals(
-                "a verified daily history point is immutable to repeated lower-priced captures",
-                0,
+                "a lower verified capture on the same day must improve the single daily point",
+                1,
                 repository.recordArchivedPriceHistory(
                     expectedTitle = title,
                     originalUrl = "https://shop.example/product/anker-prime",
@@ -362,7 +362,12 @@ class ProductRepositoryArchiveIsolationTest {
                         kotlin.math.abs(it.observedAt - mismatchedCaptureTime) < 12L * 60L * 60L * 1000L
                 }
             assertEquals("same-day imports must not create or replace the existing point", 1, savedSameDayRows.size)
-            assertEquals(19.99, savedSameDayRows.single().price, 0.0)
+            assertEquals(15.99, savedSameDayRows.single().price, 0.0)
+            assertEquals(
+                "The cheaper archived capture becomes the retained daily evidence",
+                sameDayLowerQuote.snapshotUrl,
+                savedSameDayRows.single().sourceUrl
+            )
 
             val sevenYearsAgo = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT)
                 .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }

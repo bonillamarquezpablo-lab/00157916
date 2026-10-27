@@ -204,7 +204,7 @@ class FreeArchiveHistoryPersistenceTest {
             // Legacy row is labelled archive and verified, but its source URL is the live
             // retailer page, not an archived snapshot. It is filtered from the chart and must
             // not count as an existing valid archive point.
-            database.priceObservationDao().insert(
+            val malformedArchiveId = database.priceObservationDao().insert(
                 PriceObservationEntity(
                     productId = productId,
                     storeId = "pccomponentes",
@@ -222,6 +222,11 @@ class FreeArchiveHistoryPersistenceTest {
                     evidenceType = "archive",
                     sourcePageUrl = originalUrl
                 )
+            )
+            assertFalse(
+                "The DAO verified-history query must not expose an archive-labelled row whose URL is a live retailer page",
+                database.priceObservationDao().observeVerifiedHistory(productId).first()
+                    .any { it.id == malformedArchiveId }
             )
 
             val repository = ProductRepository(

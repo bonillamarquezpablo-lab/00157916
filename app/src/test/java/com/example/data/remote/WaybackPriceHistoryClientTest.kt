@@ -45,13 +45,35 @@ class WaybackPriceHistoryClientTest {
             hasEnoughVerifiedArchiveDates(listOf(10L * day, 10L * day, 11L * day))
         )
         assertTrue(
-            "Three distinct UTC dates are enough to stop inferred backup destinations",
+            "Three distinct local dates are enough to stop inferred backup destinations",
             hasEnoughVerifiedArchiveDates(listOf(10L * day, 11L * day, 12L * day))
         )
         assertFalse(
             "An invalid zero-date threshold should not declare a complete history",
             hasEnoughVerifiedArchiveDates(listOf(10L * day, 11L * day, 12L * day), minimumDistinctDates = 0)
         )
+    }
+
+    @Test
+    fun capturesOnOneMadridDateAcrossUtcMidnightCountAsOneHistoricalDate() {
+        val previousZone = TimeZone.getDefault()
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Europe/Madrid"))
+            val format = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.ROOT).apply {
+                timeZone = TimeZone.getTimeZone("Europe/Madrid")
+                isLenient = false
+            }
+            val earlierLocalDate = format.parse("2026-10-23 23:30")!!.time
+            val earlyCapture = format.parse("2026-10-25 00:30")!!.time
+            val lateCapture = format.parse("2026-10-25 23:30")!!.time
+
+            assertFalse(
+                "Two local dates must not satisfy a three-date threshold just because UTC midnight was crossed",
+                hasEnoughVerifiedArchiveDates(listOf(earlierLocalDate, earlyCapture, lateCapture))
+            )
+        } finally {
+            TimeZone.setDefault(previousZone)
+        }
     }
 
     @Test

@@ -37,7 +37,8 @@ interface PriceObservationDao {
             "WHERE productId = :productId AND isVerified = 1 " +
             "AND upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 " +
             "AND trim(productTitle) <> '' AND observedAt > 0 " +
-            "AND (NOT (lower(evidenceType) = 'archive' OR lower(sourceUrl) LIKE 'https://web.archive.org/web/%' OR lower(sourceUrl) LIKE 'http://web.archive.org/web/%') OR (upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 AND trim(productTitle) <> '')) " +
+            "AND (NOT (lower(trim(evidenceType)) = 'archive' OR lower(trim(sourceUrl)) LIKE 'https://web.archive.org/web/%' OR lower(trim(sourceUrl)) LIKE 'http://web.archive.org/web/%' OR lower(trim(sourceUrl)) LIKE 'https://arquivo.pt/wayback/%' OR lower(trim(sourceUrl)) LIKE 'http://arquivo.pt/wayback/%' OR lower(trim(sourceUrl)) LIKE 'https://archive.org/%' OR lower(trim(sourceUrl)) LIKE 'http://archive.org/%') OR " +
+                "(lower(trim(sourceUrl)) GLOB 'https://web.archive.org/web/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]id_/https://*' OR lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]/https://*' OR lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]id_/https://*')) " +
             "ORDER BY observedAt DESC"
     )
     fun observeVerifiedHistory(productId: String): Flow<List<PriceObservationEntity>>
@@ -60,7 +61,7 @@ interface PriceObservationDao {
         nowMillis: Long = System.currentTimeMillis()
     ): PriceObservationEntity?
 
-    @Query("SELECT * FROM price_observations WHERE isVerified = 1 AND (NOT (lower(evidenceType) = 'archive' OR lower(sourceUrl) LIKE 'https://web.archive.org/web/%' OR lower(sourceUrl) LIKE 'http://web.archive.org/web/%') OR (upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 AND trim(productTitle) <> '')) ORDER BY observedAt ASC")
+    @Query("SELECT * FROM price_observations WHERE isVerified = 1 AND (NOT (lower(trim(evidenceType)) = 'archive' OR lower(trim(sourceUrl)) LIKE 'https://web.archive.org/web/%' OR lower(trim(sourceUrl)) LIKE 'http://web.archive.org/web/%' OR lower(trim(sourceUrl)) LIKE 'https://arquivo.pt/wayback/%' OR lower(trim(sourceUrl)) LIKE 'http://arquivo.pt/wayback/%' OR lower(trim(sourceUrl)) LIKE 'https://archive.org/%' OR lower(trim(sourceUrl)) LIKE 'http://archive.org/%') OR (lower(trim(sourceUrl)) GLOB 'https://web.archive.org/web/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]id_/https://*' OR lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]/https://*' OR lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]id_/https://*')) ORDER BY observedAt ASC")
     fun observeAllVerified(): Flow<List<PriceObservationEntity>>
 
     /** Verified live sources recorded for one product; used to safely associate other merchant URLs. */

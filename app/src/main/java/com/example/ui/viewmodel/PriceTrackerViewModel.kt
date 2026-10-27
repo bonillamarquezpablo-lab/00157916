@@ -169,7 +169,17 @@ internal fun hasEnoughVerifiedArchiveDates(
 ): Boolean {
     if (minimumDistinctDates <= 0) return false
     return timestamps.asSequence()
-        .map { Math.floorDiv(it, WaybackPriceHistoryClient.DAY_MS) }
+        // Persistence groups captures by the device's local calendar day, not UTC day numbers.
+        // Keep the early-exit threshold aligned or captures straddling UTC midnight can count twice.
+        .map { timestamp ->
+            java.util.Calendar.getInstance().apply {
+                timeInMillis = timestamp
+                set(java.util.Calendar.HOUR_OF_DAY, 0)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }.timeInMillis
+        }
         .distinct()
         .take(minimumDistinctDates)
         .count() >= minimumDistinctDates

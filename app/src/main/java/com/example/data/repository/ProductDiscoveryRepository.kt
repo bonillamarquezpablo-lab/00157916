@@ -539,8 +539,22 @@ class ProductDiscoveryRepository(private val database: AppDatabase) {
         return calendar.timeInMillis
     }
 
-    private fun localDayBounds(timestamp: Long): Pair<Long, Long> =
-        localDayStart(timestamp) to (localDayStart(timestamp) + 24L * 60L * 60L * 1000L)
+    private fun localDayBounds(timestamp: Long): Pair<Long, Long> {
+        // Advance by one calendar day, not a fixed 24 hours: local days can be 23 or 25 hours
+        // across daylight-saving transitions. This must match ProductRepository's deduplication.
+        val start = java.util.Calendar.getInstance().apply {
+            timeInMillis = timestamp
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val dayStart = start.timeInMillis
+        val dayEnd = (start.clone() as java.util.Calendar).apply {
+            add(java.util.Calendar.DAY_OF_MONTH, 1)
+        }.timeInMillis
+        return dayStart to dayEnd
+    }
 
     companion object {
         private const val MIN_DISCOVERY_PRICE = 0.50

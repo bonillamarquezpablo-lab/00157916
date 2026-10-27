@@ -6017,4 +6017,50 @@ class WaybackPriceHistoryClientTest {
         )
     }
 
+
+    @Test
+    fun exactYellowVariantPageDoesNotBorrowCheaperSiblingColourOffer() {
+        val client = newClient()
+        val targetUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo-libre"
+        val snapshotUrl =
+            "https://web.archive.org/web/20250101120000id_/$targetUrl"
+        val html = """
+            <html><head>
+              <title>Apple iPhone 15 Plus 256GB Amarillo Libre</title>
+              <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@graph":[
+                  {"@type":"Product","name":"Apple iPhone 15 Plus 256GB Amarillo Libre",
+                   "url":"$targetUrl",
+                   "offers":{"@type":"Offer","url":"$targetUrl","price":"899.00","priceCurrency":"EUR"}},
+                  {"@type":"Product","name":"Apple iPhone 15 Plus 256GB Azul Libre",
+                   "url":"https://www.pccomponentes.com/apple-iphone-15-plus-256gb-azul-libre",
+                   "offers":{"@type":"Offer","url":"https://www.pccomponentes.com/apple-iphone-15-plus-256gb-azul-libre","price":"249.00","priceCurrency":"EUR"}},
+                  {"@type":"Product","name":"Apple iPhone 15 Plus 256GB Negro Libre",
+                   "url":"https://www.pccomponentes.com/apple-iphone-15-plus-256gb-negro-libre",
+                   "offers":{"@type":"Offer","url":"https://www.pccomponentes.com/apple-iphone-15-plus-256gb-negro-libre","price":"299.00","priceCurrency":"EUR"}},
+                  {"@type":"Product","name":"Apple iPhone 15 Plus 256GB Verde Libre",
+                   "url":"https://www.pccomponentes.com/apple-iphone-15-plus-256gb-verde-libre",
+                   "offers":{"@type":"Offer","url":"https://www.pccomponentes.com/apple-iphone-15-plus-256gb-verde-libre","price":"320.00","priceCurrency":"EUR"}}
+                ]
+              }
+              </script>
+            </head><body></body></html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = "Apple iPhone 15 Plus 256GB",
+            originalUrl = targetUrl,
+            snapshotUrl = snapshotUrl,
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("The requested yellow 256GB SKU must remain recoverable", quote)
+        assertEquals("A cheaper blue sibling must not replace the target SKU price", 899.00, quote!!.price, 0.001)
+        assertTrue(quote.productTitle.contains("Amarillo", ignoreCase = true))
+        assertTrue("The colour omitted from the saved title must be confirmed by its exact URL", quote.variantIdentityConfirmedByUrl)
+    }
+
 }

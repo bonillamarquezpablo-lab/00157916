@@ -1210,7 +1210,26 @@ class ProductRepository(
                         }
                 }.singleOrNull()
             }
-            httpEraUrlOwner?.storeUrl ?: return rejectAllQuotes("ORIGINAL_URL_NOT_HTTPS")
+            // The ownership check above proves that this HTTP-era URL belongs to the selected
+            // product, either through its saved URL or a trusted verified live observation.
+            // Preserve the historical path when upgrading its scheme: substituting the product's
+            // current storeUrl can silently change the target and make the matching archive capture
+            // look unrelated after the ownership check has already succeeded.
+            if (httpEraUrlOwner == null) return rejectAllQuotes("ORIGINAL_URL_NOT_HTTPS")
+            val archivedHost = suppliedUri.host ?: return rejectAllQuotes("INVALID_ORIGINAL_URL")
+            val archivedHostPart = if (archivedHost.contains(':')) "[$archivedHost]" else archivedHost
+            val archivedPortPart = when {
+                suppliedUri.port == -1 -> ""
+                suppliedScheme == "http" && suppliedUri.port == 80 -> ""
+                suppliedScheme == "https" && suppliedUri.port == 443 -> ""
+                else -> ":\${suppliedUri.port}"
+            }
+            buildString {
+                append("https://").append(archivedHostPart).append(archivedPortPart)
+                append(suppliedUri.rawPath?.ifBlank { "/" } ?: "/")
+                suppliedUri.rawQuery?.let { append('?').append(it) }
+                suppliedUri.rawFragment?.let { append('#').append(it) }
+            }
         }
         val originalUri = parseHttpUri(canonicalOriginalUrl)
             ?: return rejectAllQuotes("INVALID_ORIGINAL_URL")

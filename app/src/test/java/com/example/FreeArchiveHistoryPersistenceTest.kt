@@ -230,6 +230,11 @@ class FreeArchiveHistoryPersistenceTest {
                 database.priceObservationDao().observeVerifiedHistory(productId).first()
                     .any { it.id == malformedArchiveId }
             )
+            assertFalse(
+                "The generic verified-history query must also exclude malformed archive-labelled live URLs",
+                database.priceObservationDao().observeAllVerified().first()
+                    .any { it.id == malformedArchiveId }
+            )
 
             val repository = ProductRepository(
                 storeDao = database.storeDao(),
@@ -273,6 +278,32 @@ class FreeArchiveHistoryPersistenceTest {
                 1,
                 database.priceObservationDao().observeVerifiedHistory(productId).first()
                     .count { it.sourceUrl == snapshotUrl }
+            )
+            val arquivoSnapshotUrl =
+                "https://arquivo.pt/wayback/${rawTimestamp}mp_/https://www.pccomponentes.com/anker-prime-27k"
+            val arquivoObservationId = database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = productId,
+                    storeId = "pccomponentes",
+                    price = 98.99,
+                    currency = "EUR",
+                    observedAt = archivedAt - 86_400_000L,
+                    sourceUrl = arquivoSnapshotUrl,
+                    sourceName = "Arquivo.pt",
+                    isVerified = true,
+                    productTitle = title,
+                    storeName = "PcComponentes",
+                    sourceType = "Arquivo.pt",
+                    linkType = "Archivo histórico",
+                    collectedAt = System.currentTimeMillis(),
+                    evidenceType = "archive",
+                    sourcePageUrl = originalUrl
+                )
+            )
+            assertTrue(
+                "The generic verified-history query must include valid Arquivo.pt mp_ snapshots",
+                database.priceObservationDao().observeAllVerified().first()
+                    .any { it.id == arquivoObservationId }
             )
             val restored = withTimeout(10_000L) {
                 repository.allProductsStream.first { rows ->

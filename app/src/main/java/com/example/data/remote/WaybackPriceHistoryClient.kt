@@ -5438,25 +5438,16 @@ class WaybackPriceHistoryClient(
 
         val capacity = Regex("""\b(128|256|512)\s*gb\b""")
             .find(expected)?.groupValues?.get(1) ?: return false
-        val colourSlug = when (productColourFamily(expected)) {
-            "black" -> "negro"
-            "blue" -> "azul"
-            "green" -> "verde"
-            "yellow" -> "amarillo"
-            "pink" -> "rosa"
-            else -> return false
-        }
         val display = if ("plus" in expectedVariants) "6,7" else "6,1"
-        val expectedPath = "/es/shop/buy-iphone/iphone-15/pantalla-de-$display″-${capacity}gb-$colourSlug"
-        if (!uri.path.orEmpty().lowercase(Locale.ROOT).contains(expectedPath)) return false
+        // The selected colour is not required to match: this route is used to confirm model
+        // edition and capacity, while prices from other colours remain useful historically.
+        val expectedPathPrefix = "/es/shop/buy-iphone/iphone-15/pantalla-de-$display″-${capacity}gb-"
+        if (!uri.path.orEmpty().lowercase(Locale.ROOT).contains(expectedPathPrefix)) return false
 
-        // Missing variant labels on Apple's page title are acceptable because the exact route
-        // has been verified. An explicit mismatch is not.
+        // Missing variant labels on Apple's page title are acceptable because the model,
+        // display and capacity encoded in the exact route have been verified.
         val archivedVariants = productModelVariantTokens(archived)
         if (archivedVariants.any { it !in expectedVariants }) return false
-        val archivedColour = productColourFamily(archived)
-        val expectedColour = productColourFamily(expected)
-        if (archivedColour != null && archivedColour != expectedColour) return false
 
         val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
         val archivedStorage = storagePattern.findAll(archived)
@@ -5526,8 +5517,11 @@ class WaybackPriceHistoryClient(
 
         val canonicalExpected = canonicalizeArchiveTitle(e)
         val canonicalArchived = canonicalizeArchiveTitle(a)
-        val sameIdentity =
-            onlineProductIdentityKey(canonicalExpected) == onlineProductIdentityKey(canonicalArchived)
+        fun archiveIdentity(value: String): String =
+            onlineProductIdentityKey(value).split('|')
+                .filterNot { it.startsWith("color:") }
+                .joinToString("|")
+        val sameIdentity = archiveIdentity(canonicalExpected) == archiveIdentity(canonicalArchived)
 
         // Card identity intentionally ignores storage for deduplication. Require exact capacity
         // tokens even when the broad model identity matches; retain existing equivalence rules for
@@ -5617,7 +5611,7 @@ class WaybackPriceHistoryClient(
                 }
                 .joinToString("|")
 
-        if (!missingStorage && !missingColour) {
+        if (!missingStorage) {
             // When the archived page URL points at the primary SKU, a sibling offer needs its
             // own URL to independently prove its model, capacity, colour and edition.
             val expectedModel = Regex(
@@ -5658,8 +5652,8 @@ class WaybackPriceHistoryClient(
         if (!sharedIdentifier && !sameBroadIdentity) return false
 
         // Missing qualifiers in a structured title are unknown, not a proven conflict: the
-        // matching offer URL may confirm them. Reject only qualifiers the title explicitly
-        // contradicts, or a specific colour/capacity attached to a product whose variant is unknown.
+        // matching offer URL may confirm them. Colour is deliberately ignored for historical
+        // matching; model edition and explicit capacity conflicts still reject the quote.
         if (productConditionKey(e) != productConditionKey(a)) return true
         val expectedModelVariants = productModelVariantTokens(e)
         val archivedModelVariants = productModelVariantTokens(a)

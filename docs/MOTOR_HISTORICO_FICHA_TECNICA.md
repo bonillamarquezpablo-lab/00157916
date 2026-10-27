@@ -198,9 +198,18 @@ Producto de prueba: Apple iPhone 15 Plus 256GB. Informe generado a las 04:12:03 
 - [Prueba URL con `srsltid`](https://github.com/bonillamarquezpablo-lab/00157916/commit/1294ce80a82286e34f499c7af3450ea632537c9d).
 - [Ajustar la prueba para esperar ambos puntos archivados válidos](https://github.com/bonillamarquezpablo-lab/00157916/commit/8ad0e11e7dabc3bc850e48eb89339011016e9878).
 
-**Incidencia de pruebas:** la ejecución 897 falló en la prueba `invalidLegacyArchiveRowDoesNotBlockValidatedCaptureForSameDay` con `expected 1 but was 2`. El soporte nuevo de `mp_` hace visibles tanto la captura Wayback como la captura Arquivo.pt válida; por ello la aserción antigua de una sola observación era incorrecta. Se actualizó para exigir ambos puntos y verificar sus dos precios. Esa ejecución fallida no produjo una APK nueva.
+**Incidencia de pruebas:** la ejecución 897 falló en `invalidLegacyArchiveRowDoesNotBlockValidatedCaptureForSameDay` con `expected 1 but was 2`. El soporte nuevo de `mp_` hace visibles tanto la captura Wayback como la captura Arquivo.pt válida; la aserción antigua de una sola observación era incorrecta. Se actualizó para exigir ambos puntos y verificar sus precios. Esa ejecución fallida no produjo una APK.
 
-**Verificación pendiente:** run 898 de GitHub Actions está probando el conjunto actualizado en [esta ejecución](https://github.com/bonillamarquezpablo-lab/00157916/actions/runs/40444277910). No se debe marcar el nuevo conjunto como aprobado ni asociarle una APK hasta que terminen unit tests, compilación instrumentada, build sideload, firma y comprobación de Chucker.
+**Resultado automatizado final:** [run 898 de GitHub Actions](https://github.com/bonillamarquezpablo-lab/00157916/actions/runs/40444277910) terminó correctamente sobre el SHA de código/pruebas `8ad0e11e7dabc3bc850e48eb89339011016e9878`.
+
+- `:app:testDebugUnitTest`: **PASS**.
+- `:app:compileDebugAndroidTestKotlin`: **PASS**.
+- `:app:assembleSideload`: **BUILD SUCCESSFUL**.
+- Paquete `com.aistudio.preciominimo.esrxvt`; versión `1.7.898.1`; `versionCode 99801`.
+- APK no depurable; huella SHA-256 del certificado estable verificada: `f631a8c0a194008e77a312a78775e95837dbc66df635eae9b966e5c294add450`.
+- Chucker comprobado en cinco DEX.
+- SHA-256 de APK: `801ef23cf954c20a5b8ecad2b0439a5d4ae1d94eb54e3aaaa0f5402164e0949e`.
+- Artefacto `minimo-apk` (id `12708365153`, ZIP SHA-256 `7db797fa323a1c546775fc67caaa4237ed070f22a0b40ca84149a8ad4b7f0449`): [descargar el APK desde el run 898](https://github.com/bonillamarquezpablo-lab/00157916/actions/runs/40444277910/artifacts/12708365153). Caduca el 3 de noviembre de 2026.
 
 ### Qué no está demostrado todavía
 

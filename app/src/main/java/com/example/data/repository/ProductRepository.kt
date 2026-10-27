@@ -601,16 +601,17 @@ class ProductRepository(
         if (!uri.scheme.equals("https", ignoreCase = true)) return null
         val host = uri.host?.lowercase(Locale.ROOT) ?: return null
         val match = when (host) {
-            "web.archive.org" -> Regex("""^https://web\.archive\.org/web/(\d{14})id_/(https://.+)$""")
+            "web.archive.org" -> Regex("""^https://web\.archive\.org/web/(\d{14})id_/(https?://.+)$""")
                 .find(snapshotUrl)
-            "arquivo.pt" -> Regex("""^https://arquivo\.pt/wayback/(\d{14})(?:id_)?/(https://.+)$""")
+            "arquivo.pt" -> Regex("""^https://arquivo\.pt/wayback/(\d{14})(?:id_)?/(https?://.+)$""")
                 .find(snapshotUrl)
             else -> null
         } ?: return null
         val rawTimestamp = match.groupValues[1]
         val targetUrl = match.groupValues[2]
         val target = parseHttpUri(targetUrl) ?: return null
-        if (!target.scheme.equals("https", ignoreCase = true) ||
+        if (!(target.scheme.equals("https", ignoreCase = true) || target.scheme.equals("http", ignoreCase = true)) ||
+            target.host.isNullOrBlank() || target.rawUserInfo != null ||
             target.host.equals("web.archive.org", ignoreCase = true) ||
             target.host.equals("arquivo.pt", ignoreCase = true) ||
             target.host.equals("archive.org", ignoreCase = true)
@@ -1188,7 +1189,7 @@ class ProductRepository(
 
         for (quote in quotes.distinctBy { it.observedAt to it.price }) {
             val snapshotIdentity = parseArchivedSnapshotIdentity(quote.snapshotUrl) ?: continue
-            if (normalizedProductPageKey(snapshotIdentity.targetUrl) != originalUrlKey) continue
+            if (normalizedArchivedTargetPageKey(snapshotIdentity.targetUrl) != originalUrlKey) continue
             if (kotlin.math.abs(snapshotIdentity.timestampMillis - quote.observedAt) > 1_000L) continue
             if (!quote.originalUrl.trimEnd('/').equals(originalUrl.trimEnd('/'), ignoreCase = true)) continue
             if (!isEuroCurrency(quote.currency) ||
@@ -2282,6 +2283,30 @@ class ProductRepository(
         }
     }
 
+    /**
+     * Old archive captures can embed an HTTP retailer URL even though the current product URL
+     * is HTTPS. Canonicalize only for identity comparison; keep the original snapshot URL intact.
+     */
+    private fun normalizedArchivedTargetPageKey(value: String): String? {
+        val uri = parseHttpUri(value) ?: return null
+        val scheme = uri.scheme?.lowercase(Locale.ROOT) ?: return null
+        val host = uri.host?.takeIf { it.isNotBlank() } ?: return null
+        if ((scheme != "http" && scheme != "https") || uri.rawUserInfo != null) return null
+        val hostPart = if (host.contains(':')) "[$host]" else host
+        val portPart = when {
+            uri.port == -1 -> ""
+            scheme == "http" && uri.port == 80 -> ""
+            scheme == "https" && uri.port == 443 -> ""
+            else -> ":${uri.port}"
+        }
+        val canonicalHttpsUrl = buildString {
+            append("https://").append(hostPart).append(portPart)
+            append(uri.rawPath.orEmpty())
+            uri.rawQuery?.let { append('?').append(it) }
+            uri.rawFragment?.let { append('#').append(it) }
+        }
+        return normalizedProductPageKey(canonicalHttpsUrl)
+    }
     private fun normalizedProductPageKey(value: String): String? {
         val uri = parseHttpUri(value) ?: return null
         if (!uri.scheme.equals("https", ignoreCase = true) || uri.host.isNullOrBlank()) return null

@@ -179,7 +179,9 @@ class FreeArchiveHistoryPersistenceTest {
             Date(System.currentTimeMillis() - 60L * 24L * 60L * 60L * 1000L)
         )
         val archivedAt = timestampFormat.parse(rawTimestamp)!!.time
-        val snapshotUrl = "https://web.archive.org/web/${rawTimestamp}id_/${originalUrl}"
+        // CDX contains a valid older capture whose embedded original URL is HTTP.
+        // The wrapper stays HTTPS, and product identity is compared to the current HTTPS URL.
+        val snapshotUrl = "https://web.archive.org/web/${rawTimestamp}id_/http://www.pccomponentes.com/anker-prime-27k"
 
         try {
             database.productDao().insert(
@@ -254,6 +256,12 @@ class FreeArchiveHistoryPersistenceTest {
                     storeName = "PcComponentes",
                     quotes = listOf(quote)
                 )
+            )
+            assertEquals(
+                "A valid archived snapshot with an HTTP original URL must remain visible in DAO history",
+                1,
+                database.priceObservationDao().observeVerifiedHistory(productId).first()
+                    .count { it.sourceUrl == snapshotUrl }
             )
             val restored = withTimeout(10_000L) {
                 repository.allProductsStream.first { rows ->

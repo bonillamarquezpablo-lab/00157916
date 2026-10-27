@@ -4859,19 +4859,24 @@ class WaybackPriceHistoryClient(
 
             // Resolve the URL once for this exact structured offer. Never use the page URL as a
             // substitute for a related product's own URL; it could be a different SKU.
-            val offerUrls = jsonLdProductUrlsForOffer(
+            val allOfferUrls = jsonLdProductUrlsForOffer(
                 document = document,
                 productTitle = archivedTitle,
                 expectedPrice = price,
                 expectedCurrency = currency,
                 pageUrl = originalUrl,
                 jsonLdRoots = jsonLdRoots
-            ).filter { offerUrl ->
-                // Keep the archived price tied to the retailer that supplied the captured page.
-                // A third-party URL must not confirm a SKU and then be stored as if its price
-                // came from the original merchant.
+            ).distinctBy { it.trimEnd('/').lowercase(Locale.ROOT) }
+            // Keep the archived price tied to the retailer that supplied the captured page.
+            // Retain the foreign-host signal before filtering: otherwise an explicit third-party
+            // Offer.url could disappear and a title-only fallback could accidentally attribute it
+            // to the archived merchant.
+            val hasForeignOfferUrl = allOfferUrls.any { offerUrl ->
+                !isSameMerchantHost(originalUrl, offerUrl)
+            }
+            val offerUrls = allOfferUrls.filter { offerUrl ->
                 isSameMerchantHost(originalUrl, offerUrl)
-            }.distinctBy { it.trimEnd('/').lowercase(Locale.ROOT) }
+            }
             val matches = knownProductTitlesById.entries.mapNotNull { (productId, savedTitle) ->
                 if (productId.isBlank() || savedTitle.isBlank()) return@mapNotNull null
                 // Exclude the selected product as a secondary only when its known SKU actually
@@ -4901,14 +4906,22 @@ class WaybackPriceHistoryClient(
                     !hasExplicitVariantConflictInProductUrl(savedTitle, offerUrl) &&
                         matchesVariantDetailsConfirmedByUrl(savedTitle, archivedTitle, offerUrl)
                 }
-                if (hasExplicitProductVariantConflict(savedTitle, archivedTitle) && !offerUrlConfirmsVariant) {
+                // A distinct structured Product may be routed by its exact, unambiguous title
+                // when the family page does not identify a capacity-specific primary SKU. This
+                // covers retailer pages that publish a separate Product + Offer for each item but
+                // omit Product.url and Offer.url. Do not use this fallback if a foreign seller URL
+                // was explicit, or if the page's primary identity already names a storage size:
+                // those cases need the sibling offer's own URL to avoid cross-wiring variants.
+                val offerTitleConfirmsVariant =
+                    !hasForeignOfferUrl &&
+                        primaryStorage.isEmpty() &&
+                        isMatchingProductTitle(savedTitle, archivedTitle)
+                if (hasExplicitProductVariantConflict(savedTitle, archivedTitle) &&
+                    !offerUrlConfirmsVariant && !offerTitleConfirmsVariant
+                ) {
                     return@mapNotNull null
                 }
-                // This loop handles *secondary* products from the same archived page. The page
-                // URL belongs to the primary SKU and cannot prove a sibling offer's capacity,
-                // edition, or seller. Require the matching offer's own same-merchant URL here.
-                // The primary quote is extracted and validated separately by parseArchivedPrice.
-                if (!offerUrlConfirmsVariant) return@mapNotNull null
+                if (!offerUrlConfirmsVariant && !offerTitleConfirmsVariant) return@mapNotNull null
                 Triple(productId, savedTitle, offerUrlConfirmsVariant)
             }
 

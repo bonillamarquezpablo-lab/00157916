@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import com.example.data.remote.WaybackTraceStatus
 import com.example.ui.viewmodel.WaybackDiagnosticEntry
+import com.example.ui.viewmodel.mergeWaybackDiagnosticStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -113,6 +114,54 @@ class ProductDetailSheetDiagnosticTest {
         assertTrue(report.contains("Qué revisar ahora:"))
         assertFalse(report.contains("https://shop.example"))
         assertFalse(report.contains("private-sku"))
+    }
+
+    @Test
+    fun reportDistinguishesCachedOmissionFromPhasesThatNeverRan() {
+        val entries = listOf(
+            WaybackDiagnosticEntry(
+                step = 4,
+                title = "Precontrol de consulta",
+                status = WaybackTraceStatus.SKIPPED,
+                detail = "[12:00:01] No ejecutado: consulta omitida por caché reciente."
+            ),
+            WaybackDiagnosticEntry(
+                step = 5,
+                title = "Consulta CDX",
+                status = WaybackTraceStatus.SKIPPED,
+                detail = "[12:00:02] No ejecutado: la cadena terminó antes de esta fase."
+            )
+        )
+
+        val report = buildWaybackDiagnosticExportReport(
+            productTitle = "Producto de prueba",
+            freeHistoryStatus = "Consulta omitida",
+            steps = entries,
+            generatedAt = "2026-10-27 12:00:00 UTC"
+        )
+
+        assertTrue(report.contains("4. Precontrol de consulta — OMITIDO POR CACHÉ"))
+        assertTrue(report.contains("5. Consulta CDX — NO EJECUTADO"))
+    }
+
+    @Test
+    fun expandedConsistencyPhasesDoNotTurnRedAftera later greenSubcheck() {
+        assertEquals(
+            WaybackTraceStatus.FAILED,
+            mergeWaybackDiagnosticStatus(
+                current = WaybackTraceStatus.FAILED,
+                incoming = WaybackTraceStatus.PASSED,
+                diagnosticStep = 23
+            )
+        )
+        assertEquals(
+            WaybackTraceStatus.PASSED,
+            mergeWaybackDiagnosticStatus(
+                current = WaybackTraceStatus.FAILED,
+                incoming = WaybackTraceStatus.PASSED,
+                diagnosticStep = 22
+            )
+        )
     }
 
     @Test

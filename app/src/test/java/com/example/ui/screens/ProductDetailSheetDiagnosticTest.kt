@@ -145,7 +145,7 @@ class ProductDetailSheetDiagnosticTest {
     }
 
     @Test
-    fun expandedConsistencyPhasesDoNotTurnRedAftera later greenSubcheck() {
+    fun expandedConsistencyPhasesKeepFailuresVisible() {
         assertEquals(
             WaybackTraceStatus.FAILED,
             mergeWaybackDiagnosticStatus(

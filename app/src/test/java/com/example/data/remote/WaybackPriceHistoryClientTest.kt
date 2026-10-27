@@ -55,6 +55,16 @@ class WaybackPriceHistoryClientTest {
             WaybackTraceStatus.PASSED,
             archivePersistenceStatus(savedPoints = 1)
         )
+        assertEquals(
+            "A persistence attempt that rejects every recovered quote must be reported as failed, not skipped",
+            WaybackTraceStatus.FAILED,
+            archivePersistenceStatus(savedPoints = 0, rejectedQuotes = 4, attempted = true)
+        )
+        assertEquals(
+            "A valid existing duplicate alone is not a newly saved chart point",
+            WaybackTraceStatus.SKIPPED,
+            archivePersistenceStatus(savedPoints = 0)
+        )
     }
 
     @Test

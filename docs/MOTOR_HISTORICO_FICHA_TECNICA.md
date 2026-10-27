@@ -167,3 +167,46 @@ El inventario estático de cinco archivos relevantes de pruebas suma **192 anota
 La sonda de Wayback en vivo es opcional y fue omitida en este run. Por tanto, el resultado verde confirma los tests automatizados y la construcción del APK, pero no demuestra que Internet Archive responda ahora, que una búsqueda real supere los timeouts/HTTP 429 anteriores o que añada fechas nuevas para un producto concreto. Tampoco reemplaza una prueba con el APK instalado.
 
 **Siguiente comprobación:** instalar `1.7.890.1`, ejecutar una búsqueda que no esté bloqueada por el cooldown, exportar el informe de 22 fases y comparar capturas encontradas, precios válidos, duplicados y puntos realmente nuevos en la gráfica. La ficha solo debe declarar eficacia mejorada cuando ese caso real aporte evidencia.
+
+
+## 9. Incidente real — Mínimo 1.7.890.1 — 27/10/2026
+
+### Evidencia aportada por el dispositivo
+
+Producto de prueba: Apple iPhone 15 Plus 256GB. Informe generado a las 04:12:03 GMT+01:00 en Android 17 / API 37.
+
+- Wayback CDX encontró cuatro capturas candidatas, y el dispositivo descargó cuatro páginas HTML con HTTP 200.
+- El extractor detectó ofertas estructuradas compatibles y registró cuatro precios verificados en las capturas Wayback; Memento/Arquivo.pt comunicó otras dos observaciones.
+- La fase 19 terminó con cero puntos nuevos en el producto seleccionado, cero duplicados válidos confirmados y cinco precios/candidatos rechazados. Por tanto, extracción y persistencia divergieron: encontrar/validar el precio no implica que Room acepte la observación.
+- CDX por prefijo agotó el tiempo (~16,8 s); la ventana trimestral acotada agotó el tiempo (~7,0 s). La fuente devolvió una respuesta válida parcial, pero no completó la búsqueda. Este dato no se interpreta como ausencia de capturas en el archivo.
+- La ficha no debe decir que este intento amplió el histórico: según el informe, se añadieron **0 fechas nuevas**.
+
+### Causas concretas identificadas en el código
+
+1. **Parámetro de seguimiento `srsltid`.** El informe y el HAR muestran una consulta de Arquivo.pt con `srsltid`, mientras que la URL de captura histórica apunta a la misma página sin ese parámetro. `normalizedProductPageKey` no lo eliminaba de la clave de identidad; la comparación podía concluir erróneamente que el destino de la captura no coincidía. Se añadió `srsltid` a la lista de parámetros de seguimiento y una prueba de persistencia con URL de entrada y snapshot canónico.
+
+2. **Captura de contenido `mp_` de Arquivo.pt.** El cliente Memento genera URLs como `https://arquivo.pt/wayback/{timestamp}mp_/https://tienda/...`, pero `parseArchivedSnapshotIdentity` solo aceptaba el formato simple y `id_`. Se amplió el analizador para aceptar `mp_` y se actualizó la prueba de Room para utilizar una captura de contenido real de ese tipo y comprobar que el punto se conserva tras recargar el histórico.
+
+3. **Diagnóstico insuficiente de los rechazos.** La fase 19 solo presentaba un contador agregado de capturas rechazadas. `ArchivedHistoryPersistenceResult` ahora incorpora un mapa de códigos de motivo y el ViewModel resume los recuentos por código en el informe. Se distinguen causas como URL de captura inválida, destino distinto, timestamp no coincidente, divisa/precio/fecha inválidos, identidad del producto no coincidente o precio implausible.
+
+### Cambios y pruebas de regresión
+
+- [Aceptar capturas Arquivo.pt `mp_`](https://github.com/bonillamarquezpablo-lab/00157916/commit/f825edfc2426a45ebc6dfa264d1613ceb07df857).
+- [Ignorar `srsltid` como parámetro de seguimiento](https://github.com/bonillamarquezpablo-lab/00157916/commit/f1a214fce74c35fcc813abecfe83657c63f41e09).
+- [Exponer causas de rechazo en fase 19](https://github.com/bonillamarquezpablo-lab/00157916/commit/354aa2feaade6a6305123afe10a9907f95c3449a).
+- [Prueba Memento con `mp_`](https://github.com/bonillamarquezpablo-lab/00157916/commit/eb594c93a6e7fcaf4d75218c32e96e0c048e9991).
+- [Prueba URL con `srsltid`](https://github.com/bonillamarquezpablo-lab/00157916/commit/1294ce80a82286e34f499c7af3450ea632537c9d).
+- [Ajustar la prueba para esperar ambos puntos archivados válidos](https://github.com/bonillamarquezpablo-lab/00157916/commit/8ad0e11e7dabc3bc850e48eb89339011016e9878).
+
+**Incidencia de pruebas:** la ejecución 897 falló en la prueba `invalidLegacyArchiveRowDoesNotBlockValidatedCaptureForSameDay` con `expected 1 but was 2`. El soporte nuevo de `mp_` hace visibles tanto la captura Wayback como la captura Arquivo.pt válida; por ello la aserción antigua de una sola observación era incorrecta. Se actualizó para exigir ambos puntos y verificar sus dos precios. Esa ejecución fallida no produjo una APK nueva.
+
+**Verificación pendiente:** run 898 de GitHub Actions está probando el conjunto actualizado en [esta ejecución](https://github.com/bonillamarquezpablo-lab/00157916/actions/runs/40444277910). No se debe marcar el nuevo conjunto como aprobado ni asociarle una APK hasta que terminen unit tests, compilación instrumentada, build sideload, firma y comprobación de Chucker.
+
+### Qué no está demostrado todavía
+
+- Que una búsqueda real posterior a estos cambios añada puntos en la APK del nuevo build.
+- Que CDX deje de agotar tiempos de espera o que se recupere mejor después de HTTP 429/503.
+- Que los cinco rechazos originales fueran todos debidos a `srsltid` o `mp_`: el informe original no registraba la causa individual y no permite atribuir cada rechazo a una causa. Los códigos nuevos deben identificarlo en la siguiente ejecución.
+- Que el mínimo histórico visible sea correcto para una batería de productos reales.
+
+**Siguiente paso obligatorio:** una vez aprobado el run 898, instalar esa APK y repetir la búsqueda del iPhone 15 Plus 256GB. Exportar el informe actualizado y comprobar `puntos nuevos`, `duplicados válidos` y `motivos de rechazo`. La corrección solo queda validada en uso real cuando esas cifras coincidan con los puntos que se observan en la gráfica.

@@ -358,12 +358,21 @@ internal fun buildWaybackDiagnosticExportReport(
     appVersion: String = "desconocida",
     androidVersion: String = "desconocida"
 ): String {
-    fun statusLabel(status: WaybackTraceStatus): String = when (status) {
+    fun statusLabel(entry: WaybackDiagnosticEntry): String = when (entry.status) {
         WaybackTraceStatus.PENDING -> "PENDIENTE"
         WaybackTraceStatus.RUNNING -> "EN CURSO"
         WaybackTraceStatus.PASSED -> "SUPERADO"
         WaybackTraceStatus.FAILED -> "FALLÓ"
-        WaybackTraceStatus.SKIPPED -> "NO EJECUTADO / OMITIDO"
+        WaybackTraceStatus.SKIPPED -> {
+            val detail = entry.detail.lowercase(Locale.ROOT)
+            when {
+                detail.contains("caché") || detail.contains("cache") -> "OMITIDO POR CACHÉ"
+                detail.contains("pausa") || detail.contains("cooldown") -> "OMITIDO POR PAUSA"
+                detail.contains("no ejecutado") || detail.contains("la cadena terminó antes") ->
+                    "NO EJECUTADO"
+                else -> "OMITIDO / NO APLICABA"
+            }
+        }
     }
 
     fun safeDetail(raw: String): String {
@@ -515,7 +524,7 @@ internal fun buildWaybackDiagnosticExportReport(
             report.appendLine(step.toString() + ". SIN REGISTRO")
             continue
         }
-        report.appendLine(step.toString() + ". " + safeDetail(entry.title) + " — " + statusLabel(entry.status))
+        report.appendLine(step.toString() + ". " + safeDetail(entry.title) + " — " + statusLabel(entry))
         entry.durationMs?.let { report.appendLine("   Duración registrada: " + it + " ms") }
         val detailLines = entry.detail.lines().filter { it.isNotBlank() }
         if (detailLines.isEmpty()) {
@@ -532,7 +541,7 @@ internal fun buildWaybackDiagnosticExportReport(
     } else {
         captures.forEachIndexed { index, entry ->
             report.appendLine()
-            report.appendLine((index + 1).toString() + ". " + safeDetail(entry.title) + " — " + statusLabel(entry.status))
+            report.appendLine((index + 1).toString() + ". " + safeDetail(entry.title) + " — " + statusLabel(entry))
             entry.durationMs?.let { report.appendLine("   Duración registrada: " + it + " ms") }
             entry.detail.lines().filter { it.isNotBlank() }
                 .forEach { report.appendLine("   " + safeDetail(it)) }
@@ -1226,12 +1235,21 @@ fun ProductDetailSheet(
                                 )
                             }
                             waybackDiagnosticSteps.forEach { entry ->
+                                val latestStatusDetail = entry.detail.lines().lastOrNull().orEmpty()
                                 val statusLabel = when (entry.status) {
                                     WaybackTraceStatus.PENDING -> "PENDIENTE"
                                     WaybackTraceStatus.RUNNING -> "EN CURSO"
                                     WaybackTraceStatus.PASSED -> "SUPERADO"
                                     WaybackTraceStatus.FAILED -> "FALLÓ"
-                                    WaybackTraceStatus.SKIPPED -> "NO EJECUTADO / OMITIDO"
+                                    WaybackTraceStatus.SKIPPED -> when {
+                                        latestStatusDetail.contains("caché", ignoreCase = true) ||
+                                            latestStatusDetail.contains("cache", ignoreCase = true) -> "CACHÉ"
+                                        latestStatusDetail.contains("pausa", ignoreCase = true) ||
+                                            latestStatusDetail.contains("cooldown", ignoreCase = true) -> "PAUSA"
+                                        latestStatusDetail.contains("no ejecutado", ignoreCase = true) ->
+                                            "NO EJECUTADO"
+                                        else -> "OMITIDO"
+                                    }
                                 }
                                 val statusColor = when (entry.status) {
                                     WaybackTraceStatus.PASSED -> Color(0xFF047857)

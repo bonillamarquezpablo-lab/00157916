@@ -4904,7 +4904,11 @@ class WaybackPriceHistoryClient(
                 if (hasExplicitProductVariantConflict(savedTitle, archivedTitle) && !offerUrlConfirmsVariant) {
                     return@mapNotNull null
                 }
-                if (!pageConfirmsVariant && !offerUrlConfirmsVariant) return@mapNotNull null
+                // This loop handles *secondary* products from the same archived page. The page
+                // URL belongs to the primary SKU and cannot prove a sibling offer's capacity,
+                // edition, or seller. Require the matching offer's own same-merchant URL here.
+                // The primary quote is extracted and validated separately by parseArchivedPrice.
+                if (!offerUrlConfirmsVariant) return@mapNotNull null
                 Triple(productId, savedTitle, offerUrlConfirmsVariant)
             }
 

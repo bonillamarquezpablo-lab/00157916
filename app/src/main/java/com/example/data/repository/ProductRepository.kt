@@ -1288,11 +1288,14 @@ class ProductRepository(
                 rejectQuote("INVALID_PRICE_CURRENCY_OR_DATE")
                 continue
             }
+            // The extractor and persistence layer must apply the same identity rules.
+            // Archived titles often differ by punctuation, storage suffixes or harmless wording;
+            // accept those only when the shared safe catalogue matcher confirms the same product.
+            // A URL-confirmed variant remains allowed, while genuinely different models are rejected.
+            val exactIdentityMatch = onlineProductIdentityKey(quote.productTitle) == identity
+            val safeExpectedTitleMatch = isSafeCatalogTitleMatch(quote.productTitle, expectedTitle)
             if (quote.productTitle.isBlank() ||
-                (
-                    onlineProductIdentityKey(quote.productTitle) != identity &&
-                        !quote.variantIdentityConfirmedByUrl
-                )
+                (!exactIdentityMatch && !safeExpectedTitleMatch && !quote.variantIdentityConfirmedByUrl)
             ) {
                 rejectQuote("PRODUCT_IDENTITY_MISMATCH")
                 continue

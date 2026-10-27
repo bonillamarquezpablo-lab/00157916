@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -311,6 +312,9 @@ fun PriceHistoryChart(
     // Follow the app's current theme accent (amber in Mínimo) instead of a fixed emerald line.
     val chartAccent = MaterialTheme.colorScheme.primary
     val archiveAccent = MaterialTheme.colorScheme.tertiary
+    val density = LocalDensity.current
+    val chartPaddingTopPx = with(density) { 16.dp.toPx() }
+    val chartPaddingBottomPx = with(density) { 24.dp.toPx() }
 
     Column(
         modifier = modifier
@@ -373,7 +377,12 @@ fun PriceHistoryChart(
                         val observedMinimum = historySummary.minimumObservedPoint
                         Text(
                             text = observedMinimum?.let {
-                                "Mín. del rango: ${formatChartPrice(it.price)} €"
+                                val label = if (selectedSeries == HistoryEvidenceSeries.COMBINED) {
+                                    "Mín. combinado: "
+                                } else {
+                                    "Mín. del rango: "
+                                }
+                                label + formatChartPrice(it.price) + " €"
                             } ?: "${historySummary.observationCount} observación${if (historySummary.observationCount == 1) "" else "es"}",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
@@ -580,20 +589,36 @@ fun PriceHistoryChart(
             Canvas(
                 modifier = Modifier
                     .matchParentSize()
-                    .pointerInput(filteredPoints) {
+                    .pointerInput(
+                        filteredPoints,
+                        minPriceInView,
+                        maxPriceInView,
+                        chartPaddingTopPx,
+                        chartPaddingBottomPx
+                    ) {
                         detectTapGestures { offset ->
                             if (filteredPoints.isNotEmpty()) {
                                 val firstTimestamp = filteredPoints.first().timestamp
                                 val timestampSpan = (filteredPoints.last().timestamp - firstTimestamp)
                                     .coerceAtLeast(1L).toDouble()
+                                val priceRange = (maxPriceInView - minPriceInView).coerceAtLeast(0.01)
+                                val usableHeight = (
+                                    size.height.toFloat() - chartPaddingTopPx - chartPaddingBottomPx
+                                ).coerceAtLeast(1f)
                                 selectedPointIndex = filteredPoints.indices.minByOrNull { index ->
+                                    val point = filteredPoints[index]
                                     val pointX = if (filteredPoints.size == 1) {
                                         size.width / 2f
                                     } else {
-                                        (((filteredPoints[index].timestamp - firstTimestamp).toDouble() /
+                                        (((point.timestamp - firstTimestamp).toDouble() /
                                             timestampSpan) * size.width).toFloat()
                                     }
-                                    kotlin.math.abs(pointX - offset.x)
+                                    val normalizedPrice = (point.price - minPriceInView) / priceRange
+                                    val pointY = chartPaddingTopPx + usableHeight -
+                                        normalizedPrice.toFloat() * usableHeight
+                                    val deltaX = pointX - offset.x
+                                    val deltaY = pointY - offset.y
+                                    deltaX * deltaX + deltaY * deltaY
                                 } ?: -1
                             }
                         }

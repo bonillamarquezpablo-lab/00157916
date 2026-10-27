@@ -83,6 +83,16 @@ data class ArchivedHistoryPersistenceResult(
     val rejectionReasons: Map<String, Int> = emptyMap()
 )
 
+
+/**
+ * Historical prices can describe the same model and storage capacity in another colour.
+ * Keep all other identity qualifiers (including model edition and storage) intact.
+ */
+private fun archivedPriceIdentityKey(title: String): String =
+    onlineProductIdentityKey(title).split('|')
+        .filterNot { it.startsWith("color:") }
+        .joinToString("|")
+
 class ProductRepository(
     private val storeDao: StoreDao,
     private val productDao: ProductDao,
@@ -1137,7 +1147,7 @@ class ProductRepository(
         ) return rejectAllQuotes("ARCHIVE_OR_SEARCH_INTERMEDIARY_URL")
 
         val products = productDao.getAllProductsSnapshot()
-        val identity = onlineProductIdentityKey(expectedTitle)
+        val identity = archivedPriceIdentityKey(expectedTitle)
         // Archive metadata has its own provenance checks below. Requiring a verified *current*
         // quote here hid valid old prices for products whose live offer was absent or suspicious.
         // This still requires an existing matching product row and never changes its live price.
@@ -1145,7 +1155,7 @@ class ProductRepository(
         // Prefer an exact merchant URL; when duplicate title rows remain ambiguous, do not attach
         // historical prices to an arbitrary product.
         val matchingProducts = products.filter {
-            onlineProductIdentityKey(it.title) == identity
+            archivedPriceIdentityKey(it.title) == identity
         }
         val explicitlyTargetedProduct = targetProductId?.let { id ->
             matchingProducts.singleOrNull { it.id == id }
@@ -1300,7 +1310,7 @@ class ProductRepository(
             }
             if (quote.productTitle.isBlank() ||
                 (
-                    onlineProductIdentityKey(quote.productTitle) != identity &&
+                    archivedPriceIdentityKey(quote.productTitle) != identity &&
                         !quote.variantIdentityConfirmedByUrl
                 )
             ) {

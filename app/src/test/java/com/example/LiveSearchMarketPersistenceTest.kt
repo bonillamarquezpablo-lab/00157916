@@ -11,6 +11,7 @@ import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.repository.ProductRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -267,4 +268,67 @@ class LiveSearchMarketPersistenceTest {
             database.close()
         }
     }
+
+    @Test
+    fun repeatedLiveSearchReflectsTheNewestValidatedPriceInMarketAndDailyHistory() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val title = "Apple iPhone 15 Plus 256GB Amarillo"
+            val sourceUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo"
+            val firstObservedAt = System.currentTimeMillis() - 5_000L
+            val first = SerpApiShoppingResult(
+                title = title,
+                price = 899.99,
+                storeName = "PcComponentes",
+                sourceUrl = sourceUrl,
+                observedAt = firstObservedAt,
+                condition = "new"
+            )
+
+            assertEquals(1, repository.recordOnlineSearchResults(listOf(first), "GOOGLE_SHOPPING", title))
+            val before = database.productDao().getAllProductsSnapshot().single()
+            assertEquals(899.99, before.currentPrice, 0.001)
+            assertTrue(before.isPriceVerified)
+
+            val refreshed = first.copy(
+                price = 749.99,
+                observedAt = System.currentTimeMillis()
+            )
+            assertEquals(
+                "A newer valid search must update the stored daily price instead of being discarded as a duplicate",
+                1,
+                repository.recordOnlineSearchResults(listOf(refreshed), "GOOGLE_SHOPPING", title)
+            )
+
+            val after = database.productDao().getProductById(before.id)!!
+            assertEquals(749.99, after.currentPrice, 0.001)
+            assertTrue(after.isPriceVerified)
+            assertEquals("There must be one current-day row per product/store", 1,
+                database.priceObservationDao().getObservationCount(before.id))
+            val savedHistory = database.priceObservationDao().observeVerifiedHistory(before.id).first()
+            assertEquals(1, savedHistory.size)
+            assertEquals(749.99, savedHistory.single().price, 0.001)
+
+            val displayed = repository.allProductsStream.first { rows ->
+                rows.any { it.id == before.id && it.currentPrice == 749.99 }
+            }.single { it.id == before.id }
+            assertEquals(749.99, displayed.currentPrice, 0.001)
+            assertEquals("The ficha must expose the refreshed price immediately", 749.99,
+                displayed.offers.minOf { it.price }, 0.001)
+        } finally {
+            database.close()
+        }
+    }
+
 }

@@ -159,7 +159,7 @@ class ProductDetailSheetDiagnosticTest {
             mergeWaybackDiagnosticStatus(
                 current = WaybackTraceStatus.FAILED,
                 incoming = WaybackTraceStatus.PASSED,
-                diagnosticStep = 22
+                diagnosticStep = 15
             )
         )
     }

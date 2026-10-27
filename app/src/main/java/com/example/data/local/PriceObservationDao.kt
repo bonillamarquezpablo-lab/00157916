@@ -284,10 +284,12 @@ interface PriceObservationDao {
     }
 
     /**
-     * Insert a newly validated archive observation when all same-day archive rows are invalid.
-     * Invalid IDs are computed with the repository's stricter snapshot/product checks; checking
-     * the rows again inside this transaction prevents two simultaneous imports from duplicating
-     * a newly inserted valid row.
+     * Save the best verified archive price for a product/store/local day.
+     *
+     * Invalid legacy rows are identified by the repository's stricter snapshot/product checks.
+     * Valid same-day rows block duplicates, but a newly verified lower price replaces the
+     * existing daily point so a cheaper same-model offer (including another colour) is not lost.
+     * Rechecking in this transaction prevents concurrent imports creating duplicate rows.
      */
     @Transaction
     suspend fun insertArchivedObservationIfNoEligibleDuplicate(
@@ -302,7 +304,16 @@ interface PriceObservationDao {
             dayStart,
             dayEnd
         )
-        if (existing.any { it.id !in invalidExistingIds }) return false
+        val bestEligibleExisting = existing.firstOrNull { it.id !in invalidExistingIds }
+        if (bestEligibleExisting != null) {
+            val lowerPrice = observation.price < bestEligibleExisting.price
+            val samePriceWithNewerCapture =
+                observation.price == bestEligibleExisting.price &&
+                    observation.observedAt > bestEligibleExisting.observedAt
+            if (!lowerPrice && !samePriceWithNewerCapture) return false
+            update(observation.copy(id = bestEligibleExisting.id))
+            return true
+        }
         insert(observation)
         return true
     }

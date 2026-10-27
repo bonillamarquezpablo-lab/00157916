@@ -1556,4 +1556,87 @@ class FreeArchiveHistoryPersistenceTest {
         }
     }
 
+    
+    @Test
+    fun archivedCaptureMatchesOriginalUrlWithSrsltidTrackingParameter() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        val productId = "archive-srsltid-identity-test"
+        val title = "Anker Prime 27K Power Bank"
+        val canonicalUrl = "https://www.pccomponentes.com/anker-prime-27k"
+        val requestedUrl = canonicalUrl + "?srsltid=AU7gw4Vgxo083-XCbQNB"
+        val timestampFormat = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val rawTimestamp = timestampFormat.format(
+            Date(System.currentTimeMillis() - 60L * 24L * 60L * 60L * 1000L)
+        )
+        val archivedAt = timestampFormat.parse(rawTimestamp)!!.time
+        val snapshotUrl = "https://web.archive.org/web/${rawTimestamp}id_/$canonicalUrl"
+
+        try {
+            database.productDao().insert(
+                ProductEntity(
+                    id = productId,
+                    title = title,
+                    brand = "Anker",
+                    category = "HOME_APPLIANCES",
+                    currentPrice = 499.99,
+                    athMinPrice = 499.99,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "PcComponentes",
+                    athMaxPrice = 499.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "pccomponentes",
+                    storeUrl = canonicalUrl,
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val quote = ArchivedPriceQuote(
+                observedAt = archivedAt,
+                price = 89.99,
+                currency = "EUR",
+                productTitle = title,
+                originalUrl = requestedUrl,
+                snapshotUrl = snapshotUrl,
+                targetProductId = productId
+            )
+
+            val outcome = repository.recordArchivedPriceHistoryDetailed(
+                expectedTitle = title,
+                originalUrl = requestedUrl,
+                storeName = "PcComponentes",
+                quotes = listOf(quote),
+                targetProductId = productId
+            )
+
+            assertEquals(
+                "The tracking-only srsltid query must not make the archived page look like another product URL",
+                1,
+                outcome.insertedPoints
+            )
+            assertEquals(0, outcome.rejectedQuotes)
+            assertTrue(outcome.rejectionReasons.isEmpty())
+            assertEquals(
+                1,
+                database.priceObservationDao().observeVerifiedHistory(productId).first()
+                    .count { it.sourceUrl == snapshotUrl }
+            )
+        } finally {
+            database.close()
+        }
+    }
 }

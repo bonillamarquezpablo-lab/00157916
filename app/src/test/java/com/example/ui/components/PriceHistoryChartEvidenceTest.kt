@@ -36,10 +36,10 @@ class PriceHistoryChartEvidenceTest {
         }
 
         composeRule.waitUntil(3_000L) {
-            composeRule.onAllNodesWithText("Histórico externo · Wayback")
+            composeRule.onAllNodesWithText("Histórico")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("Histórico externo · Wayback").assertIsDisplayed()
+        composeRule.onNodeWithText("Histórico").assertIsDisplayed()
         composeRule.onNodeWithText("1 observación").assertIsDisplayed()
         // Allow Compose to finish switching to the recovered series before checking its detail.
         composeRule.waitUntil(3_000L) {
@@ -72,11 +72,11 @@ class PriceHistoryChartEvidenceTest {
         }
 
         composeRule.waitUntil(3_000L) {
-            composeRule.onAllNodesWithText("Histórico externo · Wayback")
+            composeRule.onAllNodesWithText("Histórico")
                 .fetchSemanticsNodes().isNotEmpty() &&
                 composeRule.onAllNodesWithText("399,99 €").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("Histórico externo · Wayback").assertIsDisplayed()
+        composeRule.onNodeWithText("Histórico").assertIsDisplayed()
         composeRule.onNodeWithText("399,99 €").assertIsDisplayed()
         composeRule.onNodeWithText("01/01/2026 en Tienda de prueba").assertIsDisplayed()
     }
@@ -124,14 +124,14 @@ class PriceHistoryChartEvidenceTest {
         }
 
         // With a single live observation, recovered external history is the useful default view.
-        composeRule.onNodeWithText("Histórico externo · Wayback").assertIsDisplayed()
+        composeRule.onNodeWithText("Histórico").assertIsDisplayed()
         composeRule.onNodeWithText("Mínimo").performClick()
         composeRule.onNodeWithText("Evolución del precio observado").assertIsDisplayed()
 
-        composeRule.onNodeWithText("Wayback").performClick()
-        composeRule.onNodeWithText("Histórico externo · Wayback").assertIsDisplayed()
+        composeRule.onNodeWithText("Histórico").performClick()
+        composeRule.onNodeWithText("Histórico").assertIsDisplayed()
         composeRule.onNodeWithText(
-            "Capturas externas de Internet Archive; no son ofertas actuales."
+            "Capturas históricas verificadas de Internet Archive y Arquivo.pt; no son ofertas actuales."
         ).assertIsDisplayed()
         assertTrue(
             "Archived evidence must not display the live 90-day average",

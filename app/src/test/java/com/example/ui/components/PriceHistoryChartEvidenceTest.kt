@@ -37,7 +37,7 @@ class PriceHistoryChartEvidenceTest {
 
         composeRule.waitUntil(3_000L) {
             composeRule.onAllNodesWithText("Histórico")
-                .fetchSemanticsNodes().isNotEmpty()
+                .fetchSemanticsNodes().size >= 2
         }
         assertTrue(composeRule.onAllNodesWithText("Histórico").fetchSemanticsNodes().size >= 2)
         composeRule.onNodeWithText("1 observación").assertIsDisplayed()
@@ -73,7 +73,7 @@ class PriceHistoryChartEvidenceTest {
 
         composeRule.waitUntil(3_000L) {
             composeRule.onAllNodesWithText("Histórico")
-                .fetchSemanticsNodes().isNotEmpty() &&
+                .fetchSemanticsNodes().size >= 2 &&
                 composeRule.onAllNodesWithText("399,99 €").fetchSemanticsNodes().isNotEmpty()
         }
         assertTrue(composeRule.onAllNodesWithText("Histórico").fetchSemanticsNodes().size >= 2)

@@ -68,7 +68,7 @@ class PriceHistoryChartTest {
         // The archive extends the live timeline, so it should be selected automatically.
         composeRule.waitUntil(3_000L) {
             composeRule.onAllNodesWithText("Histórico")
-                .fetchSemanticsNodes().isNotEmpty()
+                .fetchSemanticsNodes().size >= 2
         }
         assertEquals(2, composeRule.onAllNodesWithText("Histórico").fetchSemanticsNodes().size)
         composeRule.onNodeWithText("Mín. del rango:", substring = true).assertIsDisplayed()

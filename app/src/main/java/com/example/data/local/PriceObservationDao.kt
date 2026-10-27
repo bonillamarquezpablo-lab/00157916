@@ -51,6 +51,10 @@ interface PriceObservationDao {
             "AND lower(sourceUrl) LIKE 'https://%' " +
             "AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' " +
             "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
+            "AND lower(trim(sourceUrl)) NOT LIKE 'https://arquivo.pt/wayback/%' " +
+            "AND lower(trim(sourceUrl)) NOT LIKE 'http://arquivo.pt/wayback/%' " +
+            "AND lower(trim(sourceUrl)) NOT LIKE 'https://archive.org/%' " +
+            "AND lower(trim(sourceUrl)) NOT LIKE 'http://archive.org/%' " +
             "AND upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 " +
             "AND trim(productTitle) <> '' AND trim(storeName) <> '' " +
             "AND observedAt > 0 AND observedAt <= :nowMillis + 300000 " +
@@ -72,6 +76,10 @@ interface PriceObservationDao {
             "AND lower(sourceUrl) LIKE 'https://%' " +
             "AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' " +
             "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
+            "AND lower(trim(sourceUrl)) NOT LIKE 'https://arquivo.pt/wayback/%' " +
+            "AND lower(trim(sourceUrl)) NOT LIKE 'http://arquivo.pt/wayback/%' " +
+            "AND lower(trim(sourceUrl)) NOT LIKE 'https://archive.org/%' " +
+            "AND lower(trim(sourceUrl)) NOT LIKE 'http://archive.org/%' " +
             "AND upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 " +
             "AND trim(productTitle) <> '' AND trim(storeName) <> '' " +
             "AND observedAt > 0 AND observedAt <= :nowMillis + 300000 " +
@@ -91,6 +99,10 @@ interface PriceObservationDao {
             "AND lower(sourceUrl) LIKE 'https://%' " +
             "AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' " +
             "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
+            "AND lower(trim(sourceUrl)) NOT LIKE 'https://arquivo.pt/wayback/%' " +
+            "AND lower(trim(sourceUrl)) NOT LIKE 'http://arquivo.pt/wayback/%' " +
+            "AND lower(trim(sourceUrl)) NOT LIKE 'https://archive.org/%' " +
+            "AND lower(trim(sourceUrl)) NOT LIKE 'http://archive.org/%' " +
             "AND upper(trim(currency)) = 'EUR' AND price >= 0.5 AND price <= 10000.0 " +
             "AND trim(productTitle) <> '' AND trim(storeName) <> '' " +
             "ORDER BY price ASC"
@@ -121,6 +133,10 @@ interface PriceObservationDao {
             "AND lower(evidenceType) = 'live' " +
             "AND lower(sourceUrl) NOT LIKE 'https://web.archive.org/web/%' " +
             "AND lower(sourceUrl) NOT LIKE 'http://web.archive.org/web/%' " +
+            "AND lower(trim(sourceUrl)) NOT LIKE 'https://arquivo.pt/wayback/%' " +
+            "AND lower(trim(sourceUrl)) NOT LIKE 'http://arquivo.pt/wayback/%' " +
+            "AND lower(trim(sourceUrl)) NOT LIKE 'https://archive.org/%' " +
+            "AND lower(trim(sourceUrl)) NOT LIKE 'http://archive.org/%' " +
             "ORDER BY observedAt DESC LIMIT 1"
     )
     suspend fun getObservationForStoreProductDay(

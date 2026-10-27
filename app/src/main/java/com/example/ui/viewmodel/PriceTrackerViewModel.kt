@@ -170,9 +170,11 @@ internal fun mergeWaybackDiagnosticStatus(
 internal fun archivePersistenceStatus(
     savedPoints: Int,
     savedVariantPoints: Int,
-    stagedDiscoveryObservations: Int
+    stagedDiscoveryObservations: Int,
+    confirmedExistingDuplicates: Int = 0
 ): WaybackTraceStatus = if (
-    savedPoints > 0 || savedVariantPoints > 0 || stagedDiscoveryObservations > 0
+    savedPoints > 0 || savedVariantPoints > 0 || stagedDiscoveryObservations > 0 ||
+    confirmedExistingDuplicates > 0
 ) WaybackTraceStatus.PASSED else WaybackTraceStatus.SKIPPED
 
 internal fun hasEnoughVerifiedArchiveDates(
@@ -2664,6 +2666,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             try {
                 var savedCount = 0
                 var crossSavedVariantObservationCount = 0
+                var confirmedPrimaryDuplicateCount = 0
+                var confirmedVariantDuplicateCount = 0
+                var rejectedArchiveQuoteCount = 0
+                var duplicateArchiveInputCount = 0
+                val invalidArchivedRowIds = linkedSetOf<Long>()
                 val stagedDiscoveryObservationsCount = java.util.concurrent.atomic.AtomicInteger(0)
                 var checkedCount = 0
                 var foundPrimaryCount = 0
@@ -2741,25 +2748,35 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId
                             }
                             if (primaryQuotes.isNotEmpty()) {
-                                savedCount += repository.recordArchivedPriceHistory(
+                                val outcome = repository.recordArchivedPriceHistoryDetailed(
                                     expectedTitle = candidate.title,
                                     originalUrl = archiveUrl,
                                     storeName = candidate.storeName,
                                     quotes = primaryQuotes.map { it.copy(targetProductId = null) },
                                     targetProductId = targetProductId
                                 )
+                                savedCount += outcome.insertedPoints
+                                confirmedPrimaryDuplicateCount += outcome.confirmedExistingDuplicates
+                                invalidArchivedRowIds.addAll(outcome.invalidExistingRowIds)
+                                rejectedArchiveQuoteCount += outcome.rejectedQuotes
+                                duplicateArchiveInputCount += outcome.duplicateQuotesInInput
                             }
                             val secondaryQuotes = knownProductQuotes.filter {
                                 !it.targetProductId.isNullOrBlank() && it.targetProductId != targetProductId
                             }
                             for ((secondaryProductId, variantQuotes) in secondaryQuotes.groupBy { it.targetProductId!! }) {
-                                crossSavedVariantObservationCount += repository.recordArchivedPriceHistory(
+                                val outcome = repository.recordArchivedPriceHistoryDetailed(
                                     expectedTitle = variantQuotes.first().productTitle,
                                     originalUrl = archiveUrl,
                                     storeName = candidate.storeName,
                                     quotes = variantQuotes.map { it.copy(targetProductId = null) },
                                     targetProductId = secondaryProductId
                                 )
+                                crossSavedVariantObservationCount += outcome.insertedPoints
+                                confirmedVariantDuplicateCount += outcome.confirmedExistingDuplicates
+                                invalidArchivedRowIds.addAll(outcome.invalidExistingRowIds)
+                                rejectedArchiveQuoteCount += outcome.rejectedQuotes
+                                duplicateArchiveInputCount += outcome.duplicateQuotesInInput
                             }
 
                             val discoveryKeysToSchedule = discoveryQuotes.filter { quote ->
@@ -3244,10 +3261,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     // Only durable writes are proof that persistence succeeded. Quotes
                     // extracted from the archive can still be rejected or collide with malformed
                     // legacy rows; those cases must not be reported as a successful save.
+                    val confirmedDuplicateTotal = confirmedPrimaryDuplicateCount + confirmedVariantDuplicateCount
                     val persistenceStatus = archivePersistenceStatus(
                         savedPoints = savedCount,
                         savedVariantPoints = crossSavedVariantObservationCount,
-                        stagedDiscoveryObservations = stagedDiscoveryObservationsCount.get()
+                        stagedDiscoveryObservations = stagedDiscoveryObservationsCount.get(),
+                        confirmedExistingDuplicates = confirmedDuplicateTotal
                     )
                     val persistenceDetail = when {
                         savedCount > 0 && crossSavedVariantObservationCount > 0 &&
@@ -3270,6 +3289,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         crossSavedVariantObservationCount > 0 ->
                             "Guardado cruzado: $crossSavedVariantObservationCount punto(s) nuevo(s) en fichas de variantes relacionadas; " +
                                 "no se añadieron puntos nuevos al producto seleccionado."
+                        confirmedDuplicateTotal > 0 ->
+                            "Se confirmó que ya existe al menos un punto archivado válido para el mismo producto, tienda y día; no se creó otra fila."
                         stagedDiscoveryObservationsCount.get() > 0 ->
                             "Radar de Descubrimientos: ${stagedDiscoveryObservationsCount.get()} observación(es) de productos nuevos guardadas en cuarentena; siguen fuera del catálogo principal."
                         foundPrimaryCount > 0 ->
@@ -3281,8 +3302,17 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         else ->
                             "No se guardaron registros: ninguna captura produjo un precio verificado."
                     }
+                    val persistenceCounters =
+                        "Conteo de persistencia: nuevos producto seleccionado=$savedCount; " +
+                            "nuevos variantes=$crossSavedVariantObservationCount; " +
+                            "duplicados válidos producto seleccionado=$confirmedPrimaryDuplicateCount; " +
+                            "duplicados válidos variantes=$confirmedVariantDuplicateCount; " +
+                            "filas antiguas inválidas ignoradas=${invalidArchivedRowIds.size}; " +
+                            "capturas rechazadas=$rejectedArchiveQuoteCount; " +
+                            "repetidas dentro de la respuesta=$duplicateArchiveInputCount."
+                    val persistenceDetailWithCounts = "$persistenceDetail\n$persistenceCounters"
                     reportWaybackDiagnostic(
-                        diagnosticProductId, 19, persistenceStatus, persistenceDetail
+                        diagnosticProductId, 19, persistenceStatus, persistenceDetailWithCounts
                     )
                     val gateStatus = when {
                         // Network activity is stronger evidence than aggregate error codes: the
@@ -3389,14 +3419,17 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             ". Son precios anunciados en páginas archivadas; puede haber huecos y no garantizan envío, stock ni precio final."
                     }
                     foundPrimaryCount > 0 && crossSavedVariantObservationCount > 0 ->
-                        "El histórico del producto seleccionado ya tenía esos registros diarios; además, se guardaron " +
-                            "$crossSavedVariantObservationCount precios en fichas de variantes relacionadas."
+                        "Se recuperaron $foundPrimaryCount precio(s) del producto seleccionado y se guardaron " +
+                            "$crossSavedVariantObservationCount puntos en variantes relacionadas. " +
+                            "La fase 19 separa duplicados válidos, filas inválidas y capturas rechazadas."
                     crossSavedVariantObservationCount > 0 ->
                         "Se guardaron $crossSavedVariantObservationCount precios históricos en fichas de variantes relacionadas; no se añadió historial nuevo al producto seleccionado."
                     foundPrimaryCount > 0 ->
-                        "Se encontraron capturas con precios previos del producto seleccionado, pero ya existían esos registros diarios y no se añadieron puntos nuevos."
+                        "Se recuperaron $foundPrimaryCount precio(s) del producto seleccionado, pero no se confirmó ningún punto nuevo. " +
+                            "No se asume que sean duplicados válidos: consulta la fase 19 para ver los duplicados confirmados, filas inválidas y capturas rechazadas."
                     foundSecondaryCount > 0 ->
-                        "Se encontraron capturas de variantes relacionadas, pero sus registros ya existían; no se añadió historial nuevo al producto seleccionado."
+                        "Se verificaron capturas de variantes relacionadas, pero no se confirmó su guardado. " +
+                            "La fase 19 indica si había puntos válidos del mismo día o si las filas fueron rechazadas."
                     requestFailedCount > 0 && diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ->
                         waybackRateLimitNotice() + " Esto no significa que no existan capturas."
                     capturesFoundCount > 0 && checkedCount == 0 && requestFailedCount > 0 ->

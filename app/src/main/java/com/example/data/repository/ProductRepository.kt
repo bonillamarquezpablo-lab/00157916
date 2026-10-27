@@ -73,6 +73,14 @@ data class UrlAnalysisResult(
     val adviceMessage: String
 )
 
+data class ArchivedHistoryPersistenceResult(
+    val insertedPoints: Int = 0,
+    val confirmedExistingDuplicates: Int = 0,
+    val invalidExistingRowIds: Set<Long> = emptySet(),
+    val rejectedQuotes: Int = 0,
+    val duplicateQuotesInInput: Int = 0
+)
+
 class ProductRepository(
     private val storeDao: StoreDao,
     private val productDao: ProductDao,
@@ -1087,16 +1095,40 @@ class ProductRepository(
         storeName: String,
         quotes: List<ArchivedPriceQuote>,
         targetProductId: String? = null
-    ): Int {
+    ): Int = recordArchivedPriceHistoryDetailed(
+        expectedTitle = expectedTitle,
+        originalUrl = originalUrl,
+        storeName = storeName,
+        quotes = quotes,
+        targetProductId = targetProductId
+    ).insertedPoints
+
+    /**
+     * Saves validated archive quotes with explicit outcome counters. The existing Int wrapper
+     * remains available to callers that only need the number of newly inserted points.
+     */
+    suspend fun recordArchivedPriceHistoryDetailed(
+        expectedTitle: String,
+        originalUrl: String,
+        storeName: String,
+        quotes: List<ArchivedPriceQuote>,
+        targetProductId: String? = null
+    ): ArchivedHistoryPersistenceResult {
         startupCleanupCompleted.await()
-        if (expectedTitle.isBlank() || originalUrl.isBlank() || quotes.isEmpty()) return 0
-        val originalUri = parseHttpUri(originalUrl) ?: return 0
-        if (!originalUri.scheme.equals("https", ignoreCase = true)) return 0
+        val uniqueQuotes = quotes.distinctBy { it.observedAt to it.price }
+        val duplicateQuotesInInput = (quotes.size - uniqueQuotes.size).coerceAtLeast(0)
+        fun rejectAllQuotes() = ArchivedHistoryPersistenceResult(
+            rejectedQuotes = uniqueQuotes.size,
+            duplicateQuotesInInput = duplicateQuotesInInput
+        )
+        if (expectedTitle.isBlank() || originalUrl.isBlank() || quotes.isEmpty()) return rejectAllQuotes()
+        val originalUri = parseHttpUri(originalUrl) ?: return rejectAllQuotes()
+        if (!originalUri.scheme.equals("https", ignoreCase = true)) return rejectAllQuotes()
         val originalHost = normalizeHost(originalUri.host.orEmpty())
         if (originalHost == "web.archive.org" || originalHost == "archive.org" ||
             isGoogleShoppingUrl(originalUrl) || originalHost.startsWith("google.") ||
             originalHost == "bing.com" || originalHost.endsWith(".bing.com")
-        ) return 0
+        ) return rejectAllQuotes()
 
         val products = productDao.getAllProductsSnapshot()
         val identity = onlineProductIdentityKey(expectedTitle)
@@ -1109,8 +1141,8 @@ class ProductRepository(
         val matchingProducts = products.filter {
             onlineProductIdentityKey(it.title) == identity
         }
-        val originalUrlKey = normalizedProductPageKey(originalUrl) ?: return 0
-        val originalPathKey = normalizedProductPagePathKey(originalUrl) ?: return 0
+        val originalUrlKey = normalizedProductPageKey(originalUrl) ?: return rejectAllQuotes()
+        val originalPathKey = normalizedProductPagePathKey(originalUrl) ?: return rejectAllQuotes()
         val verifiedUrlMatches = matchingProducts.filter { candidate ->
             normalizedProductPageKey(candidate.storeUrl) == originalUrlKey ||
                 priceObservationDao.getVerifiedLiveObservationsForProduct(candidate.id).any { observation ->
@@ -1126,11 +1158,11 @@ class ProductRepository(
         val explicitlyTargetedProduct = targetProductId?.let { id ->
             matchingProducts.singleOrNull { it.id == id }
         }
-        if (targetProductId != null && explicitlyTargetedProduct == null) return 0
+        if (targetProductId != null && explicitlyTargetedProduct == null) return rejectAllQuotes()
         val product = when {
             explicitlyTargetedProduct != null -> explicitlyTargetedProduct
             verifiedUrlMatches.size == 1 -> verifiedUrlMatches.single()
-            verifiedUrlMatches.size > 1 -> return 0
+            verifiedUrlMatches.size > 1 -> return rejectAllQuotes()
             else -> {
                 // Query or fragment values can identify a purchasable variant. Do not fall back
                 // to a title/host match when the same page path has a conflicting variant key.
@@ -1138,7 +1170,7 @@ class ProductRepository(
                     normalizedProductPagePathKey(candidate.storeUrl) == originalPathKey &&
                         normalizedProductPageKey(candidate.storeUrl) != originalUrlKey
                 }
-                if (conflictingPageVariant) return 0
+                if (conflictingPageVariant) return rejectAllQuotes()
 
                 if (matchingProducts.size == 1) {
                     matchingProducts.single()
@@ -1147,7 +1179,7 @@ class ProductRepository(
                     matchingProducts.filter { candidate ->
                         parseHttpUri(candidate.storeUrl)?.host
                             ?.let(::normalizeHost) == originalHost
-                    }.singleOrNull() ?: return 0
+                    }.singleOrNull() ?: return rejectAllQuotes()
                 }
             }
         }
@@ -1171,7 +1203,7 @@ class ProductRepository(
             targetProductId != null && explicitlyTargetedProduct?.id == product.id
         if (!hasVerifiedLiveQuote && !productOwnsArchiveUrl &&
             !uniqueGoogleOnlyProduct && !archiveCandidateBelongsToSelectedProduct
-        ) return 0
+        ) return rejectAllQuotes()
 
         val now = System.currentTimeMillis()
         // Keep the persistence horizon aligned with CDX/Memento discovery. A shorter
@@ -1184,14 +1216,30 @@ class ProductRepository(
         if (!isEligibleHistoryTitle(expectedTitle) ||
             isPromotionalBulkListing(expectedTitle, "") ||
             !isEligibleSeller(merchantName, originalUrl)
-        ) return 0
+        ) return rejectAllQuotes()
         var inserted = 0
+        var confirmedExistingDuplicates = 0
+        var rejectedQuotes = 0
+        val invalidExistingRowIds = linkedSetOf<Long>()
 
-        for (quote in quotes.distinctBy { it.observedAt to it.price }) {
-            val snapshotIdentity = parseArchivedSnapshotIdentity(quote.snapshotUrl) ?: continue
-            if (normalizedArchivedTargetPageKey(snapshotIdentity.targetUrl) != originalUrlKey) continue
-            if (kotlin.math.abs(snapshotIdentity.timestampMillis - quote.observedAt) > 1_000L) continue
-            if (!quote.originalUrl.trimEnd('/').equals(originalUrl.trimEnd('/'), ignoreCase = true)) continue
+        for (quote in uniqueQuotes) {
+            val snapshotIdentity = parseArchivedSnapshotIdentity(quote.snapshotUrl)
+            if (snapshotIdentity == null) {
+                rejectedQuotes++
+                continue
+            }
+            if (normalizedArchivedTargetPageKey(snapshotIdentity.targetUrl) != originalUrlKey) {
+                rejectedQuotes++
+                continue
+            }
+            if (kotlin.math.abs(snapshotIdentity.timestampMillis - quote.observedAt) > 1_000L) {
+                rejectedQuotes++
+                continue
+            }
+            if (!quote.originalUrl.trimEnd('/').equals(originalUrl.trimEnd('/'), ignoreCase = true)) {
+                rejectedQuotes++
+                continue
+            }
             if (!isEuroCurrency(quote.currency) ||
                 !quote.price.isFinite() ||
                 quote.price !in MIN_HISTORY_PRICE_EUR..MAX_HISTORY_PRICE_EUR ||
@@ -1205,7 +1253,10 @@ class ProductRepository(
                 !isEligibleHistoryTitle(quote.productTitle) ||
                 isPromotionalBulkListing(quote.productTitle, "") ||
                 !isPlausibleHistoryPrice(quote.productTitle, quote.price)
-            ) continue
+            ) {
+                rejectedQuotes++
+                continue
+            }
 
             val observation = PriceObservationEntity(
                 productId = product.id,
@@ -1269,15 +1320,26 @@ class ProductRepository(
             val invalidExistingArchiveIds = existingArchiveRows
                 .filterNot { isEligibleObservationForHistory(it, canonicalProductTitle = product.title) }
                 .map { it.id }
+            invalidExistingRowIds.addAll(invalidExistingArchiveIds)
             if (priceObservationDao.insertArchivedObservationIfNoEligibleDuplicate(
                     observation = observation,
                     dayStart = dayStart,
                     dayEnd = dayEnd,
                     invalidExistingIds = invalidExistingArchiveIds
                 )
-            ) inserted++
+            ) {
+                inserted++
+            } else {
+                confirmedExistingDuplicates++
+            }
         }
-        return inserted
+        return ArchivedHistoryPersistenceResult(
+            insertedPoints = inserted,
+            confirmedExistingDuplicates = confirmedExistingDuplicates,
+            invalidExistingRowIds = invalidExistingRowIds,
+            rejectedQuotes = rejectedQuotes,
+            duplicateQuotesInInput = duplicateQuotesInInput
+        )
     }
 
     /**

@@ -247,16 +247,27 @@ class FreeArchiveHistoryPersistenceTest {
                 snapshotUrl = snapshotUrl
             )
 
-            assertEquals(
-                "A malformed legacy row must not block a validated archived capture for that day",
-                1,
-                repository.recordArchivedPriceHistory(
-                    expectedTitle = title,
-                    originalUrl = originalUrl,
-                    storeName = "PcComponentes",
-                    quotes = listOf(quote)
-                )
+            val firstSave = repository.recordArchivedPriceHistoryDetailed(
+                expectedTitle = title,
+                originalUrl = originalUrl,
+                storeName = "PcComponentes",
+                quotes = listOf(quote)
             )
+            assertEquals("A fresh valid HTTP-origin archive capture must be inserted", 1, firstSave.insertedPoints)
+            assertEquals(0, firstSave.confirmedExistingDuplicates)
+            assertTrue("The malformed existing row is reported but retained for audit", firstSave.invalidExistingRowIds.contains(malformedArchiveId))
+            assertEquals(0, firstSave.rejectedQuotes)
+
+            val repeatedSave = repository.recordArchivedPriceHistoryDetailed(
+                expectedTitle = title,
+                originalUrl = originalUrl,
+                storeName = "PcComponentes",
+                quotes = listOf(quote)
+            )
+            assertEquals("The repeated valid quote must not be inserted again", 0, repeatedSave.insertedPoints)
+            assertEquals("A real same-product/store/day duplicate must be confirmed", 1, repeatedSave.confirmedExistingDuplicates)
+            assertTrue(repeatedSave.invalidExistingRowIds.contains(malformedArchiveId))
+            assertEquals(0, repeatedSave.rejectedQuotes)
             assertEquals(
                 "A valid archived snapshot with an HTTP original URL must remain visible in DAO history",
                 1,
@@ -338,6 +349,20 @@ class FreeArchiveHistoryPersistenceTest {
                 dao.getArchivedObservationsForStoreProductDay(
                     productId, "pccomponentes", dayStart, dayEnd
                 ).size
+            )
+            assertEquals(
+                "A Memento URL labelled as live must not be returned as the latest live quote",
+                null,
+                dao.getLatestVerified(productId)
+            )
+            assertTrue(
+                "Memento URLs labelled live must not enter the live-observation association path",
+                dao.getVerifiedLiveObservationsForProduct(productId).isEmpty()
+            )
+            assertEquals(
+                "A historical Memento row must not block a current live quote for the same day",
+                null,
+                dao.getObservationForStoreProductDay(productId, "pccomponentes", dayStart, dayEnd)
             )
             assertTrue(
                 "The single-row archive lookup must also recognize Memento URLs",

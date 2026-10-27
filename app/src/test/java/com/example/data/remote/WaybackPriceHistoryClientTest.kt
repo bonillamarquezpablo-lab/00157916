@@ -58,6 +58,16 @@ class WaybackPriceHistoryClientTest {
                 stagedDiscoveryObservations = 0
             )
         )
+        assertEquals(
+            "A confirmed valid same-day archive point is also a successful idempotent persistence result",
+            WaybackTraceStatus.PASSED,
+            archivePersistenceStatus(
+                savedPoints = 0,
+                savedVariantPoints = 0,
+                stagedDiscoveryObservations = 0,
+                confirmedExistingDuplicates = 1
+            )
+        )
     }
 
     @Test

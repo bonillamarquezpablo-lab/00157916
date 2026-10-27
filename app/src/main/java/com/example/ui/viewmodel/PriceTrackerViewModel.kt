@@ -2666,6 +2666,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 var confirmedVariantDuplicateCount = 0
                 var rejectedArchiveQuoteCount = 0
                 var duplicateArchiveInputCount = 0
+                val archiveQuoteRejectionReasons = linkedMapOf<String, Int>()
                 val invalidArchivedRowIds = linkedSetOf<Long>()
                 val stagedDiscoveryObservationsCount = java.util.concurrent.atomic.AtomicInteger(0)
                 var checkedCount = 0
@@ -2755,6 +2756,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 confirmedPrimaryDuplicateCount += outcome.confirmedExistingDuplicates
                                 invalidArchivedRowIds.addAll(outcome.invalidExistingRowIds)
                                 rejectedArchiveQuoteCount += outcome.rejectedQuotes
+                                outcome.rejectionReasons.forEach { (reason, count) ->
+                                    archiveQuoteRejectionReasons[reason] =
+                                        (archiveQuoteRejectionReasons[reason] ?: 0) + count
+                                }
                                 duplicateArchiveInputCount += outcome.duplicateQuotesInInput
                             }
                             val secondaryQuotes = knownProductQuotes.filter {
@@ -2772,6 +2777,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 confirmedVariantDuplicateCount += outcome.confirmedExistingDuplicates
                                 invalidArchivedRowIds.addAll(outcome.invalidExistingRowIds)
                                 rejectedArchiveQuoteCount += outcome.rejectedQuotes
+                                outcome.rejectionReasons.forEach { (reason, count) ->
+                                    archiveQuoteRejectionReasons[reason] =
+                                        (archiveQuoteRejectionReasons[reason] ?: 0) + count
+                                }
                                 duplicateArchiveInputCount += outcome.duplicateQuotesInInput
                             }
 
@@ -3293,6 +3302,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         else ->
                             "No se guardaron registros: ninguna captura produjo un precio verificado."
                     }
+                    val rejectionReasonSummary = archiveQuoteRejectionReasons.entries
+                        .sortedBy { it.key }
+                        .joinToString(", ") { (reason, count) -> "$reason=$count" }
+                        .ifBlank { "ninguno" }
                     val persistenceCounters =
                         "Conteo de persistencia: nuevos producto seleccionado=$savedCount; " +
                             "nuevos variantes=$crossSavedVariantObservationCount; " +
@@ -3300,6 +3313,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             "duplicados válidos variantes=$confirmedVariantDuplicateCount; " +
                             "filas antiguas inválidas ignoradas=${invalidArchivedRowIds.size}; " +
                             "capturas rechazadas=$rejectedArchiveQuoteCount; " +
+                            "motivos de rechazo=$rejectionReasonSummary; " +
                             "repetidas dentro de la respuesta=$duplicateArchiveInputCount."
                     val persistenceDetailWithCounts = "$persistenceDetail\n$persistenceCounters"
                     reportWaybackDiagnostic(

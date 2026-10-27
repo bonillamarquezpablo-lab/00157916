@@ -98,14 +98,14 @@ private fun archivedPriceIdentityKey(title: String): String {
     ).replace(Regex("\\p{M}+"), "")
     // Black Shark is a phone brand/model phrase, not a colour label.
     val protectedTitle = accentNeutralTitle.replace(
-        Regex("""(?i)\\bblack\\s+shark\\b"""),
+        Regex("""(?i)\bblack\s+shark\b"""),
         "blackshark"
     )
     val colourWords = Regex(
-        """(?i)\\b(?:black|negro|negra|negros|negras|nero|white|blanco|blanca|bianco|blue|azul|bleu|navy|celeste|ultramarine|teal|green|verde|mint|alpine\\s+green|yellow|amarillo|amarilla|giallo|red|rojo|roja|rosso|coral|pink|rosa|rose|purple|morado|morada|violet|violeta|lavender|grey|gray|gris|silver|plata|plateado|graphite|space\\s+grey|titanium|titanio|orange|naranja|gold|dorado|dorada|oro|brown|marron|cafe|beige|arena|sand)\\b"""
+        """(?i)\b(?:black|negro|negra|negros|negras|nero|white|blanco|blanca|bianco|blue|azul|bleu|navy|celeste|ultramarine|teal|green|verde|mint|alpine\s+green|yellow|amarillo|amarilla|giallo|red|rojo|roja|rosso|coral|pink|rosa|rose|purple|morado|morada|violet|violeta|lavender|grey|gray|gris|silver|plata|plateado|graphite|space\s+grey|titanium|titanio|orange|naranja|gold|dorado|dorada|oro|brown|marron|cafe|beige|arena|sand)\b"""
     )
     val neutralTitle = colourWords.replace(protectedTitle, " ")
-        .replace(Regex("""(?i)\\bblackshark\\b"""), "Black Shark")
+        .replace(Regex("""(?i)\bblackshark\b"""), "Black Shark")
     return onlineProductIdentityKey(neutralTitle).split('|')
         .filterNot { it.startsWith("color:") }
         .joinToString("|")

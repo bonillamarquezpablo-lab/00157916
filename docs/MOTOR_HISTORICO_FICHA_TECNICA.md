@@ -3,7 +3,10 @@
 > Documento de referencia del proyecto. Se actualiza cuando una capacidad cambia de estado y queda respaldada por pruebas. No convertir una función escrita en código en una mejora de eficacia hasta que esté medida.
 
 **Versión observada en el último informe aportado:** 1.7.838.1  
-**Última revisión de evidencias:** 26 de octubre de 2026  
+**Última revisión de evidencias:** 27 de octubre de 2026
+**Referencia de código revisada:** `main` · HEAD `5b8ff673e1477359e3e637d2ed7820960511e7ca`
+**CI / APK actual:** run 890 finalizado correctamente; pruebas unitarias, compilación instrumentada, build sideload, firma, paquete y Chucker verificados.
+**APK generada:** `1.7.890.1` · versionCode `99001` · artifact `minimo-apk` (se conserva hasta el 3 de noviembre de 2026).  
 **Estado general:** motor implementado con rutas de archivo y validación; eficacia global todavía sin métricas comparables.  
 **Regla de oro:** conservar las fichas, precios e históricos de Room. No borrar datos locales ni contar duplicados como hallazgos nuevos.
 
@@ -129,3 +132,38 @@ Al cerrar un cambio, añadir una entrada con:
 5. Rellenar las métricas de esta ficha solo con resultados de esa batería y con informes reales de dispositivo.
 
 **Principio del proyecto:** el objetivo no es que el motor haga más peticiones, sino que recupere más fechas históricas correctas por búsqueda, con menos errores y en menos tiempo, sin inventar precios ni dañar el catálogo local.
+
+
+## 8. Actualización de integridad y resultado de CI — 27/10/2026
+
+### Cambios ya integrados en `main`
+
+Los commits relevantes de esta revisión son:
+
+- [Validar enlaces históricos en conteo y deduplicación diaria](https://github.com/bonillamarquezpablo-lab/00157916/commit/c401e80df829d59153d6e3468cfd761e6a123e16) y [ajuste final de la expresión SQL compartida](https://github.com/bonillamarquezpablo-lab/00157916/commit/5b8ff673e1477359e3e637d2ed7820960511e7ca).
+- [Exigir un punto nuevo del producto seleccionado para dar la fase 19 por superada](https://github.com/bonillamarquezpablo-lab/00157916/commit/471bc3f476da10332edc426a1f2943270c0bb0e9).
+- [Pruebas de regresión para URL histórica falsa y deduplicación](https://github.com/bonillamarquezpablo-lab/00157916/commit/335d32b3dbb99394f40cb79ccfb142f0572b4ee5).
+- [Prueba de regresión del estado de guardado](https://github.com/bonillamarquezpablo-lab/00157916/commit/de8a8fd2aca2d2907c5353870bfe5bb5122da2be).
+
+**Validación de enlaces archivados:** el DAO ya no debe confiar solo en la etiqueta `evidenceType=archive`. El conteo de observaciones verificadas y la consulta diaria de deduplicación aplican patrones de URL de captura reconocidos. Se evita que una URL normal de tienda etiquetada como archivo cuente como captura auténtica o bloquee una captura válida. Se mantienen formatos reconocidos de Wayback `id_` y de Arquivo.pt, incluidos `mp_`.
+
+**Resultado real de la fase 19:** el estado del guardado depende de los puntos que se insertan en el producto seleccionado. Guardar observaciones de una variante relacionada, enviar un descubrimiento a cuarentena o encontrar un duplicado no debe aparentar que creció la gráfica de la ficha actual. Las pruebas de regresión cubren el caso de cero puntos y el de un punto nuevo.
+
+### Resultado automatizado comprobado
+
+Ejecución: [GitHub Actions · run 890](https://github.com/bonillamarquezpablo-lab/00157916/actions/runs/40438796756).
+
+- `:app:testDebugUnitTest`: **correcto**.
+- `:app:compileDebugAndroidTestKotlin`: **correcto**.
+- `:app:assembleSideload`: **BUILD SUCCESSFUL**.
+- Verificación final: paquete `com.aistudio.preciominimo.esrxvt`, versionCode `99001`, versionName `1.7.890.1`, manifiesto no depurable, certificado de firma esperado y Chucker localizado en 5 archivos DEX.
+- APK SHA-256: `efdfc53a718f724dfe61f6e6465cf591b0b06bcfa5dfa10c9ef58f4dfeaf4f0c`.
+- Artifact `minimo-apk`: [descargar desde la ejecución](https://github.com/bonillamarquezpablo-lab/00157916/actions/runs/40438796756/artifacts/12706121159). Caduca el 3 de noviembre de 2026.
+
+El inventario estático de cinco archivos relevantes de pruebas suma **192 anotaciones `@Test`**: Wayback 151, Memento 10, descubrimientos 6, informe de diagnóstico 8 y persistencia de histórico 17. Es un recuento de código fuente, no el número total de pruebas del proyecto. El resultado correcto de `testDebugUnitTest` sí confirma que la suite unitaria del workflow terminó bien.
+
+### Qué todavía no está demostrado
+
+La sonda de Wayback en vivo es opcional y fue omitida en este run. Por tanto, el resultado verde confirma los tests automatizados y la construcción del APK, pero no demuestra que Internet Archive responda ahora, que una búsqueda real supere los timeouts/HTTP 429 anteriores o que añada fechas nuevas para un producto concreto. Tampoco reemplaza una prueba con el APK instalado.
+
+**Siguiente comprobación:** instalar `1.7.890.1`, ejecutar una búsqueda que no esté bloqueada por el cooldown, exportar el informe de 22 fases y comparar capturas encontradas, precios válidos, duplicados y puntos realmente nuevos en la gráfica. La ficha solo debe declarar eficacia mejorada cuando ese caso real aporte evidencia.

@@ -39,34 +39,21 @@ import java.util.concurrent.CopyOnWriteArrayList
 @Config(sdk = [35])
 class WaybackPriceHistoryClientTest {
     @Test
-    fun extractedArchiveQuotesWithoutSavedRowsCannotMarkPersistencePassed() {
+    fun onlyNewPointsForSelectedProductCanMarkPersistencePassed() {
         assertEquals(
-            "A refreshed product or extracted quote is not proof of durable history persistence",
+            "A refreshed product or extracted quote is not proof that a new chart point was inserted",
             WaybackTraceStatus.SKIPPED,
-            archivePersistenceStatus(
-                savedPoints = 0,
-                savedVariantPoints = 0,
-                stagedDiscoveryObservations = 0
-            )
+            archivePersistenceStatus(savedPoints = 0)
         )
         assertEquals(
-            "A durable history write is enough to mark persistence as passed",
-            WaybackTraceStatus.PASSED,
-            archivePersistenceStatus(
-                savedPoints = 1,
-                savedVariantPoints = 0,
-                stagedDiscoveryObservations = 0
-            )
+            "Existing duplicates, related-variant saves, and quarantined discoveries must not mark the selected product as newly saved",
+            WaybackTraceStatus.SKIPPED,
+            archivePersistenceStatus(savedPoints = 0)
         )
         assertEquals(
-            "A confirmed valid same-day archive point is also a successful idempotent persistence result",
+            "A new durable point on the selected product is enough to mark persistence as passed",
             WaybackTraceStatus.PASSED,
-            archivePersistenceStatus(
-                savedPoints = 0,
-                savedVariantPoints = 0,
-                stagedDiscoveryObservations = 0,
-                confirmedExistingDuplicates = 1
-            )
+            archivePersistenceStatus(savedPoints = 1)
         )
     }
 

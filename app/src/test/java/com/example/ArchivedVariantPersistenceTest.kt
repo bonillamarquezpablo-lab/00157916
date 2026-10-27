@@ -85,17 +85,20 @@ class ArchivedVariantPersistenceTest {
                 variantIdentityConfirmedByUrl = false
             )
 
+            val rejectedGenericQuote = repository.recordArchivedPriceHistoryDetailed(
+                expectedTitle = title,
+                originalUrl = originalUrl,
+                storeName = "PcComponentes",
+                quotes = listOf(genericHeading),
+                targetProductId = productId
+            )
             assertEquals(
                 "A generic HTML title must not be saved without URL proof of the missing capacity",
                 0,
-                repository.recordArchivedPriceHistory(
-                    expectedTitle = title,
-                    originalUrl = originalUrl,
-                    storeName = "PcComponentes",
-                    quotes = listOf(genericHeading),
-                    targetProductId = productId
-                )
+                rejectedGenericQuote.insertedPoints
             )
+            assertEquals(1, rejectedGenericQuote.rejectedQuotes)
+            assertEquals(1, rejectedGenericQuote.rejectionReasons["PRODUCT_IDENTITY_MISMATCH"])
             assertEquals(
                 "The same captured HTML can be saved when the parser verified the exact URL variant",
                 1,

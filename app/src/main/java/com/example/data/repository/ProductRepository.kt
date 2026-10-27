@@ -1164,12 +1164,22 @@ class ProductRepository(
             val archivedTargetKey = normalizedArchivedTargetPageKey(originalUrl)
                 ?: return rejectAllQuotes("ORIGINAL_URL_NOT_HTTPS")
             val httpEraUrlOwner = if (targetProductId != null) {
-                explicitlyTargetedProduct?.takeIf {
-                    normalizedProductPageKey(it.storeUrl) == archivedTargetKey
+                explicitlyTargetedProduct?.takeIf { candidate ->
+                    normalizedProductPageKey(candidate.storeUrl) == archivedTargetKey ||
+                        priceObservationDao.getVerifiedLiveObservationsForProduct(candidate.id).any { observation ->
+                            isEligibleObservationForHistory(observation) &&
+                                (normalizedProductPageKey(observation.sourceUrl) == archivedTargetKey ||
+                                    normalizedProductPageKey(observation.sourcePageUrl) == archivedTargetKey)
+                        }
                 }
             } else {
-                matchingProducts.filter {
-                    normalizedProductPageKey(it.storeUrl) == archivedTargetKey
+                matchingProducts.filter { candidate ->
+                    normalizedProductPageKey(candidate.storeUrl) == archivedTargetKey ||
+                        priceObservationDao.getVerifiedLiveObservationsForProduct(candidate.id).any { observation ->
+                            isEligibleObservationForHistory(observation) &&
+                                (normalizedProductPageKey(observation.sourceUrl) == archivedTargetKey ||
+                                    normalizedProductPageKey(observation.sourcePageUrl) == archivedTargetKey)
+                        }
                 }.singleOrNull()
             }
             httpEraUrlOwner?.storeUrl ?: return rejectAllQuotes("ORIGINAL_URL_NOT_HTTPS")

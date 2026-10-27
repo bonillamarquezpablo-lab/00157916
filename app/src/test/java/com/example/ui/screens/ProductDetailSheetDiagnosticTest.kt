@@ -51,19 +51,90 @@ class ProductDetailSheetDiagnosticTest {
 
         assertTrue(report.contains("INFORME COMPLETO DE DIAGNÓSTICO"))
         assertTrue(report.contains("Versión de Mínimo: 1.6.1400"))
-        assertTrue(report.contains("FASES GENERALES (1–22)"))
+        assertTrue(report.contains("FASES GENERALES (1–30)"))
         assertTrue(report.contains("22. Decisión del extractor y causa de rechazo del precio — FALLÓ"))
         assertTrue(report.contains("ARCHIVE_PRICE_METADATA_MISSING"))
         assertTrue(report.contains("DETALLE DE CAPTURAS E INTENTOS"))
         assertTrue(report.contains("SNAPSHOT_STREAM_RESET"))
         assertTrue(report.contains("captura 1 de 1"))
         assertTrue(report.contains("1. SIN REGISTRO"))
+        assertTrue(report.contains("30. SIN REGISTRO"))
+        assertTrue(report.contains("HALLAZGO PRINCIPAL Y SIGUIENTE PASO"))
+        assertTrue(report.contains("Causa probable (orientativa):"))
+        assertTrue(report.contains("Qué revisar ahora:"))
+        assertTrue(report.contains("INDICIOS CLASIFICADOS POR TIPO"))
+        assertTrue(report.contains("Formato del informe: v2 · 30 fases generales"))
         assertTrue(report.contains("14. Evaluación HTML de capturas — FALLÓ"))
         assertTrue(report.contains("[contenido HTML ocultado]"))
         assertTrue(report.contains("[URL ocultada]"))
         assertFalse(report.contains("https://shop.example"))
         assertFalse(report.contains("secret-value"))
         assertFalse(report.contains("private archived page"))
+    }
+
+    @Test
+    fun reportPrioritizesIdentityAndPersistenceRejectionWithAConcreteNextStep() {
+        val entries = listOf(
+            WaybackDiagnosticEntry(
+                step = 19,
+                title = "Guardado del histórico en la base de datos local",
+                status = WaybackTraceStatus.FAILED,
+                detail = "Capturas rechazadas=4; motivos=ORIGINAL_URL_NOT_HTTPS=1, PRODUCT_IDENTITY_MISMATCH=3."
+            ),
+            WaybackDiagnosticEntry(
+                step = 23,
+                title = "Identidad del producto y vínculo URL comprobados",
+                status = WaybackTraceStatus.FAILED,
+                detail = "Precios extraídos=4; rechazos relacionados con identidad/URL=3."
+            ),
+            WaybackDiagnosticEntry(
+                step = 0,
+                title = "captura 1 de 4 · id abcdefgh · fecha 20221012120000 · ruta CDX_URL_PREFIX · tienda shop.example · Guardado",
+                status = WaybackTraceStatus.FAILED,
+                detail = "PRODUCT_IDENTITY_MISMATCH; URL https://shop.example/item?sku=private-sku",
+                isCaptureDetail = true,
+                captureKey = "identity-test"
+            )
+        )
+
+        val finding = buildWaybackDiagnosticFinding("No se añadió histórico nuevo", entries)
+        val report = buildWaybackDiagnosticExportReport(
+            productTitle = "Producto de prueba",
+            freeHistoryStatus = "No se añadió histórico nuevo",
+            steps = entries,
+            generatedAt = "2026-10-27 12:00:00 UTC",
+            appVersion = "1.7.test",
+            androidVersion = "Android 17 (API 37)"
+        )
+
+        assertTrue(finding.probableCause.contains("identidad/URL"))
+        assertTrue(finding.recommendedNextStep.contains("fases 23 y 25"))
+        assertTrue(report.contains("PRODUCT_IDENTITY_MISMATCH"))
+        assertTrue(report.contains("Qué revisar ahora:"))
+        assertFalse(report.contains("https://shop.example"))
+        assertFalse(report.contains("private-sku"))
+    }
+
+    @Test
+    fun timeoutFindingDoesNotClaimThatAnEmptyArchiveWasProven() {
+        val entries = listOf(
+            WaybackDiagnosticEntry(
+                step = 6,
+                title = "Respuesta CDX",
+                status = WaybackTraceStatus.FAILED,
+                detail = "CDX_URL_PREFIX_TIMEOUT; CDX_URL_PREFIX_YEAR_TIMEOUT."
+            ),
+            WaybackDiagnosticEntry(
+                step = 11,
+                title = "Descarga HTML de capturas",
+                status = WaybackTraceStatus.FAILED,
+                detail = "SNAPSHOT_STREAM_RESET."
+            )
+        )
+        val finding = buildWaybackDiagnosticFinding("No se recuperó precio", entries)
+        assertTrue(finding.probableCause.contains("red o de tiempo de espera"))
+        assertTrue(finding.recommendedNextStep.contains("Un timeout", ignoreCase = true) ||
+            finding.recommendedNextStep.contains("tiempo", ignoreCase = true))
     }
 
     @Test

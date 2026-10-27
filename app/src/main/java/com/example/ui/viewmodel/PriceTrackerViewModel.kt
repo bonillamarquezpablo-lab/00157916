@@ -3565,12 +3565,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             "${stagedDiscoveryObservationsCount.get()} observación(es) de productos nuevos guardadas en el Radar; no se han añadido a Mercado automáticamente."
                         )
                         foundPrimaryCount > 0 && selectedProductRefreshed -> finishWaybackDiagnostic(
-                            diagnosticProductId, WaybackTraceStatus.SKIPPED,
-                            "Se recuperaron precios, pero no se confirmó ningún punto nuevo guardado. La ficha se refrescó, pero eso no demuestra que las capturas de esta búsqueda estén guardadas como duplicados válidos."
+                            diagnosticProductId, WaybackTraceStatus.FAILED,
+                            "La fase de guardado SÍ se ejecutó, pero no se confirmó ningún punto nuevo ni un duplicado válido del producto seleccionado. La ficha se refrescó, pero eso no demuestra persistencia. Revisa en la fase 19 los motivos de rechazo, la URL original y la identidad del producto."
                         )
                         foundPrimaryCount > 0 -> finishWaybackDiagnostic(
-                            diagnosticProductId, WaybackTraceStatus.SKIPPED,
-                            "Se extrajeron precios del producto seleccionado, pero no se confirmó su persistencia. Consulta el detalle de las filas rechazadas o existentes."
+                            diagnosticProductId, WaybackTraceStatus.FAILED,
+                            "La fase de guardado SÍ se ejecutó, pero no se confirmó persistencia para el producto seleccionado. Revisa en la fase 19 los motivos de rechazo y las filas existentes."
                         )
                         foundSecondaryCount > 0 -> finishWaybackDiagnostic(
                             diagnosticProductId, WaybackTraceStatus.SKIPPED,

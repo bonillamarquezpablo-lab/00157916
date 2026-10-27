@@ -70,7 +70,7 @@ class PriceHistoryChartTest {
             composeRule.onAllNodesWithText("Histórico")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("Histórico").assertIsDisplayed()
+        assertEquals(2, composeRule.onAllNodesWithText("Histórico").fetchSemanticsNodes().size)
         composeRule.onNodeWithText("Mín. del rango:", substring = true).assertIsDisplayed()
         composeRule.onNodeWithText(
             "Capturas históricas verificadas de Internet Archive y Arquivo.pt; no son ofertas actuales."
@@ -111,7 +111,7 @@ class PriceHistoryChartTest {
             }
         }
 
-        composeRule.onNodeWithText("Histórico").assertIsDisplayed()
+        assertEquals(2, composeRule.onAllNodesWithText("Histórico").fetchSemanticsNodes().size)
         composeRule.onNodeWithText("1 observación").assertIsDisplayed()
         composeRule.onNodeWithTag("price_history_chart_container").assertIsDisplayed()
     }
@@ -137,7 +137,7 @@ class PriceHistoryChartTest {
             }
         }
 
-        composeRule.onNodeWithText("Histórico").assertIsDisplayed()
+        assertEquals(2, composeRule.onAllNodesWithText("Histórico").fetchSemanticsNodes().size)
         composeRule.onNodeWithText("1 observación").assertIsDisplayed()
         composeRule.onNodeWithTag("price_history_chart_container").assertIsDisplayed()
     }

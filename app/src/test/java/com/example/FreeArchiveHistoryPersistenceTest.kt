@@ -455,7 +455,8 @@ class FreeArchiveHistoryPersistenceTest {
         }
         val rawTimestamp = timestampFormat.format(Date(System.currentTimeMillis() - 60L * 24L * 60L * 60L * 1000L))
         val archivedAt = timestampFormat.parse(rawTimestamp)!!.time
-        val snapshotUrl = "https://arquivo.pt/wayback/$rawTimestamp/$originalUrl"
+        // Arquivo.pt serves the archived document through an mp_ content URL, not only the timemap wrapper.
+        val snapshotUrl = "https://arquivo.pt/wayback/${rawTimestamp}mp_/$originalUrl"
 
         try {
             database.productDao().insert(
@@ -494,17 +495,21 @@ class FreeArchiveHistoryPersistenceTest {
                 targetProductId = productId
             )
 
-            assertEquals(
-                "A Memento quote must be accepted only for the explicitly selected existing product",
-                1,
-                repository.recordArchivedPriceHistory(
-                    expectedTitle = title,
-                    originalUrl = originalUrl,
-                    storeName = "PcComponentes",
-                    quotes = listOf(quote),
-                    targetProductId = productId
-                )
+            val outcome = repository.recordArchivedPriceHistoryDetailed(
+                expectedTitle = title,
+                originalUrl = originalUrl,
+                storeName = "PcComponentes",
+                quotes = listOf(quote),
+                targetProductId = productId
             )
+            assertEquals(
+                "A Memento mp_ quote must be accepted only for the explicitly selected existing product",
+                1,
+                outcome.insertedPoints
+            )
+            assertEquals(0, outcome.rejectedQuotes)
+            assertTrue("A valid Arquivo.pt mp_ snapshot must not report any rejection reason",
+                outcome.rejectionReasons.isEmpty())
             val restored = withTimeout(10_000L) {
                 repository.allProductsStream.first { rows ->
                     rows.any { row ->

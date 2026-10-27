@@ -162,6 +162,109 @@ class FreeArchiveHistoryPersistenceTest {
     }
  
     @Test
+    fun invalidLegacyArchiveRowDoesNotBlockValidatedCaptureForSameDay() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        val productId = "archive-invalid-duplicate-test"
+        val title = "Anker Prime 27K Power Bank"
+        val originalUrl = "https://www.pccomponentes.com/anker-prime-27k"
+        val timestampFormat = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val rawTimestamp = timestampFormat.format(
+            Date(System.currentTimeMillis() - 60L * 24L * 60L * 60L * 1000L)
+        )
+        val archivedAt = timestampFormat.parse(rawTimestamp)!!.time
+        val snapshotUrl = "https://web.archive.org/web/${rawTimestamp}id_/${originalUrl}"
+
+        try {
+            database.productDao().insert(
+                ProductEntity(
+                    id = productId,
+                    title = title,
+                    brand = "Anker",
+                    category = "HOME_APPLIANCES",
+                    currentPrice = 499.99,
+                    athMinPrice = 499.99,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "PcComponentes",
+                    athMaxPrice = 499.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "pccomponentes",
+                    storeUrl = originalUrl,
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            // Legacy row is labelled archive and verified, but its source URL is the live
+            // retailer page, not an archived snapshot. It is filtered from the chart and must
+            // not count as an existing valid archive point.
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = productId,
+                    storeId = "pccomponentes",
+                    price = 89.99,
+                    currency = "EUR",
+                    observedAt = archivedAt,
+                    sourceUrl = originalUrl,
+                    sourceName = "Legacy malformed archive",
+                    isVerified = true,
+                    productTitle = title,
+                    storeName = "PcComponentes",
+                    sourceType = "Internet Archive",
+                    linkType = "Archivo histórico",
+                    collectedAt = System.currentTimeMillis(),
+                    evidenceType = "archive",
+                    sourcePageUrl = originalUrl
+                )
+            )
+
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val quote = ArchivedPriceQuote(
+                observedAt = archivedAt,
+                price = 99.99,
+                currency = "EUR",
+                productTitle = title,
+                originalUrl = originalUrl,
+                snapshotUrl = snapshotUrl
+            )
+
+            assertEquals(
+                "A malformed legacy row must not block a validated archived capture for that day",
+                1,
+                repository.recordArchivedPriceHistory(
+                    expectedTitle = title,
+                    originalUrl = originalUrl,
+                    storeName = "PcComponentes",
+                    quotes = listOf(quote)
+                )
+            )
+            val restored = withTimeout(10_000L) {
+                repository.allProductsStream.first { rows ->
+                    rows.any { row ->
+                        row.id == productId && row.priceHistory.any { it.isArchiveEvidence }
+                    }
+                }.first { it.id == productId }
+            }
+            assertEquals(1, restored.priceHistory.count { it.isArchiveEvidence })
+            assertEquals(99.99, restored.priceHistory.single { it.isArchiveEvidence }.price, 0.001)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun mementoArchiveCapturePersistsAndAppearsInSavedPriceHistory() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val databaseName = "memento-history-${System.nanoTime()}.db"

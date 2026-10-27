@@ -155,6 +155,30 @@ interface PriceObservationDao {
     ): PriceObservationEntity?
 
     /**
+     * All archived observations for a product/store/day. The repository applies its full
+     * snapshot, seller, and product validation before treating a legacy row as a real duplicate.
+     */
+    @Query(
+        "SELECT * FROM price_observations " +
+            "WHERE productId = :productId AND storeId = :storeId " +
+            "AND observedAt >= :dayStart AND observedAt < :dayEnd " +
+            "AND isVerified = 1 " +
+            "AND (lower(evidenceType) = 'archive' " +
+            "OR lower(sourceUrl) LIKE 'https://web.archive.org/web/%' " +
+            "OR lower(sourceUrl) LIKE 'http://web.archive.org/web/%') " +
+            "AND upper(trim(currency)) = 'EUR' " +
+            "AND price >= 0.5 AND price <= 10000.0 " +
+            "AND trim(productTitle) <> '' " +
+            "ORDER BY price ASC, observedAt DESC"
+    )
+    suspend fun getArchivedObservationsForStoreProductDay(
+        productId: String,
+        storeId: String,
+        dayStart: Long,
+        dayEnd: Long
+    ): List<PriceObservationEntity>
+
+    /**
      * Historical Google Product API insights have a separate identity per merchant/day.
      * They must not overwrite a live quote (or be overwritten by one).
      */
@@ -219,6 +243,30 @@ interface PriceObservationDao {
             dayEnd
         )
         if (existing != null) return false
+        insert(observation)
+        return true
+    }
+
+    /**
+     * Insert a newly validated archive observation when all same-day archive rows are invalid.
+     * Invalid IDs are computed with the repository's stricter snapshot/product checks; checking
+     * the rows again inside this transaction prevents two simultaneous imports from duplicating
+     * a newly inserted valid row.
+     */
+    @Transaction
+    suspend fun insertArchivedObservationIfNoEligibleDuplicate(
+        observation: PriceObservationEntity,
+        dayStart: Long,
+        dayEnd: Long,
+        invalidExistingIds: List<Long>
+    ): Boolean {
+        val existing = getArchivedObservationsForStoreProductDay(
+            observation.productId,
+            observation.storeId,
+            dayStart,
+            dayEnd
+        )
+        if (existing.any { it.id !in invalidExistingIds }) return false
         insert(observation)
         return true
     }

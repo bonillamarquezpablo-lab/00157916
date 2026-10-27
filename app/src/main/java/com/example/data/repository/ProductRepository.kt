@@ -1256,10 +1256,23 @@ class ProductRepository(
                 sourcePageUrl = originalUrl
             )
             val (dayStart, dayEnd) = localDayBounds(observation.observedAt)
-            if (priceObservationDao.insertArchivedObservationIfAbsent(
+            // A legacy archive row can satisfy the DAO's coarse daily lookup yet fail the
+            // stricter URL/seller/product checks used to build chart points. Such a row must not
+            // mask a newly validated capture. Treat only eligible archived rows as duplicates.
+            val existingArchiveRows = priceObservationDao.getArchivedObservationsForStoreProductDay(
+                productId = observation.productId,
+                storeId = observation.storeId,
+                dayStart = dayStart,
+                dayEnd = dayEnd
+            )
+            val invalidExistingArchiveIds = existingArchiveRows
+                .filterNot { isEligibleObservationForHistory(it, canonicalProductTitle = product.title) }
+                .map { it.id }
+            if (priceObservationDao.insertArchivedObservationIfNoEligibleDuplicate(
                     observation = observation,
                     dayStart = dayStart,
-                    dayEnd = dayEnd
+                    dayEnd = dayEnd,
+                    invalidExistingIds = invalidExistingArchiveIds
                 )
             ) inserted++
         }

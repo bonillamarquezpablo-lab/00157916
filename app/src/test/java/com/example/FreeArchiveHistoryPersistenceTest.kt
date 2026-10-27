@@ -235,6 +235,17 @@ class FreeArchiveHistoryPersistenceTest {
                 database.priceObservationDao().observeAllVerified().first()
                     .any { it.id == malformedArchiveId }
             )
+            assertEquals(
+                "A malformed archive-labelled live URL must not inflate the verified-observation count",
+                0,
+                database.priceObservationDao().getVerifiedObservationCount()
+            )
+            assertFalse(
+                "A malformed archive-labelled live URL must not block the genuine capture in daily deduplication",
+                database.priceObservationDao().getArchivedObservationForStoreProductDay(
+                    productId, "pccomponentes", archivedAt - 1_000L, archivedAt + 1_000L
+                ) != null
+            )
 
             val repository = ProductRepository(
                 storeDao = database.storeDao(),
@@ -262,6 +273,17 @@ class FreeArchiveHistoryPersistenceTest {
             assertEquals(0, firstSave.confirmedExistingDuplicates)
             assertTrue("The malformed existing row is reported but retained for audit", firstSave.invalidExistingRowIds.contains(malformedArchiveId))
             assertEquals(0, firstSave.rejectedQuotes)
+            assertEquals(
+                "Only the newly inserted genuine archive point should contribute to the verified count",
+                1,
+                database.priceObservationDao().getVerifiedObservationCount()
+            )
+            assertTrue(
+                "The genuine capture must become the daily deduplication target",
+                database.priceObservationDao().getArchivedObservationForStoreProductDay(
+                    productId, "pccomponentes", archivedAt - 1_000L, archivedAt + 1_000L
+                )?.sourceUrl == snapshotUrl
+            )
 
             val repeatedSave = repository.recordArchivedPriceHistoryDetailed(
                 expectedTitle = title,

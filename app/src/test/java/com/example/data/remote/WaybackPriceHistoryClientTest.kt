@@ -22,6 +22,7 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 import com.example.ui.viewmodel.mergeWaybackDiagnosticStatus
 import com.example.ui.viewmodel.hasEnoughVerifiedArchiveDates
+import com.example.ui.viewmodel.archivePersistenceStatus
 import com.example.ui.viewmodel.hasSufficientNewVerifiedArchiveHistory
 import com.example.ui.viewmodel.isSupersededWaybackSkipDetail
 import org.junit.runner.RunWith
@@ -37,6 +38,28 @@ import java.util.concurrent.CopyOnWriteArrayList
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class WaybackPriceHistoryClientTest {
+    @Test
+    fun extractedArchiveQuotesWithoutSavedRowsCannotMarkPersistencePassed() {
+        assertEquals(
+            "A refreshed product or extracted quote is not proof of durable history persistence",
+            WaybackTraceStatus.SKIPPED,
+            archivePersistenceStatus(
+                savedPoints = 0,
+                savedVariantPoints = 0,
+                stagedDiscoveryObservations = 0
+            )
+        )
+        assertEquals(
+            "A durable history write is enough to mark persistence as passed",
+            WaybackTraceStatus.PASSED,
+            archivePersistenceStatus(
+                savedPoints = 1,
+                savedVariantPoints = 0,
+                stagedDiscoveryObservations = 0
+            )
+        )
+    }
+
     @Test
     fun enoughVerifiedDatesStopSecondaryArchiveLookups() {
         val day = WaybackPriceHistoryClient.DAY_MS

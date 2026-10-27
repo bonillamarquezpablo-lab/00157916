@@ -163,6 +163,18 @@ internal fun mergeWaybackDiagnosticStatus(
  * verified dates. Extra inferred URLs can trigger redundant Availability calls and HTTP 429 even
  * after the direct CDX route has completed a usable three-date history.
  */
+/**
+ * A history lookup is only a successful persistence step when at least one item was durably
+ * written. Finding a quote or refreshing a card does not prove that its capture is present.
+ */
+internal fun archivePersistenceStatus(
+    savedPoints: Int,
+    savedVariantPoints: Int,
+    stagedDiscoveryObservations: Int
+): WaybackTraceStatus = if (
+    savedPoints > 0 || savedVariantPoints > 0 || stagedDiscoveryObservations > 0
+) WaybackTraceStatus.PASSED else WaybackTraceStatus.SKIPPED
+
 internal fun hasEnoughVerifiedArchiveDates(
     timestamps: Iterable<Long>,
     minimumDistinctDates: Int = 3
@@ -3229,12 +3241,14 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
 
                 if (diagnosticProductId != null) {
-                    val persistenceStatus = when {
-                        savedCount > 0 || crossSavedVariantObservationCount > 0 ||
-                            foundPrimaryCount > 0 || foundSecondaryCount > 0 ||
-                            stagedDiscoveryObservationsCount.get() > 0 -> WaybackTraceStatus.PASSED
-                        else -> WaybackTraceStatus.SKIPPED
-                    }
+                    // Only durable writes are proof that persistence succeeded. Quotes
+                    // extracted from the archive can still be rejected or collide with malformed
+                    // legacy rows; those cases must not be reported as a successful save.
+                    val persistenceStatus = archivePersistenceStatus(
+                        savedPoints = savedCount,
+                        savedVariantPoints = crossSavedVariantObservationCount,
+                        stagedDiscoveryObservations = stagedDiscoveryObservationsCount.get()
+                    )
                     val persistenceDetail = when {
                         savedCount > 0 && crossSavedVariantObservationCount > 0 &&
                             stagedDiscoveryObservationsCount.get() > 0 ->
@@ -3259,9 +3273,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         stagedDiscoveryObservationsCount.get() > 0 ->
                             "Radar de Descubrimientos: ${stagedDiscoveryObservationsCount.get()} observación(es) de productos nuevos guardadas en cuarentena; siguen fuera del catálogo principal."
                         foundPrimaryCount > 0 ->
-                            "Se verificaron $foundPrimaryCount punto(s) del producto seleccionado, pero no se añadieron duplicados porque esos registros ya existían."
+                            "Se recuperaron $foundPrimaryCount precio(s) del producto seleccionado, pero no se confirmó ningún punto nuevo guardado. " +
+                                "No se da el guardado por superado: comprueba las fechas existentes y el motivo de rechazo en este informe."
                         foundSecondaryCount > 0 ->
-                            "Se verificaron $foundSecondaryCount punto(s) de variantes relacionadas, pero sus registros ya existían; no se añadieron puntos al producto seleccionado."
+                            "Se recuperaron $foundSecondaryCount precio(s) de variantes relacionadas, pero no se confirmó su guardado. " +
+                                "No se da por hecho que las filas existentes sean duplicados válidos."
                         else ->
                             "No se guardaron registros: ninguna captura produjo un precio verificado."
                     }
@@ -3511,16 +3527,16 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             "${stagedDiscoveryObservationsCount.get()} observación(es) de productos nuevos guardadas en el Radar; no se han añadido a Mercado automáticamente."
                         )
                         foundPrimaryCount > 0 && selectedProductRefreshed -> finishWaybackDiagnostic(
-                            diagnosticProductId, WaybackTraceStatus.PASSED,
-                            "Se verificó el historial del producto seleccionado, pero sus registros diarios ya existían; la ficha se refrescó."
+                            diagnosticProductId, WaybackTraceStatus.SKIPPED,
+                            "Se recuperaron precios, pero no se confirmó ningún punto nuevo guardado. La ficha se refrescó, pero eso no demuestra que las capturas de esta búsqueda estén guardadas como duplicados válidos."
                         )
                         foundPrimaryCount > 0 -> finishWaybackDiagnostic(
-                            diagnosticProductId, WaybackTraceStatus.FAILED,
-                            "Se extrajeron precios del producto seleccionado, pero no se confirmó el guardado o la actualización de la ficha."
+                            diagnosticProductId, WaybackTraceStatus.SKIPPED,
+                            "Se extrajeron precios del producto seleccionado, pero no se confirmó su persistencia. Consulta el detalle de las filas rechazadas o existentes."
                         )
                         foundSecondaryCount > 0 -> finishWaybackDiagnostic(
-                            diagnosticProductId, WaybackTraceStatus.PASSED,
-                            "Solo se verificaron capturas de variantes relacionadas; no se añadió historial al producto seleccionado porque esos registros ya existían."
+                            diagnosticProductId, WaybackTraceStatus.SKIPPED,
+                            "Se verificaron capturas de variantes relacionadas, pero no se confirmó su guardado; no se marca la persistencia como superada."
                         )
                         skippedCount == candidates.size -> finishWaybackDiagnostic(
                             diagnosticProductId, WaybackTraceStatus.SKIPPED,

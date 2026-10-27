@@ -4519,7 +4519,7 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun explicitlyConflictingSelectedColourStillRejectsArchivedOffer() {
+    fun sameModelAndCapacityAreAcceptedAcrossColours() {
         val client = newClient()
         val wrongColourUrl = "https://shop.example/products/iphone-15-plus-256gb-negro"
         val quote = client.parseArchivedPrice(
@@ -4547,10 +4547,9 @@ class WaybackPriceHistoryClientTest {
             observedAt = 1_756_684_800_000L
         )
 
-        assertNull(
-            "A selected colour is a hard requirement; the matching model and capacity cannot override a different colour",
-            quote
-        )
+        assertNotNull("The same iPhone 15 Plus 256GB remains useful in another colour", quote)
+        assertEquals(624.00, quote!!.price, 0.001)
+        assertTrue(quote.productTitle.contains("Negro", ignoreCase = true))
     }
 
     @Test
@@ -5999,8 +5998,8 @@ class WaybackPriceHistoryClientTest {
                 exactYellowUrl
             )
         )
-        assertFalse(
-            "An archived title with a colour that conflicts with the original product URL must be rejected",
+        assertTrue(
+            "Colour must not prevent use of a historical price for the same model and capacity",
             client.matchesVariantDetailsConfirmedByUrl(
                 expected,
                 "Apple iPhone 15 Plus 256GB Azul",
@@ -6019,7 +6018,7 @@ class WaybackPriceHistoryClientTest {
 
 
     @Test
-    fun exactYellowVariantPageDoesNotBorrowCheaperSiblingColourOffer() {
+    fun sameModelAndCapacityCanUseCheaperHistoricalOfferInAnotherColour() {
         val client = newClient()
         val targetUrl = "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo-libre"
         val snapshotUrl =
@@ -6058,9 +6057,9 @@ class WaybackPriceHistoryClientTest {
         )
 
         assertNotNull("The requested yellow 256GB SKU must remain recoverable", quote)
-        assertEquals("A cheaper blue sibling must not replace the target SKU price", 899.00, quote!!.price, 0.001)
-        assertTrue(quote.productTitle.contains("Amarillo", ignoreCase = true))
-        assertTrue("The colour omitted from the saved title must be confirmed by its exact URL", quote.variantIdentityConfirmedByUrl)
+        assertEquals("The lower price for the same model and 256GB should be recoverable", 249.00, quote!!.price, 0.001)
+        assertTrue(quote.productTitle.contains("Azul", ignoreCase = true))
+        assertTrue("The URL-backed model/capacity identity must remain traceable", quote.variantIdentityConfirmedByUrl)
     }
 
 }

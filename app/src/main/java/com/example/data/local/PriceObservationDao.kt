@@ -141,8 +141,10 @@ interface PriceObservationDao {
             "AND observedAt >= :dayStart AND observedAt < :dayEnd " +
             "AND isVerified = 1 " +
             "AND (lower(evidenceType) = 'archive' " +
-            "OR lower(sourceUrl) LIKE 'https://web.archive.org/web/%' " +
-            "OR lower(sourceUrl) LIKE 'http://web.archive.org/web/%') " +
+            "OR lower(trim(sourceUrl)) LIKE 'https://web.archive.org/web/%' " +
+            "OR lower(trim(sourceUrl)) LIKE 'http://web.archive.org/web/%' " +
+            "OR lower(trim(sourceUrl)) LIKE 'https://arquivo.pt/wayback/%' " +
+            "OR lower(trim(sourceUrl)) LIKE 'http://arquivo.pt/wayback/%') " +
             "AND upper(trim(currency)) = 'EUR' " +
             "AND price >= 0.5 AND price <= 10000.0 " +
             "AND trim(productTitle) <> '' " +
@@ -165,8 +167,10 @@ interface PriceObservationDao {
             "AND observedAt >= :dayStart AND observedAt < :dayEnd " +
             "AND isVerified = 1 " +
             "AND (lower(evidenceType) = 'archive' " +
-            "OR lower(sourceUrl) LIKE 'https://web.archive.org/web/%' " +
-            "OR lower(sourceUrl) LIKE 'http://web.archive.org/web/%') " +
+            "OR lower(trim(sourceUrl)) LIKE 'https://web.archive.org/web/%' " +
+            "OR lower(trim(sourceUrl)) LIKE 'http://web.archive.org/web/%' " +
+            "OR lower(trim(sourceUrl)) LIKE 'https://arquivo.pt/wayback/%' " +
+            "OR lower(trim(sourceUrl)) LIKE 'http://arquivo.pt/wayback/%') " +
             "AND upper(trim(currency)) = 'EUR' " +
             "AND price >= 0.5 AND price <= 10000.0 " +
             "AND trim(productTitle) <> '' " +

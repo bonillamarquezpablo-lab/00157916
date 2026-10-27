@@ -270,6 +270,79 @@ class FreeArchiveHistoryPersistenceTest {
     }
 
     @Test
+    fun legacyMementoUrlIsRecognizedByArchiveDailyDeduplication() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        val productId = "legacy-memento-dedup-test"
+        val title = "Anker Prime 27K Power Bank"
+        val originalUrl = "https://www.pccomponentes.com/anker-prime-27k"
+        val timestampFormat = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val rawTimestamp = timestampFormat.format(
+            Date(System.currentTimeMillis() - 60L * 24L * 60L * 60L * 1000L)
+        )
+        val archivedAt = timestampFormat.parse(rawTimestamp)!!.time
+        val mementoUrl = "https://arquivo.pt/wayback/$rawTimestamp/$originalUrl"
+
+        try {
+            // Legacy imports sometimes have a Memento URL but retain the old "live" evidence label.
+            // Archive identity must therefore be detected from the URL as well as evidenceType.
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = productId,
+                    storeId = "pccomponentes",
+                    price = 89.99,
+                    currency = "EUR",
+                    observedAt = archivedAt,
+                    sourceUrl = mementoUrl,
+                    sourceName = "Legacy Memento",
+                    isVerified = true,
+                    productTitle = title,
+                    storeName = "PcComponentes",
+                    sourceType = "Memento",
+                    linkType = "Archivo histórico",
+                    collectedAt = System.currentTimeMillis(),
+                    evidenceType = "live",
+                    sourcePageUrl = originalUrl
+                )
+            )
+            val day = java.util.Calendar.getInstance().apply {
+                timeInMillis = archivedAt
+                set(java.util.Calendar.HOUR_OF_DAY, 0)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }
+            val dayStart = day.timeInMillis
+            val dayEnd = (day.clone() as java.util.Calendar).apply {
+                add(java.util.Calendar.DAY_OF_MONTH, 1)
+            }.timeInMillis
+
+            val dao = database.priceObservationDao()
+            assertEquals(
+                "Legacy Memento rows must participate in same-day archive deduplication",
+                1,
+                dao.getArchivedObservationsForStoreProductDay(
+                    productId, "pccomponentes", dayStart, dayEnd
+                ).size
+            )
+            assertTrue(
+                "The single-row archive lookup must also recognize Memento URLs",
+                dao.getArchivedObservationForStoreProductDay(
+                    productId, "pccomponentes", dayStart, dayEnd
+                ) != null
+            )
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun mementoArchiveCapturePersistsAndAppearsInSavedPriceHistory() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val databaseName = "memento-history-${System.nanoTime()}.db"

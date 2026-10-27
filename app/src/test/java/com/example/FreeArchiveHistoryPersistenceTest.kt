@@ -1570,7 +1570,7 @@ class FreeArchiveHistoryPersistenceTest {
 
     
     @Test
-    fun archivedCaptureMatchesOriginalUrlWithSrsltidTrackingParameter() = runBlocking<Unit> {
+    fun archivedCaptureMatchesOriginalUrlWithRetailerAffiliateTrackingParameters() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(
             context,
@@ -1580,6 +1580,10 @@ class FreeArchiveHistoryPersistenceTest {
         val title = "Anker Prime 27K Power Bank"
         val canonicalUrl = "https://www.pccomponentes.com/anker-prime-27k"
         val requestedUrl = canonicalUrl + "?srsltid=AU7gw4Vgxo083-XCbQNB"
+        val archivedTargetUrl = canonicalUrl +
+            "?utm_source=1261643&utm_medium=afi&utm_campaign=t.me&sv1=affiliate" +
+            "&sv_campaign_id=1261643&awc=20982_1766682290_e53d08f0e63bcda7e84755641fb562dd" +
+            "&utm_term=deeplink&utm_content="
         val timestampFormat = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
             isLenient = false
             timeZone = TimeZone.getTimeZone("UTC")
@@ -1588,7 +1592,7 @@ class FreeArchiveHistoryPersistenceTest {
             Date(System.currentTimeMillis() - 60L * 24L * 60L * 60L * 1000L)
         )
         val archivedAt = timestampFormat.parse(rawTimestamp)!!.time
-        val snapshotUrl = "https://web.archive.org/web/${rawTimestamp}id_/$canonicalUrl"
+        val snapshotUrl = "https://web.archive.org/web/${rawTimestamp}id_/$archivedTargetUrl"
 
         try {
             database.productDao().insert(
@@ -1636,7 +1640,7 @@ class FreeArchiveHistoryPersistenceTest {
             )
 
             assertEquals(
-                "The tracking-only srsltid query must not make the archived page look like another product URL",
+                "Affiliate and search tracking parameters inside the archived target must not change product URL identity",
                 1,
                 outcome.insertedPoints
             )

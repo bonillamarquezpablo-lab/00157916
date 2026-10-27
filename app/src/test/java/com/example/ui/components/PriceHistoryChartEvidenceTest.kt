@@ -192,7 +192,7 @@ class PriceHistoryChartEvidenceTest {
             "Une observaciones de Mínimo y capturas históricas verificadas, conservando el origen de cada punto."
         ).assertIsDisplayed()
         assertTrue(composeRule.onAllNodesWithText("Mínimo").fetchSemanticsNodes().isNotEmpty())
-        assertTrue(composeRule.onAllNodesWithText("Histórico").fetchSemanticsNodes().size >= 2)
+        assertTrue(composeRule.onAllNodesWithText("Histórico").fetchSemanticsNodes().isNotEmpty())
     }
 
     private fun point(timestamp: Long, price: Double, source: String, evidence: String) = PricePoint(

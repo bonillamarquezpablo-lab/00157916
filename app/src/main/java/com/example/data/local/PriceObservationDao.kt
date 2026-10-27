@@ -10,14 +10,14 @@ import kotlinx.coroutines.flow.Flow
 
 private const val AUTHENTIC_ARCHIVE_URL_SQL =
     "(" +
-        "lower(trim(sourceUrl)) GLOB 'https://web.archive.org/web/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]id_/https://*' OR ' +
-        "lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]/https://*' OR ' +
-        "lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]mp_/https://*' OR ' +
-        "lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]id_/https://*' OR ' +
-        "lower(trim(sourceUrl)) GLOB 'https://web.archive.org/web/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]id_/http://*' OR ' +
-        "lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]/http://*' OR ' +
-        "lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]mp_/http://*' OR ' +
-        "lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]id_/http://*'' +
+        "lower(trim(sourceUrl)) GLOB 'https://web.archive.org/web/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]id_/https://*' OR " +
+        "lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]/https://*' OR " +
+        "lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]mp_/https://*' OR " +
+        "lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]id_/https://*' OR " +
+        "lower(trim(sourceUrl)) GLOB 'https://web.archive.org/web/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]id_/http://*' OR " +
+        "lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]/http://*' OR " +
+        "lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]mp_/http://*' OR " +
+        "lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]id_/http://*'" +
         ")"
 
 /**

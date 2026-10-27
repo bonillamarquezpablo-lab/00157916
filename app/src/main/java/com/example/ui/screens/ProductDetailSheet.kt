@@ -260,6 +260,97 @@ internal fun buildWaybackDiagnosticSummary(
  * Builds a copy/paste-ready report from the diagnostics already collected during one lookup.
  * It performs no network requests. URLs, query strings and accidental raw HTML are removed.
  */
+internal data class WaybackDiagnosticFinding(
+    val probableCause: String,
+    val recommendedNextStep: String
+)
+
+/**
+ * Converts the raw trace into a readable first diagnosis. This is a heuristic, not a claim that
+ * the suspected cause is proven; the cited phase/code remains the evidence to inspect.
+ */
+internal fun buildWaybackDiagnosticFinding(
+    freeHistoryStatus: String?,
+    steps: List<WaybackDiagnosticEntry>
+): WaybackDiagnosticFinding {
+    val allText = buildString {
+        append(freeHistoryStatus.orEmpty()).append('\n')
+        steps.forEach { entry ->
+            append(entry.title).append('\n')
+            append(entry.detail).append('\n')
+        }
+    }
+    val identityCodes = listOf(
+        "PRODUCT_IDENTITY_MISMATCH",
+        "ORIGINAL_URL_NOT_HTTPS",
+        "ARCHIVE_TARGET_URL_MISMATCH",
+        "QUOTE_ORIGINAL_URL_MISMATCH",
+        "TARGET_PRODUCT_ID_NOT_MATCHING_EXPECTED_TITLE",
+        "ORIGINAL_URL_NOT_CANONICAL"
+    )
+    val valueCodes = listOf(
+        "INVALID_PRICE_CURRENCY_OR_DATE",
+        "IMPLAUSIBLE_PRODUCT_PRICE",
+        "ARCHIVE_PRICE_METADATA_MISSING",
+        "PRICE_NOT_FOUND",
+        "HISTORICAL_EXCHANGE_RATE_MISSING"
+    )
+    val phase19 = steps.firstOrNull { it.step == 19 && !it.isCaptureDetail }
+    val rejectedCount = Regex("""(?i)capturas rechazadas\s*=\s*(\d+)""")
+        .find(allText)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+
+    return when {
+        identityCodes.any { allText.contains(it, ignoreCase = true) } ->
+            WaybackDiagnosticFinding(
+                probableCause = "Hay capturas o precios que no pasan la comprobación de identidad/URL. La descarga puede ser correcta, pero el guardado los rechaza para evitar mezclar modelos o variantes.",
+                recommendedNextStep = "Revisar las fases 23 y 25, y el registro individual de cada captura. Comparar título esperado, título archivado, URL original y confirmación de variante. No desactivar el filtro de identidad."
+            )
+        phase19?.status == WaybackTraceStatus.FAILED && rejectedCount > 0 ->
+            WaybackDiagnosticFinding(
+                probableCause = "El proceso llegó a la persistencia, pero la base local no aceptó todos los precios recuperados. El motivo concreto debe aparecer en los códigos de rechazo de la fase 19 y en la fase 25.",
+                recommendedNextStep = "Abrir las fases 19, 25, 26 y 28. Comprobar si cada precio terminó como nuevo, duplicado válido o rechazado con un motivo; si los contadores no cuadran, corregir ese camino."
+            )
+        valueCodes.any { allText.contains(it, ignoreCase = true) } ->
+            WaybackDiagnosticFinding(
+                probableCause = "Se ha detectado un problema de datos: precio, moneda, fecha histórica, cambio de divisa o metadatos que el extractor no pudo verificar.",
+                recommendedNextStep = "Revisar las fases 17, 21, 22 y 24 junto al detalle de la captura. Confirmar qué campo falta o no supera la validación antes de modificar el extractor."
+            )
+        allText.contains("WAYBACK_RATE_LIMITED", ignoreCase = true) ||
+            Regex("""(?i)\bHTTP\s*429\b""").containsMatchIn(allText) ->
+            WaybackDiagnosticFinding(
+                probableCause = "El servicio de archivo aplicó un límite temporal de consultas. Esto no demuestra que no existan capturas.",
+                recommendedNextStep = "Revisar las fases 4–8 para distinguir una pausa activa de un 429 antiguo, respetar el tiempo de espera y usar los resultados parciales ya recuperados."
+            )
+        Regex("""(?i)(TIMEOUT|TIMED_OUT|SOCKET_TIMEOUT|DNS_FAILURE|SNAPSHOT_STREAM_RESET|CONNECTION_RESET|CDX_\\w+_TIMEOUT)""")
+            .containsMatchIn(allText) ->
+            WaybackDiagnosticFinding(
+                probableCause = "Hay indicios de un problema de red o de tiempo de espera al consultar el índice o descargar una captura. Un timeout no equivale a que el archivo esté vacío.",
+                recommendedNextStep = "Revisar las fases 5–14 y el detalle de cada captura: proveedor, ruta consultada, tiempo de espera y etapa exacta que no terminó. Evitar repetir consultas amplias si ya agotaron el tiempo."
+            )
+        allText.contains("ARCHIVE_PRICE_METADATA_MISSING", ignoreCase = true) ||
+            allText.contains("EXTRACTOR_NO_PRICE", ignoreCase = true) ->
+            WaybackDiagnosticFinding(
+                probableCause = "La página archivada se abrió, pero el extractor no encontró un precio verificable en el formato disponible.",
+                recommendedNextStep = "Revisar las fases 21 y 22 y la fecha/ruta de esa captura. Diferenciar precio ausente en el HTML de un formato nuevo que el extractor aún no reconoce."
+            )
+        steps.any { it.step in 5..14 && it.status == WaybackTraceStatus.FAILED } ->
+            WaybackDiagnosticFinding(
+                probableCause = "El fallo parece estar antes del guardado: consulta del índice, selección de capturas, descarga o validación de la página archivada.",
+                recommendedNextStep = "Localizar la primera fase fallida entre 5 y 14 y seguir el mismo identificador de captura. No cambiar la persistencia hasta confirmar que el extractor produjo un precio válido."
+            )
+        steps.any { it.step == 19 && it.status == WaybackTraceStatus.PASSED } ->
+            WaybackDiagnosticFinding(
+                probableCause = "La persistencia comunicó un resultado correcto; el siguiente punto a revisar es la actualización de la ficha/gráfica y el estado final.",
+                recommendedNextStep = "Comparar las fases 19, 26, 28 y 29. Si hay puntos nuevos pero no aparecen en la ficha, revisar la lectura de Room y la actualización de interfaz."
+            )
+        else ->
+            WaybackDiagnosticFinding(
+                probableCause = "Con los datos registrados no se puede aislar una causa única. Puede que no hubiera capturas, que no se extrajera ningún precio o que la consulta se omitiera.",
+                recommendedNextStep = "Buscar la primera fase fallida y el primer código de causa; si todas aparecen omitidas, comprobar por qué no arrancó la consulta. Compartir el informe completo, no solo el resumen."
+            )
+    }
+}
+
 internal fun buildWaybackDiagnosticExportReport(
     productTitle: String,
     freeHistoryStatus: String?,
@@ -273,7 +364,7 @@ internal fun buildWaybackDiagnosticExportReport(
         WaybackTraceStatus.RUNNING -> "EN CURSO"
         WaybackTraceStatus.PASSED -> "SUPERADO"
         WaybackTraceStatus.FAILED -> "FALLÓ"
-        WaybackTraceStatus.SKIPPED -> "NO EJECUTADO"
+        WaybackTraceStatus.SKIPPED -> "NO EJECUTADO / OMITIDO"
     }
 
     fun safeDetail(raw: String): String {
@@ -296,8 +387,10 @@ internal fun buildWaybackDiagnosticExportReport(
     val phaseRows = steps.filterNot { it.isCaptureDetail }.associateBy { it.step }
     val captures = steps.filter { it.isCaptureDetail }
     val statuses = phaseRows.values.groupingBy { it.status }.eachCount()
+    val captureStatuses = captures.groupingBy { it.status }.eachCount()
     val statusText = freeHistoryStatus?.trim().orEmpty().ifBlank { "No se registró un estado final." }
     val summary = buildWaybackDiagnosticSummary(freeHistoryStatus, steps)
+    val finding = buildWaybackDiagnosticFinding(freeHistoryStatus, steps)
     val report = StringBuilder(12_000)
     report.appendLine("INFORME COMPLETO DE DIAGNÓSTICO — MÍNIMO / INTERNET ARCHIVE")
     report.appendLine("Generado: " + generatedAt)
@@ -306,6 +399,59 @@ internal fun buildWaybackDiagnosticExportReport(
     report.appendLine("Producto: " + safeDetail(productTitle.replace(Regex("""[\r\n]+"""), " ").trim().take(180)))
     report.appendLine("Resultado comunicado por la app: " + safeDetail(statusText))
     report.appendLine("Resumen del diagnóstico: " + safeDetail(summary))
+    report.appendLine("Formato del informe: v2 · 30 fases generales + detalle por captura")
+    report.appendLine()
+    report.appendLine("HALLAZGO PRINCIPAL Y SIGUIENTE PASO")
+    report.appendLine("Causa probable (orientativa): " + safeDetail(finding.probableCause))
+    report.appendLine("Qué revisar ahora: " + safeDetail(finding.recommendedNextStep))
+    val firstFailedPhase = phaseRows.values
+        .filter { it.status == WaybackTraceStatus.FAILED }
+        .minByOrNull { it.step }
+    val firstFailedCapture = captures.firstOrNull { it.status == WaybackTraceStatus.FAILED }
+    report.appendLine("Primera fase fallida: " + (firstFailedPhase?.let {
+        "${it.step}. ${safeDetail(it.title)}"
+    } ?: "ninguna registrada"))
+    report.appendLine("Primera captura fallida: " + (firstFailedCapture?.let {
+        safeDetail(it.title)
+    } ?: "ninguna registrada"))
+    report.appendLine(
+        "Capturas por estado: ${captures.size} total; ${captureStatuses[WaybackTraceStatus.PASSED] ?: 0} superadas; " +
+            "${captureStatuses[WaybackTraceStatus.FAILED] ?: 0} fallidas; " +
+            "${captureStatuses[WaybackTraceStatus.SKIPPED] ?: 0} omitidas; " +
+            "${captureStatuses[WaybackTraceStatus.RUNNING] ?: 0} en curso."
+    )
+    report.appendLine()
+    report.appendLine("INDICIOS CLASIFICADOS POR TIPO")
+    val categories = listOf(
+        "Red, proveedor o límite de consultas" to Regex(
+            """(?i)(HTTP\\s*429|WAYBACK_RATE_LIMITED|MEMENTO_RATE_LIMITED|TIMEOUT|TIMED_OUT|SOCKET|DNS|SSL|CONNECTION|STREAM_RESET|CDX_\\w+_TIMEOUT|NETWORK)"""
+        ),
+        "Identidad del producto o URL" to Regex(
+            """(?i)(IDENTITY|PRODUCT_IDENTITY_MISMATCH|URL_\\w*(MISMATCH|HTTPS|CANONICAL)|TARGET_PRODUCT|ORIGINAL_URL_NOT_HTTPS|ARCHIVE_TARGET_URL_MISMATCH|QUOTE_ORIGINAL_URL_MISMATCH)"""
+        ),
+        "Extracción, HTML o metadatos" to Regex(
+            """(?i)(EXTRACTOR|EXTRACTION|HTML|METADATA|PARSER|DECODE|PRICE_NOT_FOUND|NO_PRICE|ARCHIVE_PRICE_METADATA_MISSING|PROFILE)"""
+        ),
+        "Precio, moneda o fecha" to Regex(
+            """(?i)(INVALID_PRICE|CURRENCY|IMPLAUSIBLE|EXCHANGE_RATE|TIMESTAMP|OBSERVED_AT|INVALID_DATE|EURO|EUR)"""
+        ),
+        "Guardado local, duplicados o contadores" to Regex(
+            """(?i)(PERSIST|ROOM|DUPLICAT|GUARDADO|RECHAZ|INVALID_ROW|FILAS ANTIGUAS|CONTADORES|INSERTED|SAVED POINTS)"""
+        ),
+        "Caché, pausa o decisión de flujo" to Regex(
+            """(?i)(CACHE_SKIPPED|CACHE|COOLDOWN|CIRCUIT|PAUSA GLOBAL|NO EJECUTADO|OMITID[AO]|FALLBACK)"""
+        )
+    )
+    for ((categoryName, pattern) in categories) {
+        val events = steps.flatMap { entry ->
+            entry.detail.lines().filter { it.isNotBlank() && pattern.containsMatchIn(it) }.map { line ->
+                "Fase ${entry.step} — ${safeDetail(entry.title)}: ${safeDetail(line)}"
+            }
+        }.distinct().take(8)
+        report.appendLine(categoryName + ":")
+        if (events.isEmpty()) report.appendLine("   Sin indicios registrados.")
+        else events.forEach { report.appendLine("   " + it) }
+    }
     report.appendLine()
     report.appendLine("RESULTADOS SEPARADOS POR SERVICIO")
     val serviceGroups: List<Pair<String, (WaybackDiagnosticEntry, String) -> Boolean>> = listOf(
@@ -361,8 +507,8 @@ internal fun buildWaybackDiagnosticExportReport(
             (statuses[WaybackTraceStatus.PENDING] ?: 0) + " pendientes."
     )
     report.appendLine()
-    report.appendLine("FASES GENERALES (1–22)")
-    for (step in 1..22) {
+    report.appendLine("FASES GENERALES (1–30)")
+    for (step in 1..30) {
         val entry = phaseRows[step]
         report.appendLine()
         if (entry == null) {
@@ -394,6 +540,7 @@ internal fun buildWaybackDiagnosticExportReport(
     }
     report.appendLine()
     report.appendLine("PRIVACIDAD: se han omitido las URL completas, parámetros de URL y contenido HTML.")
+    report.appendLine("NOTA: la causa probable es una ayuda de diagnóstico basada en los registros; confirma el código y la fase indicados antes de reparar.")
     report.appendLine("Este informe refleja los registros que la app conservó durante la búsqueda; no realiza otra consulta.")
     return report.toString().trim()
 }

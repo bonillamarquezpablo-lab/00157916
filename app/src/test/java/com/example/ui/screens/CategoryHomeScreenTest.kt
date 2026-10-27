@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -193,6 +194,8 @@ class CategoryHomeScreenTest {
 
         composeRule.onNodeWithTag("smartphone_subcategory_home")
             .performScrollToNode(androidx.compose.ui.test.hasTestTag("subcategory_card_PHONES"))
+        composeRule.onNodeWithContentDescription("Icono de móviles").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Icono de tablets").assertIsDisplayed()
         composeRule.onNodeWithTag("subcategory_card_PHONES").performClick()
         composeRule.waitForIdle()
         assertTrue("Opening a subcategory must request its product flow", productFlowRequested)

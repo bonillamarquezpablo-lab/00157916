@@ -128,6 +128,7 @@ internal fun sanitizeCombinedHistoryPoints(points: List<PricePoint>): List<Price
                 .thenBy { it.price }
                 .thenBy { if (it.isArchiveEvidence) 1 else 0 }
         )
+        .toList()
 
 /**
  * A monotone cubic Bezier path: smoother than straight segments, with tangent limiting so

@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.AppDatabase
 import com.example.data.local.ProductEntity
 import com.example.data.model.ProductCategory
+import com.example.data.model.Store
 import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.remote.onlineProductIdentityKey
 import com.example.data.repository.ProductRepository

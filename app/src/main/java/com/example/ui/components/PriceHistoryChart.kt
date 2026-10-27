@@ -430,7 +430,9 @@ fun PriceHistoryChart(
                             selectedPointIndex = -1
                         },
                         label = { Text(series.label, fontSize = 11.sp) },
-                        modifier = Modifier.heightIn(min = 36.dp)
+                        modifier = Modifier
+                            .heightIn(min = 36.dp)
+                            .testTag("price_history_series_${series.name.lowercase(Locale.ROOT)}")
                     )
                 }
             }

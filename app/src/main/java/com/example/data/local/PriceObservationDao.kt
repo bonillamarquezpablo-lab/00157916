@@ -8,6 +8,18 @@ import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
+private const val AUTHENTIC_ARCHIVE_URL_SQL =
+    "(" +
+        "lower(trim(sourceUrl)) GLOB 'https://web.archive.org/web/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]id_/https://*' OR ' +
+        "lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]/https://*' OR ' +
+        "lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]mp_/https://*' OR ' +
+        "lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]id_/https://*' OR ' +
+        "lower(trim(sourceUrl)) GLOB 'https://web.archive.org/web/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]id_/http://*' OR ' +
+        "lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]/http://*' OR ' +
+        "lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]mp_/http://*' OR ' +
+        "lower(trim(sourceUrl)) GLOB 'https://arquivo.pt/wayback/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]id_/http://*'' +
+        ")"
+
 /**
  * Durable price observations for source-backed history.
  * Callers must not mark an entry verified until its source response has been validated.
@@ -120,7 +132,9 @@ interface PriceObservationDao {
             "AND upper(trim(currency)) = 'EUR' " +
             "AND price >= 0.5 AND price <= 10000.0 " +
             "AND trim(productTitle) <> '' AND trim(storeName) <> '' " +
-            "AND observedAt > 0 AND observedAt <= :nowMillis + 300000"
+            "AND observedAt > 0 AND observedAt <= :nowMillis + 300000 " +
+            "AND (NOT (lower(trim(evidenceType)) = 'archive' OR lower(trim(sourceUrl)) LIKE 'https://web.archive.org/web/%' OR lower(trim(sourceUrl)) LIKE 'http://web.archive.org/web/%' OR lower(trim(sourceUrl)) LIKE 'https://arquivo.pt/wayback/%' OR lower(trim(sourceUrl)) LIKE 'http://arquivo.pt/wayback/%' OR lower(trim(sourceUrl)) LIKE 'https://archive.org/%' OR lower(trim(sourceUrl)) LIKE 'http://archive.org/%') " +
+            "OR " + AUTHENTIC_ARCHIVE_URL_SQL + ")"
     )
     suspend fun getVerifiedObservationCount(
         nowMillis: Long = System.currentTimeMillis()
@@ -161,6 +175,7 @@ interface PriceObservationDao {
             "OR lower(trim(sourceUrl)) LIKE 'http://web.archive.org/web/%' " +
             "OR lower(trim(sourceUrl)) LIKE 'https://arquivo.pt/wayback/%' " +
             "OR lower(trim(sourceUrl)) LIKE 'http://arquivo.pt/wayback/%') " +
+            "AND " + AUTHENTIC_ARCHIVE_URL_SQL + " " +
             "AND upper(trim(currency)) = 'EUR' " +
             "AND price >= 0.5 AND price <= 10000.0 " +
             "AND trim(productTitle) <> '' " +

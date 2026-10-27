@@ -39,7 +39,7 @@ class PriceHistoryChartEvidenceTest {
             composeRule.onAllNodesWithText("Histórico")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("Histórico").assertIsDisplayed()
+        assertTrue(composeRule.onAllNodesWithText("Histórico").fetchSemanticsNodes().size >= 2)
         composeRule.onNodeWithText("1 observación").assertIsDisplayed()
         // Allow Compose to finish switching to the recovered series before checking its detail.
         composeRule.waitUntil(3_000L) {
@@ -76,7 +76,7 @@ class PriceHistoryChartEvidenceTest {
                 .fetchSemanticsNodes().isNotEmpty() &&
                 composeRule.onAllNodesWithText("399,99 €").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("Histórico").assertIsDisplayed()
+        assertTrue(composeRule.onAllNodesWithText("Histórico").fetchSemanticsNodes().size >= 2)
         composeRule.onNodeWithText("399,99 €").assertIsDisplayed()
         composeRule.onNodeWithText("01/01/2026 en Tienda de prueba").assertIsDisplayed()
     }
@@ -124,12 +124,12 @@ class PriceHistoryChartEvidenceTest {
         }
 
         // With a single live observation, recovered external history is the useful default view.
-        composeRule.onNodeWithText("Histórico").assertIsDisplayed()
+        assertTrue(composeRule.onAllNodesWithText("Histórico").fetchSemanticsNodes().size >= 2)
         composeRule.onNodeWithText("Mínimo").performClick()
         composeRule.onNodeWithText("Evolución del precio observado").assertIsDisplayed()
 
-        composeRule.onNodeWithText("Histórico").performClick()
-        composeRule.onNodeWithText("Histórico").assertIsDisplayed()
+        composeRule.onAllNodesWithText("Histórico").onLast().performClick()
+        assertTrue(composeRule.onAllNodesWithText("Histórico").fetchSemanticsNodes().size >= 2)
         composeRule.onNodeWithText(
             "Capturas históricas verificadas de Internet Archive y Arquivo.pt; no son ofertas actuales."
         ).assertIsDisplayed()
@@ -146,6 +146,52 @@ class PriceHistoryChartEvidenceTest {
             composeRule.onAllNodesWithText("Media 90 d:", substring = true)
                 .fetchSemanticsNodes().isEmpty()
         )
+    }
+
+
+    @Test
+    fun combinedHistoryCombinesLiveAndArchiveWithoutHidingDifferentPricesAtSameTimestamp() {
+        val now = System.currentTimeMillis()
+        val tenDays = 10L * 24L * 60L * 60L * 1000L
+        val hundredDays = 100L * 24L * 60L * 60L * 1000L
+        val live = listOf(
+            point(now - tenDays, 99.99, "PcComponentes", "live"),
+            point(now, 89.99, "MediaMarkt", "live")
+        )
+        val archives = listOf(
+            point(now - hundredDays, 129.99, "PcComponentes", "archive"),
+            // An exact same time, price and merchant is a duplicate; prefer Mínimo's live point.
+            point(now - tenDays, 99.99, "PcComponentes", "archive"),
+            // A different archived price at the same timestamp is distinct evidence and stays visible.
+            point(now - tenDays, 95.99, "PcComponentes", "archive")
+        )
+
+        val combined = combineLiveAndArchiveHistory(live, archives)
+        assertEquals("Only the exact same time/price/merchant observation should be deduplicated", 4, combined.size)
+        assertTrue(combined.any { it.timestamp == now - tenDays && it.price == 95.99 && it.isArchiveEvidence })
+        assertTrue(combined.any { it.price == 99.99 && !it.isExternalHistoryEvidence })
+        assertTrue(combined.any { it.timestamp == now - hundredDays && it.isArchiveEvidence })
+
+        composeRule.setContent {
+            MaterialTheme {
+                PriceHistoryChart(
+                    priceHistory = live,
+                    avg90dPrice = 90.0,
+                    archiveHistory = archives
+                )
+            }
+        }
+
+        composeRule.waitUntil(3_000L) {
+            composeRule.onAllNodesWithText("Combinado").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("Combinado").performClick()
+        composeRule.onNodeWithText("Histórico combinado").assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "Une observaciones de Mínimo y capturas históricas verificadas, conservando el origen de cada punto."
+        ).assertIsDisplayed()
+        assertTrue(composeRule.onAllNodesWithText("Mínimo").fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeRule.onAllNodesWithText("Histórico").fetchSemanticsNodes().size >= 2)
     }
 
     private fun point(timestamp: Long, price: Double, source: String, evidence: String) = PricePoint(

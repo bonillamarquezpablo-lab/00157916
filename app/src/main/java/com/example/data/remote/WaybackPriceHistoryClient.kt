@@ -5630,7 +5630,12 @@ class WaybackPriceHistoryClient(
         // A saved title may omit colour while its retailer URL identifies the exact variant
         // (for example, "...iphone-15-plus-256gb-amarillo-libre"). Let that URL confirm the
         // colour, but reject any archived title that explicitly contradicts the URL.
-        if (expectedColour == null && archivedColour != null && urlColour != archivedColour) return false
+        if (expectedColour == null && (archivedColour != null || urlColour != null)) {
+            // The selected product has no colour: only accept a coloured offer when both the
+            // archived offer title and that offer's own URL explicitly agree. The archived
+            // page's primary URL may belong to a different merchant or sibling SKU.
+            if (archivedColour == null || urlColour == null || archivedColour != urlColour) return false
+        }
         if (expectedColour != null && urlColour != null && urlColour != expectedColour) return false
         // An offer URL must not silently assign a capacity to a saved product whose
         // storage is unknown; keep those records separate until identity is explicit.

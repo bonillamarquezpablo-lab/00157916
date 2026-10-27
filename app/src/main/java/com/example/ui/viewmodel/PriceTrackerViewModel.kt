@@ -124,6 +124,11 @@ internal fun mergeWaybackDiagnosticStatus(
     diagnosticStep: Int? = null,
     detail: String = ""
 ): WaybackTraceStatus = when {
+    // Audit phases 23–29 are consistency gates. Any failure must remain visible even if a
+    // later sub-check passes; green status must never erase a real rejection or mismatch.
+    diagnosticStep in 23..29 &&
+        (current == WaybackTraceStatus.FAILED || incoming == WaybackTraceStatus.FAILED) ->
+        WaybackTraceStatus.FAILED
     // Capture rows (download and barrier evaluation) represent several individually labelled
     // captures. If any one fails, keep the aggregate row red even if another capture succeeded;
     // the per-capture detail lines show exactly which dates succeeded and which DNS/download failed.
@@ -260,7 +265,15 @@ private val WAYBACK_DIAGNOSTIC_TITLES = listOf(
     "Guardado del histórico en la base de datos local",
     "Actualización de la ficha/gráfica y resultado final",
     "Perfil y decodificación de la página archivada",
-    "Decisión del extractor y causa de rechazo del precio"
+    "Decisión del extractor y causa de rechazo del precio",
+    "Identidad del producto y vínculo URL comprobados",
+    "Precio, moneda y fecha validados",
+    "Motivos de rechazo registrados y contabilizados",
+    "Resultado de guardado local confirmado",
+    "Duplicados existentes e integridad de filas revisados",
+    "Coherencia entre capturas, guardados y rechazos",
+    "Actualización de ficha y gráfico comprobada",
+    "Diagnóstico final y estado de la operación"
 )
 
 data class SerpApiActionConfirmation(
@@ -466,7 +479,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         detail: String,
         durationMs: Long? = null
     ) {
-        if (step !in 1..22) return
+        if (step !in 1..30) return
         val time = SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(Date())
         val detailLine = "[$time] " + detail.trim() + (durationMs?.let { " · ${it} ms" } ?: "")
         // Trace callbacks can arrive from Dispatchers.IO while the ViewModel updates UI state.
@@ -585,7 +598,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         val initial = _uiState.value
         if (initial.waybackDiagnosticProductId != productId || initial.waybackDiagnosticSteps.isEmpty()) return
         for (row in initial.waybackDiagnosticSteps.filterNot { it.isCaptureDetail }) {
-            if (row.step == 20) continue
+            // Steps 20 and 30 are terminal summaries, not executable phases.
+            if (row.step == 20 || row.step == 30) continue
             when (row.status) {
                 WaybackTraceStatus.PENDING ->
                     reportWaybackDiagnostic(
@@ -617,6 +631,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             })
         }
         reportWaybackDiagnostic(productId, 20, finalStatus, finalDetail)
+        reportWaybackDiagnostic(
+            productId, 30, finalStatus,
+            "Resultado final=$finalStatus. $finalDetail"
+        )
     }
 
     init {
@@ -3328,6 +3346,112 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     val persistenceDetailWithCounts = "$persistenceDetail\n$persistenceCounters"
                     reportWaybackDiagnostic(
                         diagnosticProductId, 19, persistenceStatus, persistenceDetailWithCounts
+                    )
+
+                    // Expanded diagnostic gates (23–29) separate product identity, data quality,
+                    // persistence outcomes and UI refresh. They use counters already collected by
+                    // this search, so they do not perform additional network or paid requests.
+                    val extractedForReport = foundPrimaryCount + foundSecondaryCount
+                    val savedTotalForReport = savedCount + crossSavedVariantObservationCount
+                    val confirmedDuplicateTotalForReport =
+                        confirmedPrimaryDuplicateCount + confirmedVariantDuplicateCount
+                    val identityRejectCount = archiveQuoteRejectionReasons
+                        .filterKeys { key ->
+                            key.contains("IDENTITY", ignoreCase = true) ||
+                                key.contains("URL", ignoreCase = true) ||
+                                key.contains("TARGET_PRODUCT", ignoreCase = true)
+                        }.values.sum()
+                    val valueRejectCount = archiveQuoteRejectionReasons
+                        .filterKeys { key ->
+                            listOf("PRICE", "CURRENCY", "DATE", "EUR", "EXCHANGE", "IMPLAUSIBLE")
+                                .any { marker -> key.contains(marker, ignoreCase = true) }
+                        }.values.sum()
+                    val rejectionReasonTotal = archiveQuoteRejectionReasons.values.sum()
+                    val rejectionCountsConsistent = rejectionReasonTotal == rejectedArchiveQuoteCount
+
+                    reportWaybackDiagnostic(
+                        diagnosticProductId, 23,
+                        when {
+                            identityRejectCount > 0 -> WaybackTraceStatus.FAILED
+                            extractedForReport > 0 -> WaybackTraceStatus.PASSED
+                            else -> WaybackTraceStatus.SKIPPED
+                        },
+                        "Precios extraídos=$extractedForReport; rechazos relacionados con identidad/URL=$identityRejectCount. " +
+                            "Motivos relevantes: " + archiveQuoteRejectionReasons.entries
+                            .filter { it.key.contains("IDENTITY", true) || it.key.contains("URL", true) ||
+                                it.key.contains("TARGET_PRODUCT", true) }
+                            .joinToString(", ") { "${it.key}=${it.value}" }.ifBlank { "ninguno" } + "."
+                    )
+                    reportWaybackDiagnostic(
+                        diagnosticProductId, 24,
+                        when {
+                            valueRejectCount > 0 -> WaybackTraceStatus.FAILED
+                            extractedForReport > 0 -> WaybackTraceStatus.PASSED
+                            else -> WaybackTraceStatus.SKIPPED
+                        },
+                        "Precios extraídos=$extractedForReport; rechazos por precio/moneda/fecha=$valueRejectCount. " +
+                            "Motivos: " + archiveQuoteRejectionReasons.entries
+                            .filter { entry -> listOf("PRICE", "CURRENCY", "DATE", "EUR", "EXCHANGE", "IMPLAUSIBLE")
+                                .any { entry.key.contains(it, true) } }
+                            .joinToString(", ") { "${it.key}=${it.value}" }.ifBlank { "ninguno" } + "."
+                    )
+                    reportWaybackDiagnostic(
+                        diagnosticProductId, 25,
+                        if (rejectionCountsConsistent) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
+                        "Rechazos totales=$rejectedArchiveQuoteCount; suma de motivos=$rejectionReasonTotal; " +
+                            "coinciden=${rejectionCountsConsistent}. Ningún contenido rechazado se añade al historial."
+                    )
+                    reportWaybackDiagnostic(
+                        diagnosticProductId, 26,
+                        when {
+                            savedTotalForReport > 0 || confirmedDuplicateTotalForReport > 0 ||
+                                stagedDiscoveryObservationsCount.get() > 0 -> WaybackTraceStatus.PASSED
+                            !persistenceCompleted || extractedForReport > 0 -> WaybackTraceStatus.FAILED
+                            else -> WaybackTraceStatus.SKIPPED
+                        },
+                        "Guardados nuevos=$savedTotalForReport; duplicados confirmados=$confirmedDuplicateTotalForReport; " +
+                            "observaciones en cuarentena=${stagedDiscoveryObservationsCount.get()}; " +
+                            "rechazos=$rejectedArchiveQuoteCount; operación de persistencia completada=$persistenceCompleted."
+                    )
+                    reportWaybackDiagnostic(
+                        diagnosticProductId, 27,
+                        when {
+                            invalidArchivedRowIds.isNotEmpty() -> WaybackTraceStatus.FAILED
+                            confirmedDuplicateTotalForReport > 0 -> WaybackTraceStatus.PASSED
+                            else -> WaybackTraceStatus.SKIPPED
+                        },
+                        "Duplicados válidos del producto seleccionado=$confirmedPrimaryDuplicateCount; " +
+                            "duplicados válidos de variantes=$confirmedVariantDuplicateCount; " +
+                            "filas antiguas inválidas ignoradas=${invalidArchivedRowIds.size}. " +
+                            "Una fila inválida no se cuenta como duplicado válido."
+                    )
+                    val accountingIsExplained = extractedForReport == 0 ||
+                        savedTotalForReport > 0 || confirmedDuplicateTotalForReport > 0 ||
+                        rejectedArchiveQuoteCount > 0 || stagedDiscoveryObservationsCount.get() > 0
+                    reportWaybackDiagnostic(
+                        diagnosticProductId, 28,
+                        when {
+                            !persistenceCompleted || !rejectionCountsConsistent || !accountingIsExplained ->
+                                WaybackTraceStatus.FAILED
+                            extractedForReport > 0 || savedTotalForReport > 0 ->
+                                WaybackTraceStatus.PASSED
+                            else -> WaybackTraceStatus.SKIPPED
+                        },
+                        "Extraídos=$extractedForReport; nuevos=$savedTotalForReport; " +
+                            "duplicados confirmados=$confirmedDuplicateTotalForReport; " +
+                            "rechazos=$rejectedArchiveQuoteCount (motivos=$rejectionReasonTotal); " +
+                            "cuarentena=${stagedDiscoveryObservationsCount.get()}; " +
+                            "cuentas explicadas=$accountingIsExplained."
+                    )
+                    reportWaybackDiagnostic(
+                        diagnosticProductId, 29,
+                        when {
+                            selectedProductRefreshed -> WaybackTraceStatus.PASSED
+                            selectedProductRefreshNeeded || savedCount > 0 -> WaybackTraceStatus.FAILED
+                            else -> WaybackTraceStatus.SKIPPED
+                        },
+                        "Actualización solicitada=$selectedProductRefreshNeeded; ficha refrescada=$selectedProductRefreshed; " +
+                            "puntos nuevos del producto seleccionado=$savedCount."
                     )
                     val gateStatus = when {
                         // Network activity is stronger evidence than aggregate error codes: the

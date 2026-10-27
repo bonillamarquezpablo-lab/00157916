@@ -147,6 +147,38 @@ data class Product(
             currentPrice.isFinite() && currentPrice > 0.0 &&
             savedHistoricalPrice == null
 
+    /**
+     * Builds a transient detail-sheet view of the latest public search listing.
+     *
+     * This copy is intentionally unverified and must not be written back to Room: it lets the
+     * user see the price that was just returned by search without replacing a trusted saved quote
+     * or deleting its historical evidence.
+     */
+    fun withUnverifiedLiveSearchListing(
+        listedPrice: Double,
+        observedAt: Long,
+        sourceUrl: String,
+        sourceName: String,
+        sourceStore: Store
+    ): Product {
+        if (!listedPrice.isFinite() || listedPrice <= 0.0 || sourceUrl.isBlank()) return this
+        return copy(
+            currentPrice = listedPrice,
+            athMinDate = PENDING_VERIFICATION_DATE_LABEL,
+            athMinStore = "",
+            currentStore = sourceStore,
+            storeUrl = sourceUrl,
+            isPriceVerified = false,
+            priceObservedAt = observedAt.takeIf {
+                it > 0L && it <= System.currentTimeMillis()
+            },
+            priceSource = sourceName.trim().ifBlank { sourceStore.name },
+            savedHistoricalPrice = null,
+            savedHistoricalPriceObservedAt = null,
+            savedHistoricalPriceSource = ""
+        )
+    }
+
     val priceDisplayStatus: PriceDisplayStatus
         get() = when {
             isPriceFresh && currentPrice.isFinite() && currentPrice > 0.0 ->

@@ -2684,6 +2684,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             var selectedProductHistoricalQuoteFound = false
             try {
                 var savedCount = 0
+                // Aggregate per-capture Room write failures outside the inner candidate loop;
+                // the terminal diagnostic needs the whole search's result, not a loop-local flag.
+                var overallPersistenceCompleted = true
                 var crossSavedVariantObservationCount = 0
                 var confirmedPrimaryDuplicateCount = 0
                 var confirmedVariantDuplicateCount = 0
@@ -2866,6 +2869,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         throw cancelled
                     } catch (_: Exception) {
                         persistenceCompleted = false
+                        overallPersistenceCompleted = false
                         diagnosticCodes.add("ARCHIVE_INCREMENTAL_SAVE_FAILED")
                         if (diagnosticProductId != null) {
                             reportWaybackDiagnostic(
@@ -3294,7 +3298,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         savedPoints = savedCount,
                         rejectedQuotes = rejectedArchiveQuoteCount,
                         attempted = foundPrimaryCount > 0 || foundSecondaryCount > 0,
-                        completed = persistenceCompleted
+                        completed = overallPersistenceCompleted
                     )
                     val persistenceDetail = when {
                         savedCount > 0 && crossSavedVariantObservationCount > 0 &&
@@ -3411,12 +3415,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         when {
                             savedTotalForReport > 0 || confirmedDuplicateTotalForReport > 0 ||
                                 stagedDiscoveryObservationsCount.get() > 0 -> WaybackTraceStatus.PASSED
-                            !persistenceCompleted || extractedForReport > 0 -> WaybackTraceStatus.FAILED
+                            !overallPersistenceCompleted || extractedForReport > 0 -> WaybackTraceStatus.FAILED
                             else -> WaybackTraceStatus.SKIPPED
                         },
                         "Guardados nuevos=$savedTotalForReport; duplicados confirmados=$confirmedDuplicateTotalForReport; " +
                             "observaciones en cuarentena=${stagedDiscoveryObservationsCount.get()}; " +
-                            "rechazos=$rejectedArchiveQuoteCount; operación de persistencia completada=$persistenceCompleted."
+                            "rechazos=$rejectedArchiveQuoteCount; operación de persistencia completada=$overallPersistenceCompleted."
                     )
                     reportWaybackDiagnostic(
                         diagnosticProductId, 27,
@@ -3436,7 +3440,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     reportWaybackDiagnostic(
                         diagnosticProductId, 28,
                         when {
-                            !persistenceCompleted || !rejectionCountsConsistent || !accountingIsExplained ->
+                            !overallPersistenceCompleted || !rejectionCountsConsistent || !accountingIsExplained ->
                                 WaybackTraceStatus.FAILED
                             extractedForReport > 0 || savedTotalForReport > 0 ->
                                 WaybackTraceStatus.PASSED

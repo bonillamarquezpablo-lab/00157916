@@ -8,34 +8,36 @@ import org.junit.Test
 class ArchiveLiveFallbackPolicyTest {
 
     @Test
-    fun noVerifiedSelectedProductQuoteTriggersCurrentPriceFallback() {
+    fun fallbackRunsWhenArchiveDidNotSaveOrConfirmAValidPoint() {
+        // No quote, or quotes extracted but rejected during persistence: search the current price.
         assertTrue(shouldTriggerLivePriceFallback(
-            selectedProductHistoricalQuotesFound = 0,
-            selectedProductHistoricalQuotesSaved = 0
+            selectedProductHistoricalQuotesSaved = 0,
+            selectedProductHistoricalDuplicatesConfirmed = 0
+        ))
+        // A valid existing point is enough to avoid a duplicate paid lookup.
+        assertFalse(shouldTriggerLivePriceFallback(
+            selectedProductHistoricalQuotesSaved = 0,
+            selectedProductHistoricalDuplicatesConfirmed = 1
         ))
         assertFalse(shouldTriggerLivePriceFallback(
-            selectedProductHistoricalQuotesFound = 1,
-            selectedProductHistoricalQuotesSaved = 0
-        ))
-        assertFalse(shouldTriggerLivePriceFallback(
-            selectedProductHistoricalQuotesFound = 0,
-            selectedProductHistoricalQuotesSaved = 1
+            selectedProductHistoricalQuotesSaved = 1,
+            selectedProductHistoricalDuplicatesConfirmed = 0
         ))
     }
 
     @Test
-    fun archiveExceptionTriggersFallbackOnlyWhenProductIsAvailableAndNoVerifiedQuoteExists() {
+    fun archiveExceptionTriggersFallbackOnlyWhenProductWasNotPersisted() {
         assertTrue(shouldTriggerLiveFallbackAfterArchiveException(
             hasFallbackProduct = true,
-            selectedProductHistoricalQuoteFound = false
+            selectedProductHistoricalPointPersisted = false
         ))
         assertFalse(shouldTriggerLiveFallbackAfterArchiveException(
             hasFallbackProduct = false,
-            selectedProductHistoricalQuoteFound = false
+            selectedProductHistoricalPointPersisted = false
         ))
         assertFalse(shouldTriggerLiveFallbackAfterArchiveException(
             hasFallbackProduct = true,
-            selectedProductHistoricalQuoteFound = true
+            selectedProductHistoricalPointPersisted = true
         ))
     }
 

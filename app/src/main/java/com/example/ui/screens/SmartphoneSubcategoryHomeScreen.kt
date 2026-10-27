@@ -20,6 +20,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.Cable
+import androidx.compose.material.icons.filled.DevicesOther
+import androidx.compose.material.icons.filled.Power
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.TabletAndroid
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -114,22 +123,14 @@ fun SmartphoneSubcategoryHomeScreen(
                             modifier = Modifier
                                 .size(42.dp)
                                 .clip(RoundedCornerShape(13.dp))
-                                .background(MaterialTheme.colorScheme.primaryContainer),
+                                .background(subcategoryIconBackground(subcategory)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = when (subcategory) {
-                                    SmartphoneSubcategory.PHONES -> "M"
-                                    SmartphoneSubcategory.TABLETS -> "T"
-                                    SmartphoneSubcategory.POWER_BANKS -> "B"
-                                    SmartphoneSubcategory.CHARGERS -> "C"
-                                    SmartphoneSubcategory.CABLES -> "USB"
-                                    SmartphoneSubcategory.CASES_PROTECTORS -> "F"
-                                    SmartphoneSubcategory.OTHER_ACCESSORIES -> "+"
-                                },
-                                fontWeight = FontWeight.Bold,
-                                fontSize = if (subcategory == SmartphoneSubcategory.CABLES) 12.sp else 17.sp,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            Icon(
+                                imageVector = subcategoryIcon(subcategory),
+                                contentDescription = "Icono de ${subcategory.title.lowercase()}",
+                                modifier = Modifier.size(25.dp),
+                                tint = subcategoryIconTint(subcategory)
                             )
                         }
                         Text(
@@ -164,3 +165,39 @@ fun SmartphoneSubcategoryHomeScreen(
         }
     }
 }
+
+
+/** Vector icons are drawn locally: no bitmap assets, network loads or per-card image decoding. */
+private fun subcategoryIcon(subcategory: SmartphoneSubcategory) = when (subcategory) {
+    SmartphoneSubcategory.PHONES -> Icons.Default.Smartphone
+    SmartphoneSubcategory.TABLETS -> Icons.Default.TabletAndroid
+    SmartphoneSubcategory.POWER_BANKS -> Icons.Default.BatteryChargingFull
+    SmartphoneSubcategory.CHARGERS -> Icons.Default.Power
+    SmartphoneSubcategory.CABLES -> Icons.Default.Cable
+    SmartphoneSubcategory.CASES_PROTECTORS -> Icons.Default.Shield
+    SmartphoneSubcategory.OTHER_ACCESSORIES -> Icons.Default.DevicesOther
+}
+
+@Composable
+private fun subcategoryIconBackground(subcategory: SmartphoneSubcategory) =
+    when (subcategory) {
+        SmartphoneSubcategory.PHONES,
+        SmartphoneSubcategory.CHARGERS -> MaterialTheme.colorScheme.primaryContainer
+        SmartphoneSubcategory.TABLETS,
+        SmartphoneSubcategory.CASES_PROTECTORS -> MaterialTheme.colorScheme.secondaryContainer
+        SmartphoneSubcategory.POWER_BANKS,
+        SmartphoneSubcategory.OTHER_ACCESSORIES -> MaterialTheme.colorScheme.tertiaryContainer
+        SmartphoneSubcategory.CABLES -> MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+
+@Composable
+private fun subcategoryIconTint(subcategory: SmartphoneSubcategory) =
+    when (subcategory) {
+        SmartphoneSubcategory.PHONES,
+        SmartphoneSubcategory.CHARGERS -> MaterialTheme.colorScheme.onPrimaryContainer
+        SmartphoneSubcategory.TABLETS,
+        SmartphoneSubcategory.CASES_PROTECTORS -> MaterialTheme.colorScheme.onSecondaryContainer
+        SmartphoneSubcategory.POWER_BANKS,
+        SmartphoneSubcategory.OTHER_ACCESSORIES -> MaterialTheme.colorScheme.onTertiaryContainer
+        SmartphoneSubcategory.CABLES -> MaterialTheme.colorScheme.onSurfaceVariant
+    }

@@ -383,7 +383,9 @@ class LiveSearchMarketPersistenceTest {
                 externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
             )
 
-            val selected = repository.awaitProductForOnlineIdentity(onlineProductIdentityKey(title))
+            val selected = withTimeout(5_000L) {
+                repository.awaitProductForOnlineIdentity(onlineProductIdentityKey(title))
+            }
             assertEquals("A stale duplicate must not win merely because Room returns it first", liveCandidate.id, selected.id)
             assertEquals(899.00, selected.currentPrice, 0.001)
             assertTrue(selected.isUnverifiedLiveListing)
@@ -417,7 +419,9 @@ class LiveSearchMarketPersistenceTest {
                 condition = "new"
             )
             repository.ensureVisibleOnlineSearchProducts(listOf(originalListing), title)
-            val savedBeforeOverlay = repository.awaitProductForOnlineIdentity(onlineProductIdentityKey(title))
+            val savedBeforeOverlay = withTimeout(5_000L) {
+                repository.awaitProductForOnlineIdentity(onlineProductIdentityKey(title))
+            }
 
             val transientFicha = savedBeforeOverlay.withUnverifiedLiveSearchListing(
                 listedPrice = 849.95,
@@ -434,7 +438,9 @@ class LiveSearchMarketPersistenceTest {
                 com.example.data.model.PriceDisplayStatus.UNVERIFIED_LIVE_LISTING,
                 transientFicha.priceDisplayStatus
             )
-            val savedAfterOverlay = repository.awaitProductForOnlineIdentity(onlineProductIdentityKey(title))
+            val savedAfterOverlay = withTimeout(5_000L) {
+                repository.awaitProductForOnlineIdentity(onlineProductIdentityKey(title))
+            }
             assertEquals("Showing a new search price must not write it over the Room row", 899.95, savedAfterOverlay.currentPrice, 0.001)
             assertFalse(savedAfterOverlay.isPriceVerified)
         } finally {

@@ -1737,4 +1737,111 @@ class FreeArchiveHistoryPersistenceTest {
         }
     }
 
+
+    @Test
+    fun matchingHttpEraCaptureKeepsVerifiedHistoricalAliasWhenCurrentProductUrlChanged() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        val productId = "archive-http-era-alias-test"
+        val title = "Anker Prime 27K Power Bank"
+        val currentUrl = "https://www.pccomponentes.com/anker-prime-27k-current"
+        val historicalHttpsUrl = "https://www.pccomponentes.com/anker-prime-27k-old-slug"
+        val historicalHttpUrl = historicalHttpsUrl.replaceFirst("https://", "http://")
+        val timestampFormat = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val rawTimestamp = timestampFormat.format(
+            Date(System.currentTimeMillis() - 60L * 24L * 60L * 60L * 1000L)
+        )
+        val archivedAt = timestampFormat.parse(rawTimestamp)!!.time
+        val snapshotUrl = "https://web.archive.org/web/" + rawTimestamp + "id_/" + historicalHttpUrl
+
+        try {
+            database.productDao().insert(
+                ProductEntity(
+                    id = productId,
+                    title = title,
+                    brand = "Anker",
+                    category = "HOME_APPLIANCES",
+                    currentPrice = 499.99,
+                    athMinPrice = 499.99,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "PcComponentes",
+                    athMaxPrice = 499.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "pccomponentes",
+                    storeUrl = currentUrl,
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            // A trusted live observation proves that this retailer's older URL was also used
+            // for the same saved product, even though its current storeUrl has since changed.
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = productId,
+                    storeId = "pccomponentes",
+                    price = 499.99,
+                    currency = "EUR",
+                    observedAt = System.currentTimeMillis() - 5_000L,
+                    sourceUrl = historicalHttpsUrl,
+                    sourceName = "PcComponentes",
+                    isVerified = true,
+                    verificationNote = "Verified direct product listing.",
+                    productTitle = title,
+                    storeName = "PcComponentes",
+                    sourceType = "Tienda online",
+                    linkType = "Enlace directo",
+                    collectedAt = System.currentTimeMillis(),
+                    evidenceType = "live",
+                    sourcePageUrl = historicalHttpsUrl
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val quote = ArchivedPriceQuote(
+                observedAt = archivedAt,
+                price = 89.99,
+                currency = "EUR",
+                productTitle = title,
+                originalUrl = historicalHttpUrl,
+                snapshotUrl = snapshotUrl,
+                targetProductId = productId
+            )
+
+            val outcome = repository.recordArchivedPriceHistoryDetailed(
+                expectedTitle = title,
+                originalUrl = historicalHttpUrl,
+                storeName = "PcComponentes",
+                quotes = listOf(quote),
+                targetProductId = productId
+            )
+
+            assertEquals(
+                "A verified historical URL must be canonicalized without replacing its path with the current store URL",
+                1,
+                outcome.insertedPoints
+            )
+            assertEquals(0, outcome.rejectedQuotes)
+            assertTrue(outcome.rejectionReasons.isEmpty())
+            val saved = database.priceObservationDao()
+                .observeVerifiedHistory(productId).first()
+                .single { it.sourceUrl == snapshotUrl }
+            assertEquals(historicalHttpsUrl, saved.sourcePageUrl)
+            assertEquals(currentUrl, database.productDao().getProductById(productId)!!.storeUrl)
+        } finally {
+            database.close()
+        }
+    }
+
 }

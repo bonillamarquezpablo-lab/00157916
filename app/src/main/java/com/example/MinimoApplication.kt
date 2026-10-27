@@ -1,6 +1,7 @@
 package com.example
 
 import android.app.Application
+import android.os.Build
 import android.os.Process
 import android.util.Log
 import kotlin.system.exitProcess
@@ -12,6 +13,11 @@ import kotlin.system.exitProcess
 class MinimoApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        // Robolectric tests run inside the Gradle JVM. Installing Android's process-killing
+        // crash handler there can terminate the whole test worker before JUnit reports the
+        // original exception. Keep production crash diagnostics enabled on real Android only.
+        if (Build.FINGERPRINT.contains("robolectric", ignoreCase = true)) return
+
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         if (previous !is MinimoUncaughtExceptionHandler) {
             Thread.setDefaultUncaughtExceptionHandler(

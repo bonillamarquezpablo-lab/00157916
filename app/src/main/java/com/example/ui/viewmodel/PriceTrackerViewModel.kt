@@ -168,10 +168,15 @@ internal fun mergeWaybackDiagnosticStatus(
  * written. Finding a quote or refreshing a card does not prove that its capture is present.
  */
 internal fun archivePersistenceStatus(
-    savedPoints: Int
-): WaybackTraceStatus = if (
-    savedPoints > 0
-) WaybackTraceStatus.PASSED else WaybackTraceStatus.SKIPPED
+    savedPoints: Int,
+    rejectedQuotes: Int = 0,
+    confirmedDuplicates: Int = 0,
+    attempted: Boolean = false
+): WaybackTraceStatus = when {
+    savedPoints > 0 || confirmedDuplicates > 0 -> WaybackTraceStatus.PASSED
+    attempted && rejectedQuotes > 0 -> WaybackTraceStatus.FAILED
+    else -> WaybackTraceStatus.SKIPPED
+}
 
 internal fun hasEnoughVerifiedArchiveDates(
     timestamps: Iterable<Long>,
@@ -3267,7 +3272,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     // extracted from the archive can still be rejected or collide with malformed
                     // legacy rows; those cases must not be reported as a successful save.
                     val confirmedDuplicateTotal = confirmedPrimaryDuplicateCount + confirmedVariantDuplicateCount
-                    val persistenceStatus = archivePersistenceStatus(savedPoints = savedCount)
+                    val persistenceStatus = archivePersistenceStatus(
+                        savedPoints = savedCount,
+                        rejectedQuotes = rejectedArchiveQuoteCount,
+                        confirmedDuplicates = confirmedDuplicateTotal,
+                        attempted = persistenceCompleted && (foundPrimaryCount > 0 || foundSecondaryCount > 0)
+                    )
                     val persistenceDetail = when {
                         savedCount > 0 && crossSavedVariantObservationCount > 0 &&
                             stagedDiscoveryObservationsCount.get() > 0 ->

@@ -3397,7 +3397,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     )
                     reportWaybackDiagnostic(
                         diagnosticProductId, 25,
-                        if (rejectionCountsConsistent) WaybackTraceStatus.PASSED else WaybackTraceStatus.FAILED,
+                        when {
+                            !rejectionCountsConsistent -> WaybackTraceStatus.FAILED
+                            extractedForReport > 0 || rejectedArchiveQuoteCount > 0 ->
+                                WaybackTraceStatus.PASSED
+                            else -> WaybackTraceStatus.SKIPPED
+                        },
                         "Rechazos totales=$rejectedArchiveQuoteCount; suma de motivos=$rejectionReasonTotal; " +
                             "coinciden=${rejectionCountsConsistent}. Ningún contenido rechazado se añade al historial."
                     )

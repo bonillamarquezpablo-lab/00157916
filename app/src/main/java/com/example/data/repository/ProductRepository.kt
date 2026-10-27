@@ -1569,9 +1569,26 @@ class ProductRepository(
     suspend fun awaitProductForOnlineIdentity(identityKey: String): Product {
         // A product may legitimately have no verified price or history yet. Resolve the saved
         // row as soon as Room exposes it instead of waiting forever for a price point.
-        return allProductsStream.first { products ->
+        val matches = allProductsStream.first { products ->
             products.any { product -> onlineProductIdentityKey(product.title) == identityKey }
-        }.first { product -> onlineProductIdentityKey(product.title) == identityKey }
+        }.filter { product -> onlineProductIdentityKey(product.title) == identityKey }
+
+        // Legacy duplicates can exist after older searches created a provisional ficha beside a
+        // catalogue row. Never pick an arbitrary/old row just because Room returned it first:
+        // a fresh verified quote wins, then a current search listing, then stale saved evidence.
+        return matches.maxWithOrNull(
+            compareBy<Product> {
+                when {
+                    it.isPriceFresh -> 4
+                    it.isUnverifiedLiveListing -> 3
+                    it.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION -> 2
+                    it.currentPrice.isFinite() && it.currentPrice > 0.0 -> 1
+                    else -> 0
+                }
+            }.thenBy { it.priceObservedAt ?: it.savedHistoricalPriceObservedAt ?: 0L }
+                .thenBy { if (it.currentPrice.isFinite() && it.currentPrice > 0.0) 1 else 0 }
+                .thenBy { it.id }
+        ) ?: error("No existe una ficha para la identidad solicitada")
     }
     /**
      * Save one verified row per product/merchant/local day. Only replace an existing row when

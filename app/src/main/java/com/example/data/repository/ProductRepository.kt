@@ -2395,7 +2395,7 @@ class ProductRepository(
         val pathKey = normalizedProductPagePathKey(value) ?: return null
         val trackingKeys = setOf(
             "gclid", "dclid", "fbclid", "msclkid", "yclid", "gbraid", "wbraid",
-            "mc_cid", "mc_eid", "_ga", "_gl", "ref_src", "igshid"
+            "mc_cid", "mc_eid", "_ga", "_gl", "ref_src", "igshid", "srsltid"
         )
         // Remove only known tracking parameters. Preserve variant, SKU, capacity, colour and
         // model selectors because they can identify different purchasable products.

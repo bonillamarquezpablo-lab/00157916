@@ -65,13 +65,20 @@ class PriceHistoryChartTest {
             }
         }
 
-        composeRule.onNodeWithText("Evolución del precio observado").assertIsDisplayed()
-        composeRule.onNodeWithText("Wayback").performClick()
+        // The archive extends the live timeline, so it should be selected automatically.
+        composeRule.waitUntil(3_000L) {
+            composeRule.onAllNodesWithText("Histórico externo · Wayback")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithText("Histórico externo · Wayback").assertIsDisplayed()
         composeRule.onNodeWithText("Mín. del rango:", substring = true).assertIsDisplayed()
         composeRule.onNodeWithText(
             "Capturas externas de Internet Archive; no son ofertas actuales."
         ).assertIsDisplayed()
+
+        // Users can still return to live observations explicitly.
+        composeRule.onNodeWithText("Mínimo").performClick()
+        composeRule.onNodeWithText("Evolución del precio observado").assertIsDisplayed()
     }
 
     @Test

@@ -977,8 +977,24 @@ class FreeArchiveHistoryPersistenceTest {
 
             assertTrue(product.isPriceVerified)
             assertEquals("The live quote must remain the current price", 199.99, product.currentPrice, 0.001)
-            assertEquals("The live observation must be the only point for a day that has a live quote", 1, product.priceHistory.size)
-            assertEquals(199.99, product.priceHistory.single().price, 0.001)
+            assertEquals(
+                "The current/live series must contain only the live quote for the day",
+                1,
+                product.priceHistory.count { !it.isArchiveEvidence }
+            )
+            assertEquals(
+                199.99,
+                product.priceHistory.single { !it.isArchiveEvidence }.price,
+                0.001
+            )
+            assertEquals(
+                "The archive capture remains available as separate historical evidence",
+                1,
+                product.priceHistory.count { it.isArchiveEvidence }
+            )
+            assertTrue(
+                product.priceHistory.any { it.isArchiveEvidence && it.price == 10.00 }
+            )
         } finally {
             database.close()
         }

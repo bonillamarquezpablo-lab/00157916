@@ -2436,7 +2436,9 @@ class ProductRepository(
         val pathKey = normalizedProductPagePathKey(value) ?: return null
         val trackingKeys = setOf(
             "gclid", "dclid", "fbclid", "msclkid", "yclid", "gbraid", "wbraid",
-            "mc_cid", "mc_eid", "_ga", "_gl", "ref_src", "igshid", "srsltid"
+            "mc_cid", "mc_eid", "_ga", "_gl", "ref_src", "igshid", "srsltid",
+            // PcComponentes affiliate redirects annotate archived target URLs with these fields.
+            "awc", "sv1", "sv_campaign_id"
         )
         // Remove only known tracking parameters. Preserve variant, SKU, capacity, colour and
         // model selectors because they can identify different purchasable products.

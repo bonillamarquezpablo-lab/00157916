@@ -1157,11 +1157,28 @@ fun ProductDetailSheet(
                                 freeHistoryStatus = freeHistoryStatus,
                                 steps = waybackDiagnosticSteps
                             )
+                            val diagnosisFinding = buildWaybackDiagnosticFinding(
+                                freeHistoryStatus = freeHistoryStatus,
+                                steps = waybackDiagnosticSteps
+                            )
                             Text(
                                 diagnosisSummary,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                "Causa probable: ${diagnosisFinding.probableCause}",
+                                modifier = Modifier.testTag("wayback_diagnostic_finding"),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                "Siguiente paso: ${diagnosisFinding.recommendedNextStep}",
+                                modifier = Modifier.testTag("wayback_diagnostic_next_step"),
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
                                 "30 fases generales más registros por captura: fecha, ruta, tienda, causa de red, decodificación y resultado del extractor. Sin consultas extra; URL completas, parámetros y HTML se ocultan en el informe copiable.",

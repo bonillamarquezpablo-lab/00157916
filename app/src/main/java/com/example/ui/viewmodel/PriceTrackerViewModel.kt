@@ -2283,8 +2283,17 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         }
                         val cacheNotice = "Resultados recuperados de caché: consulta capturada ${formatOnlineSnapshotAge(cached.savedAt)}. No se ha consumido otra búsqueda; los precios pueden haber cambiado."
                         val savedObservations = if (cachedHistoryCandidates.isNotEmpty()) {
-                            withContext(Dispatchers.IO) {
-                                repository.recordOnlineSearchResults(cachedHistoryCandidates, provider.name, query)
+                            try {
+                                withContext(Dispatchers.IO) {
+                                    repository.recordOnlineSearchResults(cachedHistoryCandidates, provider.name, query)
+                                }
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                Log.w("PriceTrackerViewModel", "Could not save cached online-search prices.", error)
+                                // A Room write failure must not hide a valid cached result list.
+                                // Opening a result retries the validated persistence path.
+                                0
                             }
                         } else 0
                         val newCatalogueProducts = try {
@@ -2439,8 +2448,17 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     }
                     onlineDiscardedCache[onlineSearchCacheKey(provider, query)] = discarded
                     val savedObservations = if (historyCandidates.isNotEmpty()) {
-                        withContext(Dispatchers.IO) {
-                            repository.recordOnlineSearchResults(historyCandidates, provider.name, query)
+                        try {
+                            withContext(Dispatchers.IO) {
+                                repository.recordOnlineSearchResults(historyCandidates, provider.name, query)
+                            }
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            Log.w("PriceTrackerViewModel", "Could not save live online-search prices.", error)
+                            // Keep presenting the newly returned offers if Room temporarily fails.
+                            // The detail-sheet tap retries persistence before resolving the product.
+                            0
                         }
                     } else 0
                     val newCatalogueProducts = try {

@@ -321,7 +321,7 @@ internal fun buildWaybackDiagnosticFinding(
                 probableCause = "El servicio de archivo aplicó un límite temporal de consultas. Esto no demuestra que no existan capturas.",
                 recommendedNextStep = "Revisar las fases 4–8 para distinguir una pausa activa de un 429 antiguo, respetar el tiempo de espera y usar los resultados parciales ya recuperados."
             )
-        Regex("""(?i)(TIMEOUT|TIMED_OUT|SOCKET_TIMEOUT|DNS_FAILURE|SNAPSHOT_STREAM_RESET|CONNECTION_RESET|CDX_\\w+_TIMEOUT)""")
+        Regex("""(?i)(TIMEOUT|TIMED_OUT|SOCKET_TIMEOUT|DNS_FAILURE|SNAPSHOT_STREAM_RESET|CONNECTION_RESET|CDX_\w+_TIMEOUT)""")
             .containsMatchIn(allText) ->
             WaybackDiagnosticFinding(
                 probableCause = "Hay indicios de un problema de red o de tiempo de espera al consultar el índice o descargar una captura. Un timeout no equivale a que el archivo esté vacío.",

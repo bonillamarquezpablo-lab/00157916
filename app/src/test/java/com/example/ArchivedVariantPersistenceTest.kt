@@ -156,16 +156,52 @@ class ArchivedVariantPersistenceTest {
             assertEquals(0, anotherColourOutcome.rejectedQuotes)
             assertTrue(anotherColourOutcome.rejectionReasons.isEmpty())
 
+            // Spanish/English yellow aliases were previously left in the base identity string
+            // even though the colour suffix was removed. They must not block useful model prices.
+            val yellowDate = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+                isLenient = false
+                timeZone = TimeZone.getTimeZone("UTC")
+            }.format(Date(observedAt - 2L * 24L * 60L * 60L * 1000L))
+            val yellowAt = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+                isLenient = false
+                timeZone = TimeZone.getTimeZone("UTC")
+            }.parse(yellowDate)!!.time
+            val yellowQuote = ArchivedPriceQuote(
+                observedAt = yellowAt,
+                price = 699.99,
+                currency = "EUR",
+                productTitle = "Apple iPhone 15 Plus 256GB Amarillo",
+                originalUrl = originalUrl,
+                snapshotUrl = "https://web.archive.org/web/${yellowDate}id_/$originalUrl",
+                variantIdentityConfirmedByUrl = false
+            )
+            val yellowOutcome = repository.recordArchivedPriceHistoryDetailed(
+                expectedTitle = title,
+                originalUrl = originalUrl,
+                storeName = "PcComponentes",
+                quotes = listOf(yellowQuote),
+                targetProductId = productId
+            )
+            assertEquals(
+                "A yellow 256GB capture must persist when the catalogue title omits colour",
+                1,
+                yellowOutcome.insertedPoints
+            )
+            assertEquals(0, yellowOutcome.rejectedQuotes)
+            assertTrue(yellowOutcome.rejectionReasons.isEmpty())
+
             val restored = withTimeout(10_000L) {
                 repository.allProductsStream.first { rows ->
                     rows.any { it.id == productId && it.priceHistory.any { point -> point.price == 799.99 } }
                 }.first { it.id == productId }
             }
-            assertEquals(2, restored.priceHistory.size)
+            assertEquals(3, restored.priceHistory.size)
             assertEquals(799.99, restored.priceHistory.first { it.price == 799.99 }.price, 0.001)
             assertEquals(observedAt, restored.priceHistory.first { it.price == 799.99 }.timestamp)
             assertEquals(749.99, restored.priceHistory.first { it.price == 749.99 }.price, 0.001)
             assertEquals(anotherColourAt, restored.priceHistory.first { it.price == 749.99 }.timestamp)
+            assertEquals(699.99, restored.priceHistory.first { it.price == 699.99 }.price, 0.001)
+            assertEquals(yellowAt, restored.priceHistory.first { it.price == 699.99 }.timestamp)
             assertFalse("Archived history must never turn the saved live price into a verified current quote",
                 restored.isPriceVerified)
             assertEquals(899.99, restored.currentPrice, 0.001)

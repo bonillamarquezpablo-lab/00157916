@@ -5422,6 +5422,37 @@ class WaybackPriceHistoryClient(
     }
 
     /**
+     * A product-detail URL can identify the selected colour even when the catalogue title does
+     * not store colour. Do not let JSON-LD offers for sibling colours on the same page qualify
+     * merely because the selected title is colour-neutral.
+     */
+    private fun archivedTitleConflictsWithExplicitPageUrlColour(
+        archivedTitle: String,
+        originalUrl: String
+    ): Boolean {
+        val uri = runCatching { URI(originalUrl) }.getOrNull() ?: return false
+        val pathText = uri.rawPath.orEmpty()
+            .split('/')
+            .filter { it.isNotBlank() }
+            .joinToString(" ") { decodePathUrlComponent(it) }
+        val identityQueryKeys = setOf(
+            "sku", "skuid", "sku_id", "variant", "variantid", "variant_id", "variation",
+            "variationid", "variation_id", "productid", "product_id", "id_product",
+            "offerid", "offer_id", "pid", "itemid", "item_id", "asin", "mpn", "gtin",
+            "ean", "model", "modelid", "color", "colour", "colorid", "colourid",
+            "storage", "capacity", "size", "configuration", "config", "option", "optionid"
+        )
+        val queryIdentityText = uri.rawQuery.orEmpty().split('&').mapNotNull { parameter ->
+            val key = decodeQueryUrlComponent(parameter.substringBefore('=')).lowercase(Locale.ROOT)
+            if (key !in identityQueryKeys) null
+            else decodeQueryUrlComponent(parameter.substringAfter('=', "")).takeIf { it.isNotBlank() }
+        }.joinToString(" ")
+        val pageColour = productColourFamily(normalizeTitle("$pathText $queryIdentityText")) ?: return false
+        val archivedColour = productColourFamily(normalizeTitle(archivedTitle)) ?: return false
+        return archivedColour != pageColour
+    }
+
+    /**
      * Apple can archive the exact configurator URL while its structured product title omits
      * storage and colour (for example, just "iPhone 15"). In that narrow case the canonical
      * configurator path is the SKU identity anchor. Do not use this for generic family pages or
@@ -5432,6 +5463,7 @@ class WaybackPriceHistoryClient(
         archivedTitle: String,
         originalUrl: String
     ): Boolean {
+        if (archivedTitleConflictsWithExplicitPageUrlColour(archivedTitle, originalUrl)) return false
         if (isMatchingProductTitle(expectedTitle, archivedTitle)) return true
         if (matchesVariantDetailsConfirmedByUrl(expectedTitle, archivedTitle, originalUrl)) return true
 

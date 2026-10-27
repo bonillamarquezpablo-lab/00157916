@@ -331,4 +331,111 @@ class LiveSearchMarketPersistenceTest {
         }
     }
 
+
+    @Test
+    fun awaitProductForOnlineIdentityPrefersLiveSearchCandidateOverStaleDuplicateFicha() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val title = "Apple iPhone 15 Plus 256GB"
+            val stale = ProductEntity(
+                id = "legacy-iphone-stale",
+                title = title,
+                brand = "Apple",
+                category = ProductCategory.SMARTPHONES.name,
+                currentPrice = 624.00,
+                athMinPrice = 624.00,
+                athMinDate = "Historial en construcción",
+                athMinStore = "Google Shopping",
+                athMaxPrice = 624.00,
+                avg90dPrice = 0.0,
+                officialPvp = 0.0,
+                currentStoreId = "unknown_store",
+                storeUrl = "https://www.google.com/search?tbm=shop&q=Apple+iPhone+15+Plus+256GB",
+                ean = "",
+                isPriceVerified = true
+            )
+            val liveCandidate = stale.copy(
+                id = "online_candidate_iphone_live",
+                currentPrice = 899.00,
+                athMinPrice = 0.0,
+                athMinDate = "Pendiente de verificación",
+                athMinStore = "",
+                athMaxPrice = 0.0,
+                currentStoreId = "unknown_store",
+                storeUrl = "https://www.google.com/search?tbm=shop&q=Apple+iPhone+15+Plus+256GB",
+                isPriceVerified = false
+            )
+            database.productDao().insert(stale)
+            database.productDao().insert(liveCandidate)
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+
+            val selected = repository.awaitProductForOnlineIdentity(onlineProductIdentityKey(title))
+            assertEquals("A stale duplicate must not win merely because Room returns it first", liveCandidate.id, selected.id)
+            assertEquals(899.00, selected.currentPrice, 0.001)
+            assertTrue(selected.isUnverifiedLiveListing)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun latestSearchListingCanBeShownInFichaWithoutChangingThePersistedPrice() = runBlocking<Unit> {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(
+            context,
+            AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+        try {
+            val title = "Victoria Hyde New English Bandolera Mujer"
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val originalListing = SerpApiShoppingResult(
+                title = title,
+                price = 49.95,
+                storeName = "Google Shopping",
+                sourceUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=Victoria+Hyde",
+                observedAt = System.currentTimeMillis(),
+                condition = "new"
+            )
+            repository.ensureVisibleOnlineSearchProducts(listOf(originalListing), title)
+            val savedBeforeOverlay = repository.awaitProductForOnlineIdentity(onlineProductIdentityKey(title))
+
+            val transientFicha = savedBeforeOverlay.withUnverifiedLiveSearchListing(
+                listedPrice = 39.95,
+                observedAt = System.currentTimeMillis(),
+                sourceUrl = "https://www.google.com/search?tbm=shop&hl=es&gl=es&q=Victoria+Hyde",
+                sourceName = "Google Shopping",
+                sourceStore = Store.findByName("Google Shopping")
+            )
+
+            assertEquals(39.95, transientFicha.currentPrice, 0.001)
+            assertFalse(transientFicha.isPriceVerified)
+            assertTrue(transientFicha.isUnverifiedLiveListing)
+            assertEquals(
+                com.example.data.model.PriceDisplayStatus.UNVERIFIED_LIVE_LISTING,
+                transientFicha.priceDisplayStatus
+            )
+            val savedAfterOverlay = repository.awaitProductForOnlineIdentity(onlineProductIdentityKey(title))
+            assertEquals("Showing a new search price must not write it over the Room row", 49.95, savedAfterOverlay.currentPrice, 0.001)
+            assertFalse(savedAfterOverlay.isPriceVerified)
+        } finally {
+            database.close()
+        }
+    }
+
 }

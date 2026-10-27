@@ -4884,8 +4884,10 @@ class WaybackPriceHistoryClient(
                 // distinct 128 GB saved product to be discarded before its own Offer URL is checked.
                 val savedNormalizedTitle = normalizedKnownTitles[productId].orEmpty()
                 val savedStorage = knownStorage[productId].orEmpty()
+                // A selected SKU with known capacity must not absorb a sibling row whose
+                // capacity is missing: unknown is not equivalent to 256 GB.
                 val explicitStorageConflict = primaryStorage.isNotEmpty() &&
-                    savedStorage.isNotEmpty() && primaryStorage != savedStorage
+                    savedStorage != primaryStorage
                 // Colour does not split historical identity when model and capacity match.
                 val explicitModelVariantConflict =
                     primaryModelVariants != knownModelVariants[productId].orEmpty()

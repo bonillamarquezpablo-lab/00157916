@@ -334,8 +334,20 @@ class FreeArchiveHistoryPersistenceTest {
                     }
                 }.first { it.id == productId }
             }
-            assertEquals(1, restored.priceHistory.count { it.isArchiveEvidence })
-            assertEquals(99.99, restored.priceHistory.single { it.isArchiveEvidence }.price, 0.001)
+            assertEquals(
+                "Both the valid Wayback capture and the valid Arquivo.pt mp_ capture must appear in history",
+                2,
+                restored.priceHistory.count { it.isArchiveEvidence }
+            )
+            assertEquals(
+                99.99,
+                restored.priceHistory.first { it.isArchiveEvidence && it.price == 99.99 }.price,
+                0.001
+            )
+            assertTrue(
+                "The Arquivo.pt mp_ capture must survive reload into the product history",
+                restored.priceHistory.any { it.isArchiveEvidence && it.price == 98.99 }
+            )
         } finally {
             database.close()
         }

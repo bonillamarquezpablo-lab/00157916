@@ -237,14 +237,14 @@ private fun CategoryCard(
             modifier = Modifier
                 .size(42.dp)
                 .clip(RoundedCornerShape(13.dp))
-                .background(MaterialTheme.colorScheme.primaryContainer),
+                .background(categoryIconBackground(summary.category)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = categoryIcon(summary.category),
                 contentDescription = summary.category.displayName,
                 modifier = Modifier.size(24.dp),
-                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                tint = categoryIconTint(summary.category)
             )
         }
 
@@ -273,6 +273,42 @@ private fun CategoryCard(
             fontSize = 11.sp
         )
     }
+}
+
+/**
+ * Keep the current compact card grid, but give related catalog areas a quiet, distinct accent.
+ * All colors come from the active Material theme, so light/dark mode remain consistent.
+ */
+@Composable
+private fun categoryIconBackground(category: ProductCategory) = when (category) {
+    ProductCategory.SMARTPHONES,
+    ProductCategory.SPORTS -> MaterialTheme.colorScheme.primaryContainer
+    ProductCategory.COMPUTING,
+    ProductCategory.PERSONAL_CARE -> MaterialTheme.colorScheme.secondaryContainer
+    ProductCategory.GAMING,
+    ProductCategory.TOYS -> MaterialTheme.colorScheme.tertiaryContainer
+    ProductCategory.TV_AUDIO,
+    ProductCategory.REPLACEMENT_PARTS,
+    ProductCategory.ACCESSORIES,
+    ProductCategory.HOME_APPLIANCES,
+    ProductCategory.OTHER,
+    ProductCategory.ALL -> MaterialTheme.colorScheme.surfaceContainerHigh
+}
+
+@Composable
+private fun categoryIconTint(category: ProductCategory) = when (category) {
+    ProductCategory.SMARTPHONES,
+    ProductCategory.SPORTS -> MaterialTheme.colorScheme.onPrimaryContainer
+    ProductCategory.COMPUTING,
+    ProductCategory.PERSONAL_CARE -> MaterialTheme.colorScheme.onSecondaryContainer
+    ProductCategory.GAMING,
+    ProductCategory.TOYS -> MaterialTheme.colorScheme.onTertiaryContainer
+    ProductCategory.TV_AUDIO,
+    ProductCategory.REPLACEMENT_PARTS,
+    ProductCategory.ACCESSORIES,
+    ProductCategory.HOME_APPLIANCES,
+    ProductCategory.OTHER,
+    ProductCategory.ALL -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
 private fun categoryIcon(category: ProductCategory): ImageVector = when (category) {

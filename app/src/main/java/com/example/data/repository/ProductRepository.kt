@@ -1222,7 +1222,7 @@ class ProductRepository(
                 suppliedUri.port == -1 -> ""
                 suppliedScheme == "http" && suppliedUri.port == 80 -> ""
                 suppliedScheme == "https" && suppliedUri.port == 443 -> ""
-                else -> ":\${suppliedUri.port}"
+                else -> ":${suppliedUri.port}"
             }
             buildString {
                 append("https://").append(archivedHostPart).append(archivedPortPart)

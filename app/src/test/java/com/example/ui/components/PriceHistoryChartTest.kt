@@ -67,13 +67,13 @@ class PriceHistoryChartTest {
 
         // The archive extends the live timeline, so it should be selected automatically.
         composeRule.waitUntil(3_000L) {
-            composeRule.onAllNodesWithText("Histórico externo · Wayback")
+            composeRule.onAllNodesWithText("Histórico")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("Histórico externo · Wayback").assertIsDisplayed()
+        composeRule.onNodeWithText("Histórico").assertIsDisplayed()
         composeRule.onNodeWithText("Mín. del rango:", substring = true).assertIsDisplayed()
         composeRule.onNodeWithText(
-            "Capturas externas de Internet Archive; no son ofertas actuales."
+            "Capturas históricas verificadas de Internet Archive y Arquivo.pt; no son ofertas actuales."
         ).assertIsDisplayed()
 
         // Users can still return to live observations explicitly.
@@ -111,7 +111,7 @@ class PriceHistoryChartTest {
             }
         }
 
-        composeRule.onNodeWithText("Histórico externo · Wayback").assertIsDisplayed()
+        composeRule.onNodeWithText("Histórico").assertIsDisplayed()
         composeRule.onNodeWithText("1 observación").assertIsDisplayed()
         composeRule.onNodeWithTag("price_history_chart_container").assertIsDisplayed()
     }
@@ -137,7 +137,7 @@ class PriceHistoryChartTest {
             }
         }
 
-        composeRule.onNodeWithText("Histórico externo · Wayback").assertIsDisplayed()
+        composeRule.onNodeWithText("Histórico").assertIsDisplayed()
         composeRule.onNodeWithText("1 observación").assertIsDisplayed()
         composeRule.onNodeWithTag("price_history_chart_container").assertIsDisplayed()
     }

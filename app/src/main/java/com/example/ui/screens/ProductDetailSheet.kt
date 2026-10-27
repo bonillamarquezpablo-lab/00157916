@@ -291,8 +291,6 @@ internal fun buildWaybackDiagnosticFinding(
     val valueCodes = listOf(
         "INVALID_PRICE_CURRENCY_OR_DATE",
         "IMPLAUSIBLE_PRODUCT_PRICE",
-        "ARCHIVE_PRICE_METADATA_MISSING",
-        "PRICE_NOT_FOUND",
         "HISTORICAL_EXCHANGE_RATE_MISSING"
     )
     val phase19 = steps.firstOrNull { it.step == 19 && !it.isCaptureDetail }
@@ -328,6 +326,7 @@ internal fun buildWaybackDiagnosticFinding(
                 recommendedNextStep = "Revisar las fases 5–14 y el detalle de cada captura: proveedor, ruta consultada, tiempo de espera y etapa exacta que no terminó. Evitar repetir consultas amplias si ya agotaron el tiempo."
             )
         allText.contains("ARCHIVE_PRICE_METADATA_MISSING", ignoreCase = true) ||
+            allText.contains("PRICE_NOT_FOUND", ignoreCase = true) ||
             allText.contains("EXTRACTOR_NO_PRICE", ignoreCase = true) ->
             WaybackDiagnosticFinding(
                 probableCause = "La página archivada se abrió, pero el extractor no encontró un precio verificable en el formato disponible.",
@@ -418,7 +417,8 @@ internal fun buildWaybackDiagnosticExportReport(
         "Capturas por estado: ${captures.size} total; ${captureStatuses[WaybackTraceStatus.PASSED] ?: 0} superadas; " +
             "${captureStatuses[WaybackTraceStatus.FAILED] ?: 0} fallidas; " +
             "${captureStatuses[WaybackTraceStatus.SKIPPED] ?: 0} omitidas; " +
-            "${captureStatuses[WaybackTraceStatus.RUNNING] ?: 0} en curso."
+            "${captureStatuses[WaybackTraceStatus.RUNNING] ?: 0} en curso; " +
+            "${captureStatuses[WaybackTraceStatus.PENDING] ?: 0} pendientes."
     )
     report.appendLine()
     report.appendLine("INDICIOS CLASIFICADOS POR TIPO")

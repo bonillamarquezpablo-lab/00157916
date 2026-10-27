@@ -5627,9 +5627,11 @@ class WaybackPriceHistoryClient(
 
         val urlColour = productColourFamily(urlTitle)
         val missingColour = expectedColour != null && archivedColour == null
-        // Do not attach a colour-specific archived offer to a saved product whose colour is
-        // unknown. Neither the archived title nor its own URL may silently introduce a colour.
-        if (expectedColour == null && (archivedColour != null || urlColour != null)) return false
+        // A saved title may omit colour while its retailer URL identifies the exact variant
+        // (for example, "...iphone-15-plus-256gb-amarillo-libre"). Let that URL confirm the
+        // colour, but reject any archived title that explicitly contradicts the URL.
+        if (expectedColour == null && archivedColour != null && urlColour != archivedColour) return false
+        if (expectedColour != null && urlColour != null && urlColour != expectedColour) return false
         // An offer URL must not silently assign a capacity to a saved product whose
         // storage is unknown; keep those records separate until identity is explicit.
         if (expectedStorage.isEmpty() && urlStorage.isNotEmpty()) return false

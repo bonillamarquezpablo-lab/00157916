@@ -1125,12 +1125,15 @@ class ProductRepository(
             rejectionReasons = if (uniqueQuotes.isEmpty()) emptyMap() else mapOf(reason to uniqueQuotes.size)
         )
         if (expectedTitle.isBlank() || originalUrl.isBlank() || quotes.isEmpty()) return rejectAllQuotes("INVALID_INPUT")
-        val originalUri = parseHttpUri(originalUrl) ?: return rejectAllQuotes("INVALID_ORIGINAL_URL")
-        if (!originalUri.scheme.equals("https", ignoreCase = true)) return rejectAllQuotes("ORIGINAL_URL_NOT_HTTPS")
-        val originalHost = normalizeHost(originalUri.host.orEmpty())
-        if (originalHost == "web.archive.org" || originalHost == "archive.org" ||
-            isGoogleShoppingUrl(originalUrl) || originalHost.startsWith("google.") ||
-            originalHost == "bing.com" || originalHost.endsWith(".bing.com")
+        val suppliedUri = parseHttpUri(originalUrl) ?: return rejectAllQuotes("INVALID_ORIGINAL_URL")
+        val suppliedScheme = suppliedUri.scheme?.lowercase(Locale.ROOT)
+        if (suppliedScheme != "http" && suppliedScheme != "https") {
+            return rejectAllQuotes("ORIGINAL_URL_NOT_HTTPS")
+        }
+        val suppliedHost = normalizeHost(suppliedUri.host.orEmpty())
+        if (suppliedHost == "web.archive.org" || suppliedHost == "archive.org" ||
+            isGoogleShoppingUrl(originalUrl) || suppliedHost.startsWith("google.") ||
+            suppliedHost == "bing.com" || suppliedHost.endsWith(".bing.com")
         ) return rejectAllQuotes("ARCHIVE_OR_SEARCH_INTERMEDIARY_URL")
 
         val products = productDao.getAllProductsSnapshot()
@@ -1144,8 +1147,40 @@ class ProductRepository(
         val matchingProducts = products.filter {
             onlineProductIdentityKey(it.title) == identity
         }
-        val originalUrlKey = normalizedProductPageKey(originalUrl) ?: return rejectAllQuotes("ORIGINAL_URL_NOT_CANONICAL")
-        val originalPathKey = normalizedProductPagePathKey(originalUrl) ?: return rejectAllQuotes("ORIGINAL_PATH_NOT_CANONICAL")
+        val explicitlyTargetedProduct = targetProductId?.let { id ->
+            matchingProducts.singleOrNull { it.id == id }
+        }
+        if (targetProductId != null && explicitlyTargetedProduct == null) {
+            return rejectAllQuotes("TARGET_PRODUCT_ID_NOT_MATCHING_EXPECTED_TITLE")
+        }
+
+        // Wayback can retain genuine captures of a retailer page from before its HTTPS migration.
+        // Accept HTTP only when its normalized destination is exactly the HTTPS URL owned by the
+        // selected product (or by one unambiguous matching product when no product ID was supplied).
+        // We persist the canonical HTTPS page URL, never the historical HTTP scheme.
+        val canonicalOriginalUrl = if (suppliedScheme == "https") {
+            originalUrl
+        } else {
+            val archivedTargetKey = normalizedArchivedTargetPageKey(originalUrl)
+                ?: return rejectAllQuotes("ORIGINAL_URL_NOT_HTTPS")
+            val httpEraUrlOwner = if (targetProductId != null) {
+                explicitlyTargetedProduct?.takeIf {
+                    normalizedProductPageKey(it.storeUrl) == archivedTargetKey
+                }
+            } else {
+                matchingProducts.filter {
+                    normalizedProductPageKey(it.storeUrl) == archivedTargetKey
+                }.singleOrNull()
+            }
+            httpEraUrlOwner?.storeUrl ?: return rejectAllQuotes("ORIGINAL_URL_NOT_HTTPS")
+        }
+        val originalUri = parseHttpUri(canonicalOriginalUrl)
+            ?: return rejectAllQuotes("INVALID_ORIGINAL_URL")
+        val originalHost = normalizeHost(originalUri.host.orEmpty())
+        val originalUrlKey = normalizedProductPageKey(canonicalOriginalUrl)
+            ?: return rejectAllQuotes("ORIGINAL_URL_NOT_CANONICAL")
+        val originalPathKey = normalizedProductPagePathKey(canonicalOriginalUrl)
+            ?: return rejectAllQuotes("ORIGINAL_PATH_NOT_CANONICAL")
         val verifiedUrlMatches = matchingProducts.filter { candidate ->
             normalizedProductPageKey(candidate.storeUrl) == originalUrlKey ||
                 priceObservationDao.getVerifiedLiveObservationsForProduct(candidate.id).any { observation ->
@@ -1158,10 +1193,6 @@ class ProductRepository(
         // use the retailer URLs selected from that product's offer list. Anchor persistence to
         // that product ID so an external capture is not discarded merely because its primary
         // saved URL is still a Google Shopping redirect.
-        val explicitlyTargetedProduct = targetProductId?.let { id ->
-            matchingProducts.singleOrNull { it.id == id }
-        }
-        if (targetProductId != null && explicitlyTargetedProduct == null) return rejectAllQuotes("TARGET_PRODUCT_ID_NOT_MATCHING_EXPECTED_TITLE")
         val product = when {
             explicitlyTargetedProduct != null -> explicitlyTargetedProduct
             verifiedUrlMatches.size == 1 -> verifiedUrlMatches.single()
@@ -1193,7 +1224,7 @@ class ProductRepository(
             ?.let(::isEligibleObservationForHistory) == true
         val productOwnsArchiveUrl = normalizedProductPageKey(product.storeUrl) == originalUrlKey
         val merchantName = storeName.ifBlank { originalUri.host.orEmpty() }
-        val storeId = canonicalStoreId(merchantName, originalUrl)
+        val storeId = canonicalStoreId(merchantName, canonicalOriginalUrl)
         // A Google Shopping-only product has no direct retailer URL yet. Historical capture
         // may be attached before the first live search only when this product identity is unique
         // in Room AND the retailer matches the product's saved store identity. The indirect
@@ -1218,7 +1249,7 @@ class ProductRepository(
                 WaybackPriceHistoryClient.DAY_MS
         if (!isEligibleHistoryTitle(expectedTitle) ||
             isPromotionalBulkListing(expectedTitle, "") ||
-            !isEligibleSeller(merchantName, originalUrl)
+            !isEligibleSeller(merchantName, canonicalOriginalUrl)
         ) return rejectAllQuotes("INELIGIBLE_PRODUCT_OR_SELLER")
         var inserted = 0
         var confirmedExistingDuplicates = 0
@@ -1244,7 +1275,7 @@ class ProductRepository(
                 rejectQuote("SNAPSHOT_TIMESTAMP_MISMATCH")
                 continue
             }
-            if (!quote.originalUrl.trimEnd('/').equals(originalUrl.trimEnd('/'), ignoreCase = true)) {
+            if (normalizedArchivedTargetPageKey(quote.originalUrl) != originalUrlKey) {
                 rejectQuote("QUOTE_ORIGINAL_URL_MISMATCH")
                 continue
             }
@@ -1324,7 +1355,7 @@ class ProductRepository(
                 linkType = "Archivo histórico",
                 collectedAt = now,
                 evidenceType = "archive",
-                sourcePageUrl = originalUrl
+                sourcePageUrl = canonicalOriginalUrl
             )
             val (dayStart, dayEnd) = localDayBounds(observation.observedAt)
             // A legacy archive row can satisfy the DAO's coarse daily lookup yet fail the

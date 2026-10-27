@@ -5973,4 +5973,38 @@ class WaybackPriceHistoryClientTest {
     }
 
 
+
+    @Test
+    fun retailerUrlConfirmsArchivedColourWhenSavedProductTitleOmitsColour() {
+        val client = newClient()
+        val expected = "Apple iPhone 15 Plus 256GB"
+        val exactYellowUrl =
+            "https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo-libre"
+
+        assertTrue(
+            "The exact saved retailer URL is allowed to supply a colour omitted from the catalogue title",
+            client.matchesVariantDetailsConfirmedByUrl(
+                expected,
+                "Apple iPhone 15 Plus 256GB Amarillo Libre",
+                exactYellowUrl
+            )
+        )
+        assertFalse(
+            "An archived title with a colour that conflicts with the original product URL must be rejected",
+            client.matchesVariantDetailsConfirmedByUrl(
+                expected,
+                "Apple iPhone 15 Plus 256GB Azul",
+                exactYellowUrl
+            )
+        )
+        assertFalse(
+            "An explicit capacity mismatch must remain rejected even when the URL carries the expected colour",
+            client.matchesVariantDetailsConfirmedByUrl(
+                expected,
+                "Apple iPhone 15 Plus 128GB Amarillo",
+                exactYellowUrl
+            )
+        )
+    }
+
 }

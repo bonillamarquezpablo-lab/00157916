@@ -3090,9 +3090,9 @@ class WaybackPriceHistoryClient(
             "variant_sku", "variant_sku_id", "variation", "variationid", "variation_id",
             "productid", "product_id", "id_product", "id_product_attribute", "offerid", "offer_id",
             "pid", "itemid", "item_id", "asin", "mpn", "gtin", "ean", "model", "modelid",
-            "color", "colour", "colorid", "colourid", "colorgris", "storage", "capacity", "size",
+            "color", "colour", "colorid", "colourid", "storage", "capacity", "size",
             "configuration", "config", "option", "optionid", "attribute_id", "device", "style", "styleid"
-        )
+        ) + (if (merchantDomain == "phonehouse.es") setOf("colorgris") else emptySet())
         val variantParameters = queryParameters.filterKeys { it in variantKeys }
         val identifiers = linkedSetOf<String>()
         pathSegments.filter { segment ->

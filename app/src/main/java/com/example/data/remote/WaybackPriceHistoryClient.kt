@@ -5081,13 +5081,73 @@ class WaybackPriceHistoryClient(
         return hasPriceField && hasProductContext
     }
 
+    /**
+     * Some retailers expose product data in a plain JavaScript assignment instead of JSON-LD or
+     * an application/json script. Only inspect explicitly named state variables; do not scrape
+     * arbitrary JavaScript objects. The extracted JSON is still passed through the exact same
+     * product/variant, currency and price validation as every other source.
+     */
+    private fun isEmbeddedJavaScriptProductState(script: Element): Boolean {
+        val type = script.attr("type").substringBefore(';').trim().lowercase(Locale.ROOT)
+        if (type.isNotBlank() &&
+            type !in setOf("text/javascript", "application/javascript", "module")
+        ) return false
+        val payload = script.data().ifBlank { script.html() }
+        if (payload.isBlank() || payload.length > MAX_EMBEDDED_PRODUCT_STATE_CHARS) return false
+        return EMBEDDED_PRODUCT_STATE_ASSIGNMENT.containsMatchIn(payload)
+    }
+
+    private fun extractAssignedJsonState(script: Element): Any? {
+        val payload = script.data().ifBlank { script.html() }
+        if (payload.isBlank() || payload.length > MAX_EMBEDDED_PRODUCT_STATE_CHARS) return null
+        val assignment = EMBEDDED_PRODUCT_STATE_ASSIGNMENT.find(payload) ?: return null
+        var start = assignment.range.last + 1
+        while (start < payload.length && payload[start].isWhitespace()) start++
+        if (start >= payload.length || payload[start] !in charArrayOf('{', '[')) return null
+        val open = payload[start]
+        val close = if (open == '{') '}' else ']'
+        var depth = 0
+        var inString = false
+        var escaped = false
+        var end = -1
+        for (index in start until payload.length) {
+            val ch = payload[index]
+            if (inString) {
+                when {
+                    escaped -> escaped = false
+                    ch == '\\' -> escaped = true
+                    ch == '"' -> inString = false
+                }
+                continue
+            }
+            when {
+                ch == '"' -> inString = true
+                ch == open -> depth++
+                ch == close -> {
+                    depth--
+                    if (depth == 0) {
+                        end = index + 1
+                        break
+                    }
+                }
+                (open == '{' && ch == '[') || (open == '[' && ch == '{') -> Unit
+            }
+        }
+        if (end <= start || end - start > MAX_EMBEDDED_PRODUCT_STATE_CHARS) return null
+        return runCatching { JSONTokener(payload.substring(start, end)).nextValue() }
+            .getOrNull()
+    }
+
     private fun extractJsonLdRoots(document: Document): List<Any> =
         document.select("script").asSequence()
             .mapNotNull { script ->
                 val type = script.attr("type").substringBefore(';').trim()
                 val isJsonLd = type.equals("application/ld+json", ignoreCase = true)
                 val isProductState = isEmbeddedProductStateScript(script)
-                if (!isJsonLd && !isProductState) return@mapNotNull null
+                val isJavaScriptState = !isJsonLd && !isProductState &&
+                    isEmbeddedJavaScriptProductState(script)
+                if (!isJsonLd && !isProductState && !isJavaScriptState) return@mapNotNull null
+                if (isJavaScriptState) return@mapNotNull extractAssignedJsonState(script)
                 val payload = script.data().ifBlank { script.html() }
                     .trim()
                     .removePrefix("<!--").removeSuffix("-->").trim()
@@ -5323,7 +5383,7 @@ class WaybackPriceHistoryClient(
         knownCurrency: String?,
         acceptedCurrencies: Set<String> = setOf("EUR")
     ): Pair<Double, String>? {
-        val priceSelector = Regex("""(?i)(product[-_ ]?price|current[-_ ]?price|sale[-_ ]?price|selling[-_ ]?price|final[-_ ]?price|special[-_ ]?price|price__current|price--current|price__sale|price--sale|price__amount|price-amount|pricevalue|price-value|a-price|pdp-price|priceblock_(?:our|deal|sale)price|^price$)""")
+        val priceSelector = Regex("""(?i)(product[-_ ]?price|current[-_ ]?price|sale[-_ ]?price|selling[-_ ]?price|final[-_ ]?price|special[-_ ]?price|price__current|price--current|price__sale|price--sale|price__amount|price-amount|pricevalue|price-value|priceblock_(?:our|deal|sale)price|woocommerce[-_ ]?price[-_ ]?amount|price-item--sale|price--highlight|price--sale|priceView-(?:hero|customer)-price|price__current|price__sale|price-current|currentPrice|salePrice|^price$)""")
         val rejectedSelector = Regex("""(?i)(old|previous|regular|original|was[-_ ]?price|list[-_ ]?price|strike|crossed|installment|monthly|shipping|unit[-_ ]?price|price[-_ ]?before)""")
         val voidTags = setOf("meta", "input", "img", "br", "hr", "link", "source", "area", "embed", "track", "wbr")
         val euroAmount = Regex("""(?i)(?:€\s*[0-9][0-9., \u00a0]*|[0-9][0-9., \u00a0]*\s*€|\bEUR\s*[0-9][0-9., \u00a0]*|[0-9][0-9., \u00a0]*\s*\bEUR\b)""")
@@ -5337,14 +5397,22 @@ class WaybackPriceHistoryClient(
             if (tagName in voidTags) continue
             val itemProps = element.attr("itemprop").lowercase(Locale.ROOT)
                 .split(Regex("""\s+""")).filter { it.isNotBlank() }
-            val selector = listOf(
+            val selectorTokens = sequenceOf(
                 element.className(), element.id(), element.attr("data-testid"),
                 element.attr("data-test"), element.attr("data-qa")
-            ).filter { it.isNotBlank() }.joinToString(" ")
+            ).flatMap { value -> value.split(Regex("""\s+""")).asSequence() }
+                .filter { it.isNotBlank() }
+                .toList()
+            val selector = selectorTokens.joinToString(" ")
             val hasDataPrice = sequenceOf("data-price", "data-price-amount", "data-product-price")
                 .any { element.hasAttr(it) }
+            val isAmazonOffscreenPrice = selectorTokens.any { it.equals("a-offscreen", ignoreCase = true) } &&
+                element.parents().any { parent ->
+                    parent.classNames().any { it.equals("a-price", ignoreCase = true) }
+                }
             val isPriceElement = itemProps.any { it in setOf("price", "lowprice") } ||
-                hasDataPrice || priceSelector.containsMatchIn(selector)
+                hasDataPrice || isAmazonOffscreenPrice ||
+                selectorTokens.any(priceSelector::containsMatchIn)
             if (!isPriceElement || rejectedSelector.containsMatchIn(selector)) continue
 
             val text = element.text().replace(Regex("""\s+"""), " ").trim()
@@ -6163,6 +6231,9 @@ class WaybackPriceHistoryClient(
         private const val MAX_CDX_BODY_BYTES = 256 * 1024
         private const val MAX_SNAPSHOT_BODY_BYTES = 2 * 1024 * 1024
         private const val MAX_EMBEDDED_PRODUCT_STATE_CHARS = 512 * 1024
+        private val EMBEDDED_PRODUCT_STATE_ASSIGNMENT = Regex(
+            """(?i)(?:window\s*\.\s*)?(?:__INITIAL_STATE__|__PRELOADED_STATE__|__APOLLO_STATE__|__PRODUCT_STATE__|__PRODUCT_DATA__|__APP_DATA__|__STATE__|productState|productData|productDetails|initialState|preloadedState|apolloState)\s*[:=]\s*"""
+        )
         private const val MAX_ARCHIVED_STRUCTURED_SCRIPTS = 24
         private const val SNAPSHOT_TRANSPORT_RETRY_DELAY_MS = 350L
         const val DAY_MS = 24L * 60L * 60L * 1000L

@@ -8,13 +8,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -59,7 +55,7 @@ fun SmartphoneSubcategoryHomeScreen(
             .fillMaxSize()
             .testTag("smartphone_subcategory_home"),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         item {
             OutlinedButton(
@@ -84,83 +80,79 @@ fun SmartphoneSubcategoryHomeScreen(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Elige qué tipo de producto quieres consultar. Los productos se cargarán al abrir cada apartado.",
+                    text = "Elige el tipo de producto. La lista se carga al abrir cada apartado.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
 
+        // Compact horizontal rows keep the icon visible while giving each description
+        // enough width to wrap naturally without consuming a tall two-column card.
         items(
-            items = subcategories.chunked(2),
-            key = { row -> row.joinToString("-") { it.name } }
-        ) { rowSubcategories ->
+            items = subcategories,
+            key = { it.name }
+        ) { subcategory ->
+            val shape = RoundedCornerShape(14.dp)
             Row(
-                modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Max),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.Top
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 76.dp)
+                    .clip(shape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .border(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
+                        shape
+                    )
+                    .clickable { onSelect(subcategory) }
+                    .padding(horizontal = 11.dp, vertical = 9.dp)
+                    .testTag("subcategory_card_${subcategory.name}"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(11.dp)
             ) {
-                rowSubcategories.forEach { subcategory ->
-                    val shape = RoundedCornerShape(18.dp)
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .heightIn(min = 150.dp)
-                            .clip(shape)
-                            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                            .border(
-                                1.dp,
-                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
-                                shape
-                            )
-                            .clickable { onSelect(subcategory) }
-                            .padding(14.dp)
-                            .testTag("subcategory_card_${subcategory.name}"),
-                        verticalArrangement = Arrangement.spacedBy(9.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(RoundedCornerShape(13.dp))
-                                .background(subcategoryIconBackground(subcategory)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = subcategoryIcon(subcategory),
-                                contentDescription = "Icono de ${subcategory.title.lowercase()}",
-                                modifier = Modifier.size(25.dp),
-                                tint = subcategoryIconTint(subcategory)
-                            )
-                        }
-                        Text(
-                            text = subcategory.title,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            minLines = 2
-                        )
-                        Text(
-                            text = subcategory.description,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 11.sp,
-                            lineHeight = 15.sp
-                        )
-                        Spacer(modifier = Modifier.weight(1f).fillMaxHeight())
-                        Text(
-                            text = "Ver productos  ›",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(subcategoryIconBackground(subcategory)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = subcategoryIcon(subcategory),
+                        contentDescription = "Icono de ${subcategory.title.lowercase()}",
+                        modifier = Modifier.size(22.dp),
+                        tint = subcategoryIconTint(subcategory)
+                    )
                 }
-                if (rowSubcategories.size == 1) {
-                    Spacer(modifier = Modifier.weight(1f))
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = subcategory.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = subcategory.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp,
+                        lineHeight = 14.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
+                Text(
+                    text = "Ver ›",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
             }
         }
     }

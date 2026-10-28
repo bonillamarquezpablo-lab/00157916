@@ -11,6 +11,7 @@ import com.example.data.local.TrackedProductEntity
 import com.example.data.model.PricePoint
 import com.example.data.model.Product
 import com.example.data.model.ProductCategory
+import com.example.data.model.SmartphoneSubcategory
 import com.example.data.model.MarketplaceCategorySummary
 import com.example.data.model.PENDING_VERIFICATION_DATE_LABEL
 import com.example.data.model.StoreOffer
@@ -132,6 +133,9 @@ class ProductRepository(
         // observations. Any failure is logged and the crash-report handler remains available.
         externalScope.launch {
             try {
+                // Repair only rows whose category is the old "unclassified" sentinel. This updates
+                // the category label only; product IDs and every historical-price row stay intact.
+                reclassifyUnclassifiedCatalogueProducts()
                 productDao.markProductsWithVerifiedObservations()
                 startupCleanupCompleted.complete(Unit)
             } catch (cancelled: CancellationException) {
@@ -140,6 +144,24 @@ class ProductRepository(
             } catch (failure: Exception) {
                 Log.e("ProductRepository", "Room startup reconciliation failed; preserving stored products.", failure)
                 startupCleanupCompleted.complete(Unit)
+            }
+        }
+    }
+
+    private suspend fun reclassifyUnclassifiedCatalogueProducts() {
+        val updates = productDao.getAllProductsSnapshot()
+            .asSequence()
+            .filter { it.category.equals(ProductCategory.ALL.name, ignoreCase = true) }
+            .mapNotNull { entity ->
+                val inferred = inferProductCategory(entity.title, "")
+                inferred.takeIf { it != ProductCategory.ALL }?.let { it to entity.id }
+            }
+            .groupBy({ it.first }, { it.second })
+
+        // Keep each Room IN-clause well below SQLite's bind-parameter limit.
+        updates.forEach { (category, productIds) ->
+            productIds.chunked(400).forEach { batch ->
+                productDao.reclassifyUnclassifiedProducts(batch, category.name)
             }
         }
     }
@@ -1661,7 +1683,9 @@ class ProductRepository(
         if (isReplacementPartListingTitle(title)) return ProductCategory.REPLACEMENT_PARTS
         if (isAccessoryListingTitle(title)) return ProductCategory.ACCESSORIES
         return when {
-            Regex("""\b(iphone|redmi|poco|smartphone|movil|telefono|galaxy s|pixel)\b""").containsMatchIn(text) ->
+            SmartphoneSubcategory.PHONES.matchesTitle(title) ||
+                SmartphoneSubcategory.PHONES.matchesTitle(query) ||
+                Regex("""\b(iphone|redmi|poco|smartphone|movil|telefono|galaxy s|pixel)\b""").containsMatchIn(text) ->
                 ProductCategory.SMARTPHONES
             Regex("""\b(laptop|portatil|macbook|chromebook|pc|ram|ssd|procesador|gpu|usb|hub|ethernet|router|cable|cargador)\b""").containsMatchIn(text) ->
                 ProductCategory.COMPUTING

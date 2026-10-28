@@ -3024,6 +3024,22 @@ class WaybackPriceHistoryClient(
             readMeta(document, setOf(key)) ?: readItemPropValue(document, key)
         }?.uppercase(Locale.ROOT)
         if (pageTitles.isEmpty() && jsonLd.isEmpty()) return "ARCHIVE_TITLE_MISSING"
+
+        // Distinguish a correctly rejected second-hand/outlet offer from a page that genuinely
+        // has no price. This is intentionally limited to Phone House's explicit buy-box condition
+        // badge; absence of a badge is not enough to infer a product's condition.
+        val host = runCatching { URI(originalUrl).host.orEmpty() }
+            .getOrDefault("").lowercase(Locale.ROOT).removePrefix("www.")
+        if (host == "phonehouse.es") {
+            val buyBox = document.selectFirst(".buy-box-1")
+            val conditionText = buyBox?.selectFirst(".estado-outlet.outlet, .estado-outlet")
+                ?.text().orEmpty()
+            val expectedCondition = productConditionKey(normalizeTitle(expectedTitle))
+            if (conditionText.isNotBlank() &&
+                productConditionKey(normalizeTitle(conditionText)) != expectedCondition
+            ) return "ARCHIVE_PRODUCT_CONDITION_MISMATCH"
+        }
+
         val visiblePrice = extractVisibleProductPrice(document, metaCurrency)?.first
         if (metaPrice == null && jsonLd.isEmpty() && visiblePrice == null) return "ARCHIVE_PRICE_METADATA_MISSING"
         val candidates = jsonLd +

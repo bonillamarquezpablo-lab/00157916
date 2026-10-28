@@ -467,6 +467,94 @@ class ProductRepositoryArchiveIsolationTest {
     }
 
     @Test
+    fun startupReclassifiesXiaomiMiPhoneWithoutTouchingHistoricalPrices() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val productId = "saved-xiaomi-mi-10-pro"
+            val title = "Xiaomi Mi 10 Pro Gris"
+            val observedAt = java.text.SimpleDateFormat(
+                "yyyyMMddHHmmss", java.util.Locale.ROOT
+            ).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.parse("20250101120000")!!.time
+            val now = System.currentTimeMillis()
+            val snapshotUrl =
+                "https://web.archive.org/web/20250101120000id_/https://www.phonehouse.es/movil/xiaomi/mi-10-pro.html"
+
+            database.productDao().insert(
+                ProductEntity(
+                    id = productId,
+                    title = title,
+                    brand = "Xiaomi",
+                    category = ProductCategory.ALL.name,
+                    currentPrice = 499.99,
+                    athMinPrice = 499.99,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "",
+                    athMaxPrice = 499.99,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "phonehouse",
+                    storeUrl = "https://www.phonehouse.es/movil/xiaomi/mi-10-pro.html",
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            database.priceObservationDao().insertAll(
+                listOf(
+                    PriceObservationEntity(
+                        productId = productId,
+                        storeId = "phonehouse",
+                        price = 499.99,
+                        currency = "EUR",
+                        observedAt = observedAt,
+                        sourceUrl = snapshotUrl,
+                        sourceName = "Internet Archive (Wayback Machine)",
+                        isVerified = true,
+                        productTitle = title,
+                        storeName = "Phone House",
+                        sourceType = "Internet Archive",
+                        linkType = "Archivo histórico",
+                        collectedAt = now,
+                        evidenceType = "archive",
+                        sourcePageUrl = "https://www.phonehouse.es/movil/xiaomi/mi-10-pro.html"
+                    )
+                )
+            )
+
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+
+            val persisted = database.productDao().getProductById(productId)
+            assertEquals(
+                "An old fallback category should be repaired to the shared mobiles category",
+                ProductCategory.SMARTPHONES.name,
+                persisted?.category
+            )
+            assertEquals(
+                "Category repair must not delete or rewrite the saved historical observation",
+                1,
+                database.priceObservationDao().getObservationCount(productId)
+            )
+
+            val mobiles = repository.productsForCategoryStream(ProductCategory.SMARTPHONES).first()
+            val xiaomi = mobiles.single { it.id == productId }
+            assertEquals(title, xiaomi.title)
+            assertEquals(499.99, xiaomi.priceHistory.single { it.evidenceType == "archive" }.price, 0.001)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
     fun concurrentDailyObservationWritesDoNotCreateDuplicateRows() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)

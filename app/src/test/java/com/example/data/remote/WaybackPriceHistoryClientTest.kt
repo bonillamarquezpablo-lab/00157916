@@ -1099,6 +1099,25 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun phoneHouseColorSelectorQueryIsRemovedFromArchiveCandidates() {
+        val client = newClient()
+        val url = "https://www.phonehouse.es/movil/xiaomi/mi-10-pro-256gbplus8gb-ram.html?colorgris="
+
+        assertEquals(
+            "A Phone House colour selector must not prevent looking up the canonical archived product page",
+            "https://www.phonehouse.es/movil/xiaomi/mi-10-pro-256gbplus8gb-ram.html",
+            client.canonicalPreferredArchiveUrl(url)
+        )
+        assertEquals(
+            listOf(
+                url,
+                "https://www.phonehouse.es/movil/xiaomi/mi-10-pro-256gbplus8gb-ram.html"
+            ),
+            client.buildDirectUrlCandidates(url)
+        )
+    }
+
+    @Test
     fun phoneHouseMarketplaceRoutingQueryIsRemovedFromArchiveCandidates() {
         val client = newClient()
         val malformedPhoneHouseUrl =

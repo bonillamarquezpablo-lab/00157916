@@ -3069,8 +3069,14 @@ class WaybackPriceHistoryClient(
             "gclsrc", "irclickid", "twclid", "ttclid", "li_fat_id", "epik", "yclid",
             "awc", "afftrack", "zanpid", "s_kwcid", "mkt_tok", "_gl", "_ga"
         )
+        // Phone House currently appends the marketplace selector as a malformed duplicate
+        // query ("?opt=marketplace?opt=phonehouse"). It is routing metadata, not a product SKU,
+        // and makes CDX exact/prefix queries miss captures of the same canonical product page.
+        // Do not strip "opt" for other retailers: it may identify a real purchasable variant there.
+        val merchantRoutingParameters = if (merchantDomain == "phonehouse.es") setOf("opt") else emptySet()
+        val ignoredArchiveQueryKeys = trackingNames + merchantRoutingParameters
         val removedTracking = decodedPairs.map { it.first }
-            .filter { it.startsWith("utm_") || it in trackingNames }
+            .filter { it.startsWith("utm_") || it in ignoredArchiveQueryKeys }
             .toSet()
         val variantKeys = setOf(
             "sku", "skuid", "sku_id", "variant", "variantid", "variant_id", "id_variant",
@@ -3090,7 +3096,7 @@ class WaybackPriceHistoryClient(
             .forEach { identifiers += it.take(100) }
         val canonicalQuery = rawQueryParts.filterNot { part ->
             val key = decodeQueryUrlComponent(part.substringBefore('=')).lowercase(Locale.ROOT)
-            key.startsWith("utm_") || key in trackingNames
+            key.startsWith("utm_") || key in ignoredArchiveQueryKeys
         }
         val base = scheme + "://" + uri.rawAuthority + path
         val canonicalUrl = base + if (canonicalQuery.isNotEmpty()) {
@@ -3141,7 +3147,7 @@ class WaybackPriceHistoryClient(
         val queryParts = uri.rawQuery?.split('&').orEmpty()
         val cleanedParts = queryParts.filterNot { part ->
             val name = decodeQueryUrlComponent(part.substringBefore('=')).lowercase(Locale.ROOT)
-            name.startsWith("utm_") || name in trackingNames
+            name.startsWith("utm_") || name in trackingNames || name in parts.trackingParameters
         }
         val base = buildString {
             append(uri.scheme.lowercase(Locale.ROOT))

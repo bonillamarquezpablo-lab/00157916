@@ -1687,8 +1687,10 @@ class ProductRepository(
         if (isAccessoryListingTitle(title)) return ProductCategory.ACCESSORIES
         return when {
             SmartphoneSubcategory.PHONES.matchesTitle(title) ||
+                SmartphoneSubcategory.TABLETS.matchesTitle(title) ||
                 SmartphoneSubcategory.PHONES.matchesTitle(query) ||
-                Regex("""\b(iphone|redmi|poco|smartphone|movil|telefono|galaxy s|pixel)\b""").containsMatchIn(text) ->
+                SmartphoneSubcategory.TABLETS.matchesTitle(query) ||
+                Regex("""\b(iphone|redmi|poco|smartphone|movil|telefono|galaxy s|pixel|ipad|tablet)\b""").containsMatchIn(text) ->
                 ProductCategory.SMARTPHONES
             Regex("""\b(laptop|portatil|macbook|chromebook|pc|ram|ssd|procesador|gpu|usb|hub|ethernet|router|cable|cargador)\b""").containsMatchIn(text) ->
                 ProductCategory.COMPUTING

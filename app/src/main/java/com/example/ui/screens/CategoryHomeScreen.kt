@@ -10,11 +10,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -171,25 +168,16 @@ fun CategoryHomeScreen(
             )
         }
 
+        // Horizontal rows use less vertical space than tall icon-on-top cards.
         items(
-            items = categories.chunked(2),
-            key = { row -> row.joinToString("-") { it.category.name } }
-        ) { rowCategories ->
-            Row(
-                modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Max),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                rowCategories.forEach { summary ->
-                    CategoryCard(
-                        summary = summary,
-                        onClick = { onCategorySelect(summary.category) },
-                        modifier = Modifier.weight(1f).fillMaxHeight()
-                    )
-                }
-                if (rowCategories.size == 1) {
-                    Spacer(modifier = Modifier.weight(1f).fillMaxHeight())
-                }
-            }
+            items = categories,
+            key = { it.category.name }
+        ) { summary ->
+            CategoryCard(
+                summary = summary,
+                onClick = { onCategorySelect(summary.category) },
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
         item {
@@ -221,56 +209,62 @@ private fun CategoryCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val shape = RoundedCornerShape(18.dp)
-    Column(
+    val shape = RoundedCornerShape(14.dp)
+    Row(
         modifier = modifier
-            .heightIn(min = 142.dp)
+            .heightIn(min = 68.dp)
             .clip(shape)
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f), shape)
             .clickable(onClick = onClick)
-            .padding(14.dp)
+            .padding(horizontal = 12.dp, vertical = 9.dp)
             .testTag("category_card_${summary.category.name}"),
-        verticalArrangement = Arrangement.spacedBy(9.dp)
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Box(
             modifier = Modifier
-                .size(42.dp)
-                .clip(RoundedCornerShape(13.dp))
+                .size(38.dp)
+                .clip(RoundedCornerShape(11.dp))
                 .background(categoryIconBackground(summary.category)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = categoryIcon(summary.category),
                 contentDescription = summary.category.displayName,
-                modifier = Modifier.size(24.dp),
+                modifier = Modifier.size(21.dp),
                 tint = categoryIconTint(summary.category)
             )
         }
 
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = summary.category.displayName,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            val storeLabel = if (summary.storeCount == 1) "1 comercio" else "${summary.storeCount} comercios"
+            val productLabel = if (summary.productCount == 1) "1 producto" else "${summary.productCount} productos"
+            Text(
+                text = "$productLabel · $storeLabel",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
         Text(
-            text = summary.category.displayName,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            minLines = 2
-        )
-
-        Spacer(modifier = Modifier.weight(1f))
-
-        Text(
-            text = if (summary.storeCount == 1) "1 comercio" else "${summary.storeCount} comercios",
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary
-        )
-        Text(
-            text = if (summary.productCount == 1) "1 producto" else "${summary.productCount} productos",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 11.sp
+            text = "›",
+            color = MaterialTheme.colorScheme.primary,
+            fontSize = 25.sp,
+            fontWeight = FontWeight.Medium
         )
     }
 }

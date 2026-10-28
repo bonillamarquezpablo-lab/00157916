@@ -836,7 +836,8 @@ class WaybackPriceHistoryClient(
         onTrace: ((WaybackTraceEvent) -> Unit)? = null,
         knownProductTitlesById: Map<String, String> = emptyMap(),
         onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null,
-        forceRefresh: Boolean = false
+        forceRefresh: Boolean = false,
+        stopWhenEnoughNewPoints: (() -> Boolean)? = null
     ): WaybackBackfillResult = withContext(Dispatchers.IO) {
         if (!preferences.getBoolean("enabled", true)) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("WAYBACK_DISABLED"))
@@ -1053,7 +1054,8 @@ class WaybackPriceHistoryClient(
                         onTrace = onTrace,
                         snapshotResultsCache = snapshotResultsCache,
                         onVerifiedQuotes = onVerifiedQuotes,
-                        knownProductTitlesById = knownProductTitlesById
+                        knownProductTitlesById = knownProductTitlesById,
+                        stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                     )
                     if (productResult.quotes.isNotEmpty()) {
                         rememberAttempt(attempt, now, hasQuotes = true, failed = false)
@@ -1130,7 +1132,8 @@ class WaybackPriceHistoryClient(
                     onTrace = onTrace,
                     snapshotResultsCache = snapshotResultsCache,
                     onVerifiedQuotes = onVerifiedQuotes,
-                    knownProductTitlesById = knownProductTitlesById
+                    knownProductTitlesById = knownProductTitlesById,
+                    stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                 )
                 lastResult = result
                 if (result.quotes.isNotEmpty()) {
@@ -1282,7 +1285,8 @@ class WaybackPriceHistoryClient(
             onVerifiedQuotes = onVerifiedQuotes,
             knownProductTitlesById = knownProductTitlesById,
             forceRefresh = forceRefresh,
-            allowSupplementalCdxSeries = !priorProductPrefixTransientFailure
+            allowSupplementalCdxSeries = !priorProductPrefixTransientFailure,
+            stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
         )
         emitWaybackTrace(
             onTrace, 6,
@@ -1376,7 +1380,8 @@ class WaybackPriceHistoryClient(
                     onTrace = onTrace,
                     snapshotResultsCache = snapshotResultsCache,
                     onVerifiedQuotes = onVerifiedQuotes,
-                    knownProductTitlesById = knownProductTitlesById
+                    knownProductTitlesById = knownProductTitlesById,
+                    stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                 )
                 alternateResult = candidateResult
                 when {

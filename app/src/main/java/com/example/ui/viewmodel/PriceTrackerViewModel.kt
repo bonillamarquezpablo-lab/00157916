@@ -169,16 +169,18 @@ internal fun mergeWaybackDiagnosticStatus(
  * after the direct CDX route has completed a usable three-date history.
  */
 /**
- * A history lookup is only a successful persistence step when at least one item was durably
- * written. Finding a quote or refreshing a card does not prove that its capture is present.
+ * Persistence is verified when a new point is inserted or a valid existing duplicate is found.
+ * A duplicate proves the historical point is already stored, but does not mean the chart grew.
+ * Merely extracting a quote or refreshing the product card is not proof of persistence.
  */
 internal fun archivePersistenceStatus(
     savedPoints: Int,
+    confirmedDuplicates: Int = 0,
     rejectedQuotes: Int = 0,
     attempted: Boolean = false,
     completed: Boolean = true
 ): WaybackTraceStatus = when {
-    savedPoints > 0 -> WaybackTraceStatus.PASSED
+    savedPoints > 0 || confirmedDuplicates > 0 -> WaybackTraceStatus.PASSED
     attempted && (!completed || rejectedQuotes > 0) -> WaybackTraceStatus.FAILED
     else -> WaybackTraceStatus.SKIPPED
 }
@@ -3387,6 +3389,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     val confirmedDuplicateTotal = confirmedPrimaryDuplicateCount + confirmedVariantDuplicateCount
                     val persistenceStatus = archivePersistenceStatus(
                         savedPoints = savedCount,
+                        confirmedDuplicates = confirmedDuplicateTotal,
                         rejectedQuotes = rejectedArchiveQuoteCount,
                         attempted = foundPrimaryCount > 0 || foundSecondaryCount > 0,
                         completed = overallPersistenceCompleted
@@ -3663,6 +3666,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             "La fase 19 separa duplicados válidos, filas inválidas y capturas rechazadas."
                     crossSavedVariantObservationCount > 0 ->
                         "Se guardaron $crossSavedVariantObservationCount precios históricos en fichas de variantes relacionadas; no se añadió historial nuevo al producto seleccionado."
+                    foundPrimaryCount > 0 && confirmedPrimaryDuplicateCount > 0 ->
+                        "Se recuperaron $foundPrimaryCount precio(s) del producto seleccionado y se confirmaron " +
+                            "$confirmedPrimaryDuplicateCount duplicado(s) histórico(s) válido(s). No se añadieron fechas nuevas porque esos puntos ya existían." +
+                            if (requestFailedCount > 0) " La búsqueda quedó parcial por una o más consultas fallidas o agotadas por tiempo; revisa los tiempos de espera CDX." else "",
                     foundPrimaryCount > 0 ->
                         "Se recuperaron $foundPrimaryCount precio(s) del producto seleccionado, pero no se confirmó ningún punto nuevo. " +
                             "No se asume que sean duplicados válidos: consulta la fase 19 para ver los duplicados confirmados, filas inválidas y capturas rechazadas."
@@ -3798,11 +3805,19 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             diagnosticProductId, WaybackTraceStatus.PASSED,
                             "${stagedDiscoveryObservationsCount.get()} observación(es) de productos nuevos guardadas en el Radar; no se han añadido a Mercado automáticamente."
                         )
-                        foundPrimaryCount > 0 && selectedProductRefreshed -> finishWaybackDiagnostic(
-                            diagnosticProductId, WaybackTraceStatus.FAILED,
-                            "La fase de guardado SÍ se ejecutó, pero no se confirmó ningún punto nuevo ni un duplicado válido del producto seleccionado. La ficha se refrescó, pero eso no demuestra persistencia. Revisa en la fase 19 los motivos de rechazo, la URL original y la identidad del producto."
+                        confirmedPrimaryDuplicateCount > 0 && selectedProductRefreshed && requestFailedCount == 0 -> finishWaybackDiagnostic(
+                            diagnosticProductId, WaybackTraceStatus.PASSED,
+                            "Se confirmó que los $confirmedPrimaryDuplicateCount punto(s) histórico(s) ya estaban guardados para el producto seleccionado. No se insertaron filas nuevas porque los puntos ya existían; la persistencia está comprobada."
                         )
-                        foundPrimaryCount > 0 -> finishWaybackDiagnostic(
+                        confirmedPrimaryDuplicateCount > 0 && requestFailedCount > 0 -> finishWaybackDiagnostic(
+                            diagnosticProductId, WaybackTraceStatus.FAILED,
+                            "La persistencia está comprobada: $confirmedPrimaryDuplicateCount duplicado(s) válido(s) del producto seleccionado ya existían. No se añadieron fechas nuevas y la búsqueda quedó incompleta porque una o más consultas agotaron el tiempo o fallaron; esto no es un fallo del guardado."
+                        )
+                        confirmedPrimaryDuplicateCount > 0 -> finishWaybackDiagnostic(
+                            diagnosticProductId, WaybackTraceStatus.FAILED,
+                            "Se confirmaron $confirmedPrimaryDuplicateCount duplicado(s) histórico(s) válido(s), pero no se pudo confirmar la actualización de la ficha. No se añadieron fechas nuevas; revisa la fase 29."
+                        )
+                        foundPrimaryCount > 0 && selectedProductRefreshed -> finishWaybackDiagnostic(
                             diagnosticProductId, WaybackTraceStatus.FAILED,
                             "La fase de guardado SÍ se ejecutó, pero no se confirmó persistencia para el producto seleccionado. Revisa en la fase 19 los motivos de rechazo y las filas existentes."
                         )

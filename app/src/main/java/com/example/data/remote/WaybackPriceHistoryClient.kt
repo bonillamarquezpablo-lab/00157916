@@ -3073,7 +3073,7 @@ class WaybackPriceHistoryClient(
         // query ("?opt=marketplace?opt=phonehouse"). It is routing metadata, not a product SKU,
         // and makes CDX exact/prefix queries miss captures of the same canonical product page.
         // Do not strip "opt" for other retailers: it may identify a real purchasable variant there.
-        val merchantRoutingParameters = if (merchantDomain == "phonehouse.es") setOf("opt") else emptySet()
+        val merchantRoutingParameters = if (merchantDomain == "phonehouse.es") setOf("opt", "colorgris") else emptySet()
         val ignoredArchiveQueryKeys = trackingNames + merchantRoutingParameters
         val removedTracking = decodedPairs.map { it.first }
             .filter { it.startsWith("utm_") || it in ignoredArchiveQueryKeys }

@@ -3031,6 +3031,16 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         }
                         persistCandidateQuotes(candidate, batch)
                     }
+                    val stopWhenEnoughNewPoints: () -> Boolean = {
+                        val currentPrimaryQuotes = candidateQuotesObserved.values.filter {
+                            !it.isDiscoveryCandidate &&
+                                (it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId)
+                        }
+                        hasSufficientNewVerifiedArchiveHistory(
+                            timestamps = currentPrimaryQuotes.map { it.observedAt },
+                            newPointsSaved = (savedCount - savedCountBeforeCandidate).coerceAtLeast(0)
+                        )
+                    }
                     var candidateTimedOut = false
                     if (candidate.directUrl != null) {
                         val direct = withTimeoutOrNull(MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS) {
@@ -3041,16 +3051,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 knownProductTitlesById = knownProductTitlesById,
                                 onVerifiedQuotes = persistQuotesAsTheyArrive,
                                 forceRefresh = forceRefresh,
-                                stopWhenEnoughNewPoints = {
-                                    val currentPrimaryQuotes = candidateQuotesObserved.values.filter {
-                                        !it.isDiscoveryCandidate &&
-                                            (it.targetProductId.isNullOrBlank() || it.targetProductId == targetProductId)
-                                    }
-                                    hasSufficientNewVerifiedArchiveHistory(
-                                        timestamps = currentPrimaryQuotes.map { it.observedAt },
-                                        newPointsSaved = (savedCount - savedCountBeforeCandidate).coerceAtLeast(0)
-                                    )
-                                }
+                                stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                             )
                         }
                         if (direct == null) {
@@ -3231,7 +3232,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                 onTrace = traceCallback,
                                 knownProductTitlesById = knownProductTitlesById,
                                 onVerifiedQuotes = persistQuotesAsTheyArrive,
-                                forceRefresh = forceRefresh
+                                forceRefresh = forceRefresh,
+                                stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                             )
                         }
                         if (domainResult == null) {

@@ -83,14 +83,14 @@ interface ProductDao {
     ): Int
 
     /**
-     * Repairs only the category label of previously unclassified rows. Product IDs, saved prices,
-     * observation rows, URLs, and verification flags are untouched.
+     * Repairs only fallback category labels (ALL/OTHER) when the title identifies a specific
+     * category. Product IDs, saved prices, observation rows, URLs, and verification flags stay untouched.
      */
     @Query(
         "UPDATE products SET category = :category " +
-            "WHERE upper(category) = 'ALL' AND id IN (:productIds)"
+            "WHERE upper(category) IN ('ALL','OTHER') AND id IN (:productIds)"
     )
-    suspend fun reclassifyUnclassifiedProducts(
+    suspend fun reclassifyFallbackCategoryProducts(
         productIds: List<String>,
         category: String
     ): Int

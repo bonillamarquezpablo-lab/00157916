@@ -332,3 +332,25 @@ Cuando al menos una consulta CDX responde válidamente sin capturas, pero otra f
 La modificación del parámetro está limitada al dominio Phone House y al valor vacío de `colorgris`; los valores de color no vacíos se conservan. Las demás tiendas mantienen su normalización previa. La ejecución de CI correspondiente a los últimos cambios debe terminar antes de marcar la corrección como probada. Los HTTP 503 y timeouts de Internet Archive son fallos externos transitorios; el código puede acotarlos y diagnosticarlos, pero no garantizar que el servicio responda en cada intento.
 
 **Próxima prueba real:** repetir la búsqueda del Xiaomi Mi 10 Pro Gris con el informe completo, comprobar que CDX recibe primero la URL canónica sin selectores vacíos, y verificar puntos históricos nuevos/fechas y gráfica. Repetir después un producto de otra tienda para confirmar ausencia de regresiones.
+
+
+## 14. Informe real de Phone House: extracción de precio y validación de variante — 28/10/2026
+
+### Evidencia de ejecución 1.7.1007.1
+El informe del Xiaomi Mi 10 Pro Gris demuestra que CDX sí encontró cinco capturas y que la aplicación descargó su HTML con HTTP 200. El fallo principal ocurrió después, durante la validación/extracción:
+- La captura archivada de 2022 contiene un Product/Offer JSON-LD con precio de 989 EUR y un SKU de Phone House; el título de la página expresa la variante como `Xiaomi Mi 10 Pro 256GB+8GB RAM`, omitiendo el color en el título.
+- Varias capturas no contienen JSON-LD ni metadatos de precio, pero muestran la oferta principal en el bloque `.buy-box-1 .precio.mb-10`.
+- La captura de noviembre de 2024 es de un producto reacondicionado (380 EUR, con precio recomendado tachado de 880 EUR). No se debe mezclar en el histórico de producto nuevo.
+- El HTTP 429 de Availability sucedió después de las consultas CDX y las descargas; no explica por sí solo por qué se rechazaron las cinco capturas.
+
+### Cambios aplicados
+- Commit [cee75f6](https://github.com/bonillamarquezpablo-lab/00157916/commit/cee75f6f10056555d434d634d375eec073af3350): extractor de precio de Phone House acotado al bloque principal de compra y a su importe `strong`; valida la condición del artículo y no reutiliza el precio tachado.
+- Commit [6f7a330](https://github.com/bonillamarquezpablo-lab/00157916/commit/6f7a33078aa0599e69bc8fcc5428426bbf62ee8e): normaliza el separador de capacidad de URL `256gbplus8gb-ram` para reconocer 256 GB de almacenamiento.
+- Commit [21e4292](https://github.com/bonillamarquezpablo-lab/00157916/commit/21e42920ca7cb03fed297c953c88d1d99ae43093): corrige el escape Kotlin del reemplazo regex de ese normalizador.
+- Se añadieron pruebas para oferta estructurada con URL exacta, precio visible sin JSON-LD, rechazo de reacondicionado, rechazo de capacidad explícitamente distinta y distinción entre almacenamiento y RAM.
+
+### Salvaguardas
+La corrección no convierte cualquier precio de la página en válido. Se sigue exigiendo que el modelo coincida, que una capacidad distinta se rechace cuando la selección la especifica, que las capacidades incluidas solo en el título archivado se confirmen con la URL exacta, que la moneda sea EUR y que la condición del producto coincida. El parser de precio visible específico solo se usa para `phonehouse.es`; las tiendas restantes conservan su extractor previo.
+
+### Estado de validación
+La ejecución CI correspondiente al último cambio es [run #1011](https://github.com/bonillamarquezpablo-lab/00157916/actions/runs/40661629344). En el momento de escribir esta nota aún no se había confirmado el resultado final. No se declara una APK validada ni una recuperación histórica completada hasta que esa ejecución termine y se pruebe la nueva APK con una búsqueda real. El HTTP 429 sigue siendo un límite temporal externo y debe respetarse la pausa indicada por la aplicación.

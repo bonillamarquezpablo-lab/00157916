@@ -1099,6 +1099,33 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun phoneHouseMarketplaceRoutingQueryIsRemovedFromArchiveCandidates() {
+        val client = newClient()
+        val malformedPhoneHouseUrl =
+            "https://www.phonehouse.es/movil/xiaomi/mi-10-pro-256gbplus8gb-ram.html?opt=marketplace?opt=phonehouse"
+        val canonicalProductUrl =
+            "https://www.phonehouse.es/movil/xiaomi/mi-10-pro-256gbplus8gb-ram.html"
+
+        assertEquals(
+            "Keep the supplied link for diagnostics, but try its clean product path for archive queries",
+            listOf(malformedPhoneHouseUrl, canonicalProductUrl),
+            client.buildDirectUrlCandidates(malformedPhoneHouseUrl)
+        )
+        assertEquals(
+            "The marketplace selector is not a Xiaomi variant identifier",
+            canonicalProductUrl,
+            client.canonicalPreferredArchiveUrl(malformedPhoneHouseUrl)
+        )
+
+        val otherRetailerOption = "https://shop.example/product/phone?opt=gray"
+        assertEquals(
+            "Do not strip opt on other retailers, where it may identify a real variant",
+            otherRetailerOption,
+            client.canonicalPreferredArchiveUrl(otherRetailerOption)
+        )
+    }
+
+    @Test
     fun fullyDecodesNestedGoogleRedirectAndPreservesProductVariantParameters() {
         val client = newClient()
         val encodedDestination =

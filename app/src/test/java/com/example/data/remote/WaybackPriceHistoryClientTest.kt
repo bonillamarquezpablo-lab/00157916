@@ -1121,6 +1121,10 @@ class WaybackPriceHistoryClientTest {
             "https://www.phonehouse.es/movil/xiaomi/mi-10-pro-256gbplus8gb-ram.html?colorgris=gris"
         assertEquals(selectedColour, client.canonicalPreferredArchiveUrl(selectedColour))
         assertEquals(listOf(selectedColour), client.buildDirectUrlCandidates(selectedColour))
+        assertEquals(
+            listOf("gris"),
+            client.decomposeProductUrl(selectedColour)?.variantParameters?.get("colorgris")
+        )
 
         // The same parameter name has no special meaning on another retailer.
         val otherRetailer =

@@ -1272,6 +1272,186 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun phoneHouseStructuredOfferMatchesGenericXiaomiTitleWhenExactUrlConfirmsCapacity() {
+        val client = newClient()
+        val expected = "Xiaomi Mi 10 Pro Gris"
+        val originalUrl = "https://www.phonehouse.es/movil/xiaomi/mi-10-pro-256gbplus8gb-ram.html"
+        val html = """
+            <html>
+              <head>
+                <title>Comprar Xiaomi Mi 10 Pro 256GB+8GB RAM al mejor precio | Phone House</title>
+                <link rel="canonical" href="$originalUrl">
+                <script type="application/ld+json">
+                  {
+                    "@context":"https://schema.org",
+                    "@type":"Product",
+                    "name":"Xiaomi Mi 10 Pro 256GB+8GB RAM",
+                    "sku":"917407",
+                    "url":"$originalUrl",
+                    "offers":{
+                      "@type":"Offer",
+                      "url":"$originalUrl",
+                      "priceCurrency":"EUR",
+                      "price":"989.0",
+                      "itemCondition":"https://schema.org/NewCondition",
+                      "availability":"https://schema.org/InStock"
+                    }
+                  }
+                </script>
+              </head>
+              <body>
+                <div class="buy-box-1">
+                  <h1>Xiaomi Mi 10 Pro 256GB+8GB RAM</h1>
+                  <div class="colores-capacidades">
+                    <div class="selector-color-new">
+                      <li data-selector-product="917407">
+                        <span class="activo" title="Gris"><label>Gris</label></span>
+                      </li>
+                    </div>
+                  </div>
+                </div>
+              </body>
+            </html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = expected,
+            originalUrl = originalUrl,
+            snapshotUrl = "https://web.archive.org/web/20220526025211id_/$originalUrl",
+            observedAt = 1_653_536_331_000L
+        )
+
+        assertNotNull(
+            "A Phone House Product/Offer with the exact archived URL should match when the catalogue title omits capacity and colour",
+            quote
+        )
+        assertEquals(989.0, quote!!.price, 0.001)
+        assertEquals("EUR", quote.currency)
+        assertTrue(quote.variantIdentityConfirmedByUrl)
+    }
+
+    @Test
+    fun phoneHouseVisibleBuyBoxPriceIsExtractedWhenJsonLdIsAbsent() {
+        val client = newClient()
+        val expected = "Xiaomi Mi 10 Pro Gris"
+        val originalUrl = "https://www.phonehouse.es/movil/xiaomi/mi-10-pro-256gbplus8gb-ram.html"
+        val html = """
+            <html>
+              <head>
+                <title>Comprar Xiaomi Mi 10 Pro 256GB+8GB RAM al mejor precio | Phone House</title>
+              </head>
+              <body>
+                <div class="buy-box-1">
+                  <h1>Xiaomi Mi 10 Pro 256GB+8GB RAM</h1>
+                  <div data-product-section="buy-box">
+                    <div class="estado-outlet outlet"></div>
+                    <div class="precio mb-10"><strong>989<small>€</small></strong></div>
+                    <div class="mb-10 vendedor-mp">Vendido por Mercamarket 88</div>
+                  </div>
+                </div>
+              </body>
+            </html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = expected,
+            originalUrl = originalUrl,
+            snapshotUrl = "https://web.archive.org/web/20250513140928id_/$originalUrl",
+            observedAt = 1_747_142_568_000L
+        )
+
+        assertNotNull("Phone House's .precio buy-box markup should be recognized", quote)
+        assertEquals(989.0, quote!!.price, 0.001)
+        assertEquals("EUR", quote.currency)
+    }
+
+    @Test
+    fun phoneHouseRefurbishedBuyBoxPriceIsNotImportedAsNewProductHistory() {
+        val client = newClient()
+        val expected = "Xiaomi Mi 10 Pro Gris"
+        val originalUrl = "https://www.phonehouse.es/movil/xiaomi/mi-10-pro-256gbplus8gb-ram.html"
+        val html = """
+            <html>
+              <head>
+                <title>Comprar Xiaomi Mi 10 Pro 256GB+8GB RAM al mejor precio | Phone House</title>
+              </head>
+              <body>
+                <div class="buy-box-1">
+                  <h1>Xiaomi Mi 10 Pro 256GB+8GB RAM</h1>
+                  <div class="estado-outlet outlet">
+                    <span>Reacondicionado</span>
+                    <span>Estado: Funcional</span>
+                  </div>
+                  <div class="precio mb-10">
+                    <strong>380<small>€</small></strong>
+                    <span class="precio-tachado">880€</span>
+                  </div>
+                  <div class="mb-10 vendedor-mp">Vendido por ecofone</div>
+                </div>
+              </body>
+            </html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = expected,
+            originalUrl = originalUrl,
+            snapshotUrl = "https://web.archive.org/web/20241111213737id_/$originalUrl",
+            observedAt = 1_731_365_867_000L
+        )
+
+        assertNull("A refurbished offer must not be mixed into standard-product history", quote)
+    }
+
+    @Test
+    fun phoneHouseOfferDoesNotCrossWireAnExplicitlyRequestedStorageCapacity() {
+        val client = newClient()
+        val expected = "Xiaomi Mi 10 Pro 128GB Gris"
+        val originalUrl = "https://www.phonehouse.es/movil/xiaomi/mi-10-pro-256gbplus8gb-ram.html"
+        val html = """
+            <html>
+              <head>
+                <title>Comprar Xiaomi Mi 10 Pro 256GB+8GB RAM al mejor precio | Phone House</title>
+              </head>
+              <body>
+                <div class="buy-box-1">
+                  <h1>Xiaomi Mi 10 Pro 256GB+8GB RAM</h1>
+                  <div data-product-section="buy-box">
+                    <div class="estado-outlet outlet"></div>
+                    <div class="precio mb-10"><strong>989<small>€</small></strong></div>
+                  </div>
+                </div>
+              </body>
+            </html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = expected,
+            originalUrl = originalUrl,
+            snapshotUrl = "https://web.archive.org/web/20250513140928id_/$originalUrl",
+            observedAt = 1_747_142_568_000L
+        )
+
+        assertNull("A 256 GB archived URL must not satisfy an explicit 128 GB selection", quote)
+    }
+
+    @Test
+    fun ramAmountIsNotMistakenForAdditionalPhoneStorageCapacity() {
+        val client = newClient()
+        val title = "Xiaomi Mi 10 Pro 256GB Gris"
+        val archivedTitle = "Xiaomi Mi 10 Pro 256GB+8GB RAM"
+        val url = "https://www.phonehouse.es/movil/xiaomi/mi-10-pro-256gbplus8gb-ram.html"
+
+        assertTrue(
+            "The 8 GB RAM label must not conflict with the phone's 256 GB storage",
+            client.matchesVariantDetailsConfirmedByUrl(title, archivedTitle, url)
+        )
+    }
+
+    @Test
     fun extractsWooCommerceVisiblePriceWithoutChangingStrictProductIdentityChecks() {
         val client = newClient()
         val title = "Xiaomi Mi 10 Pro Gris"

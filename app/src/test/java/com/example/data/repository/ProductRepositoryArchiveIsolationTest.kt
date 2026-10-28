@@ -533,6 +533,10 @@ class ProductRepositoryArchiveIsolationTest {
                 externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
             )
 
+            // Wait until Room emits the repaired category, not just the first pre-repair value.
+            val mobiles = repository.productsForCategoryStream(ProductCategory.SMARTPHONES).first { products ->
+                products.any { it.id == productId }
+            }
             val persisted = database.productDao().getProductById(productId)
             assertEquals(
                 "An old fallback category should be repaired to the shared mobiles category",
@@ -545,7 +549,6 @@ class ProductRepositoryArchiveIsolationTest {
                 database.priceObservationDao().getObservationCount(productId)
             )
 
-            val mobiles = repository.productsForCategoryStream(ProductCategory.SMARTPHONES).first()
             val xiaomi = mobiles.single { it.id == productId }
             assertEquals(title, xiaomi.title)
             assertEquals(499.99, xiaomi.priceHistory.single { it.evidenceType == "archive" }.price, 0.001)

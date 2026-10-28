@@ -312,3 +312,23 @@ Esta sección consolida el hito positivo comunicado el 28/10 y aclara el estado 
 - Corrección aplicada en [commit 6433ea7](https://github.com/bonillamarquezpablo-lab/00157916/commit/6433ea74a8c8a89aa570c1e10a20dbb6b08aebbd): se añadió el import explícito del icono `Info`, sin cambiar la lógica del motor histórico ni la identidad/validación de productos.
 - La ejecución automática posterior es [run #999](https://github.com/bonillamarquezpablo-lab/00157916/actions/runs/40621337362). En la última consulta estaba en curso; **no se declara aprobado ni se afirma que haya producido APK hasta que GitHub confirme el resultado final**.
 - Próximo criterio: confirmar que unit tests, compilación instrumentada, APK, firma y comprobación de Chucker terminan correctamente. Después probar la APK en dispositivo con una búsqueda real y conservar su informe de 22 fases.
+
+
+## 13. Corrección acotada de Phone House y diagnóstico de CDX — 28/10/2026
+
+### Qué mostró el informe 1.7.999.1 y el HAR
+- En la consulta del Xiaomi Mi 10 Pro Gris, la URL de Phone House incluía `colorgris=` vacío y el selector de marketplace `opt`. La búsqueda exacta respondió sin capturas y las consultas por prefijo/ventana trimestral incluyeron tiempos de espera o HTTP 503.
+- Una respuesta CDX válida vacía no permite cubrir las consultas que agotaron el tiempo. El diagnóstico anterior combinaba ambos resultados y podía afirmar que no había histórico a pesar de que la búsqueda quedaba incompleta.
+
+### Correcciones aplicadas en código
+- [Normalización del selector Phone House y resumen de fallos parciales](https://github.com/bonillamarquezpablo-lab/00157916/commit/4c5c43f625fcf8fd56478bdbc7becdd9b66f96f0): `colorgris` solo se elimina de la URL de archivo cuando su valor está vacío y el dominio identificado es `phonehouse.es`. El selector `opt` sigue siendo metadato específico de Phone House.
+- [Preservación de color en identidad de variante](https://github.com/bonillamarquezpablo-lab/00157916/commit/a91f80eba9db9c634da49dca7dcf7e9ba436e325): si `colorgris` tiene un valor (por ejemplo `gris`), se conserva en la URL canónica y se trata como atributo de variante. En otros comercios no se aplica la regla especial de Phone House.
+- [Pruebas de aislamiento y de diagnóstico incompleto](https://github.com/bonillamarquezpablo-lab/00157916/commit/d80bd01a84bd18f1479fd4f78f94211b7c89857e) y [aserción de identidad de color](https://github.com/bonillamarquezpablo-lab/00157916/commit/9ded15bedf5d5586af73bb8af07b1d73c841582c).
+
+### Cambio de diagnóstico
+Cuando al menos una consulta CDX responde válidamente sin capturas, pero otra falla o agota el tiempo, el informe debe decir que la búsqueda está incompleta y que no se puede concluir que el histórico esté vacío. Si todas las respuestas examinadas son válidas y vacías, sí puede informar que no se encontraron capturas en las rutas consultadas. Esto no declara que el archivo entero carezca de datos.
+
+### Alcance y validación
+La modificación del parámetro está limitada al dominio Phone House y al valor vacío de `colorgris`; los valores de color no vacíos se conservan. Las demás tiendas mantienen su normalización previa. La ejecución de CI correspondiente a los últimos cambios debe terminar antes de marcar la corrección como probada. Los HTTP 503 y timeouts de Internet Archive son fallos externos transitorios; el código puede acotarlos y diagnosticarlos, pero no garantizar que el servicio responda en cada intento.
+
+**Próxima prueba real:** repetir la búsqueda del Xiaomi Mi 10 Pro Gris con el informe completo, comprobar que CDX recibe primero la URL canónica sin selectores vacíos, y verificar puntos históricos nuevos/fechas y gráfica. Repetir después un producto de otra tienda para confirmar ausencia de regresiones.

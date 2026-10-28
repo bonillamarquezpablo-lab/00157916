@@ -1131,6 +1131,10 @@ class WaybackPriceHistoryClientTest {
             "https://shop.example/product/xiaomi-mi-10-pro?colorgris="
         assertEquals(otherRetailer, client.canonicalPreferredArchiveUrl(otherRetailer))
         assertEquals(listOf(otherRetailer), client.buildDirectUrlCandidates(otherRetailer))
+        assertNull(
+            "colorgris must not become a special variant key on other merchants",
+            client.decomposeProductUrl(otherRetailer)?.variantParameters?.get("colorgris")
+        )
     }
 
     @Test

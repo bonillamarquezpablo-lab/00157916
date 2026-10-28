@@ -39,31 +39,31 @@ import java.util.concurrent.CopyOnWriteArrayList
 @Config(sdk = [35])
 class WaybackPriceHistoryClientTest {
     @Test
-    fun onlyNewPointsForSelectedProductCanMarkPersistencePassed() {
+    fun newPointsOrConfirmedValidDuplicatesProvePersistence() {
         assertEquals(
-            "A refreshed product or extracted quote is not proof that a new chart point was inserted",
+            "An extracted quote or refreshed card alone is not proof of persistence",
             WaybackTraceStatus.SKIPPED,
             archivePersistenceStatus(savedPoints = 0)
         )
         assertEquals(
-            "Existing duplicates, related-variant saves, and quarantined discoveries must not mark the selected product as newly saved",
+            "No new point and no confirmed duplicate must remain skipped",
             WaybackTraceStatus.SKIPPED,
-            archivePersistenceStatus(savedPoints = 0)
+            archivePersistenceStatus(savedPoints = 0, confirmedDuplicates = 0)
         )
         assertEquals(
-            "A new durable point on the selected product is enough to mark persistence as passed",
+            "A new durable point confirms persistence",
             WaybackTraceStatus.PASSED,
             archivePersistenceStatus(savedPoints = 1)
         )
         assertEquals(
-            "A persistence attempt that rejects every recovered quote must be reported as failed, not skipped",
+            "A persistence attempt that rejects every recovered quote must be reported as failed",
             WaybackTraceStatus.FAILED,
             archivePersistenceStatus(savedPoints = 0, rejectedQuotes = 4, attempted = true)
         )
         assertEquals(
-            "A valid existing duplicate alone is not a newly saved chart point",
-            WaybackTraceStatus.SKIPPED,
-            archivePersistenceStatus(savedPoints = 0)
+            "A confirmed valid duplicate proves the historical point is already persisted, without claiming the chart gained a new point",
+            WaybackTraceStatus.PASSED,
+            archivePersistenceStatus(savedPoints = 0, confirmedDuplicates = 1)
         )
     }
 

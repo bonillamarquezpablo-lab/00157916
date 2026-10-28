@@ -3375,23 +3375,27 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     val targetIdentity = selectedProductRefreshTitle?.let(::onlineProductIdentityKey)
                     val refreshedProduct = runCatching {
                         withTimeout(10_000L) {
+                            // Refresh by stable product identity first. Requiring the mapped
+                            // archive point in this wait predicate can time out even after Room
+                            // has committed the rows (for example while the combined stream is
+                            // reconciling observations). UI refresh and history verification are
+                            // separate checks and must not block one another.
                             repository.allProductsStream.first { products ->
                                 products.any { product ->
                                     (targetProductId?.let { product.id == it }
                                         ?: (targetIdentity != null &&
-                                            onlineProductIdentityKey(product.title) == targetIdentity)) &&
-                                        product.priceHistory.any { it.isArchiveEvidence }
+                                            onlineProductIdentityKey(product.title) == targetIdentity))
                                 }
                             }.first { product ->
-                                (targetProductId?.let { product.id == it }
+                                targetProductId?.let { product.id == it }
                                     ?: (targetIdentity != null &&
-                                        onlineProductIdentityKey(product.title) == targetIdentity)) &&
-                                    product.priceHistory.any { it.isArchiveEvidence }
+                                        onlineProductIdentityKey(product.title) == targetIdentity)
                             }
                         }
                     }.getOrNull()
                     if (refreshedProduct != null) {
-                        selectedProductRefreshed = true
+                        val hasArchiveHistory = refreshedProduct.priceHistory.any { it.isArchiveEvidence }
+                        selectedProductRefreshed = hasArchiveHistory
                         val currentState = _uiState.value
                         if (currentState.selectedProduct?.id == refreshedProduct.id) {
                             _uiState.value = currentState.copy(selectedProduct = refreshedProduct)

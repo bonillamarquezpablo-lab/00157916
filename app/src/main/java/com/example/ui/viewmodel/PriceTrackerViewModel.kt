@@ -3669,7 +3669,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     foundPrimaryCount > 0 && confirmedPrimaryDuplicateCount > 0 ->
                         "Se recuperaron $foundPrimaryCount precio(s) del producto seleccionado y se confirmaron " +
                             "$confirmedPrimaryDuplicateCount duplicado(s) histórico(s) válido(s). No se añadieron fechas nuevas porque esos puntos ya existían." +
-                            if (requestFailedCount > 0) " La búsqueda quedó parcial por una o más consultas fallidas o agotadas por tiempo; revisa los tiempos de espera CDX." else "",
+                            if (requestFailedCount > 0) " La búsqueda quedó parcial por una o más consultas fallidas o agotadas por tiempo; revisa los tiempos de espera CDX." else ""
                     foundPrimaryCount > 0 ->
                         "Se recuperaron $foundPrimaryCount precio(s) del producto seleccionado, pero no se confirmó ningún punto nuevo. " +
                             "No se asume que sean duplicados válidos: consulta la fase 19 para ver los duplicados confirmados, filas inválidas y capturas rechazadas."

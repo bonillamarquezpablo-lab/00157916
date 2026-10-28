@@ -303,3 +303,12 @@ Esta sección consolida el hito positivo comunicado el 28/10 y aclara el estado 
 5. Repetir con Phone House y al menos otra tienda cuando haya capturas candidatas. Solo entonces cuantificar precisión, cobertura y tiempos.
 
 **Criterio de cierre:** la documentación del hito queda consolidada; la eficacia global sigue sin medirse hasta adjuntar el informe real reproducible. La corrección de compilación del run 998 y la prueba manual posterior son tareas técnicas pendientes, no se declaran completadas por esta actualización documental.
+
+
+## 12. Seguimiento del fallo de compilación y corrección — 28/10/2026
+
+- La ejecución [#998](https://github.com/bonillamarquezpablo-lab/00157916/actions/runs/40618739212) falló durante `:app:testDebugUnitTest`, porque la compilación de Kotlin falló antes de generar informes XML. Las dos referencias problemáticas estaban en `ProductDetailSheet.kt` (líneas 843 y 936): `Icons.Default.Info` sin importar la extensión `androidx.compose.material.icons.filled.Info`.
+- La validación Wayback y las tareas posteriores se omitieron por la dependencia del trabajo: no fue un fallo de la prueba histórica ni prueba de que el motor estuviera roto.
+- Corrección aplicada en [commit 6433ea7](https://github.com/bonillamarquezpablo-lab/00157916/commit/6433ea74a8c8a89aa570c1e10a20dbb6b08aebbd): se añadió el import explícito del icono `Info`, sin cambiar la lógica del motor histórico ni la identidad/validación de productos.
+- La ejecución automática posterior es [run #999](https://github.com/bonillamarquezpablo-lab/00157916/actions/runs/40621337362). En la última consulta estaba en curso; **no se declara aprobado ni se afirma que haya producido APK hasta que GitHub confirme el resultado final**.
+- Próximo criterio: confirmar que unit tests, compilación instrumentada, APK, firma y comprobación de Chucker terminan correctamente. Después probar la APK en dispositivo con una búsqueda real y conservar su informe de 22 fases.

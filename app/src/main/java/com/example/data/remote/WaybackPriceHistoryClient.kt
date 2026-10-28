@@ -397,8 +397,10 @@ internal fun summarizeCdxStep5Events(
             }
             if (recoveredCaptures) {
                 append(" Se encontraron capturas para verificar; el paso 7 confirma si producen un precio válido.")
+            } else if (failures.isNotEmpty()) {
+                append(" La búsqueda quedó incompleta porque otra consulta falló o agotó el tiempo; no puede concluirse que el histórico esté vacío.")
             } else {
-                append(" Las respuestas llegaron, pero no encontraron capturas utilizables; no hay histórico que validar.")
+                append(" Las respuestas llegaron sin capturas candidatas; esta consulta no encontró histórico en las rutas examinadas.")
             }
         }
         return WaybackTraceEvent(
@@ -3069,14 +3071,19 @@ class WaybackPriceHistoryClient(
             "gclsrc", "irclickid", "twclid", "ttclid", "li_fat_id", "epik", "yclid",
             "awc", "afftrack", "zanpid", "s_kwcid", "mkt_tok", "_gl", "_ga"
         )
-        // Phone House currently appends the marketplace selector as a malformed duplicate
-        // query ("?opt=marketplace?opt=phonehouse"). It is routing metadata, not a product SKU,
-        // and makes CDX exact/prefix queries miss captures of the same canonical product page.
-        // Do not strip "opt" for other retailers: it may identify a real purchasable variant there.
-        val merchantRoutingParameters = if (merchantDomain == "phonehouse.es") setOf("opt", "colorgris") else emptySet()
+        // Phone House may append a malformed marketplace selector ("?opt=marketplace?opt=phonehouse").
+        // That routing field is not a product SKU. Ignore its colour selector "colorgris" only when
+        // empty: a populated value may identify a purchasable variant and must survive. These rules
+        // are scoped to Phone House and never apply to other retailers.
+        val merchantRoutingParameters = if (merchantDomain == "phonehouse.es") setOf("opt") else emptySet()
         val ignoredArchiveQueryKeys = trackingNames + merchantRoutingParameters
-        val removedTracking = decodedPairs.map { it.first }
-            .filter { it.startsWith("utm_") || it in ignoredArchiveQueryKeys }
+        fun ignoreArchiveQueryPair(key: String, value: String): Boolean =
+            key.startsWith("utm_") ||
+                key in ignoredArchiveQueryKeys ||
+                (merchantDomain == "phonehouse.es" && key == "colorgris" && value.isBlank())
+        val removedTracking = decodedPairs
+            .filter { (key, value) -> ignoreArchiveQueryPair(key, value) }
+            .map { it.first }
             .toSet()
         val variantKeys = setOf(
             "sku", "skuid", "sku_id", "variant", "variantid", "variant_id", "id_variant",
@@ -3095,8 +3102,10 @@ class WaybackPriceHistoryClient(
         variantParameters.values.flatten().filter { it.isNotBlank() }
             .forEach { identifiers += it.take(100) }
         val canonicalQuery = rawQueryParts.filterNot { part ->
-            val key = decodeQueryUrlComponent(part.substringBefore('=')).lowercase(Locale.ROOT)
-            key.startsWith("utm_") || key in ignoredArchiveQueryKeys
+            val pair = part.split('=', limit = 2)
+            val key = decodeQueryUrlComponent(pair[0]).lowercase(Locale.ROOT)
+            val value = decodeQueryUrlComponent(pair.getOrElse(1) { "" })
+            ignoreArchiveQueryPair(key, value)
         }
         val base = scheme + "://" + uri.rawAuthority + path
         val canonicalUrl = base + if (canonicalQuery.isNotEmpty()) {
@@ -3146,8 +3155,15 @@ class WaybackPriceHistoryClient(
         )
         val queryParts = uri.rawQuery?.split('&').orEmpty()
         val cleanedParts = queryParts.filterNot { part ->
-            val name = decodeQueryUrlComponent(part.substringBefore('=')).lowercase(Locale.ROOT)
-            name.startsWith("utm_") || name in trackingNames || name in parts.trackingParameters
+            val pair = part.split('=', limit = 2)
+            val name = decodeQueryUrlComponent(pair[0]).lowercase(Locale.ROOT)
+            val value = decodeQueryUrlComponent(pair.getOrElse(1) { "" })
+            val emptyPhoneHouseColourSelector =
+                parts.merchantDomain == "phonehouse.es" && name == "colorgris" && value.isBlank()
+            name.startsWith("utm_") || name in trackingNames ||
+                (name in parts.trackingParameters &&
+                    !(parts.merchantDomain == "phonehouse.es" && name == "colorgris" && value.isNotBlank())) ||
+                emptyPhoneHouseColourSelector
         }
         val base = buildString {
             append(uri.scheme.lowercase(Locale.ROOT))

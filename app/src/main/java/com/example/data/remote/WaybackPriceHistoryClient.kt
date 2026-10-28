@@ -1714,18 +1714,18 @@ class WaybackPriceHistoryClient(
     }
 
     /**
-     * Inspect only identity-bearing URL parts. A family URL that omits capacity/colour must not
-     * fail this check, while an explicit "iphone-15-plus", different capacity, or different colour
-     * must not be the first archive candidate for a base iPhone 15 variant.
-     */
-    /**
      * Retailer slugs sometimes encode storage as "256gbplus8gb-ram" with no word boundary
      * after the first capacity. Separate the "plus" connector only for identity checks so the
      * real storage can be recognized without treating the RAM amount as a second capacity.
      */
     private fun normalizeArchiveUrlIdentityPath(value: String): String =
-        value.replace(Regex("""(?i)(\d+\s*(?:gb|tb))plus(?=\d)"""), "$1 plus ")
+        value.replace(Regex("""(?i)(\d+\s*(?:gb|tb))plus(?=\d)"""), "\$1 plus ")
 
+    /**
+     * Inspect only identity-bearing URL parts. A family URL that omits capacity/colour must not
+     * fail this check, while an explicit "iphone-15-plus", different capacity, or different colour
+     * must not be the first archive candidate for a base iPhone 15 variant.
+     */
     internal fun hasExplicitVariantConflictInProductUrl(
         expectedTitle: String,
         candidateUrl: String

@@ -9,6 +9,7 @@ import com.example.security.safeExternalHttpsUrl
 import com.example.security.openExternalHttpsUrl
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,6 +55,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Product
@@ -570,6 +572,7 @@ fun ProductDetailSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showWaybackDiagnostics by remember(product.id) { mutableStateOf(false) }
+    var showPriceEvidenceDetails by remember(product.id) { mutableStateOf(false) }
     var diagnosticReportCopyStatus by remember(product.id) { mutableStateOf("") }
     val context = LocalContext.current
     val scrollState = rememberScrollState()
@@ -822,22 +825,53 @@ fun ProductDetailSheet(
                     shape = MaterialTheme.shapes.medium,
                     color = MaterialTheme.colorScheme.surfaceContainer
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            text = "Datos de demostración · sin precio real guardado",
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = if (product.priceHistory.isNotEmpty()) {
-                                "El precio actual todavía no está confirmado. Los puntos del gráfico son precios antiguos de fuentes verificables; no demuestran el precio actual, el stock ni el envío."
-                            } else {
-                                "Mínimo todavía no ha confirmado el precio actual de este producto con una fuente y una fecha verificables. No uses los valores de referencia como una oferta real; el histórico solo aparecerá si encontramos capturas con precios verificables."
-                            },
-                            fontSize = 12.sp,
-                            lineHeight = 17.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    Column(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { showPriceEvidenceDetails = !showPriceEvidenceDetails }
+                                .padding(vertical = 2.dp)
+                                .testTag("price_evidence_toggle"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(7.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                modifier = Modifier.size(17.dp),
+                                tint = MaterialTheme.colorScheme.tertiary
+                            )
+                            Text(
+                                text = "Precio de referencia · falta verificar",
+                                modifier = Modifier.weight(1f),
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (showPriceEvidenceDetails) "Ocultar" else "Detalles",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        if (showPriceEvidenceDetails) {
+                            Text(
+                                text = if (product.priceHistory.isNotEmpty()) {
+                                    "El precio actual no está confirmado. Los puntos del gráfico son registros antiguos y no prueban el precio actual, el stock ni el envío."
+                                } else {
+                                    "Mínimo aún no ha confirmado un precio actual con una fuente y una fecha verificables. El histórico solo aparecerá si encontramos capturas con precios verificables."
+                                },
+                                modifier = Modifier.testTag("price_evidence_details"),
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
@@ -888,33 +922,92 @@ fun ProductDetailSheet(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION &&
-                                !isDisplayingSavedArchivePrice
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { showPriceEvidenceDetails = !showPriceEvidenceDetails }
+                                    .padding(vertical = 3.dp)
+                                    .testTag("price_evidence_toggle"),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = if (product.isPriceVerified) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.tertiary
+                                )
                                 Text(
-                                    text = product.priceFreshnessLabel,
+                                    text = when {
+                                        isDisplayingSavedArchivePrice ->
+                                            "Precio histórico guardado · no es una oferta actual"
+                                        product.isPriceVerified ->
+                                            "Precio verificado · confirma el importe final en tienda"
+                                        product.isUnverifiedLiveListing ->
+                                            "Oferta sin verificar · falta un enlace directo"
+                                        else -> "Precio guardado · pendiente de comprobar"
+                                    },
+                                    modifier = Modifier.weight(1f),
                                     fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = if (showPriceEvidenceDetails) "Ocultar" else "Detalles",
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.tertiary
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                             }
-                            Text(
-                                text = when (product.priceDisplayStatus) {
-                                    com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION ->
-                                        "Última fuente guardada: $currentSourceLabel · no confirma precio actual ni stock."
-                                    com.example.data.model.PriceDisplayStatus.UNVERIFIED_LIVE_LISTING ->
-                                        "El importe apareció en una búsqueda pública, pero falta un enlace directo verificable. Confirma vendedor, precio final, envío y stock."
-                                    else -> "$currentSourceLabel · confirma precio final y stock en la tienda."
-                                },
-                                fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            if (product.isPriceVerified) {
-                                Text(
-                                    text = "Enlace: $currentLinkType",
-                                    fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                            if (showPriceEvidenceDetails) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 22.dp)
+                                        .testTag("price_evidence_details"),
+                                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Text(
+                                        text = "Fuente: $currentSourceLabel",
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    if (product.priceDisplayStatus == com.example.data.model.PriceDisplayStatus.SAVED_PENDING_REVALIDATION &&
+                                        !isDisplayingSavedArchivePrice
+                                    ) {
+                                        Text(
+                                            text = product.priceFreshnessLabel,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.tertiary
+                                        )
+                                    }
+                                    Text(
+                                        text = when {
+                                            isDisplayingSavedArchivePrice ->
+                                                "Es un precio histórico guardado; no confirma una oferta actual, disponibilidad, envío ni stock."
+                                            product.isUnverifiedLiveListing ->
+                                                "El importe apareció en una búsqueda pública, pero falta un enlace directo verificable. Confirma vendedor, precio final, envío y stock."
+                                            product.isPriceVerified ->
+                                                "Confirma el precio final y el stock en la tienda."
+                                            else ->
+                                                "No hay una oferta actual validada. El histórico solo cuenta cuando las capturas aportan precio y fecha verificables."
+                                        },
+                                        fontSize = 10.sp,
+                                        lineHeight = 14.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    if (product.isPriceVerified) {
+                                        Text(
+                                            text = "Tipo de enlace: $currentLinkType",
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
                             }
                         }
 

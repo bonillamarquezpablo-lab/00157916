@@ -1006,7 +1006,8 @@ class WaybackPriceHistoryClient(
                     snapshotResultsCache = snapshotResultsCache,
                     onVerifiedQuotes = onVerifiedQuotes,
                     forceRefresh = forceRefresh,
-                stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
+
+                    stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                 )
             }
             if (preferredUrlAlreadyQueried && resolvedPreferredUrl != null) {
@@ -1031,7 +1032,8 @@ class WaybackPriceHistoryClient(
                     snapshotResultsCache = snapshotResultsCache,
                     onVerifiedQuotes = onVerifiedQuotes,
                     forceRefresh = forceRefresh,
-                stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
+
+                    stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                 )
             }
             if (productUrlCandidate != null) {
@@ -1081,7 +1083,8 @@ class WaybackPriceHistoryClient(
                         snapshotResultsCache = snapshotResultsCache,
                         onVerifiedQuotes = onVerifiedQuotes,
                         forceRefresh = forceRefresh,
-                    stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
+
+                        stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                     )
                 }
             }
@@ -1102,7 +1105,8 @@ class WaybackPriceHistoryClient(
                     snapshotResultsCache = snapshotResultsCache,
                     onVerifiedQuotes = onVerifiedQuotes,
                     forceRefresh = forceRefresh,
-                stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
+
+                    stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                 )
             }
 
@@ -1161,7 +1165,8 @@ class WaybackPriceHistoryClient(
                         onVerifiedQuotes = onVerifiedQuotes,
                         knownProductTitlesById = knownProductTitlesById,
                         forceRefresh = forceRefresh,
-                    stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
+
+                        stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                     )
                 }
                 if (

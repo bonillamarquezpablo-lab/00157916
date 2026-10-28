@@ -82,6 +82,19 @@ interface ProductDao {
         nowMillis: Long = System.currentTimeMillis()
     ): Int
 
+    /**
+     * Repairs only the category label of previously unclassified rows. Product IDs, saved prices,
+     * observation rows, URLs, and verification flags are untouched.
+     */
+    @Query(
+        "UPDATE products SET category = :category " +
+            "WHERE upper(category) = 'ALL' AND id IN (:productIds)"
+    )
+    suspend fun reclassifyUnclassifiedProducts(
+        productIds: List<String>,
+        category: String
+    ): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(products: List<ProductEntity>)
 

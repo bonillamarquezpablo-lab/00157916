@@ -322,7 +322,7 @@ Esta sección consolida el hito positivo comunicado el 28/10 y aclara el estado 
 
 ### Correcciones aplicadas en código
 - [Normalización del selector Phone House y resumen de fallos parciales](https://github.com/bonillamarquezpablo-lab/00157916/commit/4c5c43f625fcf8fd56478bdbc7becdd9b66f96f0): `colorgris` solo se elimina de la URL de archivo cuando su valor está vacío y el dominio identificado es `phonehouse.es`. El selector `opt` sigue siendo metadato específico de Phone House.
-- [Preservación de color en identidad de variante](https://github.com/bonillamarquezpablo-lab/00157916/commit/a91f80eba9db9c634da49dca7dcf7e9ba436e325): si `colorgris` tiene un valor (por ejemplo `gris`), se conserva en la URL canónica y se trata como atributo de variante. En otros comercios no se aplica la regla especial de Phone House.
+- [Preservación de color en identidad de variante](https://github.com/bonillamarquezpablo-lab/00157916/commit/a91f80eba9db9c634da49dca7dcf7e9ba436e325) y [alcance limitado al dominio Phone House](https://github.com/bonillamarquezpablo-lab/00157916/commit/74ef0a0d80fa4be0af1d5f5f2d365b0e45dc5f86): si `colorgris` tiene un valor (por ejemplo `gris`), se conserva en la URL canónica y solo se trata como atributo de variante en Phone House. En otros comercios no se interpreta como clave especial de variante.
 - [Pruebas de aislamiento y de diagnóstico incompleto](https://github.com/bonillamarquezpablo-lab/00157916/commit/d80bd01a84bd18f1479fd4f78f94211b7c89857e) y [aserción de identidad de color](https://github.com/bonillamarquezpablo-lab/00157916/commit/9ded15bedf5d5586af73bb8af07b1d73c841582c).
 
 ### Cambio de diagnóstico

@@ -1233,6 +1233,136 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun extractsWooCommerceVisiblePriceWithoutChangingStrictProductIdentityChecks() {
+        val client = newClient()
+        val title = "Xiaomi Mi 10 Pro Gris"
+        val originalUrl = "https://www.shop.example/product/xiaomi-mi-10-pro-gris.html"
+        val snapshotUrl = "https://web.archive.org/web/20250101120000id_/$originalUrl"
+        val html = """
+            <html><head><title>$title - Tienda</title></head>
+            <body>
+              <h1>$title</h1>
+              <div class="summary">
+                <p class="price">
+                  <span class="woocommerce-Price-amount amount">
+                    <bdi>499,99&nbsp;<span class="woocommerce-Price-currencySymbol">€</span></bdi>
+                  </span>
+                </p>
+              </div>
+            </body></html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = title,
+            originalUrl = originalUrl,
+            snapshotUrl = snapshotUrl,
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("WooCommerce-style price markup should be readable", quote)
+        assertEquals(499.99, quote!!.price, 0.001)
+        assertEquals("EUR", quote.currency)
+    }
+
+    @Test
+    fun extractsShopifyStyleSalePriceMarkup() {
+        val client = newClient()
+        val title = "Xiaomi Mi 10 Pro Gris"
+        val originalUrl = "https://www.shop.example/products/xiaomi-mi-10-pro-gris"
+        val html = """
+            <html><head><title>$title</title></head>
+            <body>
+              <h1>$title</h1>
+              <span class="price-item price-item--sale">449,90 €</span>
+            </body></html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = title,
+            originalUrl = originalUrl,
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/$originalUrl",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("Shopify-style sale price should be readable", quote)
+        assertEquals(449.90, quote!!.price, 0.001)
+    }
+
+    @Test
+    fun extractsExplicitlyNamedInlineProductStateAsStructuredEvidence() {
+        val client = newClient()
+        val title = "Xiaomi Mi 10 Pro Gris"
+        val originalUrl = "https://www.shop.example/product/xiaomi-mi-10-pro-gris"
+        val html = """
+            <html><head><title>$title</title></head>
+            <body>
+              <h1>$title</h1>
+              <script>
+                window.__INITIAL_STATE__ = {
+                  "product": {
+                    "name": "$title",
+                    "offers": {
+                      "@type": "Offer",
+                      "price": "479.99",
+                      "priceCurrency": "EUR"
+                    }
+                  }
+                };
+              </script>
+            </body></html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = title,
+            originalUrl = originalUrl,
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/$originalUrl",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("A known JavaScript product-state assignment should be inspected", quote)
+        assertEquals(479.99, quote!!.price, 0.001)
+        assertEquals("EUR", quote.currency)
+    }
+
+    @Test
+    fun inlineProductStateCannotOverrideTheRequestedModelWithAnotherProduct() {
+        val client = newClient()
+        val expectedTitle = "Xiaomi Mi 10 Pro Gris"
+        val originalUrl = "https://www.shop.example/product/xiaomi-mi-10-pro-gris"
+        val html = """
+            <html><head><title>$expectedTitle</title></head>
+            <body>
+              <h1>$expectedTitle</h1>
+              <script>
+                window.__INITIAL_STATE__ = {
+                  "product": {
+                    "name": "Xiaomi Mi 11 Lite",
+                    "offers": {
+                      "@type": "Offer",
+                      "price": "129.99",
+                      "priceCurrency": "EUR"
+                    }
+                  }
+                };
+              </script>
+            </body></html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = expectedTitle,
+            originalUrl = originalUrl,
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/$originalUrl",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNull("The extraction fallback must not borrow another model's price", quote)
+    }
+
+    @Test
     fun exactAppleSkuUrlAllowsGenericTitleButRejectsExplicitSiblingVariant() {
         val client = newClient()
         val expected = "Apple iPhone 15 256 GB Amarillo"

@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - fix/wayback-cdx-recovery
+      - fix/archive-refresh-generic-prices-oct-2026
     paths:
       - "app/**"
       - "gradle/**"
@@ -255,11 +256,11 @@ jobs:
           retention-days: 7
 
   validate-wayback-fix:
-    if: github.ref == 'refs/heads/fix/wayback-cdx-recovery'
+    if: github.ref == 'refs/heads/fix/wayback-cdx-recovery' || github.ref == 'refs/heads/fix/archive-refresh-generic-prices-oct-2026'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - name: Checkout emergency fix
+      - name: Checkout archive-engine repair branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -291,3 +292,6 @@ jobs:
 
       - name: Compile Android instrumentation tests
         run: gradle :app:compileDebugAndroidTestKotlin --stacktrace
+
+      - name: Assemble debug APK without release signing secrets
+        run: gradle :app:assembleDebug --stacktrace

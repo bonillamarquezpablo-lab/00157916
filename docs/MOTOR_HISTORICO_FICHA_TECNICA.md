@@ -267,3 +267,39 @@ El workflow [run 998](https://github.com/bonillamarquezpablo-lab/00157916/action
 6. Corregir por separado el error de compilación de la interfaz del run 998; no mezclar ese arreglo de UI con los cambios del motor histórico.
 
 **Conclusión a 28/10/2026:** se registra un avance decisivo: el histórico ya es visible en la gráfica según la prueba manual comunicada. La siguiente etapa no es rehacer el motor ni cambiar de tecnología por moda; es preservar el resultado, guardar su evidencia reproducible y medirlo en varias tiendas y productos.
+
+
+## 11. Cierre de actualización documental — 28/10/2026
+
+Esta sección consolida el hito positivo comunicado el 28/10 y aclara el estado técnico sin sobrescribir la línea base ni las incidencias anteriores.
+
+### Estado de evidencia actualizado
+- **Resultado manual positivo:** el usuario informa que la gráfica ya muestra precios históricos. Se registra como evidencia manual de que al menos un caso ha llegado a mostrar datos; no se asigna todavía una versión exacta ni una tasa de éxito porque falta adjuntar el informe completo de esa ejecución.
+- **Histórico anterior preservado:** los informes 1.7.835.1, 1.7.838.1 y 1.7.890.1 siguen siendo referencias de fallos/limitaciones de sus ejecuciones concretas, no una descripción automática del estado más reciente.
+- **Error de compilación independiente:** el run 998 del SHA `ef512e3d850eb2a9085636036c10e6683435b8b6` falló por la referencia `Icons.Filled.Info` no resuelta en `ProductDetailSheet.kt`. No distribuir APK de ese SHA. Este error es de interfaz y no prueba por sí mismo un fallo del motor histórico.
+- **Última APK cuya compilación quedó documentada como correcta en el material consultado:** 1.7.898.1, run 898, SHA de código/pruebas `8ad0e11e7dabc3bc850e48eb89339011016e9878`. No atribuirla a commits posteriores.
+
+### Clasificación de páginas que debe usar el diagnóstico
+1. **Dominio/comercio (retailer domain):** identifica la tienda, pero no garantiza que la página sea una ficha de producto.
+2. **Ficha de producto (PDP):** página dedicada a un producto o variante; validar modelo y capacidad antes de aceptar su precio.
+3. **Categoría/listado/búsqueda:** contiene varios artículos; no asociar un precio a la consulta sin resolver la identidad del artículo concreto.
+4. **URL canónica normalizada:** elimina parámetros de seguimiento como `srsltid` cuando no cambian la identidad, y normaliza variantes de URL/redirecciones conocidas.
+5. **Captura archivada (snapshot/replay):** comprobar que la URL sea realmente de Wayback/Arquivo.pt y que el destino y timestamp sean coherentes. Reconocer los formatos relevantes, incluidos Wayback `id_` y Arquivo.pt `mp_`.
+6. **Product/Offer estructurado:** señal útil para extraer nombre, precio y moneda, pero no sustituye la validación de identidad, variante, fecha y plausibilidad.
+
+### Reglas de aceptación y diagnóstico
+- El color puede tratarse como atributo no bloqueante cuando el usuario ha indicado que le da igual; modelo y capacidad de almacenamiento sí deben mantenerse como criterios relevantes cuando se han solicitado explícitamente.
+- No rechazar una ficha solo porque tenga parámetros de seguimiento o una variante técnica de URL.
+- Separar en el informe: páginas candidatas, páginas descargadas, ofertas extraídas, precios válidos, motivos de rechazo, duplicados y puntos nuevos persistidos en el producto seleccionado.
+- La fase de guardado solo cuenta como éxito si realmente se insertó al menos un punto nuevo en el producto seleccionado; encontrar capturas o extraer precios no equivale a ampliar el histórico.
+- No contar una captura repetida como fecha nueva y no eliminar ni reconstruir destructivamente los datos de Room.
+- Mantener las 22 fases y los detalles por captura. Registrar la fase no ejecutada como tal; no inferir que falló si no llegó a ejecutarse.
+
+### Siguiente validación reproducible
+1. Corregir la referencia de interfaz del run 998 en un cambio separado.
+2. Ejecutar tests unitarios, compilación instrumentada y `assembleSideload` desde el nuevo SHA; verificar firma, versión, manifiesto y Chucker.
+3. Instalar la APK resultante y repetir una búsqueda real con informe de 22 fases.
+4. Comparar los puntos persistidos en Room con los dibujados en la gráfica, anotando producto/variante, tienda, versión, fechas nuevas, duplicados y motivos de rechazo.
+5. Repetir con Phone House y al menos otra tienda cuando haya capturas candidatas. Solo entonces cuantificar precisión, cobertura y tiempos.
+
+**Criterio de cierre:** la documentación del hito queda consolidada; la eficacia global sigue sin medirse hasta adjuntar el informe real reproducible. La corrección de compilación del run 998 y la prueba manual posterior son tareas técnicas pendientes, no se declaran completadas por esta actualización documental.

@@ -90,8 +90,10 @@ enum class SmartphoneSubcategory(
     }
 
     companion object {
+        // Keep this list model-family based: brand-only hits would pull accessories into
+        // Móviles. Accessories and tablets are still excluded before PHONE_TERMS is evaluated.
         private val PHONE_TERMS = Regex(
-            """\b(iphone|smartphone|telefono movil|movil|redmi|poco f\d+|pixel \d+|samsung galaxy [saz]\d*|galaxy s\d+|oneplus|motorola edge|oppo find|vivo x\d+)\b"""
+            """\b(iphone|smartphone|telefono movil|movil|telefono|redmi|poco\s+[fxmc]\s*\d+[a-z]*|poco f\d+|pixel\s+\d+(?:\s+(?:pro|xl|a))?|pixel fold|samsung galaxy\s+[sazm]\s*\d*|galaxy\s+[sazm]\s*\d+|galaxy z fold|galaxy z flip|xiaomi mi\s+\d{1,2}[a-z]*|xiaomi\s+\d{1,2}[a-z]*|oneplus(?:\s+\d+[a-z]*|\s+nord(?:\s+\w+)*|\s+open)?|motorola edge|moto g\s*\d+[a-z]*|motorola razr|oppo (?:find|reno)\s+[a-z0-9]+|oppo a\s*\d+[a-z]*|vivo [xvy]\s*\d+[a-z]*|huawei (?:p|mate|nova|y|pura)\s*\d+[a-z]*|honor (?:magic\s*\d+|x\s*\d+|\d{2,3})|realme (?:gt(?:\s+neo)?|c|number)\s*\d+[a-z]*|nothing phone|sony xperia|asus zenfone|rog phone|nubia redmagic|fairphone\s*\d+)\b"""
         )
         private val TABLET_TERMS = Regex(
             """\b(tablet|tableta|ipad|galaxy tab|matepad|xiaomi pad|redmi pad|surface go|lenovo tab)\b"""

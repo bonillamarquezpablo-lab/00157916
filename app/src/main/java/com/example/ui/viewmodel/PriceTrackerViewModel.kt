@@ -38,6 +38,7 @@ import com.example.data.remote.SerpApiClient
 import com.example.data.remote.SerpApiException
 import com.example.data.remote.SerpApiRequestProduct
 import com.example.data.remote.SerpApiShoppingResult
+import com.example.data.remote.SerpApiShoppingSearchReport
 import com.example.data.remote.SerpApiTokenStore
 import com.example.data.remote.extractGoogleShoppingProductId
 import com.example.data.model.Product
@@ -1957,6 +1958,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 candidate?.trim()?.takeIf { it.matches(Regex("[0-9]{5,}")) }
             }.firstOrNull()
 
+            // Retain diagnostic counts from the name-based fallback. Previously the report was
+            // discarded, so "no offer" could mean zero provider results, rejected prices/links,
+            // or offers rejected later by the catalogue trust filter.
+            var fallbackShoppingReport: SerpApiShoppingSearchReport? = null
             val details = withTimeoutOrNull(25_000L) {
                 if (googleProductId != null) {
                     serpApiClient.searchGoogleProductDetails(
@@ -1967,6 +1972,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     )
                 } else {
                     val report = serpApiClient.searchOnlineWithDiagnostics(token, product.title)
+                    fallbackShoppingReport = report
                     com.example.data.remote.SerpApiGoogleProductDetails(
                         offers = report.results,
                         priceInsights = emptyList(),
@@ -2001,13 +2007,24 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             }
 
             val after = runCatching { serpApiClient.getAccountInfo(token) }.getOrNull()
+            val fallbackSearchDiagnosis = fallbackShoppingReport?.let { report ->
+                " Diagnóstico Google Shopping: resultados recibidos=${report.rawResultCount}; " +
+                    "ofertas que superaron el filtro del proveedor=${report.results.size}; " +
+                    "descartadas por relevancia=${report.rejectedAsIrrelevant}; " +
+                    "sin precio/moneda EUR verificable=${report.rejectedForPriceOrCurrency}; " +
+                    "sin enlace utilizable=${report.rejectedForLink}; otros datos inválidos=${report.rejectedOther}; " +
+                    "descartadas por la validación final del catálogo=${(report.results.size - safeOffers.size).coerceAtLeast(0)}."
+            } ?: if (googleProductId != null) {
+                " Diagnóstico: se consultó un ID de producto de Google Shopping; ninguna oferta superó todas " +
+                    "las validaciones de producto, precio EUR y enlace directo."
+            } else ""
             val resultMessage = when {
                 safeOffers.isNotEmpty() -> "Respaldo automático completado: se encontraron ${safeOffers.size} oferta(s) " +
                     "actuales para «${product.title}» y se guardaron $savedOffers observación(es) nuevas o actualizadas. " +
                     "El histórico de Wayback no se ha modificado."
                 else -> "Se lanzó la búsqueda alternativa del precio actual de «${product.title}», pero no apareció " +
                     "ninguna oferta con precio y enlace directo verificables. No se ha inventado un precio ni se ha " +
-                    "guardado un resultado de búsqueda genérico. El histórico de Wayback no se ha modificado."
+                    "guardado un resultado de búsqueda genérico.$fallbackSearchDiagnosis El histórico de Wayback no se ha modificado."
             }
             _uiState.update { current -> current.copy(
                 isSearchingFreeHistory = false,

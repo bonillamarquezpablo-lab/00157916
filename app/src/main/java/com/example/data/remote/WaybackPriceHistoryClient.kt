@@ -5785,14 +5785,17 @@ class WaybackPriceHistoryClient(
         val urlStorage = storagePattern.findAll(urlTitle)
             .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
         if (missingStorage && !urlStorage.containsAll(expectedStorage)) return false
-        if (expectedStorage.isEmpty() && archivedStorage.isNotEmpty() &&
-            !urlStorage.containsAll(archivedStorage)
+        if (expectedStorage.isEmpty() && urlStorage.isNotEmpty() &&
+            (archivedStorage.isEmpty() || !urlStorage.containsAll(archivedStorage))
         ) return false
 
         // A generic catalogue title may inherit a capacity-specific historical point only when
         // that same capacity is explicit in the exact retailer URL; a sibling SKU cannot pass.
         fun coreIdentity(value: String): String =
-            onlineProductIdentityKey(canonicalizeArchiveTitle(value)).split('|')
+            onlineProductIdentityKey(
+                canonicalizeArchiveTitle(value)
+                    .replace(Regex("""(?i)\b(?:ram|memoria ram)\b"""), " ")
+            ).split('|')
                 .filterNot {
                     it.startsWith("memory:") ||
                         it.startsWith("color:") ||

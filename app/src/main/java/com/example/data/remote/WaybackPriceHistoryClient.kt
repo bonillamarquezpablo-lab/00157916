@@ -3090,7 +3090,7 @@ class WaybackPriceHistoryClient(
             "variant_sku", "variant_sku_id", "variation", "variationid", "variation_id",
             "productid", "product_id", "id_product", "id_product_attribute", "offerid", "offer_id",
             "pid", "itemid", "item_id", "asin", "mpn", "gtin", "ean", "model", "modelid",
-            "color", "colour", "colorid", "colourid", "storage", "capacity", "size",
+            "color", "colour", "colorid", "colourid", "colorgris", "storage", "capacity", "size",
             "configuration", "config", "option", "optionid", "attribute_id", "device", "style", "styleid"
         )
         val variantParameters = queryParameters.filterKeys { it in variantKeys }

@@ -302,7 +302,7 @@ Esta sección consolida el hito positivo comunicado el 28/10 y aclara el estado 
 4. Comparar los puntos persistidos en Room con los dibujados en la gráfica, anotando producto/variante, tienda, versión, fechas nuevas, duplicados y motivos de rechazo.
 5. Repetir con Phone House y al menos otra tienda cuando haya capturas candidatas. Solo entonces cuantificar precisión, cobertura y tiempos.
 
-**Criterio de cierre:** la documentación del hito queda consolidada; la eficacia global sigue sin medirse hasta adjuntar el informe real reproducible. La corrección de compilación del run 998 y la prueba manual posterior son tareas técnicas pendientes, no se declaran completadas por esta actualización documental.
+**Criterio de cierre:** la documentación del hito queda consolidada; la eficacia global sigue sin medirse hasta adjuntar el informe real reproducible. La corrección de compilación del run 998 se aplicó posteriormente en el commit 6433ea7 (import explícito de `androidx.compose.material.icons.filled.Info`); su validación automática se sigue en la sección 12. La prueba manual posterior del motor histórico sigue pendiente.
 
 
 ## 12. Seguimiento del fallo de compilación y corrección — 28/10/2026

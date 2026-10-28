@@ -384,6 +384,7 @@ class ProductDiscoveryRepository(private val database: AppDatabase) {
             isAccessoryListingTitle(title) -> ProductCategory.ACCESSORIES
             Regex("""\b(airwrap|corrale|supersonic|planchas? de pelo|alisador(?:es)?|secador(?:es)?|styler|afeitadora|depiladora)\b""").containsMatchIn(value) -> ProductCategory.PERSONAL_CARE
             SmartphoneSubcategory.PHONES.matchesTitle(title) ||
+                SmartphoneSubcategory.TABLETS.matchesTitle(title) ||
                 Regex("""\b(iphone|samsung galaxy|smartphone|telefono movil|redmi|pixel|ipad|tablet|oneplus|motorola edge)\b""").containsMatchIn(value) -> ProductCategory.SMARTPHONES
             Regex("""\b(laptop|portatil|notebook|thinkpad|macbook|chromebook|monitor|gpu|geforce|radeon|rtx|processor|procesador|ssd|ram|pc gaming|desktop)\b""").containsMatchIn(value) -> ProductCategory.COMPUTING
             Regex("""\b(playstation|ps5|ps4|xbox|nintendo switch|steam deck|rog ally|console|consola|joy con)\b""").containsMatchIn(value) -> ProductCategory.GAMING

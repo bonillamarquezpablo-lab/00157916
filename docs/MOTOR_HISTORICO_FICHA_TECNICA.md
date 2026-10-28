@@ -354,3 +354,27 @@ La corrección no convierte cualquier precio de la página en válido. Se sigue 
 
 ### Estado de validación
 La ejecución [#1011](https://github.com/bonillamarquezpablo-lab/00157916/actions/runs/40661629344) detectó cuatro fallos de regresión en las pruebas unitarias. Se corrigieron la separación entre almacenamiento y RAM, la confirmación de capacidad por URL exacta y el tratamiento del separador `plus` en slugs de productos. La corrección final está en [commit 375c53c](https://github.com/bonillamarquezpablo-lab/00157916/commit/375c53c19c3c5195c8ffb356ae9dbb4bedf881ca). La ejecución [#1013](https://github.com/bonillamarquezpablo-lab/00157916/actions/runs/40662902782) terminó con éxito: pruebas unitarias, compilación de pruebas Android, APK, verificación de paquete/versión/firma y presencia de Chucker superadas. Generó Mínimo 1.7.1013.1 (versionCode 111301), paquete `com.aistudio.preciominimo.esrxvt`, certificado SHA-256 `f631a8c0a194008e77a312a78775e95837dbc66df635eae9b966e5c294add450` y artefacto `minimo-apk` (SHA-256 del APK: `0171107a22057b0efefac83452eab0aabf53581e11e0c54f60d366356ed8aafd`). La sonda automática de Wayback se omitió y aún falta instalar la APK en el móvil y repetir una búsqueda real; por tanto, no se declara todavía recuperado y guardado el histórico del Xiaomi. El HTTP 429 sigue siendo un límite temporal externo y debe respetarse la pausa indicada por la aplicación.
+
+
+## 15. Validación real en dispositivo de Mínimo 1.7.1013.1 — 28/10/2026, 14:46 (hora peninsular)
+
+### Resultado real
+El informe del Xiaomi Mi 10 Pro Gris confirma que el extractor corregido recupera y persiste tres puntos históricos nuevos:
+- CDX devolvió cinco capturas candidatas.
+- Las cuatro páginas que se llegaron a descargar devolvieron HTTP 200.
+- Se verificaron tres precios válidos, sin rechazos de identidad/URL ni de moneda/fecha.
+- Room confirmó tres filas nuevas, cero duplicados y cero rechazos.
+- Resultado final de persistencia: `PASSED`.
+
+### Fallo interno pendiente: fase 29
+El mismo informe contiene `Actualización solicitada=true; ficha refrescada=false; puntos nuevos del producto seleccionado=3`. En `PriceTrackerViewModel.kt`, tras guardar, la app espera hasta 10 segundos a que `repository.allProductsStream` emita el producto elegido con algún punto de evidencia archivada. Esa espera termina sin encontrar el resultado esperado; por eso no se confirma `selectedProductRefreshed` ni se reemplaza el producto actualmente seleccionado en el estado de UI. El registro no demuestra pérdida de datos: los tres puntos ya quedaron guardados. Hace falta instrumentar el resultado de esa espera (timeout/excepción, producto encontrado, número de puntos de archivo) y asegurar que la ficha abierta recibe la versión actualizada desde Room.
+- No marcar toda la operación como plenamente correcta sin reflejar esta incidencia: la persistencia fue correcta, pero el refresco visible quedó sin confirmar.
+
+### Fallo de diagnóstico en la captura de noviembre de 2024
+El HAR contiene el HTML de la captura `20241111213737`. Su bloque principal de compra incluye `.estado-outlet.outlet` con el estado **Reacondicionado / Estado: Funcional** y un precio principal de 380 EUR, junto a 880 EUR como precio recomendado tachado. Para la ficha seleccionada sin condición reacondicionada, no aceptar ese importe es correcto. Sin embargo, el informe lo clasifica como `ARCHIVE_PRICE_METADATA_MISSING` y como si no hubiera un número positivo. Es un motivo de rechazo mal clasificado: debe registrarse explícitamente como conflicto de condición/estado del artículo, sin contaminar el histórico del producto estándar.
+  
+### Pausa HTTP 429 y control de flujo
+La última petición del HAR de esta búsqueda, a las 14:46:09, fue a `archive.org/wayback/available` y devolvió HTTP 429. El registro de la app dice a las 14:46:08 que ya había guardado suficientes fechas y que omitía consultas adicionales. La petición de Availability sucede inmediatamente después; hay que comprobar si estaba ya en vuelo o si el cortocircuito no cubre esa rama. El 429 es una limitación externa y no invalida los tres puntos guardados, pero no debería hacerse una consulta nueva después de alcanzar el objetivo.
+  
+### Conclusión de esta prueba
+La extracción y el guardado históricos ya están funcionando en el dispositivo. Los próximos defectos a corregir son: **(1)** refresco/confirmación de la ficha y gráfica (fase 29), **(2)** código diagnóstico de precio rechazado por condición reacondicionada, **(3)** coherencia entre cortocircuito inteligente y peticiones Availability posteriores. El HAR combina llamadas de búsquedas anteriores; para esta ejecución las entradas relevantes son las últimas peticiones de las 14:45:52–14:46:09.

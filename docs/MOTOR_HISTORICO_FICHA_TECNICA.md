@@ -2,12 +2,12 @@
 
 > Documento de referencia del proyecto. Se actualiza cuando una capacidad cambia de estado y queda respaldada por pruebas. No convertir una función escrita en código en una mejora de eficacia hasta que esté medida.
 
-**Versión observada en el último informe aportado:** 1.7.838.1  
-**Última revisión de evidencias:** 27 de octubre de 2026
-**Referencia de código revisada:** `main` · HEAD `5b8ff673e1477359e3e637d2ed7820960511e7ca`
-**CI / APK actual:** run 890 finalizado correctamente; pruebas unitarias, compilación instrumentada, build sideload, firma, paquete y Chucker verificados.
-**APK generada:** `1.7.890.1` · versionCode `99001` · artifact `minimo-apk` (se conserva hasta el 3 de noviembre de 2026).  
-**Estado general:** motor implementado con rutas de archivo y validación; eficacia global todavía sin métricas comparables.  
+**Último informe histórico con versión documentada:** 1.7.898.1 (run 898). Nuevo hito manual comunicado el 28/10/2026: versión exacta de la búsqueda aún no registrada.  
+**Última revisión de evidencias:** 28 de octubre de 2026
+**Referencia de código revisada antes de esta actualización documental:** `main` · HEAD `ef512e3d850eb2a9085636036c10e6683435b8b6` (incluye cambios de interfaz; no equivale a una APK válida).
+**Última APK verificada documentada:** run 898 produjo la APK 1.7.898.1 desde un SHA anterior. El run 998 del HEAD ef512e3d850eb2a9085636036c10e6683435b8b6 falló al compilar ProductDetailSheet.kt por una referencia Info no resuelta; no produjo una APK de ese HEAD.
+**APK histórica verificada:** `1.7.898.1` · versionCode `99801` · artefacto del run 898. No atribuir esta APK a los commits posteriores de main.  
+**Estado general:** hito positivo de uso real comunicado el 28/10: la gráfica ya muestra precios históricos. Es una observación manual de resultado visible; faltan la versión exacta, el informe copiable y los contadores para medir la eficacia global.  
 **Regla de oro:** conservar las fichas, precios e históricos de Room. No borrar datos locales ni contar duplicados como hallazgos nuevos.
 
 ## 1. Qué es este motor
@@ -218,4 +218,52 @@ Producto de prueba: Apple iPhone 15 Plus 256GB. Informe generado a las 04:12:03 
 - Que los cinco rechazos originales fueran todos debidos a `srsltid` o `mp_`: el informe original no registraba la causa individual y no permite atribuir cada rechazo a una causa. Los códigos nuevos deben identificarlo en la siguiente ejecución.
 - Que el mínimo histórico visible sea correcto para una batería de productos reales.
 
-**Siguiente paso obligatorio:** una vez aprobado el run 898, instalar esa APK y repetir la búsqueda del iPhone 15 Plus 256GB. Exportar el informe actualizado y comprobar `puntos nuevos`, `duplicados válidos` y `motivos de rechazo`. La corrección solo queda validada en uso real cuando esas cifras coincidan con los puntos que se observan en la gráfica.
+**Siguiente paso de aquella revisión (27/10):** instalar y repetir la búsqueda del iPhone 15 Plus 256GB. Esta nota queda como antecedente histórico. El hito manual comunicado el 28/10 indica que una búsqueda posterior ya consiguió mostrar precios históricos en la gráfica; falta asociar esa observación a su versión exacta e informe para medirla y reproducirla.
+
+
+## 10. Hito positivo — precios históricos visibles en la gráfica y distinción de páginas — 28/10/2026
+
+### Resultado nuevo comunicado desde el uso real
+
+El usuario ha confirmado que **la gráfica por fin muestra precios históricos**. Este resultado posterior corrige la situación descrita en informes antiguos donde se descargaban páginas válidas, pero la búsqueda terminaba con cero puntos nuevos. No se debe seguir presentando aquellos intentos de 1.7.835.1, 1.7.838.1 o 1.7.890.1 como si describieran la búsqueda más reciente.
+
+**Estado de evidencia:** resultado manual positivo comunicado por el usuario; la gráfica mostró precios históricos en al menos un caso. No se ha adjuntado en esta actualización el informe completo de esa ejecución, la versión exacta de la app, el producto probado ni los contadores de puntos nuevos/duplicados. Por tanto:
+- Sí podemos registrar que el gráfico ya ha mostrado datos históricos en una prueba real observada por el usuario.
+- No podemos todavía calcular la tasa de éxito global, cobertura por tienda, número medio de fechas nuevas, tiempo de respuesta ni precisión estadística.
+- Los informes fallidos anteriores se conservan como regresiones históricas útiles; no se borran ni se reinterpretan retroactivamente.
+
+### Terminología técnica: qué páginas está distinguiendo el motor
+
+| Término técnico | Significado práctico | Ejemplo / tratamiento correcto |
+|---|---|---|
+| **Comercio o dominio del vendedor (merchant / retailer domain)** | Identificar a qué tienda pertenece una URL usando su dominio y el catálogo de tiendas conocido. | Phone House, PCComponentes u otra tienda. La tienda ayuda a contextualizar la URL; por sí sola no demuestra que el documento sea una ficha de producto ni que el precio sea válido. |
+| **Ficha de producto (product detail page / PDP)** | Página dedicada a un producto y, a veces, a una variante concreta. | La página de un móvil concreto en Phone House. Es más útil para extraer un precio que una portada o una lista genérica, pero hay que validar modelo, capacidad y oferta. |
+| **URL canónica y normalización de URL** | Reducir variantes técnicas de una dirección a una identidad estable, retirando parámetros de seguimiento o de enrutamiento que no identifican el producto. | En Phone House puede aparecer el selector de marketplace como una consulta mal formada duplicada, por ejemplo ?opt=marketplace?opt=phonehouse. El propio código lo trata como metadato de enrutamiento, no como SKU, para que no impida encontrar la misma página en el archivo. |
+| **Parámetros de seguimiento** | Valores añadidos por publicidad, analítica o redirecciones que no cambian el producto. | srsltid se eliminó de la clave de identidad normalizada para permitir comparar la página con su captura archivada canónica. |
+| **Página de categoría, búsqueda o listado** | Página con varios productos o resultados; no equivale a una ficha individual. | No aceptar cualquier precio de un listado como precio del producto consultado sin comprobar la identidad exacta. |
+| **Captura archivada / snapshot / replay** | Copia de una página guardada por un archivo web, identificada por una fecha de captura y una dirección de destino. | Wayback usa formatos de captura como id_; Arquivo.pt puede usar mp_. Hay que validar tanto que la URL sea realmente de archivo como que su destino corresponda a la página comercial correcta. |
+| **Datos estructurados de producto y oferta (Product / Offer, JSON-LD o marcado comercial)** | Datos de la página que pueden contener nombre, precio, moneda, disponibilidad u otros campos. | Son una fuente útil para extraer el precio; siguen necesitando validación de producto, variante, moneda y fecha de captura. |
+| **Identidad de variante** | Distinguir modelo, almacenamiento, memoria, color o versión cuando son relevantes para el precio. | Un móvil de 256 GB no debe mezclar precios del modelo de 128 GB, de una funda o de un accesorio. |
+| **URL archivada auténtica frente a URL normal etiquetada como archivo** | Comprobar la estructura de la URL archivada, no confiar solo en una etiqueta interna. | Las pruebas de persistencia cubren URLs normales de tienda y capturas válidas de Wayback / Arquivo.pt para evitar que una URL comercial común cuente como captura o bloquee una válida. |
+
+### Qué está respaldado por el código y qué no debe exagerarse
+
+- El repositorio tiene un modelo de tiendas y un análisis de URL que contempla tienda identificada y dominios comerciales conocidos: [Store.kt](https://github.com/bonillamarquezpablo-lab/00157916/blob/main/app/src/main/java/com/example/data/model/Store.kt) y [ProductRepository.kt](https://github.com/bonillamarquezpablo-lab/00157916/blob/main/app/src/main/java/com/example/data/repository/ProductRepository.kt).
+- Hay una prueba específica para normalizar la URL de Phone House antes de la búsqueda histórica: [WaybackPriceHistoryClientTest.kt](https://github.com/bonillamarquezpablo-lab/00157916/blob/main/app/src/test/java/com/example/data/remote/WaybackPriceHistoryClientTest.kt). También consta el cambio de prueba de URL canónica de Phone House en [el commit de regresión](https://github.com/bonillamarquezpablo-lab/00157916/commit/f1d32c6236f4).
+- La validación de URLs archivadas y los formatos de Wayback / Arquivo.pt se documentan en [PriceObservationDao.kt](https://github.com/bonillamarquezpablo-lab/00157916/blob/main/app/src/main/java/com/example/data/local/PriceObservationDao.kt) y en las pruebas de persistencia.
+- Esto describe identificación de comercios, normalización de direcciones y validación de capturas. **No significa que exista un clasificador universal perfecto capaz de reconocer automáticamente cualquier tipo de página de cualquier web.** La cobertura debe medirse con ejemplos reales de varias tiendas y tipos de página.
+
+### Incidencia de compilación que queda separada del motor histórico
+
+El workflow [run 998](https://github.com/bonillamarquezpablo-lab/00157916/actions/runs/40618739212), asociado al HEAD de código ef512e3d850eb2a9085636036c10e6683435b8b6, terminó con error de compilación en ProductDetailSheet.kt: referencia Icons.Filled.Info no resuelta en las líneas 843 y 936. Este fallo pertenece al cambio de interfaz de detalles del producto; no demuestra un fallo del motor histórico. No hay que distribuir una APK de ese HEAD hasta corregirlo y volver a ejecutar las comprobaciones.
+
+### Acciones prioritarias tras el nuevo hito
+
+1. Conservar y exportar el informe de 22 fases de una búsqueda en la que la gráfica muestre precios históricos; anotar versión, producto consultado, fecha y dispositivo.
+2. Confirmar en el informe cuántos puntos se añadieron realmente a Room, cuántos eran duplicados, las fechas exactas y qué fuentes aportaron cada punto. Contrastar los puntos guardados con los puntos dibujados en la gráfica.
+3. Repetir la comprobación con al menos una segunda tienda y un producto con variante exacta; incluir Phone House y otra tienda cuando haya candidatos históricos disponibles.
+4. Medir por separado éxito de CDX/Wayback, Memento/Arquivo.pt, descarga de HTML, extracción de precio, validación de identidad y persistencia. No fijar tasas porcentuales hasta tener suficientes búsquedas comparables.
+5. Mantener intactos los datos locales, el histórico ya recuperado y la ruta de dibujo de la gráfica. Cualquier mejora posterior debe ser pequeña, aislada y acompañada de regresión.
+6. Corregir por separado el error de compilación de la interfaz del run 998; no mezclar ese arreglo de UI con los cambios del motor histórico.
+
+**Conclusión a 28/10/2026:** se registra un avance decisivo: el histórico ya es visible en la gráfica según la prueba manual comunicada. La siguiente etapa no es rehacer el motor ni cambiar de tecnología por moda; es preservar el resultado, guardar su evidencia reproducible y medirlo en varias tiendas y productos.

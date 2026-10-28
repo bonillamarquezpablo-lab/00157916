@@ -1005,7 +1005,8 @@ class WaybackPriceHistoryClient(
                     onTrace = onTrace,
                     snapshotResultsCache = snapshotResultsCache,
                     onVerifiedQuotes = onVerifiedQuotes,
-                    forceRefresh = forceRefresh
+                    forceRefresh = forceRefresh,
+                    stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                 )
             }
             if (preferredUrlAlreadyQueried && resolvedPreferredUrl != null) {
@@ -1029,7 +1030,8 @@ class WaybackPriceHistoryClient(
                     onTrace = onTrace,
                     snapshotResultsCache = snapshotResultsCache,
                     onVerifiedQuotes = onVerifiedQuotes,
-                    forceRefresh = forceRefresh
+                    forceRefresh = forceRefresh,
+                    stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                 )
             }
             if (productUrlCandidate != null) {
@@ -1078,7 +1080,8 @@ class WaybackPriceHistoryClient(
                         onTrace = onTrace,
                         snapshotResultsCache = snapshotResultsCache,
                         onVerifiedQuotes = onVerifiedQuotes,
-                        forceRefresh = forceRefresh
+                        forceRefresh = forceRefresh,
+                        stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                     )
                 }
             }
@@ -1098,7 +1101,8 @@ class WaybackPriceHistoryClient(
                     onTrace = onTrace,
                     snapshotResultsCache = snapshotResultsCache,
                     onVerifiedQuotes = onVerifiedQuotes,
-                    forceRefresh = forceRefresh
+                    forceRefresh = forceRefresh,
+                    stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                 )
             }
 
@@ -1156,7 +1160,8 @@ class WaybackPriceHistoryClient(
                         snapshotResultsCache = snapshotResultsCache,
                         onVerifiedQuotes = onVerifiedQuotes,
                         knownProductTitlesById = knownProductTitlesById,
-                        forceRefresh = forceRefresh
+                        forceRefresh = forceRefresh,
+                        stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                     )
                 }
                 if (
@@ -1188,8 +1193,12 @@ class WaybackPriceHistoryClient(
         knownProductTitlesById: Map<String, String> = emptyMap(),
         snapshotResultsCache: MutableMap<String, SnapshotFetch>? = null,
         onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null,
-        forceRefresh: Boolean = false
+        forceRefresh: Boolean = false,
+        stopWhenEnoughNewPoints: (() -> Boolean)? = null
     ): WaybackBackfillResult {
+        if (stopWhenEnoughNewPoints?.invoke() == true) {
+            return WaybackBackfillResult(diagnosticCodes = setOf("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS"))
+        }
         val failureLabel = when {
             failureCodes.contains("CDX_DIRECT_URL_ALREADY_QUERIED") ->
                 "La URL directa ya se comprobó; se buscan variantes archivadas"
@@ -1799,8 +1808,12 @@ class WaybackPriceHistoryClient(
         snapshotResultsCache: MutableMap<String, SnapshotFetch>? = null,
         onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null,
         forceRefresh: Boolean = false,
-        allowSupplementalCdxSeries: Boolean = true
+        allowSupplementalCdxSeries: Boolean = true,
+        stopWhenEnoughNewPoints: (() -> Boolean)? = null
     ): WaybackBackfillResult {
+        if (stopWhenEnoughNewPoints?.invoke() == true) {
+            return WaybackBackfillResult(diagnosticCodes = setOf("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS"))
+        }
         val urls = candidateUrls.asSequence()
             .filter(::isEligibleDirectUrl)
             .distinct()
@@ -1819,8 +1832,11 @@ class WaybackPriceHistoryClient(
         val probes = mutableListOf<AvailabilityProbe>()
         for (originalUrl in urls) {
             if (probes.size >= maxCandidates.coerceAtLeast(1)) break
+            if (stopWhenEnoughNewPoints?.invoke() == true) break
             val recentProbe = availabilitySemaphore.withPermit {
-                queryAvailability(originalUrl, dates.first(), stage)
+                if (stopWhenEnoughNewPoints?.invoke() == true) {
+                    AvailabilityProbe(requestFailed = true, diagnosticCode = "ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS")
+                } else queryAvailability(originalUrl, dates.first(), stage)
             }
             probes += recentProbe
             if (recentProbe.diagnosticCode == "WAYBACK_RATE_LIMITED") break
@@ -1857,11 +1873,14 @@ class WaybackPriceHistoryClient(
                 .distinctBy { it.rawTimestamp to it.originalUrl }
             for (capture in recentCaptures) {
                 if (probes.size >= maxCandidates.coerceAtLeast(1)) break
+                if (stopWhenEnoughNewPoints?.invoke() == true) break
                 val currentUniqueCaptureCount = probes.mapNotNull { it.capture }
                     .distinctBy { it.rawTimestamp to it.originalUrl }.size
                 if (currentUniqueCaptureCount >= maxSnapshots.coerceAtLeast(1)) break
                 val olderProbe = availabilitySemaphore.withPermit {
-                    queryAvailability(capture.originalUrl, dates.last(), stage)
+                    if (stopWhenEnoughNewPoints?.invoke() == true) {
+                        AvailabilityProbe(requestFailed = true, diagnosticCode = "ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS")
+                    } else queryAvailability(capture.originalUrl, dates.last(), stage)
                 }
                 probes += olderProbe
                 if (olderProbe.diagnosticCode == "WAYBACK_RATE_LIMITED") break

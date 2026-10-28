@@ -157,7 +157,7 @@ class ProductRepository(
             }
             .mapNotNull { entity ->
                 val inferred = inferProductCategory(entity.title, "")
-                inferred.takeIf { it != ProductCategory.ALL }?.let { it to entity.id }
+                inferred.takeIf { it != ProductCategory.ALL && it != ProductCategory.OTHER }?.let { it to entity.id }
             }
             .groupBy({ it.first }, { it.second })
 

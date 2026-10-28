@@ -378,3 +378,21 @@ La última petición del HAR de esta búsqueda, a las 14:46:09, fue a `archive.o
   
 ### Conclusión de esta prueba
 La extracción y el guardado históricos ya están funcionando en el dispositivo. Los próximos defectos a corregir son: **(1)** refresco/confirmación de la ficha y gráfica (fase 29), **(2)** código diagnóstico de precio rechazado por condición reacondicionada, **(3)** coherencia entre cortocircuito inteligente y peticiones Availability posteriores. El HAR combina llamadas de búsquedas anteriores; para esta ejecución las entradas relevantes son las últimas peticiones de las 14:45:52–14:46:09.
+
+## 16. Correcciones de robustez general del histórico — 28/10/2026
+
+### Cambios implementados en la rama de reparación
+- **Lectura posterior al guardado:** se separa el flujo directo de Room (`roomProductsStream`) del flujo compartido de interfaz (`allProductsStream`). La comprobación de la fase 29 deja de depender del valor repetido de `shareIn(replay = 1)` y registra la clase del error cuando no puede confirmar el refresco. El flujo compartido sigue disponible para los consumidores de interfaz.
+- **Extracción más general:** el selector de precio visible reconoce más nombres habituales de clases y atributos de páginas de producto (por ejemplo `product__price`, `pdpPrice`, `price--main`, `priceDisplay`), siempre que el precio esté marcado en un elemento específico y exista una moneda identificable. No se aceptan números sueltos de una página ni se da por hecho que un importe sin moneda sea EUR.
+- **Condición del producto:** el analizador rechaza explícitamente una oferta que lleve una señal clara de reacondicionado/usado/caja abierta cuando no coincide con la condición solicitada. El diagnóstico usa `ARCHIVE_PRODUCT_CONDITION_MISMATCH`, en vez de ocultar el motivo bajo `ARCHIVE_PRICE_METADATA_MISSING`.
+- **Menos peticiones inútiles:** el indicador de objetivo alcanzado se propaga a las rutas de respaldo por Availability. Se comprueba antes de iniciar más sondeos y antes de la consulta CDX alternativa; también se respeta la pausa global si el servicio devuelve HTTP 429.
+- **Regresiones añadidas:** prueba de extracción genérica desde `product__price` sin JSON-LD y prueba de clasificación de la captura Phone House reacondicionada.
+
+### Alcance y cautelas
+Estas mejoras amplían patrones genéricos; no constituyen un soporte universal garantizado para todas las páginas web. Cada comercio puede cambiar su HTML, cargar precios solo mediante JavaScript o bloquear archivos históricos. El sistema debe seguir validando identidad, capacidad/modelo, condición, moneda, fecha y precio antes de guardar. La cobertura real se medirá con las pruebas automatizadas y búsquedas en varias tiendas; no se considera certificada hasta que el workflow y la prueba en el móvil terminen correctamente.
+
+### Validación pendiente
+- Ejecutar la suite unitaria, la compilación Android y la generación/verificación de APK mediante CI.
+- Repetir en dispositivo la búsqueda del Xiaomi para comprobar que la gráfica se refresca tras guardar.
+- Probar la extracción genérica en otra tienda y confirmar que el resultado conserva la identidad exacta del producto.
+- Revisar en un informe real que una captura reacondicionada quede rechazada con el código de condición, sin registrarse como precio estándar.

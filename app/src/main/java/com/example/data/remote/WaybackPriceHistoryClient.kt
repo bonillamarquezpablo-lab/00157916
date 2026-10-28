@@ -1673,7 +1673,7 @@ class WaybackPriceHistoryClient(
             expectedModel.groupValues[2] == urlModel.groupValues[2]
         ) score += 8
 
-        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b(?!\s*ram)""")
         val expectedStorage = storagePattern.findAll(expected)
             .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
         val urlStorage = storagePattern.findAll(normalized)
@@ -1767,7 +1767,7 @@ class WaybackPriceHistoryClient(
 
         // Colour is intentionally ignored for historical price matching; the model, edition
         // and storage-capacity checks below remain strict.
-        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b(?!\s*ram)""")
         val expectedStorage = storagePattern.findAll(expected)
             .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
         val candidateStorage = storagePattern.findAll(candidate)
@@ -4633,9 +4633,14 @@ class WaybackPriceHistoryClient(
             return resolved
         }
 
-        fun matchesCandidateIdentity(candidate: Triple<String, Double, String>): Boolean =
-            !hasExplicitProductVariantConflict(expectedTitle, candidate.first) &&
-                (matchesArchivedTitle(candidate.first) || matchingOfferUrl(candidate) != null)
+        fun matchesCandidateIdentity(candidate: Triple<String, Double, String>): Boolean {
+            val directUrlConfirmsVariant =
+                matchesVariantDetailsConfirmedByUrl(expectedTitle, candidate.first, originalUrl)
+            val offerUrlConfirmsVariant = matchingOfferUrl(candidate) != null
+            val conflict = hasExplicitProductVariantConflict(expectedTitle, candidate.first)
+            return (!conflict && matchesArchivedTitle(candidate.first)) ||
+                directUrlConfirmsVariant || offerUrlConfirmsVariant
+        }
 
         fun isValidCandidate(candidate: Triple<String, Double, String>): Boolean =
             candidate.third.uppercase(Locale.ROOT) in allowedCurrencies &&
@@ -4699,7 +4704,19 @@ class WaybackPriceHistoryClient(
         // Use rendered price only from a price-specific element and only after product identity matches.
         val matchingPageTitle = pageTitles.firstOrNull(::matchesArchivedTitle)
             ?: return null
-        val visibleCandidate = extractVisibleProductPrice(document, metaCurrency, allowedCurrencies) ?: return null
+        val isPhoneHousePage = normalizeMerchantDomain(
+            runCatching { URI(originalUrl).host.orEmpty() }.getOrDefault("")
+        ) == "phonehouse.es"
+        val visibleCandidate = if (isPhoneHousePage) {
+            extractPhoneHouseVisibleProductPrice(
+                document = document,
+                expectedTitle = expectedTitle,
+                originalUrl = originalUrl,
+                acceptedCurrencies = allowedCurrencies
+            )
+        } else {
+            extractVisibleProductPrice(document, metaCurrency, allowedCurrencies)
+        } ?: return null
         val visiblePrice = visibleCandidate.first
         val visibleCurrency = visibleCandidate.second
         return ArchivedPriceQuote(
@@ -4862,7 +4879,7 @@ class WaybackPriceHistoryClient(
 
         // Each archived page may expose many offers, all compared with the same saved catalogue.
         // Cache title and variant signals per product once; the final identity checks remain strict.
-        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b(?!\s*ram)""")
         fun storageTokens(title: String): Set<String> = storagePattern.findAll(title)
             .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }
             .toSet()
@@ -5046,10 +5063,15 @@ class WaybackPriceHistoryClient(
         candidate: Triple<String, Double, String>,
         pageUrl: String,
         jsonLdRoots: List<Any> = extractJsonLdRoots(document)
-    ): Boolean =
-        !hasExplicitProductVariantConflict(expectedTitle, candidate.first) &&
-            (isMatchingTitleForArchivedUrl(expectedTitle, candidate.first, pageUrl) ||
-                matchingVariantUrlForArchivedOffer(document, expectedTitle, candidate, pageUrl, jsonLdRoots) != null)
+    ): Boolean {
+        val conflict = hasExplicitProductVariantConflict(expectedTitle, candidate.first)
+        val directUrlConfirmsVariant =
+            matchesVariantDetailsConfirmedByUrl(expectedTitle, candidate.first, pageUrl)
+        val offerUrlConfirmsVariant =
+            matchingVariantUrlForArchivedOffer(document, expectedTitle, candidate, pageUrl, jsonLdRoots) != null
+        return (!conflict && isMatchingTitleForArchivedUrl(expectedTitle, candidate.first, pageUrl)) ||
+            directUrlConfirmsVariant || offerUrlConfirmsVariant
+    }
 
     private fun isSameMerchantHost(firstUrl: String, secondUrl: String): Boolean {
         val firstHost = runCatching { URI(firstUrl).host.orEmpty() }.getOrDefault("")
@@ -5394,6 +5416,51 @@ class WaybackPriceHistoryClient(
      * Prefer itemprop price and current/sale selectors over wrappers containing crossed-out prices.
      * A EUR marker or currency metadata scoped to the price/product is required.
      */
+    /**
+     * Phone House's archived PDP exposes the primary offer as .buy-box-1 .precio.mb-10 rather
+     * than schema price metadata. Read only the main buy-box price, and reject the visible price
+     * when that box explicitly labels the product as refurbished/used but the selected product
+     * is a standard/new item. Other retailer parsers remain untouched.
+     */
+    private fun extractPhoneHouseVisibleProductPrice(
+        document: Document,
+        expectedTitle: String,
+        originalUrl: String,
+        acceptedCurrencies: Set<String>
+    ): Pair<Double, String>? {
+        val host = runCatching { URI(originalUrl).host.orEmpty() }.getOrDefault("")
+            .lowercase(Locale.ROOT).removePrefix("www.")
+        if (host != "phonehouse.es" || "EUR" !in acceptedCurrencies.map { it.uppercase(Locale.ROOT) }) {
+            return null
+        }
+        val buyBox = document.selectFirst(".buy-box-1") ?: return null
+        val conditionBadge = buyBox.selectFirst(".estado-outlet.outlet, .estado-outlet")
+        val conditionText = conditionBadge?.text().orEmpty()
+        val expectedCondition = productConditionKey(normalizeTitle(expectedTitle))
+        if (conditionText.isNotBlank() &&
+            productConditionKey(normalizeTitle(conditionText)) != expectedCondition
+        ) return null
+        if (conditionText.isBlank() && expectedCondition != "standard") return null
+
+        val priceElement = buyBox.selectFirst("[data-product-section=\"buy-box\"] > .precio.mb-10")
+            ?: buyBox.children().firstOrNull { it.hasClass("precio") && it.hasClass("mb-10") }
+            ?: buyBox.selectFirst(".precio.mb-10")
+            ?: return null
+        // .precio can also contain crossed-out retail-price and tooltip text. Prefer only its
+        // immediate <strong> current amount so those numbers can never be mistaken for the price.
+        val amountElement = priceElement.children().firstOrNull { it.normalName() == "strong" }
+            ?: priceElement
+        val priceText = amountElement.text().replace(Regex("""\s+"""), " ").trim()
+        if (!priceText.contains("€") ||
+            Regex("""(?i)\b\d+\s*€\s*/\s*(mes|month)\b""").containsMatchIn(priceText)
+        ) return null
+        val rawAmount = Regex("""(?<![A-Za-z0-9])\d[\d.,\u00a0 ]*(?:[.,]\d{1,2})?(?![A-Za-z0-9])""")
+            .find(priceText)?.value ?: return null
+        val price = parsePositivePrice(rawAmount) ?: return null
+        if (price !in MIN_HISTORICAL_PRICE..MAX_HISTORICAL_PRICE) return null
+        return price to "EUR"
+    }
+
     private fun extractVisibleProductPrice(
         document: Document,
         knownCurrency: String?,
@@ -5558,7 +5625,7 @@ class WaybackPriceHistoryClient(
         val archivedVariants = productModelVariantTokens(archived)
         if (archivedVariants.any { it !in expectedVariants }) return false
 
-        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b(?!\s*ram)""")
         val archivedStorage = storagePattern.findAll(archived)
             .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
         if (archivedStorage.isNotEmpty() && "${capacity}gb" !in archivedStorage) return false
@@ -5578,7 +5645,7 @@ class WaybackPriceHistoryClient(
         // Trim/model suffixes (Pro, Ultra, Max, etc.) are meaningful for phones and scooters.
         // Require the same explicit trim markers on both titles to avoid cross-variant prices.
         if (productModelVariantTokens(e) != productModelVariantTokens(a)) return false
-        val strictStoragePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+        val strictStoragePattern = Regex("""\b\d+\s*(?:gb|tb)\b(?!\s*ram)""")
         val expectedStorageIdentity = strictStoragePattern.findAll(e)
             .map { it.value.replace(Regex("""\s+"""), "") }.toSet()
         val archivedStorageIdentity = strictStoragePattern.findAll(a)
@@ -5637,7 +5704,7 @@ class WaybackPriceHistoryClient(
         // model-code spelling (e.g. WH-1000XM5 versus WH1000XM5).
         val expectedVariants = requiredVariantTokens(canonicalExpected)
         val archivedVariants = requiredVariantTokens(canonicalArchived)
-        val storageToken = Regex("""\b\d+\s*(?:gb|tb)\b""")
+        val storageToken = Regex("""\b\d+\s*(?:gb|tb)\b(?!\s*ram)""")
         val expectedStorage = storageToken.findAll(canonicalExpected)
             .map { it.value.replace(Regex("""\s+"""), "") }.toSet()
         val archivedStorage = storageToken.findAll(canonicalArchived)
@@ -5672,14 +5739,17 @@ class WaybackPriceHistoryClient(
         // Colour is intentionally ignored for historical pricing. Model/edition and storage
         // capacity below still prevent matching a different product configuration.
 
-        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b(?!\s*ram)""")
         val expectedStorage = storagePattern.findAll(expected)
             .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
         val archivedStorage = storagePattern.findAll(archived)
             .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
 
-        // An archived page that explicitly names an unrequested capacity is a different SKU.
-        if (archivedStorage.any { it !in expectedStorage }) return false
+        // Ignore RAM sizes such as "8GB RAM": they are not storage capacity.
+        // If the selected catalogue title has a capacity, a conflicting archived capacity is
+        // rejected. If the title is generic, the exact retailer URL must confirm any capacity
+        // named by the archived title before this page may stand in for that selection.
+        if (expectedStorage.isNotEmpty() && archivedStorage.any { it !in expectedStorage }) return false
         val missingStorage = expectedStorage.any { it !in archivedStorage }
 
         val uri = runCatching { URI(originalUrl) }.getOrNull() ?: return false
@@ -5707,10 +5777,12 @@ class WaybackPriceHistoryClient(
         val urlStorage = storagePattern.findAll(urlTitle)
             .map { it.value.replace(Regex("""\s+"""), "").lowercase(Locale.ROOT) }.toSet()
         if (missingStorage && !urlStorage.containsAll(expectedStorage)) return false
+        if (expectedStorage.isEmpty() && archivedStorage.isNotEmpty() &&
+            !urlStorage.containsAll(archivedStorage)
+        ) return false
 
-        // An offer URL must not silently assign a capacity to a saved product whose
-        // storage is unknown; keep those records separate until identity is explicit.
-        if (expectedStorage.isEmpty() && urlStorage.isNotEmpty()) return false
+        // A generic catalogue title may inherit a capacity-specific historical point only when
+        // that same capacity is explicit in the exact retailer URL; a sibling SKU cannot pass.
         fun coreIdentity(value: String): String =
             onlineProductIdentityKey(canonicalizeArchiveTitle(value)).split('|')
                 .filterNot {
@@ -5768,7 +5840,7 @@ class WaybackPriceHistoryClient(
         val archivedModelVariants = productModelVariantTokens(a)
         if (archivedModelVariants.isNotEmpty() && expectedModelVariants != archivedModelVariants) return true
 
-        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b""")
+        val storagePattern = Regex("""\b\d+\s*(?:gb|tb)\b(?!\s*ram)""")
         val expectedStorage = storagePattern.findAll(e).map { it.value.replace(Regex("""\s+"""), "") }.toSet()
         val archivedStorage = storagePattern.findAll(a).map { it.value.replace(Regex("""\s+"""), "") }.toSet()
         if (expectedStorage.isEmpty() && archivedStorage.isNotEmpty()) return true

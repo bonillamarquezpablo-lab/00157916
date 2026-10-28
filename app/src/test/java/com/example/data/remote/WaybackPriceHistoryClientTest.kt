@@ -1449,6 +1449,10 @@ class WaybackPriceHistoryClientTest {
             "The 8 GB RAM label must not conflict with the phone's 256 GB storage",
             client.matchesVariantDetailsConfirmedByUrl(title, archivedTitle, url)
         )
+        assertFalse(
+            "The capacity separator in the URL must not be mistaken for a phone model's Plus edition",
+            client.hasExplicitVariantConflictInProductUrl(title, url)
+        )
     }
 
     @Test

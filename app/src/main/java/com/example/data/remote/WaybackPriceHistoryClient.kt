@@ -1719,7 +1719,7 @@ class WaybackPriceHistoryClient(
      * real storage can be recognized without treating the RAM amount as a second capacity.
      */
     private fun normalizeArchiveUrlIdentityPath(value: String): String =
-        value.replace(Regex("""(?i)(\d+\s*(?:gb|tb))plus(?=\d)"""), "\$1 plus ")
+        value.replace(Regex("""(?i)(\d+\s*(?:gb|tb))plus(?=\d)"""), "\$1 ")
 
     /**
      * Inspect only identity-bearing URL parts. A family URL that omits capacity/colour must not

@@ -133,8 +133,8 @@ class ProductRepository(
         // observations. Any failure is logged and the crash-report handler remains available.
         externalScope.launch {
             try {
-                // Repair only rows whose category is the old "unclassified" sentinel. This updates
-                // the category label only; product IDs and every historical-price row stay intact.
+                // Repair only fallback category labels (ALL/OTHER) when the title identifies a
+                // specific category. Product IDs and every historical-price row stay intact.
                 reclassifyUnclassifiedCatalogueProducts()
                 productDao.markProductsWithVerifiedObservations()
                 startupCleanupCompleted.complete(Unit)
@@ -151,7 +151,10 @@ class ProductRepository(
     private suspend fun reclassifyUnclassifiedCatalogueProducts() {
         val updates = productDao.getAllProductsSnapshot()
             .asSequence()
-            .filter { it.category.equals(ProductCategory.ALL.name, ignoreCase = true) }
+            .filter {
+                it.category.equals(ProductCategory.ALL.name, ignoreCase = true) ||
+                    it.category.equals(ProductCategory.OTHER.name, ignoreCase = true)
+            }
             .mapNotNull { entity ->
                 val inferred = inferProductCategory(entity.title, "")
                 inferred.takeIf { it != ProductCategory.ALL }?.let { it to entity.id }
@@ -161,7 +164,7 @@ class ProductRepository(
         // Keep each Room IN-clause well below SQLite's bind-parameter limit.
         updates.forEach { (category, productIds) ->
             productIds.chunked(400).forEach { batch ->
-                productDao.reclassifyUnclassifiedProducts(batch, category.name)
+                productDao.reclassifyFallbackCategoryProducts(batch, category.name)
             }
         }
     }

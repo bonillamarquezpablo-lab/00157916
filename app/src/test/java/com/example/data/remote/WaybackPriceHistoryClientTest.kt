@@ -1115,6 +1115,18 @@ class WaybackPriceHistoryClientTest {
             ),
             client.buildDirectUrlCandidates(url)
         )
+
+        // A populated Phone House colour value may identify a real variant; preserve it.
+        val selectedColour =
+            "https://www.phonehouse.es/movil/xiaomi/mi-10-pro-256gbplus8gb-ram.html?colorgris=gris"
+        assertEquals(selectedColour, client.canonicalPreferredArchiveUrl(selectedColour))
+        assertEquals(listOf(selectedColour), client.buildDirectUrlCandidates(selectedColour))
+
+        // The same parameter name has no special meaning on another retailer.
+        val otherRetailer =
+            "https://shop.example/product/xiaomi-mi-10-pro?colorgris="
+        assertEquals(otherRetailer, client.canonicalPreferredArchiveUrl(otherRetailer))
+        assertEquals(listOf(otherRetailer), client.buildDirectUrlCandidates(otherRetailer))
     }
 
     @Test
@@ -5274,7 +5286,28 @@ class WaybackPriceHistoryClientTest {
         assertTrue(result.detail.contains("1 respuesta(s) CDX válida(s)"))
         assertTrue(result.detail.contains("0 captura(s) candidata(s)"))
         assertTrue(result.detail.contains("CDX_DOMAIN_TIMEOUT"))
-        assertTrue(result.detail.contains("no hay histórico que validar"))
+        assertTrue(result.detail.contains("búsqueda quedó incompleta"))
+        assertTrue(result.detail.contains("no puede concluirse que el histórico esté vacío"))
+        assertFalse(result.detail.contains("no hay histórico que validar"))
+    }
+
+    @Test
+    fun stepFiveReportsNoCapturesWhenTheOnlyCdxResponseIsValidAndEmpty() {
+        val result = summarizeCdxStep5Events(
+            listOf(
+                WaybackTraceEvent(
+                    step = 5,
+                    status = WaybackTraceStatus.PASSED,
+                    detail = "CDX_URL_EXACT: respuesta válida; 0 captura(s) candidatas.",
+                    durationMs = 500L
+                )
+            )
+        )
+
+        assertNotNull(result)
+        assertEquals(WaybackTraceStatus.FAILED, result!!.status)
+        assertTrue(result.detail.contains("sin capturas candidatas"))
+        assertFalse(result.detail.contains("búsqueda quedó incompleta"))
     }
 
     @Test

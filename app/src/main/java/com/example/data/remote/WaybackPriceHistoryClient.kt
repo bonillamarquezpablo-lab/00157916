@@ -1718,6 +1718,14 @@ class WaybackPriceHistoryClient(
      * fail this check, while an explicit "iphone-15-plus", different capacity, or different colour
      * must not be the first archive candidate for a base iPhone 15 variant.
      */
+    /**
+     * Retailer slugs sometimes encode storage as "256gbplus8gb-ram" with no word boundary
+     * after the first capacity. Separate the "plus" connector only for identity checks so the
+     * real storage can be recognized without treating the RAM amount as a second capacity.
+     */
+    private fun normalizeArchiveUrlIdentityPath(value: String): String =
+        value.replace(Regex("""(?i)(\d+\s*(?:gb|tb))plus(?=\d)"""), "$1 plus ")
+
     internal fun hasExplicitVariantConflictInProductUrl(
         expectedTitle: String,
         candidateUrl: String
@@ -1729,7 +1737,7 @@ class WaybackPriceHistoryClient(
         val pathText = uri.path.orEmpty()
             .split('/')
             .filter { it.isNotBlank() }
-            .joinToString(" ") { decodePathUrlComponent(it) }
+            .joinToString(" ") { normalizeArchiveUrlIdentityPath(decodePathUrlComponent(it)) }
         val identityQueryKeys = setOf(
             "sku", "skuid", "sku_id", "variant", "variantid", "variant_id", "variation",
             "variationid", "variation_id", "productid", "product_id", "id_product",
@@ -5753,7 +5761,7 @@ class WaybackPriceHistoryClient(
         val missingStorage = expectedStorage.any { it !in archivedStorage }
 
         val uri = runCatching { URI(originalUrl) }.getOrNull() ?: return false
-        val pathText = decodePathUrlComponent(uri.rawPath.orEmpty())
+        val pathText = normalizeArchiveUrlIdentityPath(decodePathUrlComponent(uri.rawPath.orEmpty()))
         val identityQueryKeys = setOf(
             "sku", "skuid", "sku_id", "variant", "variantid", "variant_id", "variation",
             "variationid", "variation_id", "productid", "product_id", "offerid", "offer_id",

@@ -269,7 +269,12 @@ class ProductRepository(
 
     // Persisted Room rows + verified observations + local tracking are the canonical stream.
     // No demo or simulated price points are composed into this flow.
-    val allProductsStream: Flow<List<Product>> = combine(
+    /**
+     * Direct Room-backed stream used for read-after-write checks. Unlike the shared UI stream below,
+     * it has no replay cache, so callers that must confirm a recent insert cannot inspect a stale
+     * replay value while waiting for Room invalidation.
+     */
+    val roomProductsStream: Flow<List<Product>> = combine(
         productDao.getAllProducts(),
         storeDao.getAllStores(),
         trackedDao.getAllTracked(),
@@ -293,7 +298,11 @@ class ProductRepository(
     }.onEach { currentProducts ->
         _latestProducts.value = currentProducts
     }.flowOn(Dispatchers.Default)
-        .shareIn(externalScope, SharingStarted.WhileSubscribed(5_000L), replay = 1)
+
+    // Keep the shared stream for UI subscribers; durable read-after-write checks use
+    // roomProductsStream directly so a cached replay value cannot mask a just-saved history point.
+    val allProductsStream: Flow<List<Product>> =
+        roomProductsStream.shareIn(externalScope, SharingStarted.WhileSubscribed(5_000L), replay = 1)
 
 
     /**

@@ -2810,6 +2810,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 var selectedProductRefreshed = false
                 var selectedProductRefreshNeeded = false
                 var selectedProductRefreshTitle: String? = null
+                var selectedProductRefreshFailure: String? = null
                 var mementoAttempted = false
                 // Search-wide circuit breaker: one unhealthy direct CDX route must not be
                 // followed by another candidate's merchant-domain requests in the same run.
@@ -3373,9 +3374,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
 
                 if (selectedProductRefreshNeeded) {
                     val targetIdentity = selectedProductRefreshTitle?.let(::onlineProductIdentityKey)
-                    val refreshedProduct = runCatching {
+                    // Read directly from Room, not from allProductsStream's replay cache. This is a
+                    // read-after-write barrier: the selected card is refreshed only after the
+                    // archived evidence is visible in the newly mapped database snapshot.
+                    val refreshAttempt = runCatching {
                         withTimeout(10_000L) {
-                            repository.allProductsStream.first { products ->
+                            repository.roomProductsStream.first { products ->
                                 products.any { product ->
                                     (targetProductId?.let { product.id == it }
                                         ?: (targetIdentity != null &&
@@ -3389,13 +3393,23 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                     product.priceHistory.any { it.isArchiveEvidence }
                             }
                         }
-                    }.getOrNull()
+                    }
+                    val refreshedProduct = refreshAttempt.getOrNull()
+                    selectedProductRefreshFailure = refreshAttempt.exceptionOrNull()
+                        ?.let { it::class.java.simpleName }
                     if (refreshedProduct != null) {
                         selectedProductRefreshed = true
+                        selectedProductRefreshFailure = null
                         val currentState = _uiState.value
                         if (currentState.selectedProduct?.id == refreshedProduct.id) {
                             _uiState.value = currentState.copy(selectedProduct = refreshedProduct)
                         }
+                    } else {
+                        Log.w(
+                            "PriceTrackerViewModel",
+                            "Archived history was persisted, but the fresh Room snapshot did not expose it. " +
+                                "Failure=${selectedProductRefreshFailure ?: "NO_MATCHING_PRODUCT"}"
+                        )
                     }
                 }
 
@@ -3571,7 +3585,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             else -> WaybackTraceStatus.SKIPPED
                         },
                         "Actualización solicitada=$selectedProductRefreshNeeded; ficha refrescada=$selectedProductRefreshed; " +
-                            "puntos nuevos del producto seleccionado=$savedCount."
+                            "puntos nuevos del producto seleccionado=$savedCount; " +
+                            "error refresco=${selectedProductRefreshFailure ?: "ninguno"}."
                     )
                     val gateStatus = when {
                         // Network activity is stronger evidence than aggregate error codes: the

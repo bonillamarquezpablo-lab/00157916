@@ -1368,6 +1368,34 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun genericDoubleUnderscoreProductPriceClassIsExtractedWithoutJsonLd() {
+        val client = newClient()
+        val expected = "Samsung Galaxy S24 256 GB"
+        val originalUrl = "https://shop.example/products/samsung-galaxy-s24-256gb"
+        val html = """
+            <html>
+              <head><title>Samsung Galaxy S24 256 GB</title></head>
+              <body>
+                <h1>Samsung Galaxy S24 256 GB</h1>
+                <div class="product__price">899,99 €</div>
+              </body>
+            </html>
+        """.trimIndent()
+
+        val quote = client.parseArchivedPrice(
+            html = html,
+            expectedTitle = expected,
+            originalUrl = originalUrl,
+            snapshotUrl = "https://web.archive.org/web/20250101120000id_/$originalUrl",
+            observedAt = 1_735_732_800_000L
+        )
+
+        assertNotNull("Generic product__price markup should be recognized without retailer-specific code", quote)
+        assertEquals(899.99, quote!!.price, 0.001)
+        assertEquals("EUR", quote.currency)
+    }
+
+    @Test
     fun phoneHouseRefurbishedBuyBoxPriceIsNotImportedAsNewProductHistory() {
         val client = newClient()
         val expected = "Xiaomi Mi 10 Pro Gris"
@@ -1403,6 +1431,11 @@ class WaybackPriceHistoryClientTest {
         )
 
         assertNull("A refurbished offer must not be mixed into standard-product history", quote)
+        assertEquals(
+            "The report must say that the condition mismatched, not that no numeric price existed",
+            "ARCHIVE_PRODUCT_CONDITION_MISMATCH",
+            client.diagnoseArchivedPrice(Jsoup.parse(html), expected, originalUrl)
+        )
     }
 
     @Test

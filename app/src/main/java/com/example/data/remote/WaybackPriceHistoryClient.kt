@@ -3005,13 +3005,16 @@ class WaybackPriceHistoryClient(
         )
     }
 
-    private fun diagnoseArchivedPrice(
+    internal fun diagnoseArchivedPrice(
         document: Document,
         expectedTitle: String,
         originalUrl: String,
         jsonLdRoots: List<Any> = extractJsonLdRoots(document)
     ): String {
         val jsonLd = extractJsonLdProductOffers(jsonLdRoots)
+        if (hasExplicitArchivedConditionMismatch(document, expectedTitle)) {
+            return "ARCHIVE_PRODUCT_CONDITION_MISMATCH"
+        }
         val pageTitles = extractArchivedPageTitles(document)
         val metaPrice = listOf(
             "product:price:amount", "og:price:amount", "price", "product:price"
@@ -4625,6 +4628,10 @@ class WaybackPriceHistoryClient(
         }?.uppercase(Locale.ROOT)
 
         val allowedCurrencies = acceptedCurrencies.map { it.uppercase(Locale.ROOT) }.toSet()
+        // Explicitly labelled used/refurbished/open-box offers must never enter the wrong
+        // condition's history, even when the retailer's structured Product title is generic.
+        if (hasExplicitArchivedConditionMismatch(document, expectedTitle)) return null
+
         fun matchesArchivedTitle(title: String): Boolean =
             isMatchingTitleForArchivedUrl(expectedTitle, title, originalUrl)
 
@@ -5474,7 +5481,7 @@ class WaybackPriceHistoryClient(
         knownCurrency: String?,
         acceptedCurrencies: Set<String> = setOf("EUR")
     ): Pair<Double, String>? {
-        val priceSelector = Regex("""(?i)(product[-_ ]?price|current[-_ ]?price|sale[-_ ]?price|selling[-_ ]?price|final[-_ ]?price|special[-_ ]?price|price__current|price--current|price__sale|price--sale|price__amount|price-amount|pricevalue|price-value|priceblock_(?:our|deal|sale)price|woocommerce[-_ ]?price[-_ ]?amount|price-item--sale|price--highlight|price--sale|priceView-(?:hero|customer)-price|price__current|price__sale|price-current|currentPrice|salePrice|^price$)""")
+        val priceSelector = Regex("""(?i)(product[-_ ]{0,2}price|pdp[-_ ]{0,2}price|productdetail[-_ ]{0,2}price|product-detail[-_ ]{0,2}price|current[-_ ]?price|sale[-_ ]?price|selling[-_ ]?price|final[-_ ]?price|special[-_ ]?price|price__current|price--current|price__sale|price--sale|price__amount|price-amount|pricevalue|price-value|priceblock_(?:our|deal|sale)price|woocommerce[-_ ]?price[-_ ]?amount|price-item--sale|price--highlight|price--sale|priceView-(?:hero|customer)-price|price__current|price__sale|price-current|currentPrice|salePrice|price[-_ ]{1,2}(?:main|primary|display|offer|now|active|hero)|price(?:Display|Current|Amount|Value)|pdpPrice|productPrice|^price$)""")
         val rejectedSelector = Regex("""(?i)(old|previous|regular|original|was[-_ ]?price|list[-_ ]?price|strike|crossed|installment|monthly|shipping|unit[-_ ]?price|price[-_ ]?before)""")
         val voidTags = setOf("meta", "input", "img", "br", "hr", "link", "source", "area", "embed", "track", "wbr")
         val euroAmount = Regex("""(?i)(?:€\s*[0-9][0-9., \u00a0]*|[0-9][0-9., \u00a0]*\s*€|\bEUR\s*[0-9][0-9., \u00a0]*|[0-9][0-9., \u00a0]*\s*\bEUR\b)""")
@@ -5900,6 +5907,35 @@ class WaybackPriceHistoryClient(
         Regex("""\b(open box|open-box|caja abierta)\b""")
             .containsMatchIn(title) -> "open-box"
         else -> "standard"
+    }
+
+    /**
+     * Reads only explicit product-condition badges/metadata, not arbitrary page text, because
+     * retailer pages can advertise refurbished products elsewhere in a footer or recommendation.
+     */
+    private fun hasExplicitArchivedConditionMismatch(document: Document, expectedTitle: String): Boolean {
+        val expectedCondition = productConditionKey(normalizeTitle(expectedTitle))
+        val selectors = listOf(
+            ".buy-box-1 .estado-outlet",
+            ".buy-box-1 [class*=condition]",
+            "[class*=product-condition]",
+            "[class*=condition-badge]",
+            "[class*=condition-label]",
+            "[class*=outlet]",
+            "[itemprop=itemCondition]",
+            "[itemprop=condition]",
+            "[data-condition]"
+        )
+        return document.select(selectors.joinToString(",")).any { element ->
+            val conditionText = listOf(
+                element.text(),
+                element.attr("data-condition"),
+                element.attr("content"),
+                element.attr("aria-label")
+            ).filter { it.isNotBlank() }.joinToString(" ")
+            val observedCondition = productConditionKey(normalizeTitle(conditionText))
+            observedCondition != "standard" && observedCondition != expectedCondition
+        }
     }
 
     private fun canonicalizeArchiveTitle(normalizedTitle: String): String {

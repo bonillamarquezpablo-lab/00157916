@@ -13,6 +13,35 @@ class SmartphoneSubcategoryTest {
     }
 
     @Test
+    fun recognizesXiaomiMiPhonesAndOtherMajorPhoneFamiliesWithoutLeakingAccessories() {
+        listOf(
+            "Xiaomi Mi 10 Pro Gris",
+            "Xiaomi 14T Pro 256GB Negro",
+            "Xiaomi Redmi Note 13 Pro",
+            "POCO X6 Pro 5G",
+            "Google Pixel Fold",
+            "Samsung Galaxy Z Fold 6",
+            "Huawei Pura 70 Ultra",
+            "Honor Magic6 Pro",
+            "OnePlus 12R",
+            "Motorola Moto G84",
+            "OPPO Reno 11 Pro",
+            "vivo V30",
+            "realme GT 6",
+            "Sony Xperia 1 VI",
+            "ASUS Zenfone 10",
+            "Nothing Phone 2a"
+        ).forEach { title ->
+            assertTrue("Expected a mobile phone to appear in Móviles: $title", SmartphoneSubcategory.PHONES.matchesTitle(title))
+        }
+
+        assertFalse(SmartphoneSubcategory.PHONES.matchesTitle("Xiaomi Pad 6"))
+        assertFalse(SmartphoneSubcategory.PHONES.matchesTitle("Xiaomi Mi Band 8"))
+        assertFalse(SmartphoneSubcategory.PHONES.matchesTitle("Funda para Xiaomi Mi 10 Pro"))
+        assertFalse(SmartphoneSubcategory.PHONES.matchesTitle("Cargador Xiaomi 67W"))
+    }
+
+    @Test
     fun recognizesTabletsAndPowerBanksSeparately() {
         assertTrue(SmartphoneSubcategory.TABLETS.matchesTitle("Samsung Galaxy Tab S10"))
         assertTrue(SmartphoneSubcategory.POWER_BANKS.matchesTitle("Anker Nano Power Bank 45W iPhone"))

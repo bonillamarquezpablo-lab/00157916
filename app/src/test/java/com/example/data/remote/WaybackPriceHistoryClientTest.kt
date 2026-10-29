@@ -54,6 +54,16 @@ class WaybackPriceHistoryClientTest {
         )
         assertFalse("Sports-only stores must not be used for a console fallback", "decathlon" in consoleStores)
 
+        val genericGamingStores = historicalRetailerFallbackStores(
+            ProductCategory.GAMING,
+            "Logitech G923 volante de simulación"
+        ).map { it.id }
+        assertEquals(
+            "Non-console gaming searches must keep their pre-existing GAME-first order",
+            "game",
+            genericGamingStores.first()
+        )
+
         val phoneStores = historicalRetailerFallbackStores(
             ProductCategory.SMARTPHONES,
             "Samsung Galaxy A27 5G"

@@ -82,19 +82,29 @@ import java.util.Date
 internal fun historicalRetailerFallbackStores(category: ProductCategory, title: String): List<Store> {
     val normalizedTitle = Normalizer.normalize(title.lowercase(Locale.ROOT), Normalizer.Form.NFD)
         .replace(Regex("\\p{M}+"), "")
-    val gamingProduct = category == ProductCategory.GAMING ||
-        Regex("""\b(playstation|ps[345]|xbox|nintendo\s+switch|steam\s+deck|videojuegos?|consola|gaming)\b""")
-            .containsMatchIn(normalizedTitle)
+    val consoleProduct = Regex(
+        """\b(playstation|ps[345]|xbox|nintendo\s+switch|steam\s+deck|consola)\b"""
+    ).containsMatchIn(normalizedTitle)
+    val gamingProduct = category == ProductCategory.GAMING || consoleProduct ||
+        Regex("""\b(videojuegos?|gaming)\b""").containsMatchIn(normalizedTitle)
     val effectiveCategory = if (gamingProduct) ProductCategory.GAMING else category
 
     return when (effectiveCategory) {
-        ProductCategory.GAMING -> listOf(
-            // First choices expose known retailer search routes; use guessed title slugs only
-            // when the retailer has no product-search URL pattern.
-            Store.MEDIA_MARKT, Store.PC_COMPONENTES, Store.FNAC, Store.AMAZON_ES, Store.GAME,
-            Store.EL_CORTE_INGLES, Store.CARREFOUR, Store.WORTEN, Store.MIRAVIA,
-            Store.NEOBYTE, Store.COOLMOD, Store.ALTERNATE, Store.LDLC
-        )
+        ProductCategory.GAMING -> if (consoleProduct) {
+            // Console lookups prioritize broad electronics shops with known product-search URLs.
+            listOf(
+                Store.MEDIA_MARKT, Store.PC_COMPONENTES, Store.FNAC, Store.AMAZON_ES, Store.GAME,
+                Store.EL_CORTE_INGLES, Store.CARREFOUR, Store.WORTEN, Store.MIRAVIA,
+                Store.NEOBYTE, Store.COOLMOD, Store.ALTERNATE, Store.LDLC
+            )
+        } else {
+            // Preserve the existing order for other gaming products such as games and steering wheels.
+            listOf(
+                Store.GAME, Store.MEDIA_MARKT, Store.PC_COMPONENTES, Store.FNAC, Store.AMAZON_ES,
+                Store.EL_CORTE_INGLES, Store.CARREFOUR, Store.WORTEN, Store.MIRAVIA,
+                Store.NEOBYTE, Store.COOLMOD, Store.ALTERNATE, Store.LDLC
+            )
+        }
         ProductCategory.SMARTPHONES -> listOf(
             Store.MEDIA_MARKT, Store.PC_COMPONENTES, Store.AMAZON_ES, Store.FNAC,
             Store.EL_CORTE_INGLES, Store.CARREFOUR, Store.WORTEN, Store.MIRAVIA,

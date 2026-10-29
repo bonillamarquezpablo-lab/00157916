@@ -1324,6 +1324,22 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun shopifyVariantCountryCurrencyQueryAddsStablePathAsBoundedAlternate() {
+        val client = newClient()
+        val original =
+            "https://electronicabarata.com/products/sony-playstation-5-chasis-e-1-tb-lector-blanco-desprecintado" +
+                "?variant=53862408683704&country=ES&currency=EUR"
+
+        assertEquals(
+            listOf(
+                "https://electronicabarata.com/products/sony-playstation-5-chasis-e-1-tb-lector-blanco-desprecintado",
+                original
+            ),
+            client.buildDirectUrlCandidates(original)
+        )
+    }
+
+    @Test
     fun directUrlCandidatesTrySlashVariantOnlyForQuerylessPages() {
         val client = newClient()
         val queryless = client.buildDirectUrlCandidates("https://shop.example/product/anker-prime")

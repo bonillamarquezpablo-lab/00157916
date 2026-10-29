@@ -16,6 +16,7 @@ import com.example.data.remote.ArchivedPriceQuote
 import com.example.data.remote.isAccessoryListingTitle
 import com.example.data.remote.isReplacementPartListingTitle
 import com.example.data.remote.isToyListingTitle
+import com.example.data.remote.isPersonalTransportVehicleListingTitle
 import com.example.data.remote.onlineProductIdentityKey
 import kotlinx.coroutines.flow.Flow
 import java.net.URI
@@ -382,6 +383,7 @@ class ProductDiscoveryRepository(private val database: AppDatabase) {
             isToyListingTitle(title) -> ProductCategory.TOYS
             isReplacementPartListingTitle(title) -> ProductCategory.REPLACEMENT_PARTS
             isAccessoryListingTitle(title) -> ProductCategory.ACCESSORIES
+            isPersonalTransportVehicleListingTitle(title) -> ProductCategory.OTHER
             Regex("""\b(airwrap|corrale|supersonic|planchas? de pelo|alisador(?:es)?|secador(?:es)?|styler|afeitadora|depiladora)\b""").containsMatchIn(value) -> ProductCategory.PERSONAL_CARE
             SmartphoneSubcategory.PHONES.matchesTitle(title) ||
                 SmartphoneSubcategory.TABLETS.matchesTitle(title) ||

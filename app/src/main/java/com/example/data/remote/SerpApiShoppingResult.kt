@@ -17,6 +17,7 @@ private val ONLINE_PRODUCT_TYPES = listOf(
     "headphones" to Regex("""\b(auricular|auriculares|headphones?|headsets?|cascos)\b"""),
     "monitor" to Regex("""\b(monitores?|pantallas?|monitors?|display)\b"""),
     "laptop" to Regex("""\b(portatil|portatiles|laptop|notebook|chromebook)\b"""),
+    "scooter" to Regex("""\b(patinetes?|scooters?|e scooters?|electric scooters?)\b"""),
     "phone" to Regex("""\b(smartphone|movil|moviles|telefono|telefonos|phone)\b"""),
     "controller" to Regex("""\b(mandos?|controllers?|gamepad)\b"""),
     "webcam" to Regex("""\b(webcams?|camara web)\b"""),
@@ -118,6 +119,19 @@ private fun onlineProductTypes(value: String): Set<String> {
         .map { it.first }
         .toSet()
 }
+
+/** Stops a clearly different kind of product leaking into a category-specific search. */
+internal fun isUnrelatedProductTypeListing(searchQuery: String, resultTitle: String): Boolean {
+    val queryTypes = onlineProductTypes(searchQuery)
+    if (queryTypes.isEmpty()) return false
+    val titleTypes = onlineProductTypes(resultTitle)
+    return titleTypes.isNotEmpty() && titleTypes.none { it in queryTypes }
+}
+
+/** Identifies personal-transport vehicles so a scooter cannot inherit a phone category from the query. */
+internal fun isPersonalTransportVehicleListingTitle(title: String): Boolean =
+    Regex("""\b(patinetes?|scooters?|e scooters?|electric scooters?)\b""")
+        .containsMatchIn(normalizeOnlineSearchText(title))
 
 /**
  * Rejects bundles that mention the requested model alongside a different product.

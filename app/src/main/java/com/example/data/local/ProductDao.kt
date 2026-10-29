@@ -95,6 +95,13 @@ interface ProductDao {
         category: String
     ): Int
 
+    /** Reclassify only explicitly identified miscategorised rows; preserve all other saved data. */
+    @Query("UPDATE products SET category = :category WHERE id IN (:productIds)")
+    suspend fun reclassifyProductsById(
+        productIds: List<String>,
+        category: String
+    ): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(products: List<ProductEntity>)
 

@@ -7,6 +7,7 @@ import com.example.data.local.AppDatabase
 import com.example.data.local.PriceObservationEntity
 import com.example.data.local.ProductEntity
 import com.example.data.remote.ArchivedPriceQuote
+import com.example.data.remote.SerpApiShoppingResult
 import com.example.data.model.ProductCategory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
@@ -552,6 +553,130 @@ class ProductRepositoryArchiveIsolationTest {
             val xiaomi = mobiles.single { it.id == productId }
             assertEquals(title, xiaomi.title)
             assertEquals(499.99, xiaomi.priceHistory.single { it.evidenceType == "archive" }.price, 0.001)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun startupMovesMisclassifiedScooterOutOfSmartphonesAndPhoneSearchFiltersIt() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val productId = "online_candidate_misclassified_scooter"
+            val title = "Xiaomi 2 Pro Scooter eléctrica 1 Asiento 25 kmh 600 W Negro"
+            database.productDao().insert(
+                ProductEntity(
+                    id = productId,
+                    title = title,
+                    brand = "Xiaomi",
+                    category = ProductCategory.SMARTPHONES.name,
+                    currentPrice = 472.04,
+                    athMinPrice = 472.04,
+                    athMinDate = "Pendiente de verificación",
+                    athMinStore = "",
+                    athMaxPrice = 472.04,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "voltnation",
+                    storeUrl = "https://voltnation.gr/xiaomi-2-pro-scooter",
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val others = repository.productsForCategoryStream(ProductCategory.OTHER).first { products ->
+                products.any { it.id == productId }
+            }
+            assertTrue(others.any { it.id == productId })
+            assertEquals(ProductCategory.OTHER.name, database.productDao().getProductById(productId)?.category)
+            assertTrue(repository.productsForCategoryStream(ProductCategory.SMARTPHONES).first()
+                .none { it.id == productId })
+
+            val result = SerpApiShoppingResult(
+                title = title,
+                price = 472.04,
+                storeName = "voltnation.gr",
+                sourceUrl = "https://voltnation.gr/xiaomi-2-pro-scooter",
+                observedAt = System.currentTimeMillis()
+            )
+            assertTrue(repository.filterVisibleLiveSearchResults(listOf(result), "móviles").isEmpty())
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun implausiblyCheapHuaweiNovaDoesNotRemainAsAnObservedOrPendingPrice() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val productId = "huawei-nova-14-pro-implausible-price"
+            val title = "Huawei Nova 14 Pro"
+            val now = System.currentTimeMillis()
+            database.productDao().insert(
+                ProductEntity(
+                    id = productId,
+                    title = title,
+                    brand = "Huawei",
+                    category = ProductCategory.SMARTPHONES.name,
+                    currentPrice = 5.62,
+                    athMinPrice = 5.62,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "",
+                    athMaxPrice = 5.62,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "phonehouse",
+                    storeUrl = "https://www.phonehouse.es/movil/huawei-nova-14-pro.html",
+                    ean = "",
+                    isPriceVerified = true
+                )
+            )
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = productId,
+                    storeId = "phonehouse",
+                    price = 5.62,
+                    currency = "EUR",
+                    observedAt = now,
+                    sourceUrl = "https://www.phonehouse.es/movil/huawei-nova-14-pro.html",
+                    sourceName = "SerpApi · Google Shopping",
+                    isVerified = true,
+                    productTitle = title,
+                    storeName = "Phone House",
+                    sourceType = "Google Shopping",
+                    linkType = "directo",
+                    collectedAt = now,
+                    evidenceType = "live"
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+            val huawei = repository.productsForCategoryStream(ProductCategory.SMARTPHONES)
+                .first { products -> products.any { it.id == productId } }
+                .single { it.id == productId }
+
+            assertEquals(0.0, huawei.currentPrice, 0.001)
+            assertTrue(huawei.priceHistory.isEmpty())
+            assertTrue(huawei.savedHistoricalPrice == null)
+            assertTrue(!huawei.isPriceVerified)
+            assertEquals(1, database.priceObservationDao().getObservationCount(productId))
         } finally {
             database.close()
         }

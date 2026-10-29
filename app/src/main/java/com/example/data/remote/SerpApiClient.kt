@@ -348,9 +348,12 @@ class SerpApiClient(
                     recordDiscard(item, "", "Datos incompletos")
                     return@mapNotNull null
                 }
-            if (!query.isNullOrBlank() && isIrrelevantMultiProductBundle(query, title)) {
+            if (!query.isNullOrBlank() &&
+                (isIrrelevantMultiProductBundle(query, title) ||
+                    isUnrelatedProductTypeListing(query, title))
+            ) {
                 rejectedAsIrrelevant++
-                recordDiscard(item, title, "Pack con varios productos no solicitado")
+                recordDiscard(item, title, "Producto de otro tipo o pack no solicitado")
                 return@mapNotNull null
             }
             if (isClearlyNonNewListing(item, title)) {
@@ -604,9 +607,12 @@ class SerpApiClient(
                     resultPcd != wheelFitmentQuery.boltPattern ||
                     (wheelFitmentQuery.widthInches != null && resultWidth != wheelFitmentQuery.widthInches) ||
                     (wheelFitmentQuery.offsetMm != null && resultOffset != wheelFitmentQuery.offsetMm)            } else {
-                if (!query.isNullOrBlank() && isIrrelevantMultiProductBundle(query, title)) {
+                if (!query.isNullOrBlank() &&
+                (isIrrelevantMultiProductBundle(query, title) ||
+                    isUnrelatedProductTypeListing(query, title))
+            ) {
                     rejectedAsIrrelevant++
-                    recordDiscard(item, title, "Pack con varios productos no solicitado")
+                    recordDiscard(item, title, "Producto de otro tipo o pack no solicitado")
                     return@mapNotNull null
                 }
                 if (!query.isNullOrBlank() && hasVariantMismatch(query, title)) {

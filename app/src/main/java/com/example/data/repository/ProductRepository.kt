@@ -25,6 +25,8 @@ import com.example.data.remote.RejectedOnlineOffer
 import com.example.data.remote.OnlineProductGroup
 import com.example.data.remote.groupOnlineShoppingResults
 import com.example.data.remote.isIrrelevantMultiProductBundle
+import com.example.data.remote.isUnrelatedProductTypeListing
+import com.example.data.remote.isPersonalTransportVehicleListingTitle
 import com.example.data.remote.hasXiaomiModelMismatch
 import com.example.data.remote.isAccessoryListingTitle
 import com.example.data.remote.isToyListingTitle
@@ -149,7 +151,8 @@ class ProductRepository(
     }
 
     private suspend fun reclassifyUnclassifiedCatalogueProducts() {
-        val updates = productDao.getAllProductsSnapshot()
+        val catalogue = productDao.getAllProductsSnapshot()
+        val updates = catalogue
             .asSequence()
             .filter {
                 it.category.equals(ProductCategory.ALL.name, ignoreCase = true) ||
@@ -165,6 +168,21 @@ class ProductRepository(
         updates.forEach { (category, productIds) ->
             productIds.chunked(400).forEach { batch ->
                 productDao.reclassifyFallbackCategoryProducts(batch, category.name)
+            }
+        }
+
+        // A previous broad mobile search could have saved a clearly non-mobile result under
+        // SMARTPHONES. Repair this known mismatch without deleting its ficha or price evidence.
+        val misclassifiedScooters = catalogue.asSequence()
+            .filter { entity ->
+                entity.category.equals(ProductCategory.SMARTPHONES.name, ignoreCase = true) &&
+                    isPersonalTransportVehicleListingTitle(entity.title)
+            }
+            .map { it.id }
+            .toList()
+        misclassifiedScooters.chunked(400).forEach { batch ->
+            if (batch.isNotEmpty()) {
+                productDao.reclassifyProductsById(batch, ProductCategory.OTHER.name)
             }
         }
     }
@@ -452,6 +470,7 @@ class ProductRepository(
                 // the title; filter it before display so it cannot look like a total purchase price.
                 !Regex("""(?i)/\s*(?:mes|month|mo)\b""").containsMatchIn(result.title) &&
                 !isIrrelevantMultiProductBundle(searchQuery, result.title) &&
+                !isUnrelatedProductTypeListing(searchQuery, result.title) &&
                 !hasXiaomiModelMismatch(
                     searchQuery,
                     result.title,
@@ -494,6 +513,7 @@ class ProductRepository(
                 !result.isRentalOrMonthly &&
                 !isPromotionalBulkListing(result.title, searchQuery) &&
                 !isIrrelevantMultiProductBundle(searchQuery, result.title) &&
+                !isUnrelatedProductTypeListing(searchQuery, result.title) &&
                 !hasXiaomiModelMismatch(
                     searchQuery,
                     result.title,
@@ -771,7 +791,7 @@ class ProductRepository(
         if (drivetrainPart && !completeDrivetrain && price > 600.0) return false
         if (isBicycleTireListing(title) && price > 350.0) return false
 
-        val smartphone = Regex(
+        val smartphone = SmartphoneSubcategory.PHONES.matchesTitle(title) || Regex(
             """\b(iphone|redmi|poco|pixel|oneplus|realme|oppo|vivo|honor|smartphone|galaxy\s+(s|a|z|m)\s?\d{1,2})\b"""
         ).containsMatchIn(normalized)
         if (smartphone && price < 45.0) return false
@@ -1685,6 +1705,8 @@ class ProductRepository(
         if (isToyListingTitle(title)) return ProductCategory.TOYS
         if (isReplacementPartListingTitle(title)) return ProductCategory.REPLACEMENT_PARTS
         if (isAccessoryListingTitle(title)) return ProductCategory.ACCESSORIES
+        // Explicit mobility products must not inherit SMARTPHONES from a broad search query.
+        if (isPersonalTransportVehicleListingTitle(title)) return ProductCategory.OTHER
         return when {
             SmartphoneSubcategory.PHONES.matchesTitle(title) ||
                 SmartphoneSubcategory.TABLETS.matchesTitle(title) ||
@@ -2210,7 +2232,10 @@ class ProductRepository(
             uniqueTimestamps.last() - uniqueTimestamps.first() >= ninetyDaysMs &&
             lastNinetyDays.map { it.observedAt }.distinct().size >= 3 &&
             now - (liveHistory.maxOfOrNull { it.observedAt } ?: 0L) <= 7L * 24L * 60L * 60L * 1000L
-        val current = if (priceIsVerified) latestObservation!!.price else currentPrice
+        // Stale cached numbers still exist in older catalogue rows. Don't display them as
+        // pending prices when the canonical product/amount pair is implausible.
+        val current = if (priceIsVerified) latestObservation!!.price
+            else currentPrice.takeIf { isPlausibleHistoryPrice(title, it) } ?: 0.0
         // These bounds describe the actual saved daily series; the 90-day average remains
         // unavailable until enough dates have accumulated.
         val lowest = minObservation?.price ?: current

@@ -16,6 +16,14 @@ import org.robolectric.annotation.Config
 class SerpApiVariantMismatchTest {
 
     @Test
+    fun mobileSearchRejectsAnElectricScooterButScooterSearchKeepsIt() {
+        val scooterTitle = "Xiaomi 2 Pro Scooter eléctrica 1 Asiento 25 kmh 600 W Negro"
+        assertTrue(isUnrelatedProductTypeListing("móviles", scooterTitle))
+        assertTrue(isUnrelatedProductTypeListing("smartphone", scooterTitle))
+        assertFalse(isUnrelatedProductTypeListing("scooter eléctrica", scooterTitle))
+    }
+
+    @Test
     fun pricedAdidasSuperstarVariantsWithoutSellerLinksRemainVisibleViaShoppingSearchFallback() {
         val client = SerpApiClient()
         val report = client.parseShoppingResultsDetailed(

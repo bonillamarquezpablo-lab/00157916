@@ -123,6 +123,30 @@ internal fun shouldOpenArchiveDomainFallbackCircuit(
     directLookupTimedOut
 
 /**
+ * After a repeated CDX timeout, allow only a small number of later store candidates to use
+ * Availability API. This never permits another CDX query, and global rate limits / outer timeouts
+ * still shut the fallback off.
+ */
+internal fun shouldUseAvailabilityOnlyFallbackAfterCdxTimeout(
+    searchCircuitOpen: Boolean,
+    timeoutFallbackAvailable: Boolean,
+    rateLimited: Boolean,
+    allDirectSnapshotsTimedOut: Boolean,
+    directLookupTimedOut: Boolean,
+    hasMerchantDomain: Boolean,
+    usedFallbacks: Int,
+    maxFallbacks: Int
+): Boolean = searchCircuitOpen &&
+    timeoutFallbackAvailable &&
+    !rateLimited &&
+    !allDirectSnapshotsTimedOut &&
+    !directLookupTimedOut &&
+    hasMerchantDomain &&
+    maxFallbacks > 0 &&
+    usedFallbacks >= 0 &&
+    usedFallbacks < maxFallbacks
+
+/**
  * Decide whether a merchant-domain fallback is worthwhile for the current candidate.
  * The search-wide circuit breaker has priority over per-candidate eligibility.
  */
@@ -833,6 +857,7 @@ class WaybackPriceHistoryClient(
         preferredUrl: String? = null,
         preferredUrlAlreadyQueried: Boolean = false,
         priorCdxDiagnostics: Set<String> = emptySet(),
+        availabilityOnlyAfterPriorTimeout: Boolean = false,
         onTrace: ((WaybackTraceEvent) -> Unit)? = null,
         knownProductTitlesById: Map<String, String> = emptyMap(),
         onVerifiedQuotes: (suspend (List<ArchivedPriceQuote>) -> Unit)? = null,
@@ -961,6 +986,38 @@ class WaybackPriceHistoryClient(
 
             val snapshotResultsCache = mutableMapOf<String, SnapshotFetch>()
 
+            // A previous retailer has already exhausted two direct CDX routes. In this special
+            // mode, don't query the index again: go directly to the independent, bounded
+            // Availability API for this retailer's own product/search URLs.
+            if (availabilityOnlyAfterPriorTimeout) {
+                val inheritedTimeoutCodes = priorCdxDiagnostics.filter { code ->
+                    (code.startsWith("CDX_URL_PREFIX") ||
+                        code.startsWith("CDX_PRODUCT_PREFIX") ||
+                        code.startsWith("CDX_ALTERNATE_PREFIX")) &&
+                        (code.endsWith("_TIMEOUT") || code.endsWith("_DNS") ||
+                            (code.contains("_HTTP_") &&
+                                code.substringAfterLast('_').toIntOrNull()
+                                    ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true))
+                }
+                return@serializedArchiveLookup runDomainAvailabilityFallback(
+                    normalizedDomain = normalizedDomain,
+                    expectedTitle = expectedTitle,
+                    preferredUrl = resolvedPreferredUrl,
+                    now = now,
+                    lookbackDays = lookbackDays,
+                    cacheKey = attempt,
+                    failureCodes = inheritedTimeoutCodes.ifEmpty {
+                        setOf("CDX_URL_PREFIX_TIMEOUT")
+                    },
+                    onTrace = onTrace,
+                    snapshotResultsCache = snapshotResultsCache,
+                    onVerifiedQuotes = onVerifiedQuotes,
+                    knownProductTitlesById = knownProductTitlesById,
+                    forceRefresh = forceRefresh,
+                    stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
+                )
+            }
+
             // Query CDX directly: one index response can contain multiple timestamps, avoiding
             // repeated availability calls for individual dates. Try the apex host only if the
             // www host returned a valid empty result; never keep probing after a timeout or 429.
@@ -1002,7 +1059,15 @@ class WaybackPriceHistoryClient(
                     now = now,
                     lookbackDays = lookbackDays,
                     cacheKey = attempt,
-                    failureCodes = setOf("CDX_INFERRED_URL_AVAILABILITY_FIRST"),
+                    failureCodes = setOf("CDX_INFERRED_URL_AVAILABILITY_FIRST") + priorCdxDiagnostics.filter { code ->
+                        (code.startsWith("CDX_URL_PREFIX") ||
+                            code.startsWith("CDX_PRODUCT_PREFIX") ||
+                            code.startsWith("CDX_ALTERNATE_PREFIX")) &&
+                            (code.endsWith("_TIMEOUT") || code.endsWith("_DNS") ||
+                                (code.contains("_HTTP_") &&
+                                    code.substringAfterLast('_').toIntOrNull()
+                                        ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true))
+                    },
                     onTrace = onTrace,
                     snapshotResultsCache = snapshotResultsCache,
                     onVerifiedQuotes = onVerifiedQuotes,
@@ -3360,6 +3425,24 @@ class WaybackPriceHistoryClient(
             .replace(Regex("[^a-z0-9]+"), "-")
             .trim('-')
         if (fullSlug.isBlank()) return emptyList()
+        if (normalizedDomain == "direct.playstation.com") {
+            val normalizedTitle = normalizeTitle(expectedTitle)
+            val path = when {
+                Regex("""\b(playstation\s*5|ps\s*5|ps5)\b""").containsMatchIn(normalizedTitle) &&
+                    Regex("""\bslim\b""").containsMatchIn(normalizedTitle) &&
+                    Regex("""\b(digital|edition digital)\b""").containsMatchIn(normalizedTitle) ->
+                    "/es-es/buy-consoles/playstation5-digital-edition-console-model-group-slim"
+                Regex("""\b(playstation\s*5|ps\s*5|ps5)\b""").containsMatchIn(normalizedTitle) &&
+                    Regex("""\bslim\b""").containsMatchIn(normalizedTitle) ->
+                    "/es-es/buy-consoles/playstation5-console-model-group-slim"
+                else -> "/es-es/hardware/ps5"
+            }
+            return listOf(
+                HttpUrl.Builder().scheme("https").host("direct.playstation.com")
+                    .addPathSegments(path.trim('/')).build().toString(),
+                "https://direct.playstation.com/es-es/hardware/ps5"
+            ).distinct().take(MAX_AVAILABILITY_URL_CANDIDATES)
+        }
         val prefixes = when (normalizedDomain) {
             "apple.com" -> listOf("apple")
             "samsung.com" -> listOf("samsung")
@@ -4169,6 +4252,8 @@ class WaybackPriceHistoryClient(
             "anker" to ("Anker" to "anker.com"),
             "ugreen" to ("UGREEN" to "ugreen.com"),
             "baseus" to ("Baseus" to "baseus.com"),
+            // PlayStation has its own Spanish shop; don't manufacture a product-shaped URL on sony.es.
+            "playstation" to ("PlayStation Direct" to "direct.playstation.com"),
             "sony" to ("Sony" to "sony.es"),
             "xiaomi" to ("Xiaomi" to "mi.com"),
             "redmi" to ("Xiaomi" to "mi.com"),

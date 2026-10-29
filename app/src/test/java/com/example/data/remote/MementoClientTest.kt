@@ -69,6 +69,28 @@ class MementoClientTest {
     }
 
     @Test
+    fun canonicalizeTemuShareUrlStripsReferralFieldsButKeepsGoodsAndSkuIds() {
+        val client = newClient()
+        val sharedUrl = "https://www.temu.com/goods.html" +
+            "?refer_page_id=10032&refer_page_sn=10032&refer_page_el_sn=201" +
+            "&goods_id=601099999&sku_id=17600001&_x_sessn_id=session123" +
+            "&_x_ads_channel=share&traffic_source=copy_link"
+
+        assertEquals(
+            "https://www.temu.com/goods.html?goods_id=601099999&sku_id=17600001",
+            client.canonicalizeArchiveLookupUrl(sharedUrl)
+        )
+        val decomposed = WaybackPriceHistoryClient(
+            ApplicationProvider.getApplicationContext<Context>()
+        ).decomposeProductUrl(sharedUrl)
+        assertNotNull(decomposed)
+        assertTrue("The opaque Temu goods identifier must remain a product identifier",
+            decomposed!!.productIdentifiers.contains("601099999"))
+        assertTrue("The Temu SKU identifier must remain a product identifier",
+            decomposed.productIdentifiers.contains("17600001"))
+    }
+
+    @Test
     fun canonicalizeArchiveLookupUrlPrefersCleanPathWhenOnlyNeutralSelectorsRemain() {
         val client = newClient()
         assertEquals(

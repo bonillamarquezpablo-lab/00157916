@@ -1364,6 +1364,27 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun temuReferralParametersAreDroppedWithoutRemovingGoodsOrSkuIdentity() {
+        val client = newClient()
+        val sharedUrl = "https://www.temu.com/goods.html" +
+            "?refer_page_id=10032&refer_page_sn=10032&refer_page_el_sn=201" +
+            "&goods_id=601099999&sku_id=17600001&_x_sessn_id=session123" +
+            "&_x_ads_channel=share&traffic_source=copy_link"
+
+        assertEquals(
+            listOf(
+                sharedUrl,
+                "https://www.temu.com/goods.html?goods_id=601099999&sku_id=17600001"
+            ),
+            client.buildDirectUrlCandidates(sharedUrl)
+        )
+        val decomposed = client.decomposeProductUrl(sharedUrl)
+        assertNotNull(decomposed)
+        assertTrue(decomposed!!.productIdentifiers.contains("601099999"))
+        assertTrue(decomposed.productIdentifiers.contains("17600001"))
+    }
+
+    @Test
     fun directUrlCandidatesTrySlashVariantOnlyForQuerylessPages() {
         val client = newClient()
         val queryless = client.buildDirectUrlCandidates("https://shop.example/product/anker-prime")

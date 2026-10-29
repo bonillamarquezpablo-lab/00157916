@@ -3185,7 +3185,19 @@ class WaybackPriceHistoryClient(
             "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
             "utm_id", "utm_name", "campaignid", "adgroupid", "creative", "network",
             "gclsrc", "irclickid", "twclid", "ttclid", "li_fat_id", "epik", "yclid",
-            "awc", "afftrack", "zanpid", "s_kwcid", "mkt_tok", "_gl", "_ga"
+            "awc", "afftrack", "zanpid", "s_kwcid", "mkt_tok", "_gl", "_ga",
+            "aff_fcid", "aff_fsk", "aff_platform", "aff_trace_key",
+            "algo_pvid", "algo_exp_id", "scm", "spm", "spm_id_from",
+            "refer_page_id", "refer_page_sn", "refer_page_el_sn", "refer_page_name",
+            "refer_page_type", "refer_page_position", "page_sn", "page_id",
+            "traffic_source", "traffic_source_type", "tt_from", "enter_from", "from_page",
+            "is_back", "_x_sessn_id", "_x_ads_channel",
+            "aff_fcid", "aff_fsk", "aff_platform", "aff_trace_key",
+            "algo_pvid", "algo_exp_id", "scm", "spm", "spm_id_from",
+            "refer_page_id", "refer_page_sn", "refer_page_el_sn", "refer_page_name",
+            "refer_page_type", "refer_page_position", "page_sn", "page_id",
+            "traffic_source", "traffic_source_type", "tt_from", "enter_from", "from_page",
+            "is_back", "_x_sessn_id", "_x_ads_channel"
         )
         // Phone House may append a malformed marketplace selector ("?opt=marketplace?opt=phonehouse").
         // That routing field is not a product SKU. Ignore its colour selector "colorgris" only when
@@ -3204,7 +3216,7 @@ class WaybackPriceHistoryClient(
         val variantKeys = setOf(
             "sku", "skuid", "sku_id", "variant", "variantid", "variant_id", "id_variant",
             "variant_sku", "variant_sku_id", "variation", "variationid", "variation_id",
-            "productid", "product_id", "id_product", "id_product_attribute", "offerid", "offer_id",
+            "productid", "product_id", "goodsid", "goods_id", "id_product", "id_product_attribute", "offerid", "offer_id",
             "pid", "itemid", "item_id", "asin", "mpn", "gtin", "ean", "model", "modelid",
             "color", "colour", "colorid", "colourid", "storage", "capacity", "size",
             "configuration", "config", "option", "optionid", "attribute_id", "device", "style", "styleid"

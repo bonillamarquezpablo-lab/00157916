@@ -161,7 +161,9 @@ class MementoClient(
         val cleanSamePath = if (!uri.rawQuery.isNullOrBlank()) {
             candidates.firstOrNull { candidate ->
                 val candidateUri = parseHttpUri(candidate)
-                candidateUri?.rawPath == uri.rawPath && candidateUri.rawQuery.isNullOrBlank()
+                candidateUri != null &&
+                    candidateUri.rawPath == uri.rawPath &&
+                    candidateUri.rawQuery.isNullOrBlank()
             }
         } else {
             null

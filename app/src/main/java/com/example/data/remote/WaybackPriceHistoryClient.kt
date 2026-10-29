@@ -3284,7 +3284,19 @@ class WaybackPriceHistoryClient(
             append(uri.rawAuthority)
             append(uri.rawPath?.takeIf { it.isNotBlank() } ?: "/")
         }
-        if (cleanedParts.isNotEmpty()) {
+        val archiveNeutralNames = setOf("variant", "country", "currency")
+        val cleanedNames = cleanedParts.map {
+            decodeQueryUrlComponent(it.substringBefore('=')).lowercase(Locale.ROOT)
+        }
+        val onlyArchiveNeutralParameters = cleanedParts.isNotEmpty() &&
+            cleanedNames.all { it in archiveNeutralNames }
+        if (onlyArchiveNeutralParameters) {
+            // Keep the exact variant URL last for the primary CDX lookup, but let the
+            // existing one-candidate fallback try the stable product path without Shopify selectors.
+            candidates.clear()
+            candidates += base
+            candidates += parts.resolvedUrl
+        } else if (cleanedParts.isNotEmpty()) {
             candidates += base + "?" + cleanedParts.joinToString("&")
         } else if (parts.trackingParameters.isNotEmpty()) {
             candidates += base

@@ -1006,7 +1006,7 @@ class WaybackPriceHistoryClient(
                     now = now,
                     lookbackDays = lookbackDays,
                     cacheKey = attempt,
-                    failureCodes = inheritedTimeoutCodes.ifEmpty {
+                    failureCodes = inheritedTimeoutCodes.toSet().ifEmpty {
                         setOf("CDX_URL_PREFIX_TIMEOUT")
                     },
                     onTrace = onTrace,

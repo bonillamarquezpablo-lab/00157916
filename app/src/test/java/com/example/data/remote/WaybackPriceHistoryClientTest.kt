@@ -49,7 +49,7 @@ class WaybackPriceHistoryClientTest {
 
         assertEquals(
             "When the category is broad, the console title should still select relevant archive retailers",
-            listOf("game", "mediamarkt", "pccomponentes"),
+            listOf("mediamarkt", "pccomponentes", "fnac"),
             consoleStores.take(3)
         )
         assertFalse("Sports-only stores must not be used for a console fallback", "decathlon" in consoleStores)
@@ -61,6 +61,54 @@ class WaybackPriceHistoryClientTest {
         assertTrue("Phone fallback should include broad electronics retailers", "mediamarkt" in phoneStores)
         assertTrue("Phone fallback should include PCComponentes", "pccomponentes" in phoneStores)
         assertFalse("Phone fallback should not start with a console specialist", phoneStores.first() == "game")
+    }
+
+    @Test
+    fun cdxTimeoutCircuitAllowsOnlyTwoBoundedAvailabilityOnlyRetailers() {
+        fun allowed(
+            rateLimited: Boolean = false,
+            snapshotsTimedOut: Boolean = false,
+            outerTimeout: Boolean = false,
+            used: Int = 0,
+            hasDomain: Boolean = true
+        ) = shouldUseAvailabilityOnlyFallbackAfterCdxTimeout(
+            searchCircuitOpen = true,
+            timeoutFallbackAvailable = true,
+            rateLimited = rateLimited,
+            allDirectSnapshotsTimedOut = snapshotsTimedOut,
+            directLookupTimedOut = outerTimeout,
+            hasMerchantDomain = hasDomain,
+            usedFallbacks = used,
+            maxFallbacks = 2
+        )
+
+        assertTrue("A different store may use bounded Availability after repeated CDX timeouts", allowed())
+        assertTrue("The second retailer is still within the two-store allowance", allowed(used = 1))
+        assertFalse("No more than two additional retailer fallbacks may run", allowed(used = 2))
+        assertFalse("HTTP 429 must close every fallback", allowed(rateLimited = true))
+        assertFalse("Snapshot download timeouts must keep the circuit closed", allowed(snapshotsTimedOut = true))
+        assertFalse("An outer timeout must not start another lookup", allowed(outerTimeout = true))
+        assertFalse("A candidate without a valid merchant domain cannot use this path", allowed(hasDomain = false))
+    }
+
+    @Test
+    fun playstationAvailabilityUsesTheOfficialStoreRouteInsteadOfGuessedSonyUrls() {
+        val client = newClient()
+        assertEquals(
+            "PlayStation Direct" to "direct.playstation.com",
+            client.resolveBrandMerchant("Consola de videojuegos Sony PlayStation 5 Slim")
+        )
+
+        val urls = client.buildAvailabilityCandidateUrls(
+            "direct.playstation.com",
+            "Consola de videojuegos Sony PlayStation 5 Slim"
+        )
+        assertEquals(
+            "https://direct.playstation.com/es-es/buy-consoles/playstation5-console-model-group-slim",
+            urls.first()
+        )
+        assertFalse("The PS5 fallback must not manufacture a product path on sony.es",
+            urls.any { it.contains("sony.es", ignoreCase = true) })
     }
 
     @Test

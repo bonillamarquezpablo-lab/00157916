@@ -361,19 +361,31 @@ internal fun buildWaybackDiagnosticExportReport(
     appVersion: String = "desconocida",
     androidVersion: String = "desconocida"
 ): String {
-    fun statusLabel(entry: WaybackDiagnosticEntry): String = when (entry.status) {
-        WaybackTraceStatus.PENDING -> "PENDIENTE"
-        WaybackTraceStatus.RUNNING -> "EN CURSO"
-        WaybackTraceStatus.PASSED -> "SUPERADO"
-        WaybackTraceStatus.FAILED -> "FALLÓ"
-        WaybackTraceStatus.SKIPPED -> {
-            val detail = entry.detail.lowercase(Locale.ROOT)
-            when {
-                detail.contains("caché") || detail.contains("cache") -> "OMITIDO POR CACHÉ"
-                detail.contains("pausa") || detail.contains("cooldown") -> "OMITIDO POR PAUSA"
-                detail.contains("no ejecutado") || detail.contains("la cadena terminó antes") ->
-                    "NO EJECUTADO"
-                else -> "OMITIDO / NO APLICABA"
+    // A condition mismatch is an intentional safety rejection, not an extractor failure:
+    // e.g. a refurbished offer must not be mixed into a new-device price history.
+    fun effectiveStatus(entry: WaybackDiagnosticEntry): WaybackTraceStatus =
+        if (entry.status == WaybackTraceStatus.FAILED &&
+            entry.detail.contains("ARCHIVE_PRODUCT_CONDITION_MISMATCH", ignoreCase = true)
+        ) WaybackTraceStatus.PASSED else entry.status
+
+    fun statusLabel(entry: WaybackDiagnosticEntry): String {
+        if (entry.status == WaybackTraceStatus.FAILED &&
+            entry.detail.contains("ARCHIVE_PRODUCT_CONDITION_MISMATCH", ignoreCase = true)
+        ) return "DESCARTADO CORRECTAMENTE (CONDICIÓN DISTINTA)"
+        return when (effectiveStatus(entry)) {
+            WaybackTraceStatus.PENDING -> "PENDIENTE"
+            WaybackTraceStatus.RUNNING -> "EN CURSO"
+            WaybackTraceStatus.PASSED -> "SUPERADO"
+            WaybackTraceStatus.FAILED -> "FALLÓ"
+            WaybackTraceStatus.SKIPPED -> {
+                val detail = entry.detail.lowercase(Locale.ROOT)
+                when {
+                    detail.contains("caché") || detail.contains("cache") -> "OMITIDO POR CACHÉ"
+                    detail.contains("pausa") || detail.contains("cooldown") -> "OMITIDO POR PAUSA"
+                    detail.contains("no ejecutado") || detail.contains("la cadena terminó antes") ->
+                        "NO EJECUTADO"
+                    else -> "OMITIDO / NO APLICABA"
+                }
             }
         }
     }
@@ -397,8 +409,8 @@ internal fun buildWaybackDiagnosticExportReport(
 
     val phaseRows = steps.filterNot { it.isCaptureDetail }.associateBy { it.step }
     val captures = steps.filter { it.isCaptureDetail }
-    val statuses = phaseRows.values.groupingBy { it.status }.eachCount()
-    val captureStatuses = captures.groupingBy { it.status }.eachCount()
+    val statuses = phaseRows.values.groupingBy { effectiveStatus(it) }.eachCount()
+    val captureStatuses = captures.groupingBy { effectiveStatus(it) }.eachCount()
     val statusText = freeHistoryStatus?.trim().orEmpty().ifBlank { "No se registró un estado final." }
     val summary = buildWaybackDiagnosticSummary(freeHistoryStatus, steps)
     val finding = buildWaybackDiagnosticFinding(freeHistoryStatus, steps)
@@ -416,9 +428,11 @@ internal fun buildWaybackDiagnosticExportReport(
     report.appendLine("Causa probable (orientativa): " + safeDetail(finding.probableCause))
     report.appendLine("Qué revisar ahora: " + safeDetail(finding.recommendedNextStep))
     val firstFailedPhase = phaseRows.values
-        .filter { it.status == WaybackTraceStatus.FAILED }
+        .filter { effectiveStatus(it) == WaybackTraceStatus.FAILED }
         .minByOrNull { it.step }
-    val firstFailedCapture = captures.firstOrNull { it.status == WaybackTraceStatus.FAILED }
+    val firstFailedCapture = captures.firstOrNull {
+        effectiveStatus(it) == WaybackTraceStatus.FAILED
+    }
     report.appendLine("Primera fase fallida: " + (firstFailedPhase?.let {
         "${it.step}. ${safeDetail(it.title)}"
     } ?: "ninguna registrada"))
@@ -512,7 +526,11 @@ internal fun buildWaybackDiagnosticExportReport(
     }
     report.appendLine()
     report.appendLine(
-        "Estado de fases: " + (statuses[WaybackTraceStatus.PASSED] ?: 0) + " superadas, " +
+        "Interpretación de duplicados: un importe igual en fechas diferentes no es un duplicado por sí solo. " +
+            "Un duplicado confirmado es un punto que ya estaba guardado para la misma identidad y fecha."
+    )
+    report.appendLine(
+        "Estado de fases: " + (statuses[WaybackTraceStatus.PASSED] ?: 0) + " superadas, "
             (statuses[WaybackTraceStatus.FAILED] ?: 0) + " fallidas, " +
             (statuses[WaybackTraceStatus.SKIPPED] ?: 0) + " no ejecutadas, " +
             (statuses[WaybackTraceStatus.RUNNING] ?: 0) + " en curso, " +

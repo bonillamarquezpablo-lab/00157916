@@ -25,6 +25,8 @@ import com.example.ui.viewmodel.hasEnoughVerifiedArchiveDates
 import com.example.ui.viewmodel.archivePersistenceStatus
 import com.example.ui.viewmodel.hasSufficientNewVerifiedArchiveHistory
 import com.example.ui.viewmodel.isSupersededWaybackSkipDetail
+import com.example.ui.viewmodel.historicalRetailerFallbackStores
+import com.example.data.model.ProductCategory
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -38,6 +40,29 @@ import java.util.concurrent.CopyOnWriteArrayList
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class WaybackPriceHistoryClientTest {
+    @Test
+    fun historicalFallbackCandidatesMatchProductFamilyAndAreOrderedForCoverage() {
+        val consoleStores = historicalRetailerFallbackStores(
+            ProductCategory.OTHER,
+            "Consola de videojuegos Sony PlayStation 5 Slim"
+        ).map { it.id }
+
+        assertEquals(
+            "When the category is broad, the console title should still select relevant archive retailers",
+            listOf("game", "mediamarkt", "pccomponentes"),
+            consoleStores.take(3)
+        )
+        assertFalse("Sports-only stores must not be used for a console fallback", "decathlon" in consoleStores)
+
+        val phoneStores = historicalRetailerFallbackStores(
+            ProductCategory.SMARTPHONES,
+            "Samsung Galaxy A27 5G"
+        ).map { it.id }
+        assertTrue("Phone fallback should include broad electronics retailers", "mediamarkt" in phoneStores)
+        assertTrue("Phone fallback should include PCComponentes", "pccomponentes" in phoneStores)
+        assertFalse("Phone fallback should not start with a console specialist", phoneStores.first() == "game")
+    }
+
     @Test
     fun newPointsOrConfirmedValidDuplicatesProvePersistence() {
         assertEquals(

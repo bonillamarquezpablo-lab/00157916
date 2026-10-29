@@ -353,7 +353,15 @@ class SerpApiClient(
                     isUnrelatedProductTypeListing(query, title))
             ) {
                 rejectedAsIrrelevant++
-                recordDiscard(item, title, "Producto de otro tipo o pack no solicitado")
+                recordDiscard(
+                    item,
+                    title,
+                    if (isIrrelevantMultiProductBundle(query, title)) {
+                        "Pack con varios productos no solicitado"
+                    } else {
+                        "Producto de otro tipo no solicitado"
+                    }
+                )
                 return@mapNotNull null
             }
             if (isClearlyNonNewListing(item, title)) {
@@ -612,7 +620,15 @@ class SerpApiClient(
                     isUnrelatedProductTypeListing(query, title))
             ) {
                     rejectedAsIrrelevant++
-                    recordDiscard(item, title, "Producto de otro tipo o pack no solicitado")
+                    recordDiscard(
+                    item,
+                    title,
+                    if (isIrrelevantMultiProductBundle(query, title)) {
+                        "Pack con varios productos no solicitado"
+                    } else {
+                        "Producto de otro tipo no solicitado"
+                    }
+                )
                     return@mapNotNull null
                 }
                 if (!query.isNullOrBlank() && hasVariantMismatch(query, title)) {

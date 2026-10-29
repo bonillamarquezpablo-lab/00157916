@@ -1736,6 +1736,20 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             }
             return
         }
+        val backendUnavailableUntil = waybackPriceHistoryClient.activeBackendUnavailableUntil()
+        if (backendUnavailableUntil != null) {
+            val remainingMinutes = ((backendUnavailableUntil - System.currentTimeMillis() + 59_999L) / 60_000L).coerceAtLeast(1L)
+            val status = "Internet Archive no está respondiendo de forma estable. Mínimo ha pausado las consultas históricas durante unos $remainingMinutes min; no enviará más peticiones ni gastará consultas de pago por este fallo."
+            _uiState.value = _uiState.value.copy(
+                isSearchingFreeHistory = false,
+                freeHistoryStatus = status,
+                freeHistoryProductId = product.id
+            )
+            reportWaybackDiagnostic(product.id, 3, WaybackTraceStatus.SKIPPED, status)
+            reportWaybackDiagnostic(product.id, 4, WaybackTraceStatus.SKIPPED, "Circuito de protección activo: se evita consultar CDX y Availability mientras el servicio se recupera.")
+            finishWaybackDiagnostic(product.id, WaybackTraceStatus.SKIPPED, status)
+            return
+        }
 
         // Archived snapshots are independent evidence; use the saved retailer offers first.
         // Some older Google Shopping rows contain a generic Google URL and an incomplete
@@ -3141,9 +3155,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     repository.allProductsStream.first().associate { it.id to it.title }
                 }.orEmpty()
                 for (candidate in candidates) {
-                    // If the CDX circuit was opened by two prefix timeouts, later retailer slots
-                    // get a bounded Availability-only fallback. This uses no further CDX queries
-                    // and is disabled after HTTP 429, snapshot timeouts, or an outer timeout.
+                    // Once the shared Archive.org circuit is open, do not fan out to Availability
+                    // on other retailers. Memento/Arquivo.pt is the independent recovery route.
                     val availabilityOnlyFallbackForCandidate =
                         shouldUseAvailabilityOnlyFallbackAfterCdxTimeout(
                             searchCircuitOpen = skipDomainFallbacksForSearch,
@@ -3338,7 +3351,11 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         }
                         searchCdxTimeoutDiagnostics.addAll(timeoutCodes)
                         if (timeoutCodes.isNotEmpty()) {
-                            availabilityOnlyFallbackAfterCdxTimeoutAvailable = true
+                            // Two failed CDX routes indicate shared Archive.org backend trouble.
+                            // Persist a short global circuit so another product cannot immediately
+                            // repeat the same failing traffic after this search completes.
+                            waybackPriceHistoryClient.activateBackendUnavailableCooldown()
+                            availabilityOnlyFallbackAfterCdxTimeoutAvailable = false
                         }
                     }
                     if (rateLimitedAtDirectStage || allDirectSnapshotsTimedOut || candidateTimedOut) {

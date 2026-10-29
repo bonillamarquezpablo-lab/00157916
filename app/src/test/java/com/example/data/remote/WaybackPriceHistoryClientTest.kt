@@ -74,7 +74,7 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun cdxTimeoutCircuitAllowsOnlyTwoBoundedAvailabilityOnlyRetailers() {
+    fun repeatedCdxTimeoutCircuitBlocksAvailabilityFanoutForEveryProductCategory() {
         fun allowed(
             rateLimited: Boolean = false,
             snapshotsTimedOut: Boolean = false,
@@ -92,11 +92,10 @@ class WaybackPriceHistoryClientTest {
             maxFallbacks = 2
         )
 
-        assertTrue("A different store may use bounded Availability after repeated CDX timeouts", allowed())
-        assertTrue("The second retailer is still within the two-store allowance", allowed(used = 1))
-        assertFalse("No more than two additional retailer fallbacks may run", allowed(used = 2))
-        assertFalse("HTTP 429 must close every fallback", allowed(rateLimited = true))
-        assertFalse("Snapshot download timeouts must keep the circuit closed", allowed(snapshotsTimedOut = true))
+        assertFalse("A shared CDX outage must not fan out to Availability on another retailer", allowed())
+        assertFalse("The circuit remains closed regardless of how many retailers were considered", allowed(used = 1))
+        assertFalse("HTTP 429 also blocks every Archive.org fallback", allowed(rateLimited = true))
+        assertFalse("Snapshot download timeouts must not start another lookup", allowed(snapshotsTimedOut = true))
         assertFalse("An outer timeout must not start another lookup", allowed(outerTimeout = true))
         assertFalse("A candidate without a valid merchant domain cannot use this path", allowed(hasDomain = false))
     }
@@ -643,6 +642,24 @@ class WaybackPriceHistoryClientTest {
                 }
             }
         )
+    }
+
+    @Test
+    fun repeatedCdxOutageCooldownIsPersistedAcrossClientInstances() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        preferences.edit().remove("wayback_backend_unavailable_until").commit()
+        val now = System.currentTimeMillis()
+        try {
+            val firstClient = WaybackPriceHistoryClient(context)
+            val until = firstClient.activateBackendUnavailableCooldown(now, 120_000L)
+            assertTrue("The backend circuit must be persisted for at least its requested interval", until >= now + 120_000L)
+            val secondClient = WaybackPriceHistoryClient(context)
+            assertEquals("A new client instance must see the same global backend cooldown", until, secondClient.activeBackendUnavailableUntil(now))
+            assertEquals("The cooldown must expire cleanly", null, secondClient.activeBackendUnavailableUntil(until + 1L))
+        } finally {
+            preferences.edit().remove("wayback_backend_unavailable_until").commit()
+        }
     }
 
     @Test

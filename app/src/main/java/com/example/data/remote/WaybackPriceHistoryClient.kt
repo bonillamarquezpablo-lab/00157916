@@ -123,9 +123,10 @@ internal fun shouldOpenArchiveDomainFallbackCircuit(
     directLookupTimedOut
 
 /**
- * After a repeated CDX timeout, allow only a small number of later store candidates to use
- * Availability API. This never permits another CDX query, and global rate limits / outer timeouts
- * still shut the fallback off.
+ * Once two CDX routes have timed out or returned a transient server failure, do not fan out to
+ * Availability on other merchants in the same search. CDX and Availability share Archive.org
+ * infrastructure; continuing those probes can turn a recoverable outage into HTTP 429 throttling.
+ * Arquivo.pt/Memento remains the independent fallback.
  */
 internal fun shouldUseAvailabilityOnlyFallbackAfterCdxTimeout(
     searchCircuitOpen: Boolean,
@@ -136,15 +137,7 @@ internal fun shouldUseAvailabilityOnlyFallbackAfterCdxTimeout(
     hasMerchantDomain: Boolean,
     usedFallbacks: Int,
     maxFallbacks: Int
-): Boolean = searchCircuitOpen &&
-    timeoutFallbackAvailable &&
-    !rateLimited &&
-    !allDirectSnapshotsTimedOut &&
-    !directLookupTimedOut &&
-    hasMerchantDomain &&
-    maxFallbacks > 0 &&
-    usedFallbacks >= 0 &&
-    usedFallbacks < maxFallbacks
+): Boolean = false
 
 /**
  * Decide whether a merchant-domain fallback is worthwhile for the current candidate.
@@ -541,10 +534,17 @@ class WaybackPriceHistoryClient(
         val directUrl = directCandidates.lastOrNull() ?: decomposedUrl.canonicalUrl
         val attempt = attemptKey("url-cdx-batch-v11-bounded-url-alternate|${decomposedUrl.merchantDomain}|${decomposedUrl.productIdentifiers.sorted().joinToString(",")}|$directUrl|$expectedTitle")
         serializedArchiveLookup {
-            if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
+            val lookupNow = System.currentTimeMillis()
+            if (activeRateLimitUntil(lookupNow) != null) {
                 return@serializedArchiveLookup WaybackBackfillResult(
                     requestFailed = true,
                     diagnosticCodes = setOf("WAYBACK_RATE_LIMITED")
+                )
+            }
+            if (activeBackendUnavailableUntil(lookupNow) != null) {
+                return@serializedArchiveLookup WaybackBackfillResult(
+                    requestFailed = true,
+                    diagnosticCodes = setOf("WAYBACK_BACKEND_UNAVAILABLE_COOLDOWN")
                 )
             }
             if (!forceRefresh && wasAttemptedRecently(attempt, System.currentTimeMillis())) {
@@ -965,10 +965,17 @@ class WaybackPriceHistoryClient(
             "domain-cdx-batch-v9-url-discovery|$normalizedDomain|$expectedTitle|$preferredUrlIdentity|$preferredUrlIdentifiers"
         )
         serializedArchiveLookup {
-            if (activeRateLimitUntil(System.currentTimeMillis()) != null) {
+            val lookupNow = System.currentTimeMillis()
+            if (activeRateLimitUntil(lookupNow) != null) {
                 return@serializedArchiveLookup WaybackBackfillResult(
                     requestFailed = true,
                     diagnosticCodes = setOf("WAYBACK_RATE_LIMITED")
+                )
+            }
+            if (activeBackendUnavailableUntil(lookupNow) != null) {
+                return@serializedArchiveLookup WaybackBackfillResult(
+                    requestFailed = true,
+                    diagnosticCodes = setOf("WAYBACK_BACKEND_UNAVAILABLE_COOLDOWN")
                 )
             }
             if (shouldSkipRecentAttempt(attempt, System.currentTimeMillis(), forceRefresh)) {
@@ -3670,8 +3677,9 @@ class WaybackPriceHistoryClient(
     }
 
     private suspend fun awaitArchiveRequestTurn(): String? {
-        if (activeRateLimitUntil(System.currentTimeMillis()) != null) return "WAYBACK_RATE_LIMITED"
         val now = System.currentTimeMillis()
+        if (activeRateLimitUntil(now) != null) return "WAYBACK_RATE_LIMITED"
+        if (activeBackendUnavailableUntil(now) != null) return "WAYBACK_BACKEND_UNAVAILABLE_COOLDOWN"
         val lastRequestAt = preferences.getLong(KEY_LAST_AVAILABILITY_REQUEST_AT, 0L)
         val waitMs = computeAvailabilityDelayMs(lastRequestAt, now)
         if (waitMs > 0L) delay(waitMs)
@@ -3760,12 +3768,29 @@ class WaybackPriceHistoryClient(
     internal fun activeRateLimitUntil(now: Long = System.currentTimeMillis()): Long? =
         preferences.getLong(KEY_RATE_LIMIT_UNTIL, 0L).takeIf { it > now }
 
+    /** Persist a short global circuit after repeated CDX 503/timeouts, across products and screens. */
+    internal fun activateBackendUnavailableCooldown(
+        now: Long = System.currentTimeMillis(),
+        durationMs: Long = DEFAULT_BACKEND_UNAVAILABLE_COOLDOWN_MS
+    ): Long {
+        val until = maxOf(
+            preferences.getLong(KEY_BACKEND_UNAVAILABLE_UNTIL, 0L),
+            now + durationMs.coerceIn(30_000L, MAX_BACKEND_UNAVAILABLE_COOLDOWN_MS)
+        )
+        preferences.edit().putLong(KEY_BACKEND_UNAVAILABLE_UNTIL, until).commit()
+        return until
+    }
+
+    internal fun activeBackendUnavailableUntil(now: Long = System.currentTimeMillis()): Long? =
+        preferences.getLong(KEY_BACKEND_UNAVAILABLE_UNTIL, 0L).takeIf { it > now }
+
     internal fun clearRateLimitForTests() {
         preferences.edit()
             .remove(KEY_RATE_LIMIT_UNTIL)
             .remove(KEY_RATE_LIMIT_LAST_HIT_AT)
             .remove(KEY_RATE_LIMIT_HIT_COUNT)
             .remove(KEY_LAST_AVAILABILITY_REQUEST_AT)
+            .remove(KEY_BACKEND_UNAVAILABLE_UNTIL)
             .apply()
     }
 
@@ -6515,6 +6540,9 @@ class WaybackPriceHistoryClient(
         private const val KEY_RATE_LIMIT_UNTIL = "wayback_rate_limit_until"
         private const val KEY_RATE_LIMIT_LAST_HIT_AT = "wayback_rate_limit_last_hit_at"
         private const val KEY_RATE_LIMIT_HIT_COUNT = "wayback_rate_limit_hit_count"
+        private const val KEY_BACKEND_UNAVAILABLE_UNTIL = "wayback_backend_unavailable_until"
+        private const val DEFAULT_BACKEND_UNAVAILABLE_COOLDOWN_MS = 2L * 60L * 1000L
+        private const val MAX_BACKEND_UNAVAILABLE_COOLDOWN_MS = 10L * 60L * 1000L
         private val GLOBAL_AVAILABILITY_SEMAPHORE = Semaphore(1)
         private val GLOBAL_BACKFILL_MUTEX = Mutex()
         private const val MAX_CDX_BODY_BYTES = 256 * 1024

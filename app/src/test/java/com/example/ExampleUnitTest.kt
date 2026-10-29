@@ -5,6 +5,9 @@ import com.example.data.model.PricePoint
 import com.example.data.model.sanitizePriceHistory
 import com.example.data.model.summarizePriceHistory
 import com.example.data.model.Product
+import com.example.data.model.ProductCategory
+import com.example.data.model.PriceDisplayStatus
+import com.example.data.model.PriceBadgeType
 import com.example.data.model.Store
 import com.example.data.model.VerdictLevel
 import com.example.data.repository.SpanishMarketData
@@ -21,6 +24,36 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ExampleUnitTest {
+    @Test
+    fun implausibleHuaweiNovaPriceCannotBeShownAsSavedPriceOrHistoricalMinimum() {
+        val seed = SpanishMarketData.getInitialProducts().first()
+        val now = System.currentTimeMillis()
+        val day = 24L * 60L * 60L * 1000L
+        val product = seed.copy(
+            id = "huawei-nova-14-pro-guard-test",
+            title = "Huawei Nova 14 Pro",
+            brand = "Huawei",
+            category = ProductCategory.SMARTPHONES,
+            currentPrice = 5.62,
+            athMinPrice = 5.62,
+            athMaxPrice = 5.62,
+            isPriceVerified = true,
+            priceObservedAt = now,
+            savedHistoricalPrice = 5.62,
+            savedHistoricalPriceObservedAt = now,
+            priceHistory = listOf(
+                PricePoint(now - 100L * day, "hace 100 días", 5.62, "Phone House"),
+                PricePoint(now, "hoy", 5.62, "Phone House")
+            )
+        )
+
+        assertFalse("An accessory-level phone price must not be fresh", product.isPriceFresh)
+        assertEquals(PriceDisplayStatus.DEMONSTRATION, product.priceDisplayStatus)
+        assertEquals(PriceBadgeType.UNVERIFIED, product.priceBadgeState.type)
+        assertFalse("An implausible price must not create a historical minimum", product.isAtAth)
+        assertFalse("Implausible values must not support sufficient history", product.hasSufficientHistory)
+    }
+
     @Test
     fun groupedOnlineSearchCombinesRetailersButKeepsModelsVariantsAndAccessoriesSeparate() {
         fun result(title: String, price: Double, store: String) = SerpApiShoppingResult(

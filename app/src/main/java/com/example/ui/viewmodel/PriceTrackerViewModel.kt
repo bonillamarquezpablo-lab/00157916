@@ -17,6 +17,7 @@ import com.example.data.remote.shouldSkipDomainFallbackAfterSnapshotTimeout
 import com.example.data.remote.shouldSkipDomainFallbackAfterRepeatedCdxTimeouts
 import com.example.data.remote.shouldOpenArchiveDomainFallbackCircuit
 import com.example.data.remote.shouldTryDomainFallbackForArchiveCandidate
+import com.example.data.remote.shouldUseAvailabilityOnlyFallbackAfterCdxTimeout
 import com.example.data.remote.WaybackPriceHistoryClient
 import com.example.data.remote.diagnosticIndexForWaybackTrace
 import com.example.data.remote.summarizeCdxStep5Events

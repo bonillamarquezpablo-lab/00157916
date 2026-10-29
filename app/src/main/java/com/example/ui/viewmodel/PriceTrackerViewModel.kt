@@ -73,6 +73,70 @@ import java.text.Normalizer
 import java.text.SimpleDateFormat
 import java.util.Date
 
+/**
+ * Known retailer candidates used only to fill unused slots in a manual historical lookup.
+ * Existing direct/store URLs always keep their priority, and the caller still applies the
+ * three-store cap. The final HTML verifier remains responsible for product identity and price.
+ */
+internal fun historicalRetailerFallbackStores(category: ProductCategory, title: String): List<Store> {
+    val normalizedTitle = Normalizer.normalize(title.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+        .replace(Regex("\\p{M}+"), "")
+    val gamingProduct = category == ProductCategory.GAMING ||
+        Regex("""\b(playstation|ps[345]|xbox|nintendo\s+switch|steam\s+deck|videojuegos?|consola|gaming)\b""")
+            .containsMatchIn(normalizedTitle)
+    val effectiveCategory = if (gamingProduct) ProductCategory.GAMING else category
+
+    return when (effectiveCategory) {
+        ProductCategory.GAMING -> listOf(
+            Store.GAME, Store.MEDIA_MARKT, Store.PC_COMPONENTES, Store.FNAC, Store.AMAZON_ES,
+            Store.EL_CORTE_INGLES, Store.CARREFOUR, Store.WORTEN, Store.MIRAVIA,
+            Store.NEOBYTE, Store.COOLMOD, Store.ALTERNATE, Store.LDLC
+        )
+        ProductCategory.SMARTPHONES -> listOf(
+            Store.MEDIA_MARKT, Store.PC_COMPONENTES, Store.AMAZON_ES, Store.FNAC,
+            Store.EL_CORTE_INGLES, Store.CARREFOUR, Store.WORTEN, Store.MIRAVIA,
+            Store.POWERPLANET, Store.LA_MANZANITA
+        )
+        ProductCategory.COMPUTING -> listOf(
+            Store.PC_COMPONENTES, Store.AMAZON_ES, Store.MEDIA_MARKT, Store.COOLMOD,
+            Store.NEOBYTE, Store.ALTERNATE, Store.LDLC, Store.FNAC, Store.EL_CORTE_INGLES,
+            Store.LENOVO_STORE, Store.DELL_STORE, Store.HP_STORE
+        )
+        ProductCategory.TV_AUDIO -> listOf(
+            Store.MEDIA_MARKT, Store.AMAZON_ES, Store.PC_COMPONENTES, Store.FNAC,
+            Store.WORTEN, Store.EL_CORTE_INGLES, Store.CARREFOUR, Store.ALCAMPO
+        )
+        ProductCategory.HOME_APPLIANCES -> listOf(
+            Store.MEDIA_MARKT, Store.AMAZON_ES, Store.WORTEN, Store.CARREFOUR,
+            Store.EL_CORTE_INGLES, Store.ALCAMPO, Store.EROSKI, Store.CONFORAMA
+        )
+        ProductCategory.PERSONAL_CARE -> listOf(
+            Store.AMAZON_ES, Store.MEDIA_MARKT, Store.EL_CORTE_INGLES,
+            Store.CARREFOUR, Store.ALCAMPO, Store.WORTEN
+        )
+        ProductCategory.ACCESSORIES -> listOf(
+            Store.AMAZON_ES, Store.PC_COMPONENTES, Store.MEDIA_MARKT, Store.FNAC,
+            Store.MIRAVIA, Store.COOLMOD
+        )
+        ProductCategory.REPLACEMENT_PARTS -> listOf(
+            Store.AMAZON_ES, Store.PC_COMPONENTES, Store.LEROY_MERLIN,
+            Store.CARREFOUR, Store.ALCAMPO, Store.MIRAVIA
+        )
+        ProductCategory.TOYS -> listOf(
+            Store.AMAZON_ES, Store.FNAC, Store.CARREFOUR, Store.EL_CORTE_INGLES,
+            Store.ALCAMPO, Store.MIRAVIA, Store.GAME
+        )
+        ProductCategory.SPORTS -> listOf(
+            Store.DECATHLON, Store.AMAZON_ES, Store.SPRINTER,
+            Store.TRADEINN, Store.MIRAVIA, Store.CARREFOUR
+        )
+        ProductCategory.ALL, ProductCategory.OTHER -> listOf(
+            Store.AMAZON_ES, Store.PC_COMPONENTES, Store.MEDIA_MARKT, Store.FNAC,
+            Store.EL_CORTE_INGLES, Store.CARREFOUR, Store.WORTEN, Store.MIRAVIA
+        )
+    }
+}
+
 enum class OnlineSearchProvider { GOOGLE_SHOPPING, AMAZON }
 
 /**
@@ -1734,9 +1798,40 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             )
         }
 
-        val retailerCandidates = candidateBuilder.sortedWith(
-            compareBy<FreeArchiveCandidate> { if (it.directUrl != null) 0 else 1 }
-                .thenBy { it.merchantDomain.orEmpty() }
+        // Keep every existing candidate first. Only when the selected product has fewer
+        // retailer destinations than the existing budget, fill the unused slots with known
+        // merchants that commonly sell this product family. No extra slots or retries are added.
+        val selectedArchiveDomains = existingDomains.toMutableSet()
+        manufacturerCandidate?.merchantDomain?.let {
+            selectedArchiveDomains += it.lowercase(Locale.ROOT).removePrefix("www.")
+        }
+        val supplementalRetailerCandidates = historicalRetailerFallbackStores(product.category, product.title)
+            .mapNotNull { store ->
+                val domain = waybackPriceHistoryClient.resolveMerchantDomain(
+                    storeName = store.name,
+                    sourceUrl = store.officialUrl,
+                    knownStoreDomain = store.domain
+                ) ?: return@mapNotNull null
+                val normalizedDomain = domain.lowercase(Locale.ROOT).removePrefix("www.")
+                val alreadyCovered = selectedArchiveDomains.any { existing ->
+                    normalizedDomain == existing ||
+                        normalizedDomain.endsWith(".$existing") ||
+                        existing.endsWith(".$normalizedDomain")
+                }
+                if (alreadyCovered) return@mapNotNull null
+                selectedArchiveDomains += normalizedDomain
+                FreeArchiveCandidate(
+                    title = product.title,
+                    storeName = store.name,
+                    directUrl = null,
+                    merchantDomain = domain
+                )
+            }
+        val retailerCandidates = (
+            candidateBuilder.sortedWith(
+                compareBy<FreeArchiveCandidate> { if (it.directUrl != null) 0 else 1 }
+                    .thenBy { it.merchantDomain.orEmpty() }
+            ) + supplementalRetailerCandidates
         ).distinctBy {
             // Search one page per retailer: a seller's alternate URL must not consume another slot.
             it.title.trim().lowercase(Locale.ROOT) + "|" + (it.merchantDomain ?: it.directUrl ?: "unknown")

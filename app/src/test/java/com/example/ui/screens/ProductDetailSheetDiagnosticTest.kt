@@ -10,6 +10,42 @@ import org.junit.Test
 
 class ProductDetailSheetDiagnosticTest {
     @Test
+    fun conditionMismatchIsReportedAsSafeRejectionRatherThanTechnicalFailure() {
+        val entries = listOf(
+            WaybackDiagnosticEntry(
+                step = 22,
+                title = "Decisión del extractor y causa de rechazo del precio",
+                status = WaybackTraceStatus.FAILED,
+                detail = "ARCHIVE_PRODUCT_CONDITION_MISMATCH; no se guarda el candidato."
+            ),
+            WaybackDiagnosticEntry(
+                step = 0,
+                title = "captura 1 de 1 · fecha 20241111213737 · tienda www.phonehouse.es · Resultado del extractor",
+                status = WaybackTraceStatus.FAILED,
+                detail = "causa=ARCHIVE_PRODUCT_CONDITION_MISMATCH; no se guarda el candidato.",
+                isCaptureDetail = true,
+                captureKey = "condition-mismatch-test"
+            )
+        )
+
+        val report = buildWaybackDiagnosticExportReport(
+            productTitle = "Xiaomi Mi 10 Pro Gris",
+            freeHistoryStatus = "Se guardó un precio histórico",
+            steps = entries,
+            generatedAt = "2026-10-29 02:00:00 UTC",
+            appVersion = "1.7.1019.1",
+            androidVersion = "Android 17 (API 37)"
+        )
+
+        assertTrue(report.contains("22. Decisión del extractor y causa de rechazo del precio — DESCARTADO CORRECTAMENTE (CONDICIÓN DISTINTA)"))
+        assertTrue(report.contains("DESCARTADO CORRECTAMENTE (CONDICIÓN DISTINTA)"))
+        assertTrue(report.contains("Estado de fases: 1 superadas, 0 fallidas"))
+        assertTrue(report.contains("Interpretación de duplicados: un importe igual en fechas diferentes no es un duplicado por sí solo."))
+        assertTrue(report.contains("Primera fase fallida: ninguna registrada"))
+        assertTrue(report.contains("Primera captura fallida: ninguna registrada"))
+    }
+
+    @Test
     fun exportedWaybackReportIncludesAllPhasesCaptureAttemptsAndSanitizesUrlsAndHtml() {
         val entries = listOf(
             WaybackDiagnosticEntry(

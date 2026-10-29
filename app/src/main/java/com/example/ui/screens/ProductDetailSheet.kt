@@ -530,7 +530,7 @@ internal fun buildWaybackDiagnosticExportReport(
             "Un duplicado confirmado es un punto que ya estaba guardado para la misma identidad y fecha."
     )
     report.appendLine(
-        "Estado de fases: " + (statuses[WaybackTraceStatus.PASSED] ?: 0) + " superadas, "
+        "Estado de fases: " + (statuses[WaybackTraceStatus.PASSED] ?: 0) + " superadas, " +
             (statuses[WaybackTraceStatus.FAILED] ?: 0) + " fallidas, " +
             (statuses[WaybackTraceStatus.SKIPPED] ?: 0) + " no ejecutadas, " +
             (statuses[WaybackTraceStatus.RUNNING] ?: 0) + " en curso, " +

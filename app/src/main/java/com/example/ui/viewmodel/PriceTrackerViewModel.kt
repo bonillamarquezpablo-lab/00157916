@@ -88,7 +88,9 @@ internal fun historicalRetailerFallbackStores(category: ProductCategory, title: 
 
     return when (effectiveCategory) {
         ProductCategory.GAMING -> listOf(
-            Store.GAME, Store.MEDIA_MARKT, Store.PC_COMPONENTES, Store.FNAC, Store.AMAZON_ES,
+            // First choices expose known retailer search routes; use guessed title slugs only
+            // when the retailer has no product-search URL pattern.
+            Store.MEDIA_MARKT, Store.PC_COMPONENTES, Store.FNAC, Store.AMAZON_ES, Store.GAME,
             Store.EL_CORTE_INGLES, Store.CARREFOUR, Store.WORTEN, Store.MIRAVIA,
             Store.NEOBYTE, Store.COOLMOD, Store.ALTERNATE, Store.LDLC
         )
@@ -413,6 +415,10 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         const val TRACKED_REFRESH_COOLDOWN_MS = 24L * 60L * 60L * 1000L
         const val MAX_TRACKED_REFRESH_PER_TAP = 10
         const val MAX_ARCHIVE_PAGES_PER_SEARCH = 3
+        // Once two direct CDX routes time out, don't send another CDX request. Still allow the
+        // remaining retailer slots to use up to three bounded Availability probes each.
+        const val MAX_AVAILABILITY_ONLY_FALLBACKS_AFTER_CDX_TIMEOUT =
+            MAX_ARCHIVE_PAGES_PER_SEARCH - 1
         // Historical lookup is a user-triggered background action. Reserve time for the
         // CDX query and a representative set of dated captures; a too-short outer timeout
         // cancels useful HTML downloads before they can be validated and saved.
@@ -1836,14 +1842,15 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             // Search one page per retailer: a seller's alternate URL must not consume another slot.
             it.title.trim().lowercase(Locale.ROOT) + "|" + (it.merchantDomain ?: it.directUrl ?: "unknown")
         }
-        // Reserve one slot for a distinct manufacturer archive, so a list of retailer links
-        // cannot crowd out the canonical product archive. The manufacturer is always tried last.
-        val retailerBudget = if (manufacturerCandidate != null) MAX_ARCHIVE_PAGES_PER_SEARCH - 1
-            else MAX_ARCHIVE_PAGES_PER_SEARCH
-        val orderedCandidates = (retailerCandidates.take(retailerBudget) +
-            listOfNotNull(manufacturerCandidate)).distinctBy {
-            it.title.trim().lowercase(Locale.ROOT) + "|" + (it.merchantDomain ?: it.directUrl ?: "unknown")
-        }
+        // Actual seller URLs and known retailer domains come first. A manufacturer fallback is
+        // useful only after real retailer candidates; it must not displace a second store from
+        // the three-store budget (the old reserved slot sent PS5 lookups to a guessed sony.es URL).
+        val orderedCandidates = (retailerCandidates + listOfNotNull(manufacturerCandidate))
+            .distinctBy {
+                it.title.trim().lowercase(Locale.ROOT) + "|" +
+                    (it.merchantDomain ?: it.directUrl ?: "unknown")
+            }
+            .take(MAX_ARCHIVE_PAGES_PER_SEARCH)
 
         val directCandidates = orderedCandidates.count { it.directUrl != null }
         val domainCandidates = orderedCandidates.count { it.merchantDomain != null }
@@ -2909,6 +2916,9 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 // Search-wide circuit breaker: one unhealthy direct CDX route must not be
                 // followed by another candidate's merchant-domain requests in the same run.
                 var skipDomainFallbacksForSearch = false
+                var availabilityOnlyFallbacksUsed = 0
+                var availabilityOnlyFallbackAfterCdxTimeoutAvailable = false
+                val searchCdxTimeoutDiagnostics = linkedSetOf<String>()
                 var successfulLookupsCount = 0
                 var requestFailedCount = 0
                 var skippedCount = 0
@@ -3106,9 +3116,23 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     repository.allProductsStream.first().associate { it.id to it.title }
                 }.orEmpty()
                 for (candidate in candidates) {
+                    // If the CDX circuit was opened by two prefix timeouts, later retailer slots
+                    // get a bounded Availability-only fallback. This uses no further CDX queries
+                    // and is disabled after HTTP 429, snapshot timeouts, or an outer timeout.
+                    val availabilityOnlyFallbackForCandidate =
+                        shouldUseAvailabilityOnlyFallbackAfterCdxTimeout(
+                            searchCircuitOpen = skipDomainFallbacksForSearch,
+                            timeoutFallbackAvailable = availabilityOnlyFallbackAfterCdxTimeoutAvailable,
+                            rateLimited = waybackPriceHistoryClient.activeRateLimitUntil() != null,
+                            allDirectSnapshotsTimedOut = false,
+                            directLookupTimedOut = false,
+                            hasMerchantDomain = candidate.merchantDomain != null,
+                            usedFallbacks = availabilityOnlyFallbacksUsed,
+                            maxFallbacks = MAX_AVAILABILITY_ONLY_FALLBACKS_AFTER_CDX_TIMEOUT
+                        )
                     // Decide whether a route completed the job from newly inserted Room points,
                     // not from the number of captures returned by CDX. Repeated dates must not
-                    // suppress Memento, annual CDX blocks or alternate retailer URLs.
+                    // suppress independent retailer Availability lookups after a CDX outage.
                     val savedCountBeforeCandidate = savedCount
                     // Bound each candidate's direct + merchant-domain lookup so slow public
                     // archive responses cannot leave the detail sheet spinning indefinitely.
@@ -3137,7 +3161,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         )
                     }
                     var candidateTimedOut = false
-                    if (candidate.directUrl != null) {
+                    if (candidate.directUrl != null && !availabilityOnlyFallbackForCandidate) {
                         val direct = withTimeoutOrNull(MAX_ARCHIVE_LOOKUP_PER_CANDIDATE_MS) {
                             waybackPriceHistoryClient.fetchHistory(
                                 originalUrl = candidate.directUrl,
@@ -3174,7 +3198,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         timestamps = currentCandidateQuotes.map { it.observedAt },
                         newPointsSaved = (savedCount - savedCountBeforeCandidate).coerceAtLeast(0)
                     )
-                    if (candidate.directUrl != null && shouldAttemptMementoFallback(
+                    if (!availabilityOnlyFallbackForCandidate &&
+                        candidate.directUrl != null && shouldAttemptMementoFallback(
                             alreadyAttempted = mementoAttempted,
                             hasEligibleDirectUrl = true,
                             hasSufficientHistory = sufficientHistoricalCoverage,
@@ -3272,6 +3297,28 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         directLookupTimedOut = candidateTimedOut
                     )
                     if (openCircuitNow) skipDomainFallbacksForSearch = true
+                    if (repeatedCdxTimeouts &&
+                        !rateLimitedAtDirectStage &&
+                        !allDirectSnapshotsTimedOut &&
+                        !candidateTimedOut
+                    ) {
+                        val timeoutCodes = priorDirectCdxDiagnostics.filter { code ->
+                            (code.startsWith("CDX_URL_PREFIX") ||
+                                code.startsWith("CDX_PRODUCT_PREFIX") ||
+                                code.startsWith("CDX_ALTERNATE_PREFIX")) &&
+                                (code.endsWith("_TIMEOUT") || code.endsWith("_DNS") ||
+                                    (code.contains("_HTTP_") &&
+                                        code.substringAfterLast('_').toIntOrNull()
+                                            ?.let { it in setOf(500, 502, 503, 504) } == true))
+                        }
+                        searchCdxTimeoutDiagnostics.addAll(timeoutCodes)
+                        if (timeoutCodes.isNotEmpty()) {
+                            availabilityOnlyFallbackAfterCdxTimeoutAvailable = true
+                        }
+                    }
+                    if (rateLimitedAtDirectStage || allDirectSnapshotsTimedOut || candidateTimedOut) {
+                        availabilityOnlyFallbackAfterCdxTimeoutAvailable = false
+                    }
                     if (repeatedCdxTimeouts) {
                         diagnosticCodes.add("CDX_DOMAIN_FALLBACK_SKIPPED_AFTER_REPEATED_TIMEOUTS")
                         if (diagnosticProductId != null) {
@@ -3294,36 +3341,60 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             "Se detienen las búsquedas por dominio restantes de esta ejecución: $reason. Se conservan los precios verificados y se evita generar más peticiones."
                         )
                     }
-                    val shouldTryDomainFallback = shouldTryDomainFallbackForArchiveCandidate(
-                        hasMerchantDomain = merchantDomainForFallback != null,
-                        hasSufficientHistory = hasSufficientHistoryBeforeDomain,
-                        rateLimited = rateLimitedAtDirectStage,
-                        allDirectSnapshotsTimedOut = allDirectSnapshotsTimedOut,
-                        searchCircuitOpen = skipDomainFallbacksForSearch
-                    )
+                    val shouldTryDomainFallback = if (availabilityOnlyFallbackForCandidate) {
+                        merchantDomainForFallback != null &&
+                            !hasSufficientHistoryBeforeDomain &&
+                            !rateLimitedAtDirectStage &&
+                            !allDirectSnapshotsTimedOut &&
+                            !candidateTimedOut &&
+                            waybackPriceHistoryClient.activeRateLimitUntil() == null
+                    } else {
+                        shouldTryDomainFallbackForArchiveCandidate(
+                            hasMerchantDomain = merchantDomainForFallback != null,
+                            hasSufficientHistory = hasSufficientHistoryBeforeDomain,
+                            rateLimited = rateLimitedAtDirectStage,
+                            allDirectSnapshotsTimedOut = allDirectSnapshotsTimedOut,
+                            searchCircuitOpen = skipDomainFallbacksForSearch
+                        )
+                    }
                     if (shouldTryDomainFallback && merchantDomainForFallback != null) {
+                        if (availabilityOnlyFallbackForCandidate) {
+                            availabilityOnlyFallbacksUsed++
+                        }
                         if (diagnosticProductId != null) {
                             reportWaybackDiagnostic(
                                 diagnosticProductId, 7, WaybackTraceStatus.RUNNING,
-                                "Se activa la alternativa por dominio; se mantienen la caché y los límites de consultas."
+                                if (availabilityOnlyFallbackForCandidate) {
+                                    "CDX ha agotado dos rutas; se prueba un comercio adicional con Availability API, sin repetir consultas CDX."
+                                } else {
+                                    "Se activa la alternativa por dominio; se mantienen la caché y los límites de consultas."
+                                }
                             )
+                        }
+                        val inheritedCdxFailures = if (availabilityOnlyFallbackForCandidate) {
+                            searchCdxTimeoutDiagnostics
+                        } else {
+                            emptySet()
                         }
                         val domainResult = withTimeoutOrNull(MAX_ARCHIVE_DOMAIN_FALLBACK_MS) {
                             waybackPriceHistoryClient.fetchHistoryByMerchantDomain(
                                 domain = merchantDomainForFallback,
                                 expectedTitle = candidate.title,
                                 preferredUrl = candidate.directUrl,
-                                // The direct URL's prefix-CDX lookup ran just above. Avoid
-                                // repeating the same request before the Availability fallback.
-                                preferredUrlAlreadyQueried = candidate.directUrl != null,
+                                // Do not repeat the direct query; if the search-wide CDX circuit is
+                                // open, the client will go straight to bounded Availability probes.
+                                preferredUrlAlreadyQueried =
+                                    candidate.directUrl != null && !availabilityOnlyFallbackForCandidate,
                                 priorCdxDiagnostics = (
                                     attempts.flatMap { it.diagnosticCodes } +
+                                        inheritedCdxFailures +
                                         if (candidateTimedOut) setOf("CDX_URL_PREFIX_TIMEOUT") else emptySet()
                                     ).filter { code ->
                                         code.startsWith("CDX_URL_PREFIX") ||
                                             code.startsWith("CDX_PRODUCT_PREFIX") ||
                                             code.startsWith("CDX_ALTERNATE_PREFIX")
                                     }.toSet(),
+                                availabilityOnlyAfterPriorTimeout = availabilityOnlyFallbackForCandidate,
                                 onTrace = traceCallback,
                                 knownProductTitlesById = knownProductTitlesById,
                                 onVerifiedQuotes = persistQuotesAsTheyArrive,

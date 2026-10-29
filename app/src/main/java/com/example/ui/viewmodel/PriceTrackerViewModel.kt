@@ -1746,16 +1746,26 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 )?.let(::add)
             }
             val currentDestination = product.storeUrl.ifBlank { product.currentStore.officialUrl }
-            buildFreeArchiveCandidate(
-                title = product.title,
-                storeName = product.currentStore.name,
-                sourceUrl = currentDestination,
-                knownDomain = product.currentStore.domain
-            )?.let(::add)
+            // The current-store field can be stale on legacy/catalogue rows. Do not let a
+            // manufacturer/homepage URL displace actual sellers already present in saved offers.
+            // If the current store is represented by an offer (or there are no offers), it remains
+            // eligible here; otherwise the brand fallback is appended after real retailers below.
+            val currentStoreIsRepresentedInOffers =
+                product.offers.any { it.store.id == product.currentStore.id }
+            if (product.offers.isEmpty() || currentStoreIsRepresentedInOffers) {
+                buildFreeArchiveCandidate(
+                    title = product.title,
+                    storeName = product.currentStore.name,
+                    sourceUrl = currentDestination,
+                    knownDomain = product.currentStore.domain
+                )?.let(::add)
+            }
 
             // A Google Shopping intermediary is not an archive target. If it is the only
             // saved destination, retry using the known seller name/domain from the saved row.
-            if (isGoogleShoppingUrl(product.storeUrl) || candidateBuilder.isEmpty()) {
+            if (candidateBuilder.isEmpty() ||
+                (isGoogleShoppingUrl(product.storeUrl) && candidateBuilder.none { it.directUrl != null })
+            ) {
                 val savedStore = Store.findKnownByName(product.currentStore.name, currentDestination)
                     ?: Store.findKnownByName(product.currentStore.id.replace('_', ' '), currentDestination)
                 val fallbackStore = savedStore ?: product.currentStore

@@ -152,8 +152,21 @@ class MementoClient(
     internal fun canonicalizeArchiveLookupUrl(originalUrl: String): String? {
         val uri = parseHttpUri(originalUrl) ?: return null
         if (isArchiveOrSearchHost(uri.host.orEmpty())) return null
-        return priceParser.buildDirectUrlCandidates(originalUrl).lastOrNull()
-            ?: originalUrl.substringBefore('#')
+        val candidates = priceParser.buildDirectUrlCandidates(originalUrl)
+        // Arquivo.pt's index often stores the canonical product path, not a storefront's
+        // variant/country/currency/tracking query string. Prefer a queryless equivalent only
+        // when the supplied link actually has a query and the candidate keeps the same path.
+        // Functional SKU/colour/capacity parameters are preserved because the shared candidate
+        // builder does not produce a queryless candidate for those links.
+        val cleanSamePath = if (!uri.rawQuery.isNullOrBlank()) {
+            candidates.firstOrNull { candidate ->
+                val candidateUri = parseHttpUri(candidate)
+                candidateUri?.rawPath == uri.rawPath && candidateUri.rawQuery.isNullOrBlank()
+            }
+        } else {
+            null
+        }
+        return cleanSamePath ?: candidates.lastOrNull() ?: originalUrl.substringBefore('#')
     }
 
     suspend fun fetchHistory(

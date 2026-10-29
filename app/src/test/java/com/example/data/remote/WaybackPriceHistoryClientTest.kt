@@ -3372,6 +3372,53 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun quarterlyRetryKeepsTheSelectedCleanPrefixTargetInsteadOfRestoringVariantSelectors() {
+        val client = newClient()
+        val now = SimpleDateFormat("yyyyMMddHHmmss", Locale.ROOT).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.parse("20261029000000")!!.time
+        val cleanPath = "https://electronicabarata.com/products/sony-playstation-5-chasis-e"
+        val variantUrl = "$cleanPath?variant=53862408683704&country=ES&currency=EUR"
+
+        val cleanPrefix = client.buildCdxUrl(
+            originalUrl = cleanPath,
+            now = now,
+            lookbackDays = WaybackPriceHistoryClient.DEFAULT_LOOKBACK_DAYS,
+            matchType = "prefix"
+        )!!
+        val variantPrefix = client.buildCdxUrl(
+            originalUrl = variantUrl,
+            now = now,
+            lookbackDays = WaybackPriceHistoryClient.DEFAULT_LOOKBACK_DAYS,
+            matchType = "prefix"
+        )!!
+
+        assertEquals(
+            "Quarterly scans must continue on the cleaned path selected by the prefix fallback",
+            cleanPath,
+            client.selectQuarterlyPrefixTargetUrl(cleanPrefix, variantUrl)
+        )
+        assertEquals(
+            "When no cleaned fallback was selected, keep the variant URL",
+            variantUrl,
+            client.selectQuarterlyPrefixTargetUrl(variantPrefix, variantUrl)
+        )
+    }
+
+    @Test
+    fun cdx503IsNotImmediatelyRetriedButOtherTransientServerErrorsStayBounded() {
+        val client = newClient()
+        assertFalse("HTTP 503 should stop the repeated query that often becomes a timeout",
+            client.shouldRetryCdxHttpResponse(statusCode = 503, attempt = 0, maxRetries = 1))
+        assertTrue("A transient 502 may still receive its one bounded retry",
+            client.shouldRetryCdxHttpResponse(statusCode = 502, attempt = 0, maxRetries = 1))
+        assertFalse("A 502 must not exceed the configured retry ceiling",
+            client.shouldRetryCdxHttpResponse(statusCode = 502, attempt = 1, maxRetries = 1))
+        assertFalse("No retries should occur when the retry budget is zero",
+            client.shouldRetryCdxHttpResponse(statusCode = 504, attempt = 0, maxRetries = 0))
+    }
+
+    @Test
     fun quarterlyCdxWindowsAreBoundedToQuarterAndHistoricalWindow() {
         val now = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT).apply {
             timeZone = java.util.TimeZone.getTimeZone("UTC")

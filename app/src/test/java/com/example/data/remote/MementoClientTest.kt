@@ -69,6 +69,23 @@ class MementoClientTest {
     }
 
     @Test
+    fun canonicalizeArchiveLookupUrlPrefersCleanPathWhenOnlyNeutralSelectorsRemain() {
+        val client = newClient()
+        assertEquals(
+            "https://shop.example/products/cordless-drill",
+            client.canonicalizeArchiveLookupUrl(
+                "https://shop.example/products/cordless-drill?variant=887766&country=ES&currency=EUR"
+            )
+        )
+        assertEquals(
+            "https://shop.example/products/cordless-drill?sku=DRILL-18V&size=18V",
+            client.canonicalizeArchiveLookupUrl(
+                "https://shop.example/products/cordless-drill?sku=DRILL-18V&size=18V"
+            )
+        )
+    }
+
+    @Test
     fun arquivoReplayUrlsAreConvertedToArchivedContentUrls() {
         val client = newClient()
         val wrapper = "https://arquivo.pt/wayback/20250316233444/https://www.pccomponentes.com/apple-iphone-15-plus-256gb-amarillo-libre"

@@ -677,6 +677,7 @@ class WaybackPriceHistoryClient(
             )
 
             val quarterlyResults = mutableListOf<WaybackBackfillResult>()
+            val prefixTargetUrl = selectQuarterlyPrefixTargetUrl(prefixCdxUrl, directUrl)
             if (shouldRetryPrefixInYearBlocks(prefixResult.diagnosticCodes)) {
                 val earliestWindow = historyWindowStartTimestamp(now, lookbackDays)
                 val earliestCalendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.ROOT).apply {
@@ -689,8 +690,8 @@ class WaybackPriceHistoryClient(
                 val currentYear = currentCalendar.get(Calendar.YEAR)
                 val earliestQuarterIndex = earliestYear * 4 + earliestCalendar.get(Calendar.MONTH) / 3
                 val currentQuarterIndex = currentYear * 4 + currentCalendar.get(Calendar.MONTH) / 3
-                val cursorKey = attemptKey("prefix-quarter-cursor-v2|$directUrl|$expectedTitle|$lookbackDays")
-                val legacyYearCursorKey = attemptKey("prefix-year-cursor-v1|$directUrl|$expectedTitle|$lookbackDays")
+                val cursorKey = attemptKey("prefix-quarter-cursor-v2|$prefixTargetUrl|$expectedTitle|$lookbackDays")
+                val legacyYearCursorKey = attemptKey("prefix-year-cursor-v1|$prefixTargetUrl|$expectedTitle|$lookbackDays")
                 var nextQuarterIndex = preferences.getInt(cursorKey, Int.MIN_VALUE)
                 if (nextQuarterIndex == Int.MIN_VALUE) {
                     // Carry forward the cursor stored by older builds at the last failed year.
@@ -712,7 +713,9 @@ class WaybackPriceHistoryClient(
                     val year = Math.floorDiv(quarterIndex, 4)
                     val quarter = Math.floorMod(quarterIndex, 4) + 1
                     val quarterlyCdxUrl = buildCdxUrlForQuarter(
-                        originalUrl = directUrl,
+                        // Continue against the actual prefix target. If the first attempt removed
+                        // archive-neutral/tracking query parameters, do not reintroduce them here.
+                        originalUrl = prefixTargetUrl,
                         year = year,
                         quarter = quarter,
                         now = now,
@@ -753,7 +756,7 @@ class WaybackPriceHistoryClient(
                         // Retry one failed window on the next manual lookup; if it fails again,
                         // continue into older quarters rather than starving the rest of the history.
                         val failureKey = attemptKey(
-                            "prefix-quarter-failure-v1|$directUrl|$expectedTitle|$lookbackDays|$quarterIndex"
+                            "prefix-quarter-failure-v1|$prefixTargetUrl|$expectedTitle|$lookbackDays|$quarterIndex"
                         )
                         if (!hitRateLimit) {
                             val failureCount = preferences.getInt(failureKey, 0)
@@ -4137,8 +4140,33 @@ class WaybackPriceHistoryClient(
     }
 
     /**
+     * Prefer the URL actually used by the selected prefix query when scanning narrower quarterly
+     * windows. This is important when a previous exact lookup had query parameters that were
+     * deliberately stripped from the fallback prefix URL.
+     */
+    internal fun selectQuarterlyPrefixTargetUrl(
+        prefixCdxUrl: HttpUrl,
+        fallbackDirectUrl: String
+    ): String =
+        prefixCdxUrl.queryParameter("url")?.takeIf(::isEligibleDirectUrl) ?: fallbackDirectUrl
+
+    /**
+     * HTTP 503 means the shared CDX backend is explicitly unavailable. Retrying the same query
+     * immediately tends to turn a useful 503 into a timeout and wastes another request. Other
+     * known transient 5xx responses retain the existing single-retry ceiling.
+     */
+    internal fun shouldRetryCdxHttpResponse(
+        statusCode: Int,
+        attempt: Int,
+        maxRetries: Int
+    ): Boolean =
+        statusCode in RETRYABLE_CDX_HTTP_CODES &&
+            statusCode != 503 &&
+            attempt < maxRetries
+
+    /**
      * Wayback's public CDX endpoint intermittently returns 5xx responses for otherwise valid
-     * queries. Retry only transient server failures once; never retry 4xx, timeouts, or arbitrary
+     * queries. Retry only transient server failures once; never retry HTTP 503, 4xx, timeouts, or arbitrary
      * exceptions, so the free-history action remains bounded and responsive.
      */
     private suspend fun executeCdxWithTransientRetry(
@@ -4159,8 +4187,11 @@ class WaybackPriceHistoryClient(
                 delay(CDX_RETRY_DELAY_MS + (attempt * CDX_RETRY_DELAY_MS) + jitterMs)
                 return@repeat
             }
-            val shouldRetry = response.code in RETRYABLE_CDX_HTTP_CODES &&
-                attempt < maxRetries
+            val shouldRetry = shouldRetryCdxHttpResponse(
+                statusCode = response.code,
+                attempt = attempt,
+                maxRetries = maxRetries
+            )
             if (!shouldRetry) return response
             response.close()
 

@@ -69,7 +69,7 @@ data class Product(
         if (!price.isFinite() || price <= 0.0) return false
         val looksLikePhone = SmartphoneSubcategory.PHONES.matchesTitle(title)
         val isAccessory = Regex(
-            """\\b(funda|fundas|carcasa|carcasas|protector|protectores|cristal templado|cable|cargador|adaptador|repuesto|replacement|cover|bumper|pantalla|bateria externa|power bank)\\b"""
+            """\b(funda|fundas|carcasa|carcasas|protector|protectores|cristal templado|cable|cargador|adaptador|repuesto|replacement|cover|bumper|pantalla|bateria externa|power bank)\b"""
         ).containsMatchIn(title.lowercase(java.util.Locale.ROOT))
         return !looksLikePhone || isAccessory || price >= MIN_PLAUSIBLE_SMARTPHONE_PRICE_EUR
     }

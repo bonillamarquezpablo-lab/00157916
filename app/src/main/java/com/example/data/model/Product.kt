@@ -61,15 +61,32 @@ data class Product(
     val savedHistoricalPriceSource: String = ""
 ) {
     /**
+     * Last line of defence for legacy/provider rows that reached the catalogue before
+     * repository validation. A full smartphone model cannot be shown at accessory-level
+     * prices; use the same conservative €45 floor as historical quote validation.
+     */
+    private fun isPlausiblePriceForThisProduct(price: Double): Boolean {
+        if (!price.isFinite() || price <= 0.0) return false
+        val looksLikePhone = SmartphoneSubcategory.PHONES.matchesTitle(title)
+        val isAccessory = Regex(
+            """\\b(funda|fundas|carcasa|carcasas|protector|protectores|cristal templado|cable|cargador|adaptador|repuesto|replacement|cover|bumper|pantalla|bateria externa|power bank)\\b"""
+        ).containsMatchIn(title.lowercase(java.util.Locale.ROOT))
+        return !looksLikePhone || isAccessory || price >= MIN_PLAUSIBLE_SMARTPHONE_PRICE_EUR
+    }
+
+    /**
      * Historical conclusions require at least three distinct snapshots spanning 90 days,
      * including three observations within the latest 90-day window and a recent last query.
      * One live price can be shown immediately, but is not enough to establish a historical low.
      */
     val hasSufficientHistory: Boolean
         get() {
-            if (!isPriceVerified) return false
+            if (!isPriceVerified || !isPlausiblePriceForThisProduct(currentPrice)) return false
             // External archive/Google Insight data is useful context, but cannot prove a live-price history.
-            val liveTimeline = priceHistory.filterNot { it.isExternalHistoryEvidence }
+            // Bad legacy prices are filtered again here so they cannot support a minimum or average.
+            val liveTimeline = priceHistory
+                .filterNot { it.isExternalHistoryEvidence }
+                .filter { isPlausiblePriceForThisProduct(it.price) }
             val timestamps = liveTimeline.map { it.timestamp }.distinct().sorted()
             if (timestamps.size < MIN_HISTORY_POINTS) return false
             val now = System.currentTimeMillis()
@@ -88,6 +105,7 @@ data class Product(
         get() {
             val orderedPoints = priceHistory
                 .filterNot { it.isExternalHistoryEvidence }
+                .filter { isPlausiblePriceForThisProduct(it.price) }
                 .sortedBy { it.timestamp }
             val priorPrices = if (orderedPoints.size > 1) {
                 orderedPoints.dropLast(1).map { it.price }
@@ -132,6 +150,7 @@ data class Product(
     /** A live observation older than 24 hours may remain visible, but is not a current deal. */
     val isPriceFresh: Boolean
         get() = isPriceVerified &&
+            isPlausiblePriceForThisProduct(currentPrice) &&
             priceAgeMillis?.let { it <= PRICE_FRESHNESS_WINDOW_MS } == true
 
     /**
@@ -144,7 +163,7 @@ data class Product(
         get() = !isPriceVerified &&
             (id.startsWith("online_candidate_") ||
                 athMinDate.equals(PENDING_VERIFICATION_DATE_LABEL, ignoreCase = true)) &&
-            currentPrice.isFinite() && currentPrice > 0.0 &&
+            isPlausiblePriceForThisProduct(currentPrice) &&
             savedHistoricalPrice == null
 
     /**
@@ -181,11 +200,10 @@ data class Product(
 
     val priceDisplayStatus: PriceDisplayStatus
         get() = when {
-            isPriceFresh && currentPrice.isFinite() && currentPrice > 0.0 ->
-                PriceDisplayStatus.VERIFIED_CURRENT
-            isPriceVerified && currentPrice.isFinite() && currentPrice > 0.0 ->
+            isPriceFresh -> PriceDisplayStatus.VERIFIED_CURRENT
+            isPriceVerified && isPlausiblePriceForThisProduct(currentPrice) ->
                 PriceDisplayStatus.SAVED_PENDING_REVALIDATION
-            savedHistoricalPrice?.let { it.isFinite() && it > 0.0 } == true &&
+            savedHistoricalPrice?.let { isPlausiblePriceForThisProduct(it) } == true &&
                 savedHistoricalPriceObservedAt?.let { it > 0L && it <= System.currentTimeMillis() } == true ->
                 PriceDisplayStatus.SAVED_PENDING_REVALIDATION
             isUnverifiedLiveListing -> PriceDisplayStatus.UNVERIFIED_LIVE_LISTING
@@ -228,6 +246,7 @@ data class Product(
         const val HOUR_MS = 60L * 60L * 1000L
         const val DAY_MS = 24L * HOUR_MS
         const val PRICE_FRESHNESS_WINDOW_MS = DAY_MS
+        const val MIN_PLAUSIBLE_SMARTPHONE_PRICE_EUR = 45.0
         const val FUTURE_TIMESTAMP_TOLERANCE_MS = 5L * 60L * 1000L
         const val MAX_PRICE_AGE_FOR_HISTORICAL_CLAIMS = 7L * DAY_MS
     }

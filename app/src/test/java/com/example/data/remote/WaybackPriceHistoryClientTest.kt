@@ -119,6 +119,20 @@ class WaybackPriceHistoryClientTest {
         )
         assertFalse("The PS5 fallback must not manufacture a product path on sony.es",
             urls.any { it.contains("sony.es", ignoreCase = true) })
+
+        val staleSonyDomainUrls = client.buildAvailabilityCandidateUrls(
+            "sony.es",
+            "Consola de videojuegos Sony PlayStation 5 Slim"
+        )
+        assertEquals(
+            "A stale Sony-branded offer must reuse the official PlayStation URL candidates",
+            urls,
+            staleSonyDomainUrls
+        )
+        assertTrue(
+            "All PS5 console fallback URLs must point to PlayStation Direct",
+            staleSonyDomainUrls.all { it.startsWith("https://direct.playstation.com/") }
+        )
     }
 
     @Test

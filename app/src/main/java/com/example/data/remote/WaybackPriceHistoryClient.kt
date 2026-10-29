@@ -3437,8 +3437,18 @@ class WaybackPriceHistoryClient(
             .replace(Regex("[^a-z0-9]+"), "-")
             .trim('-')
         if (fullSlug.isBlank()) return emptyList()
-        if (normalizedDomain == "direct.playstation.com") {
-            val normalizedTitle = normalizeTitle(expectedTitle)
+        val normalizedTitle = normalizeTitle(expectedTitle)
+        val isPlayStation5Console = Regex("""\b(playstation\s*5|ps\s*5|ps5)\b""")
+            .containsMatchIn(normalizedTitle) &&
+            (Regex("""\b(consola|console)\b""").containsMatchIn(normalizedTitle) ||
+                Regex("""\bslim\b""").containsMatchIn(normalizedTitle) ||
+                Regex("""\bdigital\b""").containsMatchIn(normalizedTitle))
+        // Old saved offers can contain a guessed sony.es URL. For PS5 consoles, resolve that
+        // stale manufacturer domain to the actual Spanish PlayStation Direct routes instead
+        // of probing several product-shaped URLs that are not real retailer pages.
+        val shouldUsePlayStationOfficialRoute = normalizedDomain == "direct.playstation.com" ||
+            (normalizedDomain in setOf("sony.es", "sony.com") && isPlayStation5Console)
+        if (shouldUsePlayStationOfficialRoute) {
             val path = when {
                 Regex("""\b(playstation\s*5|ps\s*5|ps5)\b""").containsMatchIn(normalizedTitle) &&
                     Regex("""\bslim\b""").containsMatchIn(normalizedTitle) &&

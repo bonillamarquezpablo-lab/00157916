@@ -1853,15 +1853,19 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
             // Search one page per retailer: a seller's alternate URL must not consume another slot.
             it.title.trim().lowercase(Locale.ROOT) + "|" + (it.merchantDomain ?: it.directUrl ?: "unknown")
         }
-        // Actual seller URLs and known retailer domains come first. A manufacturer fallback is
-        // useful only after real retailer candidates; it must not displace a second store from
-        // the three-store budget (the old reserved slot sent PS5 lookups to a guessed sony.es URL).
-        val orderedCandidates = (retailerCandidates + listOfNotNull(manufacturerCandidate))
-            .distinctBy {
-                it.title.trim().lowercase(Locale.ROOT) + "|" +
-                    (it.merchantDomain ?: it.directUrl ?: "unknown")
-            }
-            .take(MAX_ARCHIVE_PAGES_PER_SEARCH)
+        // Preserve the established priority: use the saved retailer destinations first and
+        // reserve the final slot for a distinct, recognized manufacturer shop. For PlayStation,
+        // resolve that slot to PlayStation Direct rather than guessing a product path on sony.es.
+        val retailerBudget = if (manufacturerCandidate != null) {
+            MAX_ARCHIVE_PAGES_PER_SEARCH - 1
+        } else {
+            MAX_ARCHIVE_PAGES_PER_SEARCH
+        }
+        val orderedCandidates = (retailerCandidates.take(retailerBudget) +
+            listOfNotNull(manufacturerCandidate)).distinctBy {
+            it.title.trim().lowercase(Locale.ROOT) + "|" +
+                (it.merchantDomain ?: it.directUrl ?: "unknown")
+        }
 
         val directCandidates = orderedCandidates.count { it.directUrl != null }
         val domainCandidates = orderedCandidates.count { it.merchantDomain != null }

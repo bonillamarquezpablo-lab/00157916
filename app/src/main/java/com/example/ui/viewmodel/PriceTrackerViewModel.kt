@@ -3946,6 +3946,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             "ARCHIVE_AVAILABILITY_API_HTTP_429" -> "$code (HTTP 429 recibido en la Availability API de archive.org; fuente separada de CDX y Memento)"
                             "CDX_URL_PREFIX_QUARTER_TIMEOUT" -> "$code (agotó el tiempo una ventana trimestral de CDX)"
                             "WAYBACK_RATE_LIMITED" -> "$code (HTTP 429: consultas pausadas temporalmente para respetar el límite de Internet Archive)"
+                            "WAYBACK_BACKEND_UNAVAILABLE_COOLDOWN" -> "$code (circuito global temporal tras varios tiempos de espera/HTTP 503; se bloquean nuevas consultas a Archive.org durante la recuperación)"
                             "WAYBACK_DISABLED" -> "$code (búsqueda desactivada)"
                             "DIRECT_URL_INVALID" -> "$code (la URL guardada no es una página de comercio válida)"
                             "PRODUCT_TITLE_EMPTY" -> "$code (falta el nombre del producto)"

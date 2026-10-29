@@ -3683,9 +3683,11 @@ class WaybackPriceHistoryClient(
         val lastRequestAt = preferences.getLong(KEY_LAST_AVAILABILITY_REQUEST_AT, 0L)
         val waitMs = computeAvailabilityDelayMs(lastRequestAt, now)
         if (waitMs > 0L) delay(waitMs)
-        // Recheck after waiting; another client may have activated the cooldown.
-        if (activeRateLimitUntil(System.currentTimeMillis()) != null) return "WAYBACK_RATE_LIMITED"
-        preferences.edit().putLong(KEY_LAST_AVAILABILITY_REQUEST_AT, System.currentTimeMillis()).apply()
+        // Recheck both global gates after waiting; another client may have opened either circuit.
+        val afterWait = System.currentTimeMillis()
+        if (activeRateLimitUntil(afterWait) != null) return "WAYBACK_RATE_LIMITED"
+        if (activeBackendUnavailableUntil(afterWait) != null) return "WAYBACK_BACKEND_UNAVAILABLE_COOLDOWN"
+        preferences.edit().putLong(KEY_LAST_AVAILABILITY_REQUEST_AT, afterWait).apply()
         return null
     }
 

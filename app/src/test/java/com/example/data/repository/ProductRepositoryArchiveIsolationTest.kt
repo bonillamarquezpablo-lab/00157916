@@ -609,6 +609,21 @@ class ProductRepositoryArchiveIsolationTest {
                 observedAt = System.currentTimeMillis()
             )
             assertTrue(repository.filterVisibleLiveSearchResults(listOf(result), "móviles").isEmpty())
+
+            // A later provider update must also repair a legacy category mismatch, not just startup cleanup.
+            val staleMobileCategory = database.productDao().getProductById(productId)!!
+                .copy(category = ProductCategory.SMARTPHONES.name)
+            database.productDao().insert(staleMobileCategory)
+            repository.recordOnlineSearchResults(
+                results = listOf(result),
+                sourceType = "GOOGLE_SHOPPING",
+                searchQuery = title
+            )
+            assertEquals(
+                "A scooter result must not retain a stale Móviles category after an update",
+                ProductCategory.OTHER.name,
+                database.productDao().getProductById(productId)?.category
+            )
         } finally {
             database.close()
         }

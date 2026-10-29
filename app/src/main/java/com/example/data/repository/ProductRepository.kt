@@ -914,9 +914,11 @@ class ProductRepository(
                     title = group.title,
                     brand = existingProduct.brand.takeIf { it.isNotBlank() && it != "Sin marca" }
                         ?: inferProductBrand(group.title),
-                    category = if (existingProduct.category == ProductCategory.ALL.name) {
-                        inferProductCategory(group.title, searchQuery).name
-                    } else existingProduct.category,
+                    category = correctedCategoryForExistingListing(
+                        title = group.title,
+                        query = searchQuery,
+                        existingCategory = existingProduct.category
+                    ),
                     currentPrice = displayPrice ?: existingProduct.currentPrice,
                     athMinPrice = 0.0,
                     athMinDate = PENDING_VERIFICATION_DATE_LABEL,
@@ -1065,8 +1067,12 @@ class ProductRepository(
                     brand = if (hasTrustedOffer && existingProduct.brand.isBlank()) {
                         inferProductBrand(displayTitle)
                     } else existingProduct.brand,
-                    category = if (hasTrustedOffer && existingProduct.category == ProductCategory.ALL.name) {
-                        inferProductCategory(displayTitle, searchQuery).name
+                    category = if (hasTrustedOffer) {
+                        correctedCategoryForExistingListing(
+                            title = displayTitle,
+                            query = searchQuery,
+                            existingCategory = existingProduct.category
+                        )
                     } else existingProduct.category,
                     currentPrice = currentMinimum,
                     athMinPrice = if (hasTrustedOffer && existingProduct.athMinPrice <= 0.0) currentMinimum else existingProduct.athMinPrice,
@@ -1695,6 +1701,22 @@ class ProductRepository(
             "Acer", "Dell", "Philips", "Rowenta", "Cecotec", "Bosch", "LG", "TCL"
         )
         return brands.firstOrNull { title.contains(it, ignoreCase = true) } ?: "Sin marca"
+    }
+
+    /**
+     * Preserve an explicitly selected category unless the listing itself proves the old
+     * assignment is impossible. Mobility products are a known source of pollution in Móviles.
+     */
+    private fun correctedCategoryForExistingListing(
+        title: String,
+        query: String,
+        existingCategory: String
+    ): String {
+        if (isPersonalTransportVehicleListingTitle(title)) return ProductCategory.OTHER.name
+        if (existingCategory.isBlank() || existingCategory == ProductCategory.ALL.name) {
+            return inferProductCategory(title, query).name
+        }
+        return existingCategory
     }
 
     private fun inferProductCategory(title: String, query: String): ProductCategory {

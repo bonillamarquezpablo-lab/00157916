@@ -3159,7 +3159,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     // It does not repeat index scans and remains subject to the shared 429 gate.
                     val archiveBackendCoolingDown =
                         waybackPriceHistoryClient.activeBackendUnavailableUntil() != null
-                    val availabilityOnlyFallbackForCandidate =
+                    var availabilityOnlyFallbackForCandidate =
                         shouldUseAvailabilityOnlyFallbackAfterCdxTimeout(
                             searchCircuitOpen = skipDomainFallbacksForSearch || archiveBackendCoolingDown,
                             timeoutFallbackAvailable =
@@ -3358,9 +3358,21 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             // Persist a short global circuit so another product cannot immediately
                             // repeat the same failing traffic after this search completes.
                             waybackPriceHistoryClient.activateBackendUnavailableCooldown()
-                            // Allow at most the configured number of other merchants to use
-                            // Availability API only; never repeat CDX while the circuit is open.
+                            // Keep recovery available for this same candidate: the decision made
+                            // at loop entry predates the CDX timeouts observed during its direct lookup.
+                            // The fallback remains limited to two merchant candidates and never repeats CDX.
                             availabilityOnlyFallbackAfterCdxTimeoutAvailable = true
+                            availabilityOnlyFallbackForCandidate =
+                                shouldUseAvailabilityOnlyFallbackAfterCdxTimeout(
+                                    searchCircuitOpen = true,
+                                    timeoutFallbackAvailable = true,
+                                    rateLimited = rateLimitedAtDirectStage,
+                                    allDirectSnapshotsTimedOut = allDirectSnapshotsTimedOut,
+                                    directLookupTimedOut = candidateTimedOut,
+                                    hasMerchantDomain = merchantDomainForFallback != null,
+                                    usedFallbacks = availabilityOnlyFallbacksUsed,
+                                    maxFallbacks = MAX_AVAILABILITY_ONLY_FALLBACKS_AFTER_CDX_TIMEOUT
+                                )
                         }
                     }
                     if (rateLimitedAtDirectStage || allDirectSnapshotsTimedOut) {
@@ -3371,7 +3383,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         if (diagnosticProductId != null) {
                             reportWaybackDiagnostic(
                                 diagnosticProductId, 7, WaybackTraceStatus.SKIPPED,
-                                "Se omite otra ronda de consultas a Internet Archive: la búsqueda directa y los bloques anuales CDX agotaron el tiempo. Se conserva el histórico verificado y el cursor permitirá continuar por años en una búsqueda posterior, sin provocar más peticiones durante este intento."
+                                "El índice CDX agotó dos rutas. Se detienen nuevas consultas al índice, pero se conserva una recuperación limitada mediante Availability API para este comercio y, como máximo, otro candidato. Se conserva cualquier precio ya verificado."
                             )
                         }
                     } else if (!circuitWasAlreadyOpen && skipDomainFallbacksForSearch &&

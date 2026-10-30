@@ -40,6 +40,20 @@ import java.util.concurrent.CopyOnWriteArrayList
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class WaybackPriceHistoryClientTest {
+    /**
+     * Advances the request clock instead of sleeping. This keeps route/fallback tests fast while
+     * still exercising the same 2.5-second gate calculation and persisted timestamp updates.
+     */
+    private class ImmediateArchiveRequestClock {
+        private var currentTimeMs = System.currentTimeMillis()
+
+        fun nowMillis(): Long = currentTimeMs
+
+        suspend fun advanceBy(milliseconds: Long) {
+            currentTimeMs += milliseconds
+        }
+    }
+
     @Test
     fun historicalFallbackCandidatesMatchProductFamilyAndAreOrderedForCoverage() {
         val consoleStores = historicalRetailerFallbackStores(
@@ -841,8 +855,14 @@ class WaybackPriceHistoryClientTest {
         }.build()
 
         try {
+            val requestClock = ImmediateArchiveRequestClock()
             val result = withTimeout(12_000L) {
-                WaybackPriceHistoryClient(context, http).fetchHistory(
+                WaybackPriceHistoryClient(
+                    context,
+                    http,
+                    archiveRequestNowMs = requestClock::nowMillis,
+                    archiveRequestDelay = requestClock::advanceBy
+                ).fetchHistory(
                     originalUrl = originalUrl,
                     expectedTitle = title,
                     lookbackDays = 2_920
@@ -2994,8 +3014,14 @@ class WaybackPriceHistoryClientTest {
 
         try {
             val traceEvents = CopyOnWriteArrayList<WaybackTraceEvent>()
+            val requestClock = ImmediateArchiveRequestClock()
             val result = withTimeout(10_000L) {
-                WaybackPriceHistoryClient(context, http).fetchHistoryByMerchantDomain(
+                WaybackPriceHistoryClient(
+                    context,
+                    http,
+                    archiveRequestNowMs = requestClock::nowMillis,
+                    archiveRequestDelay = requestClock::advanceBy
+                ).fetchHistoryByMerchantDomain(
                     domain = "shop.example",
                     expectedTitle = title,
                     lookbackDays = 730,
@@ -3110,8 +3136,14 @@ class WaybackPriceHistoryClientTest {
         }.build()
 
         try {
+            val requestClock = ImmediateArchiveRequestClock()
             val result = withTimeout(25_000L) {
-                WaybackPriceHistoryClient(context, http).fetchHistoryByMerchantDomain(
+                WaybackPriceHistoryClient(
+                    context,
+                    http,
+                    archiveRequestNowMs = requestClock::nowMillis,
+                    archiveRequestDelay = requestClock::advanceBy
+                ).fetchHistoryByMerchantDomain(
                     domain = "shop.example",
                     expectedTitle = title,
                     lookbackDays = 730

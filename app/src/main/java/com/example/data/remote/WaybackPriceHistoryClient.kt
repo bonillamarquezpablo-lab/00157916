@@ -2277,6 +2277,8 @@ class WaybackPriceHistoryClient(
         var supplementalCdxChecked = 0
         if (verifiedSeriesUrl != null &&
             !probeDiagnostics.contains("WAYBACK_RATE_LIMITED") &&
+            !probeDiagnostics.contains("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS") &&
+            stopWhenEnoughNewPoints?.invoke() != true &&
             allowSupplementalCdxSeries
         ) {
             val seriesCacheKey = attemptKey(
@@ -2294,6 +2296,12 @@ class WaybackPriceHistoryClient(
                         onTrace, 4, WaybackTraceStatus.RUNNING,
                         "Availability confirmó una captura; se consulta CDX sobre la URL verificada para recuperar otras fechas."
                     )
+                    if (stopWhenEnoughNewPoints?.invoke() == true) {
+                        emitWaybackTrace(
+                            onTrace, 4, WaybackTraceStatus.SKIPPED,
+                            "Se omite CDX suplementario: ya se habían guardado suficientes fechas verificadas."
+                        )
+                    } else {
                     val seriesResult = queryCdxAndFetchPrices(
                         cdxUrl = seriesCdxUrl,
                         expectedTitle = expectedTitle,
@@ -2305,12 +2313,14 @@ class WaybackPriceHistoryClient(
                         cdxStage = "CDX_AVAILABILITY_SERIES",
                         snapshotTimeoutSeconds = SNAPSHOT_CALL_TIMEOUT_SECONDS,
                         onTrace = onTrace,
-                        knownProductTitlesById = knownProductTitlesById
+                        knownProductTitlesById = knownProductTitlesById,
+                        stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                     )
                     supplementalCdxQuotes += seriesResult.quotes
                     supplementalCdxDiagnostics += seriesResult.diagnosticCodes
                     supplementalCdxCaptures = seriesResult.capturesFound
                     supplementalCdxChecked = seriesResult.capturesChecked
+                    }
                 }
             } else {
                 emitWaybackTrace(

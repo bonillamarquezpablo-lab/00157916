@@ -74,16 +74,18 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
-    fun repeatedCdxTimeoutCircuitBlocksAvailabilityFanoutForEveryProductCategory() {
+    fun repeatedCdxTimeoutKeepsBoundedAvailabilityRecoveryForEveryProductCategory() {
         fun allowed(
             rateLimited: Boolean = false,
             snapshotsTimedOut: Boolean = false,
             outerTimeout: Boolean = false,
             used: Int = 0,
-            hasDomain: Boolean = true
+            hasDomain: Boolean = true,
+            circuitOpen: Boolean = true,
+            fallbackAvailable: Boolean = true
         ) = shouldUseAvailabilityOnlyFallbackAfterCdxTimeout(
-            searchCircuitOpen = true,
-            timeoutFallbackAvailable = true,
+            searchCircuitOpen = circuitOpen,
+            timeoutFallbackAvailable = fallbackAvailable,
             rateLimited = rateLimited,
             allDirectSnapshotsTimedOut = snapshotsTimedOut,
             directLookupTimedOut = outerTimeout,
@@ -92,12 +94,15 @@ class WaybackPriceHistoryClientTest {
             maxFallbacks = 2
         )
 
-        assertFalse("A shared CDX outage must not fan out to Availability on another retailer", allowed())
-        assertFalse("The circuit remains closed regardless of how many retailers were considered", allowed(used = 1))
-        assertFalse("HTTP 429 also blocks every Archive.org fallback", allowed(rateLimited = true))
+        assertTrue("A CDX outage may use the bounded Availability-only recovery route", allowed())
+        assertTrue("A second merchant may be tried without repeating CDX", allowed(used = 1))
+        assertFalse("The configured per-search fallback limit must be respected", allowed(used = 2))
+        assertFalse("HTTP 429 blocks every Archive.org fallback", allowed(rateLimited = true))
         assertFalse("Snapshot download timeouts must not start another lookup", allowed(snapshotsTimedOut = true))
         assertFalse("An outer timeout must not start another lookup", allowed(outerTimeout = true))
         assertFalse("A candidate without a valid merchant domain cannot use this path", allowed(hasDomain = false))
+        assertFalse("No recovery is attempted when the circuit is closed", allowed(circuitOpen = false))
+        assertFalse("No recovery is attempted when the fallback budget is unavailable", allowed(fallbackAvailable = false))
     }
 
     @Test

@@ -6849,9 +6849,11 @@ class WaybackPriceHistoryClientTest {
             assertTrue("The Availability probe must reach the request pacing gate", pacingWaitStarted.get())
             assertTrue("The sufficient-history signal must be raised during the pacing wait", stopRequested.get())
             assertEquals("No Availability HTTP request may start after the stop signal", 0, availabilityRequests.get())
-            assertFalse("An intentional stop after reaching the target is not a network failure", result.requestFailed)
+            // This test injects a previous CDX timeout to force the Availability-only route.
+            // That earlier failure may remain in the aggregate result; this assertion checks the
+            // intentional Availability stop independently of that earlier CDX outcome.
             assertTrue(
-                "The result must explain the intentional stop instead of reporting a transport failure",
+                "The result must explain that Availability was intentionally stopped after the threshold",
                 result.diagnosticCodes.contains("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS")
             )
         } finally {

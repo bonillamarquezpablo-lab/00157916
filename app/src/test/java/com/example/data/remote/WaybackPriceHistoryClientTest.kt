@@ -2069,6 +2069,20 @@ class WaybackPriceHistoryClientTest {
             "https://www.samsung.com/es/smartphones/galaxy-s/galaxy-s26-ultra/",
             storageColourUltraCandidates.first()
         )
+
+        val a27Candidates = client.buildAvailabilityCandidateUrls(
+            domain = "samsung.com",
+            expectedTitle = "Samsung Galaxy A27 5G"
+        )
+        assertEquals(
+            "Galaxy A-series products must use Samsung's Galaxy A folder, not the Galaxy S folder",
+            "https://www.samsung.com/es/smartphones/galaxy-a/galaxy-a27-5g/",
+            a27Candidates.first()
+        )
+        assertFalse(
+            "An A-series model must never be guessed under the Galaxy S product path",
+            a27Candidates.any { it.contains("/galaxy-s/galaxy-a27", ignoreCase = true) }
+        )
     }
 
     @Test
@@ -3596,25 +3610,37 @@ class WaybackPriceHistoryClientTest {
     @Test
     fun repeatedWaybackPrefixAndQuarterTimeoutsTripDomainFallbackCircuitBreaker() {
         assertTrue(
-            shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
+            shouldSkipDomainFallbackAfterCdxBackendFailure(
                 setOf("CDX_URL_PREFIX_TIMEOUT", "CDX_URL_PREFIX_YEAR_TIMEOUT")
             )
         )
         assertTrue(
             "A narrow quarterly timeout also means the CDX prefix backend is unhealthy",
-            shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
+            shouldSkipDomainFallbackAfterCdxBackendFailure(
                 setOf("CDX_URL_PREFIX_TIMEOUT", "CDX_URL_PREFIX_QUARTER_TIMEOUT")
             )
         )
         assertFalse(
             "A single timeout should still allow the bounded independent fallback",
-            shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
+            shouldSkipDomainFallbackAfterCdxBackendFailure(
                 setOf("CDX_URL_PREFIX_TIMEOUT")
+            )
+        )
+        assertTrue(
+            "A CDX HTTP 503 must open the index circuit and continue through Availability instead",
+            shouldSkipDomainFallbackAfterCdxBackendFailure(
+                setOf("CDX_URL_PREFIX_HTTP_503")
+            )
+        )
+        assertFalse(
+            "A successful empty CDX response alone is not a backend failure",
+            shouldSkipDomainFallbackAfterCdxBackendFailure(
+                setOf("CDX_URL_PREFIX_NO_CAPTURES")
             )
         )
         assertFalse(
             "An HTTP 429 is handled by the global cooldown instead",
-            shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
+            shouldSkipDomainFallbackAfterCdxBackendFailure(
                 setOf(
                     "CDX_URL_PREFIX_TIMEOUT",
                     "CDX_URL_PREFIX_YEAR_TIMEOUT",
@@ -3624,7 +3650,7 @@ class WaybackPriceHistoryClientTest {
         )
         assertFalse(
             "Other stages must not accidentally trip the Wayback-prefix circuit breaker",
-            shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
+            shouldSkipDomainFallbackAfterCdxBackendFailure(
                 setOf("CDX_DOMAIN_TIMEOUT", "CDX_URL_PREFIX_YEAR_TIMEOUT")
             )
         )

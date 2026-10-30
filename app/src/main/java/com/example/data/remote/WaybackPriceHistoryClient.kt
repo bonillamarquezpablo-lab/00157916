@@ -93,19 +93,30 @@ internal fun shouldSkipDomainFallbackAfterSnapshotTimeout(
 }
 
 /**
- * After the direct lookup, a broad prefix index timeout followed by a calendar-year index timeout
- * means the same Wayback CDX backend has failed on two bounded routes. In that case the next
- * merchant-domain Availability probes are likely to add traffic while the archive is struggling.
- * Keep the already verified quotes and let a later lookup resume from its saved year cursor.
- * A 429 remains the stronger global stop signal.
+ * Do not fan out into more CDX index scans when a URL-prefix route has shown a real backend
+ * failure. A single 5xx is sufficient evidence of a transient server problem; two bounded
+ * timeout routes are also sufficient. A clean HTTP 200 with zero captures is NOT a failure.
+ * Availability remains the bounded recovery route, and an HTTP 429 remains the stronger stop.
  */
 internal fun shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
     diagnosticCodes: Set<String>
-): Boolean =
-    diagnosticCodes.contains("CDX_URL_PREFIX_TIMEOUT") &&
-        (diagnosticCodes.contains("CDX_URL_PREFIX_YEAR_TIMEOUT") ||
-            diagnosticCodes.contains("CDX_URL_PREFIX_QUARTER_TIMEOUT")) &&
-        !diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
+): Boolean {
+    if (diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) return false
+    val retryablePrefixFailure = diagnosticCodes.any { code ->
+        (code.startsWith("CDX_URL_PREFIX") ||
+            code.startsWith("CDX_PRODUCT_PREFIX") ||
+            code.startsWith("CDX_ALTERNATE_PREFIX")) &&
+            (code.endsWith("_TIMEOUT") || code.endsWith("_DNS") || code.endsWith("_NETWORK") ||
+                (code.contains("_HTTP_") &&
+                    code.substringAfterLast('_').toIntOrNull()
+                        ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true))
+    }
+    val repeatedTimeoutRoutes =
+        diagnosticCodes.contains("CDX_URL_PREFIX_TIMEOUT") &&
+            (diagnosticCodes.contains("CDX_URL_PREFIX_YEAR_TIMEOUT") ||
+                diagnosticCodes.contains("CDX_URL_PREFIX_QUARTER_TIMEOUT"))
+    return retryablePrefixFailure || repeatedTimeoutRoutes
+}
 
 /**
  * Open a search-wide circuit breaker when direct archive recovery is already unhealthy.
@@ -3541,16 +3552,34 @@ class WaybackPriceHistoryClient(
                 .forEach { paths += "/es/$it/" }
         }
         if (normalizedDomain == "samsung.com") {
-            val canonicalSamsungSlugs = slugs.map(::canonicalRetailerProductSlug).distinct()
-            canonicalSamsungSlugs.filter { it.startsWith("galaxy-") }
-                .forEach { paths += "/es/smartphones/galaxy-s/$it/" }
-            slugs.filter { it.startsWith("galaxy-") }
-                .forEach { paths += "/es/smartphones/galaxy-s/$it/" }
+            // Samsung uses separate canonical folders for Galaxy A, S, Z and M families.
+            // Sending every "galaxy-*" slug to /galaxy-s/ silently creates invalid A-series URLs.
+            fun samsungFamilyFolder(slug: String): String? = when {
+                Regex("""^galaxy-a\d""").containsMatchIn(slug) -> "galaxy-a"
+                Regex("""^galaxy-s\d""").containsMatchIn(slug) -> "galaxy-s"
+                Regex("""^galaxy-z""").containsMatchIn(slug) -> "galaxy-z"
+                Regex("""^galaxy-m\d""").containsMatchIn(slug) -> "galaxy-m"
+                else -> null
+            }
+            val canonicalSamsungSlugs = (slugs.map(::canonicalRetailerProductSlug) + slugs)
+                .filter { it.startsWith("galaxy-") }
+                .distinct()
+            canonicalSamsungSlugs.forEach { slug ->
+                val familyFolder = samsungFamilyFolder(slug) ?: return@forEach
+                paths += "/es/smartphones/$familyFolder/$slug/"
+            }
 
-            // Saved product titles are sometimes shortened by shopping providers to
-            // "Samsung S26" or "Samsung S26 Ultra", omitting "Galaxy". Derive the
-            // canonical Samsung product path from the model code before trying generic
-            // slugs such as /s26/, which are very unlikely to be archived product pages.
+            // Shopping titles can omit "Galaxy" and only expose the model code.
+            // Preserve the correct product family instead of guessing a Galaxy S route.
+            val samsungAModel = Regex("""(?i)\bA\s*(\d{2,3})(?:\s*(5G))?\b""")
+                .find(expectedTitle)
+            if (samsungAModel != null) {
+                val modelSlug = "galaxy-a" + samsungAModel.groupValues[1] +
+                    if (samsungAModel.groupValues.getOrNull(2).orEmpty().isNotBlank()) "-5g" else ""
+                paths.add("/es/smartphones/galaxy-a/$modelSlug/")
+            }
+
+            // Keep the existing shortened Galaxy S handling for titles such as "Samsung S26".
             val samsungModel = Regex(
                 """(?i)\bS\s*(\d{1,2})(?:\s*(Ultra|Plus|FE|Edge))?\b"""
             ).find(expectedTitle)
@@ -3598,8 +3627,11 @@ class WaybackPriceHistoryClient(
         val orderedCandidates = if (normalizedDomain == "samsung.com") {
             val canonicalSamsungUrls = guessedProductUrls.filter { candidate ->
                 runCatching {
-                    URI(candidate).rawPath.orEmpty()
-                        .startsWith("/es/smartphones/galaxy-s/")
+                    val path = URI(candidate).rawPath.orEmpty()
+                    path.startsWith("/es/smartphones/galaxy-a/") ||
+                        path.startsWith("/es/smartphones/galaxy-s/") ||
+                        path.startsWith("/es/smartphones/galaxy-z/") ||
+                        path.startsWith("/es/smartphones/galaxy-m/")
                 }.getOrDefault(false)
             }
             val canonicalSet = canonicalSamsungUrls.toSet()

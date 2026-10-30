@@ -181,6 +181,29 @@ class ProductDetailSheetDiagnosticTest {
     }
 
     @Test
+    fun globalPauseTakesPriorityOverCacheMentionInDiagnosticLabel() {
+        val entries = listOf(
+            WaybackDiagnosticEntry(
+                step = 4,
+                title = "Precontrol de pausa global y preparación de consulta",
+                status = WaybackTraceStatus.SKIPPED,
+                detail = "[03:10:15] Comprobando configuración, caché y pausa global antes de solicitar datos al archivo.\n" +
+                    "[03:10:15] La pausa global bloqueó la petición antes de consultar CDX o Availability. HTTP 429."
+            )
+        )
+
+        val report = buildWaybackDiagnosticExportReport(
+            productTitle = "Samsung Galaxy A18",
+            freeHistoryStatus = "Internet Archive ha pedido una pausa temporal (HTTP 429).",
+            steps = entries,
+            generatedAt = "2026-10-30 03:10:52 GMT+01:00"
+        )
+
+        assertTrue(report.contains("4. Precontrol de pausa global y preparación de consulta — OMITIDO POR PAUSA"))
+        assertFalse(report.contains("4. Precontrol de pausa global y preparación de consulta — OMITIDO POR CACHÉ"))
+    }
+
+    @Test
     fun expandedConsistencyPhasesKeepFailuresVisible() {
         assertEquals(
             WaybackTraceStatus.FAILED,

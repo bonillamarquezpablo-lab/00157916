@@ -1715,3 +1715,57 @@ La última petición del HAR de esta búsqueda, a las 14:46:09, fue a `archive.o
   
 ### Conclusión de esta prueba
 La extracción y el guardado históricos ya están funcionando en el dispositivo. Los próximos defectos a corregir son: **(1)** refresco/confirmación de la ficha y gráfica (fase 29), **(2)** código diagnóstico de precio rechazado por condición reacondicionada, **(3)** coherencia entre cortocircuito inteligente y peticiones Availability posteriores. El HAR combina llamadas de búsquedas anteriores; para esta ejecución las entradas relevantes son las últimas peticiones de las 14:45:52–14:46:09.
+
+
+## 28. Resultado definitivo del CI #1070 y alcance de la validación — 30/10/2026
+
+### 28.1 Identificación de la ejecución
+
+- Workflow: **Compilar Mínimo APK**.
+- Run: [#1070](https://github.com/bonillamarquezpablo-lab/00157916/actions/runs/40990640592).
+- ID: \`40990640592\`.
+- SHA probado: \`d2d2f3f715c71d97aa7c60243397f4ed14b23957\`.
+- Resultado del job \`build\`: **failure**.
+- Etapa bloqueante: \`:app:testDebugUnitTest\`.
+- Resultado agregado: **482 pruebas ejecutadas, 4 fallidas y 1 omitida**.
+- \`compileDebugAndroidTestKotlin\`, \`assembleSideload\`, verificación del paquete/versión/firma y publicación de APK quedaron omitidos por la dependencia del job tras fallar las pruebas unitarias.
+- No se produjo una APK verificable en esta ejecución.
+
+### 28.2 Fallos exactos que muestra el log
+
+| Prueba | Resultado comunicado por CI | Interpretación |
+|---|---|---|
+| \`domainCdxHttp500FallsBackToAvailabilityAndSavesVerifiedPrice\` | Timeout a los 10.000 ms | La ruta de fallback no terminó dentro del límite de la prueba. Requiere revisar el orden de peticiones, el gate de ritmo y el presupuesto temporal del test. |
+| \`availabilityRequestsArePacedAndClockChangesCannotCreateLongWaits\` | Esperaba 1.000 ms y recibió 2.000 ms | La expectativa de la prueba estaba obsoleta respecto al valor de pacing que ya aplicaba el cliente en ese SHA. |
+| \`exactHistoryContinuesPrefixScanAfterThreeVerifiedDates\` | Timeout a los 12.000 ms | La prueba no terminó dentro de su presupuesto temporal. No demuestra por sí sola un fallo de extracción real; hay que revisar el comportamiento esperado y el coste de las peticiones simuladas. |
+| \`inferredMerchantUrlUsesAvailabilityFirstThenCdxForMultipleHistoricalDates\` | Timeout a los 25.000 ms | La secuencia de recuperación excedió el presupuesto de la prueba. Necesita diagnóstico específico, sin aumentar límites indiscriminadamente. |
+
+### 28.3 Relación con los commits posteriores
+
+El SHA probado por el run #1070 era \`d2d2f3f...\`. El código de \`main\` consultado posteriormente avanzó tres commits hasta \`723c3569b3b7c574677664ffcdf5fd4801dbfbcb\`.
+
+La comparación de esos commits muestra cambios en:
+- \`ProductDetailSheet.kt\`: prioridad del motivo «pausa» frente a «caché» al etiquetar una fase omitida;
+- \`WaybackPriceHistoryClientTest.kt\`: actualización de las expectativas de ritmo para reflejar el intervalo de 2.500 ms;
+- \`ProductDetailSheetDiagnosticTest.kt\`: nueva prueba de regresión para el diagnóstico de pausa global.
+
+Por tanto, el fallo de la aserción de 1.000 ms quedó abordado en el código de pruebas posterior. **No se debe afirmar que los tres timeouts estén corregidos**: hace falta ejecutar de nuevo la suite sobre el SHA actual, comprobar si persisten y resolverlos si corresponde.
+
+### 28.4 Qué significa para la versión y la APK
+
+- No hay APK de run #1070 que se pueda recomendar para instalar.
+- El run #1070 no prueba el código posterior a \`d2d2f3f...\`.
+- El commit documental que actualiza esta ficha tampoco modifica código de aplicación y no ejecuta el workflow Android, porque la ruta \`docs/\` no forma parte de los filtros de activación del workflow.
+- La última APK verificada que esta ficha puede acreditar expresamente sigue siendo la histórica \`1.7.1013.1\` del run #1013; no se presenta como la versión actual.
+- El siguiente hito de validación debe ser un workflow iniciado sobre el SHA actual de código o uno posterior, con las cuatro pruebas revisadas y todas las comprobaciones de APK completadas.
+
+### 28.5 Acciones técnicas pendientes derivadas de este run
+
+1. Ejecutar la suite unitaria sobre el código actual de \`main\`, no sobre el SHA anterior.
+2. Confirmar la expectativa de ritmo de 2.500 ms en todas las pruebas de pacing y eliminar expectativas heredadas de 1.000/1.500 ms cuando ya no representen la política real.
+3. Diagnosticar individualmente los tres timeouts: llamadas simuladas, cadencia, gates globales, reintentos y presupuesto de \`withTimeout\`.
+4. Si los tests exceden el tiempo solo por el reloj de pacing simulado, aislar el reloj/gate en pruebas sin debilitar la protección real de producción.
+5. No resolver los timeouts aumentando indiscriminadamente timeouts de producción, reintentos, concurrencia o número de peticiones.
+6. Tras corregir o confirmar las pruebas, repetir unit tests, compilación Android instrumentada, APK sideload, firma, versión y Chucker en el mismo SHA.
+
+**Estado:** fallo de CI documentado y causa parcial identificada. La expectativa obsoleta de ritmo tiene una corrección posterior; los tres timeouts siguen **en investigación**. La documentación está completa como referencia, pero la validación automatizada del código actual sigue pendiente.

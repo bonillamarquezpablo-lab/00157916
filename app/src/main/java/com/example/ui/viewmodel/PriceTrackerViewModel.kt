@@ -3345,7 +3345,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         !allDirectSnapshotsTimedOut &&
                         !candidateTimedOut
                     ) {
-                        val timeoutCodes = priorDirectCdxDiagnostics.filter { code ->
+                        val transientPrefixFailures = priorDirectCdxDiagnostics.filter { code ->
                             (code.startsWith("CDX_URL_PREFIX") ||
                                 code.startsWith("CDX_PRODUCT_PREFIX") ||
                                 code.startsWith("CDX_ALTERNATE_PREFIX")) &&
@@ -3354,15 +3354,15 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                                         code.substringAfterLast('_').toIntOrNull()
                                             ?.let { it in setOf(500, 502, 503, 504) } == true))
                         }
-                        searchCdxTimeoutDiagnostics.addAll(timeoutCodes)
-                        if (timeoutCodes.isNotEmpty()) {
+                        searchCdxTimeoutDiagnostics.addAll(transientPrefixFailures)
+                        if (transientPrefixFailures.isNotEmpty()) {
                             // A CDX timeout or transient HTTP 5xx indicates shared Archive.org backend trouble.
                             // Persist a short global circuit so another product cannot immediately
                             // repeat the same failing traffic after this search completes.
                             waybackPriceHistoryClient.activateBackendUnavailableCooldown()
                             // Keep recovery available for this same candidate: the decision made
                             // at loop entry predates the CDX timeouts observed during its direct lookup.
-                            // The fallback remains limited to two merchant candidates and never repeats CDX.
+                            // The fallback uses the remaining slots in the three-store budget and never repeats CDX.
                             availabilityOnlyFallbackAfterCdxTimeoutAvailable = true
                             availabilityOnlyFallbackForCandidate =
                                 shouldUseAvailabilityOnlyFallbackAfterCdxTimeout(
@@ -4009,7 +4009,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             "CANDIDATE_TIMEOUT" -> "$code (se agotó el tiempo total de la búsqueda de esta tienda)"
                             "CDX_URL_PREFIX_CANDIDATE_TIMEOUT" -> "$code (la consulta por prefijo superó su límite de tiempo)"
                             "CDX_DOMAIN_CANDIDATE_TIMEOUT" -> "$code (la búsqueda amplia por dominio superó su límite de tiempo)"
-                            "CDX_DOMAIN_FALLBACK_SKIPPED_AFTER_REPEATED_TIMEOUTS" -> "Se pausó la alternativa por dominio porque CDX agotó el tiempo en la búsqueda directa y en los bloques anuales; se evitaron más peticiones al archivo."
+                            "CDX_DOMAIN_FALLBACK_SKIPPED_AFTER_REPEATED_TIMEOUTS" -> "Se pausó la búsqueda de más rutas CDX tras un timeout o un error HTTP 5xx; se mantuvo la recuperación limitada por Availability."
                             "CDX_EARLY_EXIT_VALID_PRICE" -> "CDX_EARLY_EXIT_VALID_PRICE (se cancelaron alternativas al confirmar un precio)"
                             else -> code
                         }

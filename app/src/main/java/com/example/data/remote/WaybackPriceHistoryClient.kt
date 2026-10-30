@@ -6573,8 +6573,8 @@ class WaybackPriceHistoryClient(
         // Timeouts/transport failures are transient; allow a manual retry after two minutes.
         // Genuine empty results retain the longer negative cache to protect Internet Archive.
         const val FAILURE_RETRY_INTERVAL_MS = 2L * 60L * 1000L
-        // Kept at 1.5 seconds globally across CDX, Availability, and snapshot requests.
-        private const val MIN_AVAILABILITY_REQUEST_INTERVAL_MS = 1_500L
+        // Conservative shared cadence: at most one archive request every 2.5 seconds across CDX, Availability, and snapshots.
+        private const val MIN_AVAILABILITY_REQUEST_INTERVAL_MS = 2_500L
         // Retain this legacy preference key so older saved pacing timestamps still apply.
         private const val KEY_LAST_AVAILABILITY_REQUEST_AT = "wayback_last_availability_request_at"
         private const val MIN_RATE_LIMIT_COOLDOWN_MS = 60L * 1000L

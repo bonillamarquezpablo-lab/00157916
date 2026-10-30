@@ -3610,37 +3610,37 @@ class WaybackPriceHistoryClientTest {
     @Test
     fun repeatedWaybackPrefixAndQuarterTimeoutsTripDomainFallbackCircuitBreaker() {
         assertTrue(
-            shouldSkipDomainFallbackAfterCdxBackendFailure(
+            shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
                 setOf("CDX_URL_PREFIX_TIMEOUT", "CDX_URL_PREFIX_YEAR_TIMEOUT")
             )
         )
         assertTrue(
             "A narrow quarterly timeout also means the CDX prefix backend is unhealthy",
-            shouldSkipDomainFallbackAfterCdxBackendFailure(
+            shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
                 setOf("CDX_URL_PREFIX_TIMEOUT", "CDX_URL_PREFIX_QUARTER_TIMEOUT")
             )
         )
         assertFalse(
             "A single timeout should still allow the bounded independent fallback",
-            shouldSkipDomainFallbackAfterCdxBackendFailure(
+            shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
                 setOf("CDX_URL_PREFIX_TIMEOUT")
             )
         )
         assertTrue(
             "A CDX HTTP 503 must open the index circuit and continue through Availability instead",
-            shouldSkipDomainFallbackAfterCdxBackendFailure(
+            shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
                 setOf("CDX_URL_PREFIX_HTTP_503")
             )
         )
         assertFalse(
             "A successful empty CDX response alone is not a backend failure",
-            shouldSkipDomainFallbackAfterCdxBackendFailure(
+            shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
                 setOf("CDX_URL_PREFIX_NO_CAPTURES")
             )
         )
         assertFalse(
             "An HTTP 429 is handled by the global cooldown instead",
-            shouldSkipDomainFallbackAfterCdxBackendFailure(
+            shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
                 setOf(
                     "CDX_URL_PREFIX_TIMEOUT",
                     "CDX_URL_PREFIX_YEAR_TIMEOUT",
@@ -3650,7 +3650,7 @@ class WaybackPriceHistoryClientTest {
         )
         assertFalse(
             "Other stages must not accidentally trip the Wayback-prefix circuit breaker",
-            shouldSkipDomainFallbackAfterCdxBackendFailure(
+            shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
                 setOf("CDX_DOMAIN_TIMEOUT", "CDX_URL_PREFIX_YEAR_TIMEOUT")
             )
         )

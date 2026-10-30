@@ -426,10 +426,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
         const val TRACKED_REFRESH_COOLDOWN_MS = 24L * 60L * 60L * 1000L
         const val MAX_TRACKED_REFRESH_PER_TAP = 10
         const val MAX_ARCHIVE_PAGES_PER_SEARCH = 3
-        // Once two direct CDX routes time out, don't send another CDX request. Still allow the
-        // remaining retailer slots to use up to three bounded Availability probes each.
+        // Once direct CDX routes time out, don't send another CDX request. Every retailer
+        // slot already admitted by the three-store search budget may switch to Availability-only.
+        // The first store's domain fallback is still that same store, not an extra retailer;
+        // subtracting one here accidentally left the final (often manufacturer) candidate unused.
         const val MAX_AVAILABILITY_ONLY_FALLBACKS_AFTER_CDX_TIMEOUT =
-            MAX_ARCHIVE_PAGES_PER_SEARCH - 1
+            MAX_ARCHIVE_PAGES_PER_SEARCH
         // Historical lookup is a user-triggered background action. Reserve time for the
         // CDX query and a representative set of dated captures; a too-short outer timeout
         // cancels useful HTML downloads before they can be validated and saved.

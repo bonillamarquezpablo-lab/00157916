@@ -3155,12 +3155,15 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     repository.allProductsStream.first().associate { it.id to it.title }
                 }.orEmpty()
                 for (candidate in candidates) {
-                    // Once the shared Archive.org circuit is open, do not fan out to Availability
-                    // on other retailers. Memento/Arquivo.pt is the independent recovery route.
+                    // When CDX is unhealthy, keep a small Availability-only recovery path.
+                    // It does not repeat index scans and remains subject to the shared 429 gate.
+                    val archiveBackendCoolingDown =
+                        waybackPriceHistoryClient.activeBackendUnavailableUntil() != null
                     val availabilityOnlyFallbackForCandidate =
                         shouldUseAvailabilityOnlyFallbackAfterCdxTimeout(
-                            searchCircuitOpen = skipDomainFallbacksForSearch,
-                            timeoutFallbackAvailable = availabilityOnlyFallbackAfterCdxTimeoutAvailable,
+                            searchCircuitOpen = skipDomainFallbacksForSearch || archiveBackendCoolingDown,
+                            timeoutFallbackAvailable =
+                                availabilityOnlyFallbackAfterCdxTimeoutAvailable || archiveBackendCoolingDown,
                             rateLimited = waybackPriceHistoryClient.activeRateLimitUntil() != null,
                             allDirectSnapshotsTimedOut = false,
                             directLookupTimedOut = false,
@@ -3355,10 +3358,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             // Persist a short global circuit so another product cannot immediately
                             // repeat the same failing traffic after this search completes.
                             waybackPriceHistoryClient.activateBackendUnavailableCooldown()
-                            availabilityOnlyFallbackAfterCdxTimeoutAvailable = false
+                            // Allow at most the configured number of other merchants to use
+                            // Availability API only; never repeat CDX while the circuit is open.
+                            availabilityOnlyFallbackAfterCdxTimeoutAvailable = true
                         }
                     }
-                    if (rateLimitedAtDirectStage || allDirectSnapshotsTimedOut || candidateTimedOut) {
+                    if (rateLimitedAtDirectStage || allDirectSnapshotsTimedOut) {
                         availabilityOnlyFallbackAfterCdxTimeoutAvailable = false
                     }
                     if (repeatedCdxTimeouts) {

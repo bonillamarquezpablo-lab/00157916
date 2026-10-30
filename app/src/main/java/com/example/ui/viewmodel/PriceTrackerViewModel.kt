@@ -14,7 +14,7 @@ import com.example.data.remote.MementoClient
 import com.example.data.remote.shouldAttemptMementoFallback
 import com.example.data.remote.hasMatchingExplicitStorageCapacity
 import com.example.data.remote.shouldSkipDomainFallbackAfterSnapshotTimeout
-import com.example.data.remote.shouldSkipDomainFallbackAfterRepeatedCdxTimeouts
+import com.example.data.remote.shouldSkipDomainFallbackAfterCdxBackendFailure
 import com.example.data.remote.shouldOpenArchiveDomainFallbackCircuit
 import com.example.data.remote.shouldTryDomainFallbackForArchiveCandidate
 import com.example.data.remote.shouldUseAvailabilityOnlyFallbackAfterCdxTimeout
@@ -3327,20 +3327,20 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     val rateLimitedAtDirectStage =
                         attempts.any { it.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") }
                     val priorDirectCdxDiagnostics = attempts.flatMap { it.diagnosticCodes }.toSet()
-                    val repeatedCdxTimeouts =
-                        shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(priorDirectCdxDiagnostics)
+                    val cdxBackendUnhealthy =
+                        shouldSkipDomainFallbackAfterCdxBackendFailure(priorDirectCdxDiagnostics)
                     val allDirectSnapshotsTimedOut =
                         shouldSkipDomainFallbackAfterSnapshotTimeout(attempts)
                     val merchantDomainForFallback = candidate.merchantDomain
                     val circuitWasAlreadyOpen = skipDomainFallbacksForSearch
                     val openCircuitNow = shouldOpenArchiveDomainFallbackCircuit(
-                        repeatedCdxTimeouts = repeatedCdxTimeouts,
+                        repeatedCdxTimeouts = cdxBackendUnhealthy,
                         rateLimited = rateLimitedAtDirectStage,
                         allDirectSnapshotsTimedOut = allDirectSnapshotsTimedOut,
                         directLookupTimedOut = candidateTimedOut
                     )
                     if (openCircuitNow) skipDomainFallbacksForSearch = true
-                    if (repeatedCdxTimeouts &&
+                    if (cdxBackendUnhealthy &&
                         !rateLimitedAtDirectStage &&
                         !allDirectSnapshotsTimedOut &&
                         !candidateTimedOut
@@ -3356,7 +3356,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         }
                         searchCdxTimeoutDiagnostics.addAll(timeoutCodes)
                         if (timeoutCodes.isNotEmpty()) {
-                            // Two failed CDX routes indicate shared Archive.org backend trouble.
+                            // A CDX timeout or transient HTTP 5xx indicates shared Archive.org backend trouble.
                             // Persist a short global circuit so another product cannot immediately
                             // repeat the same failing traffic after this search completes.
                             waybackPriceHistoryClient.activateBackendUnavailableCooldown()
@@ -3380,12 +3380,12 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                     if (rateLimitedAtDirectStage || allDirectSnapshotsTimedOut) {
                         availabilityOnlyFallbackAfterCdxTimeoutAvailable = false
                     }
-                    if (repeatedCdxTimeouts) {
+                    if (cdxBackendUnhealthy) {
                         diagnosticCodes.add("CDX_DOMAIN_FALLBACK_SKIPPED_AFTER_REPEATED_TIMEOUTS")
                         if (diagnosticProductId != null) {
                             reportWaybackDiagnostic(
                                 diagnosticProductId, 7, WaybackTraceStatus.SKIPPED,
-                                "El índice CDX agotó dos rutas. Se detienen nuevas consultas al índice, pero se conserva una recuperación limitada mediante Availability API para este comercio y, como máximo, otro candidato. Se conserva cualquier precio ya verificado."
+                                "CDX no responde de forma fiable (timeout o error HTTP 5xx). Se detienen nuevas consultas al índice, pero se conserva una recuperación limitada mediante Availability API. Se mantienen los precios ya verificados."
                             )
                         }
                     } else if (!circuitWasAlreadyOpen && skipDomainFallbacksForSearch &&
@@ -3426,7 +3426,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             reportWaybackDiagnostic(
                                 diagnosticProductId, 7, WaybackTraceStatus.RUNNING,
                                 if (availabilityOnlyFallbackForCandidate) {
-                                    "CDX ha agotado dos rutas; se prueba un comercio adicional con Availability API, sin repetir consultas CDX."
+                                    "CDX ha fallado temporalmente; se prueba Availability API sin repetir consultas al índice."
                                 } else {
                                     "Se activa la alternativa por dominio; se mantienen la caché y los límites de consultas."
                                 }

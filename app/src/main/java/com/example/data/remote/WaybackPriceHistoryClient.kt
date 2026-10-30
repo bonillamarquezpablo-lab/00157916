@@ -999,7 +999,9 @@ class WaybackPriceHistoryClient(
             // A previous retailer has already exhausted two direct CDX routes. In this special
             // mode, don't query the index again: go directly to the independent, bounded
             // Availability API for this retailer's own product/search URLs.
-            if (availabilityOnlyAfterPriorTimeout) {
+            if (availabilityOnlyAfterPriorTimeout ||
+                activeBackendUnavailableUntil() != null
+            ) {
                 val inheritedTimeoutCodes = priorCdxDiagnostics.filter { code ->
                     (code.startsWith("CDX_URL_PREFIX") ||
                         code.startsWith("CDX_PRODUCT_PREFIX") ||

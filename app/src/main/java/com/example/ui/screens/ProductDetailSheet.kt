@@ -380,8 +380,10 @@ internal fun buildWaybackDiagnosticExportReport(
             WaybackTraceStatus.SKIPPED -> {
                 val detail = entry.detail.lowercase(Locale.ROOT)
                 when {
-                    detail.contains("caché") || detail.contains("cache") -> "OMITIDO POR CACHÉ"
+                    // Pause is the real reason when the precheck text mentions both cache
+                    // and the global cooldown. Check it first so reports do not mislabel a 429.
                     detail.contains("pausa") || detail.contains("cooldown") -> "OMITIDO POR PAUSA"
+                    detail.contains("caché") || detail.contains("cache") -> "OMITIDO POR CACHÉ"
                     detail.contains("no ejecutado") || detail.contains("la cadena terminó antes") ->
                         "NO EJECUTADO"
                     else -> "OMITIDO / NO APLICABA"

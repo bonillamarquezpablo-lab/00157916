@@ -4006,6 +4006,16 @@ class WaybackPriceHistoryClient(
         primarySeedQuotes: List<ArchivedPriceQuote> = emptyList(),
         stopWhenEnoughNewPoints: (() -> Boolean)? = null
     ): WaybackBackfillResult {
+        if (stopWhenEnoughNewPoints?.invoke() == true) {
+            emitWaybackTrace(
+                onTrace, 4, WaybackTraceStatus.SKIPPED,
+                "$cdxStage: consulta omitida porque ya se habían guardado suficientes fechas."
+            )
+            return WaybackBackfillResult(
+                requestFailed = true,
+                diagnosticCodes = setOf("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS")
+            )
+        }
         emitWaybackTrace(onTrace, 4, WaybackTraceStatus.RUNNING,
             "$cdxStage: petición CDX preparada; URL completa omitida.")
         val startedAt = System.nanoTime()
@@ -4017,6 +4027,15 @@ class WaybackPriceHistoryClient(
                 emitWaybackTrace(onTrace, 5, WaybackTraceStatus.SKIPPED,
                     "No hubo respuesta HTTP porque la petición no salió.")
                 CdxIndexOutcome(requestFailed = true, diagnosticCodes = setOf(gate))
+            } else if (stopWhenEnoughNewPoints?.invoke() == true) {
+                emitWaybackTrace(onTrace, 4, WaybackTraceStatus.SKIPPED,
+                    "Consulta CDX no enviada: el objetivo de fechas se alcanzó durante la espera de ritmo.")
+                emitWaybackTrace(onTrace, 5, WaybackTraceStatus.SKIPPED,
+                    "No hubo respuesta HTTP porque la consulta se canceló antes de enviarse.")
+                CdxIndexOutcome(
+                    requestFailed = true,
+                    diagnosticCodes = setOf("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS")
+                )
             } else {
                 emitWaybackTrace(onTrace, 4, WaybackTraceStatus.PASSED, "$cdxStage: petición CDX enviada.")
                 emitWaybackTrace(onTrace, 5, WaybackTraceStatus.RUNNING, "$cdxStage: esperando respuesta.")
@@ -4092,7 +4111,10 @@ class WaybackPriceHistoryClient(
                 diagnosticStep = 18
             )
             val rateLimited = cdxOutcome.diagnosticCodes.contains("WAYBACK_RATE_LIMITED")
-            rememberAttempt(cacheKey, now, hasQuotes = false, failed = true, rateLimited = rateLimited)
+            val stoppedAfterEnough = cdxOutcome.diagnosticCodes.contains("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS")
+            if (!stoppedAfterEnough) {
+                rememberAttempt(cacheKey, now, hasQuotes = false, failed = true, rateLimited = rateLimited)
+            }
             return WaybackBackfillResult(
                 requestFailed = true,
                 diagnosticCodes = cdxOutcome.diagnosticCodes

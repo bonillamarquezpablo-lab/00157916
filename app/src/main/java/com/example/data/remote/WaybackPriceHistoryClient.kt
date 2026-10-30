@@ -4016,7 +4016,7 @@ class WaybackPriceHistoryClient(
                 "$cdxStage: consulta omitida porque ya se habían guardado suficientes fechas."
             )
             return WaybackBackfillResult(
-                requestFailed = true,
+                requestFailed = false,
                 diagnosticCodes = setOf("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS")
             )
         }

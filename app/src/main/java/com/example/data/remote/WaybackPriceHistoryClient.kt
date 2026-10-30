@@ -102,20 +102,19 @@ internal fun shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(
     diagnosticCodes: Set<String>
 ): Boolean {
     if (diagnosticCodes.contains("WAYBACK_RATE_LIMITED")) return false
-    val retryablePrefixFailure = diagnosticCodes.any { code ->
+    val transientServerFailure = diagnosticCodes.any { code ->
         (code.startsWith("CDX_URL_PREFIX") ||
             code.startsWith("CDX_PRODUCT_PREFIX") ||
             code.startsWith("CDX_ALTERNATE_PREFIX")) &&
-            (code.endsWith("_TIMEOUT") || code.endsWith("_DNS") || code.endsWith("_NETWORK") ||
-                (code.contains("_HTTP_") &&
-                    code.substringAfterLast('_').toIntOrNull()
-                        ?.let { it in RETRYABLE_CDX_HTTP_CODES } == true))
+            code.contains("_HTTP_") &&
+            code.substringAfterLast('_').toIntOrNull()
+                ?.let { it in setOf(500, 502, 503, 504) } == true
     }
     val repeatedTimeoutRoutes =
         diagnosticCodes.contains("CDX_URL_PREFIX_TIMEOUT") &&
             (diagnosticCodes.contains("CDX_URL_PREFIX_YEAR_TIMEOUT") ||
                 diagnosticCodes.contains("CDX_URL_PREFIX_QUARTER_TIMEOUT"))
-    return retryablePrefixFailure || repeatedTimeoutRoutes
+    return transientServerFailure || repeatedTimeoutRoutes
 }
 
 /**

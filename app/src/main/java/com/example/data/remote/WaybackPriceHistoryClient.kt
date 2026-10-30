@@ -2350,12 +2350,13 @@ class WaybackPriceHistoryClient(
                     it.observedAt.toString(), it.price.toString(), it.currency.uppercase(Locale.ROOT)
                 )
             }
+        val stoppedAfterEnough = probeDiagnostics.contains("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS")
         val diagnostics = linkedSetOf<String>().apply {
             addAll(probeDiagnostics)
             addAll(supplementalCdxDiagnostics)
             fetched.mapNotNullTo(this) { it.diagnosticCode }
-            if (quotes.isEmpty() && fetched.any { it.fetched }) add("NO_VERIFIED_EUR_PRICE")
-            else if (quotes.isEmpty() && isEmpty()) add("${stage}_NO_VERIFIED_PRICE")
+            if (!stoppedAfterEnough && quotes.isEmpty() && fetched.any { it.fetched }) add("NO_VERIFIED_EUR_PRICE")
+            else if (!stoppedAfterEnough && quotes.isEmpty() && isEmpty()) add("${stage}_NO_VERIFIED_PRICE")
         }
         val verifiedBeforeDedup = (
             fetched.flatMap { snapshot -> listOfNotNull(snapshot.quote) + snapshot.additionalQuotes } +
@@ -2397,18 +2398,19 @@ class WaybackPriceHistoryClient(
         // If no verified quote was obtained and any probe/download failed, treat the attempt as
         // transient. A successful HTML download with a mismatching title is a clean negative;
         // a timeout of a sibling capture is not.
-        val stoppedAfterEnough = probeDiagnostics.contains("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS")
         val failed = !stoppedAfterEnough && quotes.isEmpty() && (
             successfulProbes == 0 || failedProbeCount > 0 || anySnapshotFailed
         )
-        rememberAttempt(
-            cacheKey,
-            now,
-            hasQuotes = quotes.isNotEmpty(),
-            failed = failed,
-            rateLimited = probeDiagnostics.contains("WAYBACK_RATE_LIMITED") ||
-                fetched.any { it.diagnosticCode == "WAYBACK_RATE_LIMITED" }
-        )
+        if (!stoppedAfterEnough) {
+            rememberAttempt(
+                cacheKey,
+                now,
+                hasQuotes = quotes.isNotEmpty(),
+                failed = failed,
+                rateLimited = probeDiagnostics.contains("WAYBACK_RATE_LIMITED") ||
+                    fetched.any { it.diagnosticCode == "WAYBACK_RATE_LIMITED" }
+            )
+        }
         return WaybackBackfillResult(
             quotes = quotes,
             capturesFound = maxOf(captures.size, supplementalCdxCaptures),

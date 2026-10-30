@@ -106,6 +106,63 @@ class WaybackPriceHistoryClientTest {
     }
 
     @Test
+    fun availabilityOnlyFallbackSendsRequestsWhileCdxBackendCircuitIsOpen() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        val requests = CopyOnWriteArrayList<String>()
+        val mockHttp = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            requests += request.url.toString()
+            assertEquals("archive.org", request.url.host)
+            assertEquals("/wayback/available", request.url.encodedPath)
+            Response.Builder()
+                .request(request)
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .header("Content-Type", "application/json; charset=utf-8")
+                .body("""{"archived_snapshots":{}}""".toResponseBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+        }.build()
+        val client = WaybackPriceHistoryClient(context, mockHttp)
+        client.clearRateLimitForTests()
+        preferences.edit()
+            .putLong("wayback_backend_unavailable_until", System.currentTimeMillis() + 120_000L)
+            .commit()
+
+        try {
+            val result = withTimeout(20_000L) {
+                client.fetchHistoryByMerchantDomain(
+                    domain = "shop.example",
+                    expectedTitle = "Anker Prime 27K Power Bank",
+                    preferredUrl = "https://shop.example/products/anker-prime-27k",
+                    priorCdxDiagnostics = setOf(
+                        "CDX_URL_PREFIX_TIMEOUT",
+                        "CDX_URL_PREFIX_QUARTER_TIMEOUT"
+                    ),
+                    availabilityOnlyAfterPriorTimeout = true,
+                    forceRefresh = false
+                )
+            }
+
+            assertTrue(
+                "The CDX circuit must not silently block the independent Availability-only recovery",
+                requests.isNotEmpty()
+            )
+            assertTrue(
+                "Availability-only recovery must not repeat CDX index scans",
+                requests.none { it.contains("web.archive.org/cdx/search/cdx") }
+            )
+            assertFalse(
+                "An open CDX outage circuit is not itself a 429 rate limit",
+                result.diagnosticCodes.contains("WAYBACK_BACKEND_UNAVAILABLE_COOLDOWN")
+            )
+        } finally {
+            client.clearRateLimitForTests()
+        }
+    }
+
+    @Test
     fun playstationAvailabilityUsesTheOfficialStoreRouteInsteadOfGuessedSonyUrls() {
         val client = newClient()
         assertEquals(

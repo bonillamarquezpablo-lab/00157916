@@ -91,7 +91,7 @@ class WaybackPriceHistoryClientTest {
             directLookupTimedOut = outerTimeout,
             hasMerchantDomain = hasDomain,
             usedFallbacks = used,
-            maxFallbacks = 2
+            maxFallbacks = 3
         )
 
         assertTrue("The primary retailer can recover through Availability after CDX fails", allowed())

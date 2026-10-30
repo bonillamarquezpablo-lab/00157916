@@ -6849,6 +6849,7 @@ class WaybackPriceHistoryClientTest {
             assertTrue("The Availability probe must reach the request pacing gate", pacingWaitStarted.get())
             assertTrue("The sufficient-history signal must be raised during the pacing wait", stopRequested.get())
             assertEquals("No Availability HTTP request may start after the stop signal", 0, availabilityRequests.get())
+            assertFalse("An intentional stop after reaching the target is not a network failure", result.requestFailed)
             assertTrue(
                 "The result must explain the intentional stop instead of reporting a transport failure",
                 result.diagnosticCodes.contains("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS")

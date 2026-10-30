@@ -2397,7 +2397,8 @@ class WaybackPriceHistoryClient(
         // If no verified quote was obtained and any probe/download failed, treat the attempt as
         // transient. A successful HTML download with a mismatching title is a clean negative;
         // a timeout of a sibling capture is not.
-        val failed = quotes.isEmpty() && (
+        val stoppedAfterEnough = probeDiagnostics.contains("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS")
+        val failed = !stoppedAfterEnough && quotes.isEmpty() && (
             successfulProbes == 0 || failedProbeCount > 0 || anySnapshotFailed
         )
         rememberAttempt(
@@ -2413,7 +2414,8 @@ class WaybackPriceHistoryClient(
             capturesFound = maxOf(captures.size, supplementalCdxCaptures),
             capturesChecked = fetched.count { it.fetched && !it.reused } + supplementalCdxChecked,
             available = successfulProbes > 0,
-            requestFailed = quotes.isEmpty() && (failed || (anySnapshotFailed && successfulProbes == 0)),
+            requestFailed = !stoppedAfterEnough && quotes.isEmpty() &&
+                (failed || (anySnapshotFailed && successfulProbes == 0)),
             diagnosticCodes = diagnostics
         )
     }
@@ -4116,7 +4118,7 @@ class WaybackPriceHistoryClient(
                 rememberAttempt(cacheKey, now, hasQuotes = false, failed = true, rateLimited = rateLimited)
             }
             return WaybackBackfillResult(
-                requestFailed = true,
+                requestFailed = !stoppedAfterEnough,
                 diagnosticCodes = cdxOutcome.diagnosticCodes
             )
         }

@@ -1817,7 +1817,7 @@ Las tres pruebas de regresión afectadas usan ahora un reloj simulado que avanza
 | APK | `app-sideload.apk` |
 | Tamaño APK | 25.881.609 bytes |
 | SHA-256 APK | `9d143f56b7bccc665987855e329d5ae8200b47d18b3e632f38e2abff57c00e7b` |
-| Certificado SHA-256 | `f631a8c0a194008e77e312a78775e95837dbc66df635eae9b966e5c294add450` |
+| Certificado SHA-256 | `f631a8c0a194008e77a312a78775e95837dbc66df635eae9b966e5c294add450` |
 | Manifiesto | No depurable (`android:debuggable` no activado) |
 | Chucker | `ChuckerInterceptor` encontrado en 5 archivos DEX |
 | Artefacto GitHub | `minimo-apk`, ID `12949898617` |

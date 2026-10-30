@@ -1769,3 +1769,66 @@ Por tanto, el fallo de la aserción de 1.000 ms quedó abordado en el código de
 6. Tras corregir o confirmar las pruebas, repetir unit tests, compilación Android instrumentada, APK sideload, firma, versión y Chucker en el mismo SHA.
 
 **Estado:** fallo de CI documentado y causa parcial identificada. La expectativa obsoleta de ritmo tiene una corrección posterior; los tres timeouts siguen **en investigación**. La documentación está completa como referencia, pero la validación automatizada del código actual sigue pendiente.
+
+
+## 29. Corrección de pruebas de ritmo, validación completa y APK 1.7.1072.1 — 30/10/2026
+
+### 29.1 Causa de los tres timeouts
+
+La política de protección mantiene una separación mínima global de **2.500 ms** entre solicitudes a Internet Archive. Esa espera se aplicaba también a las peticiones simuladas de algunas pruebas de integración del cliente histórico. Tres pruebas ejecutaban varias solicitudes CDX, Availability y descargas HTML dentro de límites de 10, 12 y 25 segundos; el tiempo artificial de espera hacía que sus límites pudieran vencer antes de terminar el escenario simulado.
+
+No era correcto reducir el intervalo de producción ni ampliar indiscriminadamente los timeouts de red para ocultar el problema.
+
+### 29.2 Corrección aplicada
+
+Se añadió al constructor de `WaybackPriceHistoryClient` una frontera inyectable para:
+- la lectura del reloj usado por el control de ritmo;
+- la espera correspondiente a ese intervalo.
+
+Los valores predeterminados de producción siguen siendo el reloj real del sistema (`System.currentTimeMillis()`) y la espera real de corrutina (`delay(ms)`). Por tanto, el intervalo global de **2.500 ms**, el semáforo, los circuit breakers, los cooldowns HTTP 429 y la cadencia de peticiones no se han reducido ni desactivado.
+
+Las tres pruebas de regresión afectadas usan ahora un reloj simulado que avanza exactamente el intervalo solicitado sin dormir el hilo de pruebas. La prueba específica de cálculo del ritmo conserva las comprobaciones de 2.000 ms, 500 ms y el límite de 2.500 ms ante un retroceso del reloj.
+
+**Cambios de código:**
+- Commit `635f9d1a0e3f7c410ec22805d7d12afa90cd2dd8`: frontera inyectable del reloj y espera de peticiones.
+- Commit `9817464d4a10d836db7c6f63b51ad22d964908b3`: reloj simulado en las tres pruebas de recuperación.
+- Rama: `main`; no se creó una rama nueva.
+- El cambio no modifica Room, sus migraciones, las entidades, ni los datos históricos del usuario.
+
+### 29.3 Resultado del CI #1072
+
+- Ejecución: [CI #1072](https://github.com/bonillamarquezpablo-lab/00157916/actions/runs/40993408464).
+- Estado: **success**.
+- SHA probado: `9817464d4a10d836db7c6f63b51ad22d964908b3`.
+- ` :app:testDebugUnitTest `: **BUILD SUCCESSFUL**, 5 min 2 s.
+- El comprobador de informes XML examinó 40 informes y no encontró elementos de fallo.
+- ` :app:compileDebugAndroidTestKotlin `: **BUILD SUCCESSFUL**.
+- ` :app:assembleSideload `: **BUILD SUCCESSFUL**, 3 min 12 s.
+- Verificación de paquete, versión, firma, manifiesto no depurable e integración de Chucker: superadas.
+- El artefacto `minimo-apk` quedó guardado durante 7 días, hasta el 06/11/2026 a las 02:53:55 UTC.
+
+### 29.4 Identidad y comprobaciones de la APK generada
+
+| Propiedad | Resultado verificado |
+|---|---|
+| Versión | `1.7.1072.1` |
+| versionCode | `117201` |
+| Application ID | `com.aistudio.preciominimo.esrxvt` |
+| APK | `app-sideload.apk` |
+| Tamaño APK | 25.881.609 bytes |
+| SHA-256 APK | `9d143f56b7bccc665987855e329d5ae8200b47d18b3e632f38e2abff57c00e7b` |
+| Certificado SHA-256 | `f631a8c0a194008e77e312a78775e95837dbc66df635eae9b966e5c294add450` |
+| Manifiesto | No depurable (`android:debuggable` no activado) |
+| Chucker | `ChuckerInterceptor` encontrado en 5 archivos DEX |
+| Artefacto GitHub | `minimo-apk`, ID `12949898617` |
+| Run | `40993408464` |
+
+La firma coincide con el certificado estable autorizado por el workflow. El SHA-256 calculado sobre el APK descargado coincide con el valor calculado en GitHub Actions.
+
+### 29.5 Estado tras la reparación
+
+Las cuatro incidencias que bloquearon el CI #1070 ya no bloquean el build:
+1. La expectativa obsoleta de 1.000 ms se actualizó para representar el intervalo real de 2.500 ms.
+2. Los tres escenarios de recuperación que agotaban sus límites de prueba usan ahora el reloj simulado.
+
+**Estado:** reparación de las pruebas confirmada en CI #1072; compilación, firma, paquete, manifiesto y Chucker verificados. La política real de ritmo y protección de Internet Archive permanece intacta. Esta validación no garantiza que Wayback tenga capturas para cualquier producto; solo confirma que el código compila y que la suite automatizada no detecta los fallos anteriores.

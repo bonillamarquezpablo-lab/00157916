@@ -2953,6 +2953,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 var selectedProductRefreshed = false
                 var selectedProductRefreshNeeded = false
                 var selectedProductRefreshTitle: String? = null
+                var selectedProductRefreshFailure: String? = null
                 var mementoAttempted = false
                 // Search-wide circuit breaker: one unhealthy direct CDX route must not be
                 // followed by another candidate's merchant-domain requests in the same run.
@@ -3601,30 +3602,26 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                 }
 
                 if (selectedProductRefreshNeeded) {
-                    val targetIdentity = selectedProductRefreshTitle?.let(::onlineProductIdentityKey)
-                    val refreshedProduct = runCatching {
+                    val refreshedProduct = try {
                         withTimeout(10_000L) {
-                            // Refresh by stable product identity first. Requiring the mapped
-                            // archive point in this wait predicate can time out even after Room
-                            // has committed the rows (for example while the combined stream is
-                            // reconciling observations). UI refresh and history verification are
-                            // separate checks and must not block one another.
-                            repository.allProductsStream.first { products ->
-                                products.any { product ->
-                                    (targetProductId?.let { product.id == it }
-                                        ?: (targetIdentity != null &&
-                                            onlineProductIdentityKey(product.title) == targetIdentity))
-                                }
-                            }.first { product ->
-                                targetProductId?.let { product.id == it }
-                                    ?: (targetIdentity != null &&
-                                        onlineProductIdentityKey(product.title) == targetIdentity)
-                            }
+                            repository.getProductSnapshot(targetProductId, selectedProductRefreshTitle)
                         }
-                    }.getOrNull()
-                    if (refreshedProduct != null) {
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        selectedProductRefreshFailure = failure.javaClass.simpleName.take(80)
+                        null
+                    }
+                    if (refreshedProduct == null) {
+                        if (selectedProductRefreshFailure == null) {
+                            selectedProductRefreshFailure = "PRODUCT_NOT_FOUND"
+                        }
+                    } else {
                         val hasArchiveHistory = refreshedProduct.priceHistory.any { it.isArchiveEvidence }
                         selectedProductRefreshed = hasArchiveHistory
+                        if (!hasArchiveHistory) {
+                            selectedProductRefreshFailure = "ARCHIVE_HISTORY_NOT_VISIBLE"
+                        }
                         val currentState = _uiState.value
                         if (currentState.selectedProduct?.id == refreshedProduct.id) {
                             _uiState.value = currentState.copy(selectedProduct = refreshedProduct)
@@ -3804,7 +3801,8 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                             else -> WaybackTraceStatus.SKIPPED
                         },
                         "Actualización solicitada=$selectedProductRefreshNeeded; ficha refrescada=$selectedProductRefreshed; " +
-                            "puntos nuevos del producto seleccionado=$savedCount."
+                            "puntos nuevos del producto seleccionado=$savedCount; lectura=Room directo" +
+                            (selectedProductRefreshFailure?.let { "; detalle=$it" } ?: "")
                     )
                     val gateStatus = when {
                         // Network activity is stronger evidence than aggregate error codes: the

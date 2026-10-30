@@ -31,6 +31,10 @@ interface PriceObservationDao {
     fun observeAllStored(): Flow<List<PriceObservationEntity>>
 
 
+    /** Read the latest committed rows for one product without waiting for a Flow emission. */
+    @Query("SELECT * FROM price_observations WHERE productId = :productId ORDER BY observedAt ASC")
+    suspend fun getObservationsForProduct(productId: String): List<PriceObservationEntity>
+
     /** Load history rows only for the product IDs currently visible in a category. */
     @Query("SELECT * FROM price_observations WHERE productId IN (:productIds) ORDER BY observedAt ASC")
     fun observeForProducts(productIds: List<String>): Flow<List<PriceObservationEntity>>

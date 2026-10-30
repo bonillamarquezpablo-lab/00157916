@@ -19,6 +19,7 @@ import kotlinx.coroutines.runBlocking
 import java.util.Calendar
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -750,6 +751,81 @@ class ProductRepositoryArchiveIsolationTest {
                 .first()
             assertEquals("Concurrent refreshes must leave one row for the day", 1, rows.size)
             assertEquals("The lower price wins when timestamps are identical", 39.99, rows.single().price, 0.001)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun directProductSnapshotReadsNewArchiveRowsStraightFromRoom() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val productId = "room-refresh-archive-snapshot"
+            val title = "Anker Prime 27K Power Bank"
+            database.productDao().insert(
+                ProductEntity(
+                    id = productId,
+                    title = title,
+                    brand = "Anker",
+                    category = ProductCategory.ACCESSORIES.name,
+                    currentPrice = 0.0,
+                    athMinPrice = 0.0,
+                    athMinDate = "Historial en construcción",
+                    athMinStore = "",
+                    athMaxPrice = 0.0,
+                    avg90dPrice = 0.0,
+                    officialPvp = 0.0,
+                    currentStoreId = "sample-store",
+                    storeUrl = "https://shop.example/product/anker-prime",
+                    ean = "",
+                    isPriceVerified = false
+                )
+            )
+            val repository = ProductRepository(
+                storeDao = database.storeDao(),
+                productDao = database.productDao(),
+                trackedDao = database.trackedProductDao(),
+                priceObservationDao = database.priceObservationDao(),
+                externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            )
+
+            val beforeImport = repository.getProductSnapshot(productId)
+            assertNotNull("The saved catalogue row must be readable directly from Room", beforeImport)
+            assertTrue("The product starts without historical observations", beforeImport!!.priceHistory.isEmpty())
+
+            val observedAt = java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.ROOT)
+                .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                .parse("20250101000000")!!.time
+            val sourcePageUrl = "https://shop.example/product/anker-prime"
+            database.priceObservationDao().insert(
+                PriceObservationEntity(
+                    productId = productId,
+                    storeId = "sample-store",
+                    price = 129.99,
+                    currency = "EUR",
+                    observedAt = observedAt,
+                    sourceUrl = "https://web.archive.org/web/20250101000000id_/$sourcePageUrl",
+                    sourceName = "Internet Archive (Wayback Machine)",
+                    isVerified = true,
+                    productTitle = title,
+                    storeName = "Tienda de prueba",
+                    sourceType = "Internet Archive",
+                    linkType = "Archivo histórico",
+                    collectedAt = System.currentTimeMillis(),
+                    evidenceType = "archive",
+                    sourcePageUrl = sourcePageUrl
+                )
+            )
+
+            val refreshed = repository.getProductSnapshot(productId)
+            assertNotNull("The direct Room snapshot must include the committed observation", refreshed)
+            assertTrue(
+                "The freshly committed archive point must be present without waiting for allProductsStream replay",
+                refreshed!!.priceHistory.any { it.isArchiveEvidence && it.price == 129.99 }
+            )
         } finally {
             database.close()
         }

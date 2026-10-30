@@ -6784,4 +6784,117 @@ class WaybackPriceHistoryClientTest {
         assertTrue("The URL-backed model/capacity identity must remain traceable", quote.variantIdentityConfirmedByUrl)
     }
 
+
+    @Test
+    fun availabilityRequestIsCancelledWhenHistoryGoalIsReachedDuringPacingWait() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("minimo_wayback_backfill", Context.MODE_PRIVATE)
+        val requestClock = ImmediateArchiveRequestClock()
+        val now = requestClock.nowMillis()
+        preferences.edit()
+            .remove("wayback_rate_limit_until")
+            .putLong("wayback_last_availability_request_at", now - 1_000L)
+            .commit()
+
+        val stopRequested = java.util.concurrent.atomic.AtomicBoolean(false)
+        val pacingWaitStarted = java.util.concurrent.atomic.AtomicBoolean(false)
+        val availabilityRequests = java.util.concurrent.atomic.AtomicInteger(0)
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            if (request.url.host == "archive.org" && request.url.encodedPath == "/wayback/available") {
+                availabilityRequests.incrementAndGet()
+                Response.Builder()
+                    .request(request)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .header("Content-Type", "application/json; charset=utf-8")
+                    .body("""{"archived_snapshots":{"closest":{"available":false}}}"""
+                        .toResponseBody("application/json; charset=utf-8".toMediaType()))
+                    .build()
+            } else {
+                throw AssertionError(
+                    "Unexpected request after sufficient-history stop: ${request.url.host}${request.url.encodedPath}"
+                )
+            }
+        }.build()
+        val title = "Stop Availability During Pacing ${System.currentTimeMillis()}"
+        val preferredUrl = "https://shop.example/products/stop-availability-during-pacing.html"
+
+        try {
+            val client = WaybackPriceHistoryClient(
+                context = context,
+                http = http,
+                archiveRequestNowMs = requestClock::nowMillis,
+                archiveRequestDelay = { milliseconds ->
+                    pacingWaitStarted.set(true)
+                    requestClock.advanceBy(milliseconds)
+                    stopRequested.set(true)
+                }
+            )
+            val result = withTimeout(10_000L) {
+                client.fetchHistoryByMerchantDomain(
+                    domain = "shop.example",
+                    expectedTitle = title,
+                    now = now,
+                    lookbackDays = 730,
+                    preferredUrl = preferredUrl,
+                    availabilityOnlyAfterPriorTimeout = true,
+                    priorCdxDiagnostics = setOf("CDX_URL_PREFIX_TIMEOUT"),
+                    forceRefresh = true,
+                    stopWhenEnoughNewPoints = { stopRequested.get() }
+                )
+            }
+
+            assertTrue("The Availability probe must reach the request pacing gate", pacingWaitStarted.get())
+            assertTrue("The sufficient-history signal must be raised during the pacing wait", stopRequested.get())
+            assertEquals("No Availability HTTP request may start after the stop signal", 0, availabilityRequests.get())
+            assertTrue(
+                "The result must explain the intentional stop instead of reporting a transport failure",
+                result.diagnosticCodes.contains("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS")
+            )
+        } finally {
+            preferences.edit()
+                .remove("wayback_rate_limit_until")
+                .remove("wayback_last_availability_request_at")
+                .commit()
+        }
+    }
+
+
+    @Test
+    fun phoneHouseConditionOutsideBuyBoxIsDiagnosedBeforeMissingPriceMetadata() {
+        val client = newClient()
+        val expected = "Xiaomi Mi 10 Pro Gris"
+        val originalUrl = "https://www.phonehouse.es/movil/xiaomi/mi-10-pro-256gbplus8gb-ram.html"
+        val html = """
+            <html>
+              <head>
+                <title>Comprar Xiaomi Mi 10 Pro 256GB+8GB RAM al mejor precio | Phone House</title>
+              </head>
+              <body>
+                <div class="buy-box-1">
+                  <h1>Xiaomi Mi 10 Pro 256GB+8GB RAM</h1>
+                </div>
+                <div class="estado-outlet outlet">
+                  <span>Reacondicionado</span>
+                  <span>Estado: Funcional</span>
+                </div>
+              </body>
+            </html>
+        """.trimIndent()
+
+        val diagnosis = client.diagnoseArchivedPrice(
+            document = Jsoup.parse(html),
+            expectedTitle = expected,
+            originalUrl = originalUrl
+        )
+
+        assertEquals(
+            "The explicit refurbished condition must win over generic missing-price diagnosis",
+            "ARCHIVE_PRODUCT_CONDITION_MISMATCH",
+            diagnosis
+        )
+    }
+
 }

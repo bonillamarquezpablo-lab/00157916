@@ -313,6 +313,38 @@ class ProductRepository(
     }.flowOn(Dispatchers.Default)
         .shareIn(externalScope, SharingStarted.WhileSubscribed(5_000L), replay = 1)
 
+    /**
+     * Reads a product and its latest observations directly from Room.
+     *
+     * This bypasses the shared catalogue Flow replay so a just-committed historical import can
+     * refresh the selected product while the combined catalogue stream is still reconciling.
+     */
+    suspend fun getProductSnapshot(
+        productId: String?,
+        productTitle: String? = null
+    ): Product? {
+        val entity = if (!productId.isNullOrBlank()) {
+            productDao.getProductById(productId)
+        } else {
+            val expectedIdentity = productTitle?.let(::onlineProductIdentityKey) ?: return null
+            productDao.getAllProductsSnapshot().firstOrNull { row ->
+                onlineProductIdentityKey(row.title) == expectedIdentity
+            }
+        } ?: return null
+        val stores = storeDao.getAllStoresSnapshot()
+            .map { it.toDomainStore() }
+            .ifEmpty { Store.ALL_STORES }
+        val observations = priceObservationDao.getObservationsForProduct(entity.id)
+        val trackingInfo = trackedDao.getById(entity.id)
+        return entity.toDomainProduct(
+            stores = stores,
+            allObservations = observations
+        ).copy(
+            isTracked = trackingInfo != null,
+            alertTargetPrice = trackingInfo?.targetAlertPrice
+        )
+    }
+
 
     /**
      * Aggregate the home-screen counts in Room. This flow deliberately returns only one row per

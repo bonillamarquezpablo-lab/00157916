@@ -884,6 +884,12 @@ class WaybackPriceHistoryClient(
         if (!preferences.getBoolean("enabled", true)) {
             return@withContext WaybackBackfillResult(diagnosticCodes = setOf("WAYBACK_DISABLED"))
         }
+        if (stopWhenEnoughNewPoints?.invoke() == true) {
+            return@withContext WaybackBackfillResult(
+                requestFailed = true,
+                diagnosticCodes = setOf("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS")
+            )
+        }
         // Merchant metadata can be incomplete even when the offer has a valid direct URL.
         // Recover the host from that URL before rejecting the fallback; this adds no network call
         // and the normalizer still rejects search-engine/archive hosts.
@@ -1386,11 +1392,14 @@ class WaybackPriceHistoryClient(
         emitWaybackTrace(
             onTrace, 6,
             when {
-                fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") -> WaybackTraceStatus.SKIPPED
+                fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ||
+                    fallback.diagnosticCodes.contains("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS") -> WaybackTraceStatus.SKIPPED
                 fallback.quotes.isNotEmpty() || fallback.capturesFound > 0 -> WaybackTraceStatus.PASSED
                 else -> WaybackTraceStatus.FAILED
             },
             when {
+                fallback.diagnosticCodes.contains("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS") ->
+                    "La recuperación se detuvo porque ya se habían guardado suficientes fechas; no se lanzó otra consulta."
                 fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") ->
                     if (fallback.diagnosticCodes.contains("ARCHIVE_AVAILABILITY_API_HTTP_429")) {
                         "La Availability API de archive.org devolvió HTTP 429. Se activa la pausa global de Internet Archive; no se puede concluir si existen capturas."
@@ -1442,7 +1451,14 @@ class WaybackPriceHistoryClient(
         // route cannot consume the whole per-store budget. Archived title + EUR price validation
         // remains mandatory before any quote is accepted.
         var alternateResult: WaybackBackfillResult? = null
-        if (!fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") &&
+        if (stopWhenEnoughNewPoints?.invoke() == true) {
+            emitWaybackTrace(
+                onTrace, 6, WaybackTraceStatus.SKIPPED,
+                "Se omiten CDX alternativo y búsqueda amplia: ya se habían guardado suficientes fechas verificadas."
+            )
+        }
+        if (stopWhenEnoughNewPoints?.invoke() != true &&
+            !fallback.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") &&
             !priorProductPrefixTransientFailure &&
             activeRateLimitUntil(System.currentTimeMillis()) == null
         ) {
@@ -1566,7 +1582,8 @@ class WaybackPriceHistoryClient(
         // escalate it into an expensive host-wide scan; keep recovery targeted and predictable.
         val skipBroadDomainDiscovery = failureCodes.contains("CDX_NO_CAPTURES") ||
             priorProductPrefixTransientFailure
-        if (fallback.quotes.isEmpty() && !priorRateLimited && !alternateTransientFailure &&
+        if (stopWhenEnoughNewPoints?.invoke() != true &&
+            fallback.quotes.isEmpty() && !priorRateLimited && !alternateTransientFailure &&
             !skipBroadDomainDiscovery &&
             activeRateLimitUntil(System.currentTimeMillis()) == null
         ) {
@@ -1577,6 +1594,13 @@ class WaybackPriceHistoryClient(
                 lookbackDays = lookbackDays
             ).orEmpty().take(MAX_DOMAIN_CDX_HOST_QUERIES)
             for ((index, domainCdxUrl) in domainQueries.withIndex()) {
+                if (stopWhenEnoughNewPoints?.invoke() == true) {
+                    emitWaybackTrace(
+                        onTrace, 6, WaybackTraceStatus.SKIPPED,
+                        "Se detiene la búsqueda por dominio: ya se han guardado suficientes fechas verificadas."
+                    )
+                    break
+                }
                 if (activeRateLimitUntil(System.currentTimeMillis()) != null) break
                 emitWaybackTrace(
                     onTrace, 6, WaybackTraceStatus.RUNNING,
@@ -1598,7 +1622,8 @@ class WaybackPriceHistoryClient(
                     onTrace = onTrace,
                     snapshotResultsCache = snapshotResultsCache,
                     onVerifiedQuotes = onVerifiedQuotes,
-                    knownProductTitlesById = knownProductTitlesById
+                    knownProductTitlesById = knownProductTitlesById,
+                    stopWhenEnoughNewPoints = stopWhenEnoughNewPoints
                 )
                 domainDiscoveryResults += discovered
                 when {
@@ -1936,7 +1961,7 @@ class WaybackPriceHistoryClient(
             val recentProbe = availabilitySemaphore.withPermit {
                 if (stopWhenEnoughNewPoints?.invoke() == true) {
                     AvailabilityProbe(requestFailed = true, diagnosticCode = "ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS")
-                } else queryAvailability(originalUrl, dates.first(), stage)
+                } else queryAvailability(originalUrl, dates.first(), stage, stopWhenEnoughNewPoints)
             }
             probes += recentProbe
             if (recentProbe.diagnosticCode == "WAYBACK_RATE_LIMITED") break
@@ -1980,7 +2005,7 @@ class WaybackPriceHistoryClient(
                 val olderProbe = availabilitySemaphore.withPermit {
                     if (stopWhenEnoughNewPoints?.invoke() == true) {
                         AvailabilityProbe(requestFailed = true, diagnosticCode = "ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS")
-                    } else queryAvailability(capture.originalUrl, dates.last(), stage)
+                    } else queryAvailability(capture.originalUrl, dates.last(), stage, stopWhenEnoughNewPoints)
                 }
                 probes += olderProbe
                 if (olderProbe.diagnosticCode == "WAYBACK_RATE_LIMITED") break
@@ -2003,13 +2028,16 @@ class WaybackPriceHistoryClient(
             listOfNotNull(probe.diagnosticCode, probe.serviceDiagnosticCode)
         }.toSet()
         val availabilityTraceStatus = when {
-            probeDiagnostics.contains("WAYBACK_RATE_LIMITED") -> WaybackTraceStatus.SKIPPED
+            probeDiagnostics.contains("WAYBACK_RATE_LIMITED") ||
+                probeDiagnostics.contains("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS") -> WaybackTraceStatus.SKIPPED
             captures.isNotEmpty() -> WaybackTraceStatus.PASSED
             // HTTP 200 with an empty Availability result means the network responded, not that
             // historical captures were recovered. Keep the step red rather than implying success.
             else -> WaybackTraceStatus.FAILED
         }
         val availabilityTraceDetail = when {
+            probeDiagnostics.contains("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS") ->
+                "Availability se detuvo antes de enviar otra petición porque ya se habían guardado suficientes fechas verificadas."
             probeDiagnostics.contains("WAYBACK_RATE_LIMITED") ->
                 if (probeDiagnostics.contains("ARCHIVE_AVAILABILITY_API_HTTP_429")) {
                 "La Availability API de archive.org devolvió HTTP 429; se detuvieron las consultas y se activó la pausa global."
@@ -2033,7 +2061,8 @@ class WaybackPriceHistoryClient(
         // marked as unexecuted when the fallback has already returned usable captures.
         val captureExtractionStatus = when {
             captures.isNotEmpty() -> WaybackTraceStatus.PASSED
-            probeDiagnostics.contains("WAYBACK_RATE_LIMITED") -> WaybackTraceStatus.SKIPPED
+            probeDiagnostics.contains("WAYBACK_RATE_LIMITED") ||
+                probeDiagnostics.contains("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS") -> WaybackTraceStatus.SKIPPED
             successfulProbes > 0 -> WaybackTraceStatus.SKIPPED
             else -> WaybackTraceStatus.FAILED
         }
@@ -2042,6 +2071,8 @@ class WaybackPriceHistoryClient(
             when {
                 captures.isNotEmpty() ->
                     "Availability API devolvió ${captures.size} captura(s) válidas dentro del período solicitado."
+                probeDiagnostics.contains("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS") ->
+                    "Extracción omitida: el objetivo de fechas se alcanzó antes de iniciar otra petición."
                 probeDiagnostics.contains("WAYBACK_RATE_LIMITED") ->
                     "Extracción omitida: HTTP 429; se respeta la pausa global."
                 successfulProbes > 0 ->
@@ -2057,6 +2088,8 @@ class WaybackPriceHistoryClient(
             when {
                 captures.isNotEmpty() ->
                     "Candidatas Availability normalizadas y deduplicadas: ${captures.map { it.originalUrl }.distinct().size} URL(s) únicas."
+                probeDiagnostics.contains("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS") ->
+                    "Normalización omitida: ya se había alcanzado el objetivo de fechas; no se enviaron más peticiones."
                 probeDiagnostics.contains("WAYBACK_RATE_LIMITED") ->
                     "Normalización omitida por HTTP 429: se respeta la pausa global; no se puede concluir que falten capturas."
                 else ->
@@ -2068,13 +2101,16 @@ class WaybackPriceHistoryClient(
             onTrace, 7,
             when {
                 captures.isNotEmpty() -> WaybackTraceStatus.PASSED
-                probeDiagnostics.contains("WAYBACK_RATE_LIMITED") -> WaybackTraceStatus.SKIPPED
+                probeDiagnostics.contains("WAYBACK_RATE_LIMITED") ||
+                    probeDiagnostics.contains("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS") -> WaybackTraceStatus.SKIPPED
                 successfulProbes > 0 -> WaybackTraceStatus.SKIPPED
                 else -> WaybackTraceStatus.FAILED
             },
             when {
                 captures.isNotEmpty() ->
                     "Fechas Availability validadas: ${captures.size} captura(s) dentro de los últimos ${lookbackDays.coerceAtLeast(1)} días; ${outsideWindowCount} descartada(s) fuera del intervalo."
+                probeDiagnostics.contains("ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS") ->
+                    "Validación de fechas omitida: el objetivo de histórico suficiente ya se había alcanzado."
                 probeDiagnostics.contains("WAYBACK_RATE_LIMITED") ->
                     "Validación de fechas omitida por HTTP 429: se respeta la pausa global; no se interpreta como ausencia de capturas."
                 successfulProbes > 0 ->
@@ -2389,8 +2425,15 @@ class WaybackPriceHistoryClient(
     private suspend fun queryAvailability(
         originalUrl: String,
         targetDate: String,
-        stage: String
+        stage: String,
+        stopWhenEnoughNewPoints: (() -> Boolean)? = null
     ): AvailabilityProbe {
+        if (stopWhenEnoughNewPoints?.invoke() == true) {
+            return AvailabilityProbe(
+                requestFailed = true,
+                diagnosticCode = "ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS"
+            )
+        }
         val endpoint = buildAvailabilityUrl(originalUrl, targetDate)
             ?: return AvailabilityProbe(requestFailed = true, diagnosticCode = "${stage}_INVALID_TARGET")
         // The previous 4-second budget expired on the product-domain fallback even when
@@ -2404,8 +2447,17 @@ class WaybackPriceHistoryClient(
         val request = Request.Builder().url(endpoint).header("User-Agent", USER_AGENT).get().build()
         return try {
             // The shared permit and persisted request gate are also used by CDX fallback calls.
-            awaitArchiveRequestTurn(allowDuringBackendCooldown = true)?.let { code ->
-                return AvailabilityProbe(requestFailed = true, diagnosticCode = code)
+            val requestGateFailure = awaitArchiveRequestTurn(allowDuringBackendCooldown = true)
+            if (requestGateFailure != null) {
+                return AvailabilityProbe(requestFailed = true, diagnosticCode = requestGateFailure)
+            }
+            // The sufficient-history signal can arrive while this probe waits for the global
+            // request slot. Check again at the last possible point before sending HTTP.
+            if (stopWhenEnoughNewPoints?.invoke() == true) {
+                return AvailabilityProbe(
+                    requestFailed = true,
+                    diagnosticCode = "ARCHIVE_LOOKUP_STOPPED_AFTER_ENOUGH_POINTS"
+                )
             }
             availabilityHttp.newCall(request).execute().use { response ->
                 if (response.code == 429) {
@@ -3124,7 +3176,7 @@ class WaybackPriceHistoryClient(
         )
     }
 
-    private fun diagnoseArchivedPrice(
+    internal fun diagnoseArchivedPrice(
         document: Document,
         expectedTitle: String,
         originalUrl: String,
@@ -3142,22 +3194,24 @@ class WaybackPriceHistoryClient(
         ).firstNotNullOfOrNull { key ->
             readMeta(document, setOf(key)) ?: readItemPropValue(document, key)
         }?.uppercase(Locale.ROOT)
-        if (pageTitles.isEmpty() && jsonLd.isEmpty()) return "ARCHIVE_TITLE_MISSING"
-
-        // Distinguish a correctly rejected second-hand/outlet offer from a page that genuinely
-        // has no price. This is intentionally limited to Phone House's explicit buy-box condition
-        // badge; absence of a badge is not enough to infer a product's condition.
+        // Classify an explicit Phone House product-condition badge before generic metadata
+        // failures. Some archived page versions place the badge beside, not inside, the buy box.
         val host = runCatching { URI(originalUrl).host.orEmpty() }
             .getOrDefault("").lowercase(Locale.ROOT).removePrefix("www.")
         if (host == "phonehouse.es") {
-            val buyBox = document.selectFirst(".buy-box-1")
-            val conditionText = buyBox?.selectFirst(".estado-outlet.outlet, .estado-outlet")
+            val buyBoxCondition = document
+                .selectFirst(".buy-box-1 .estado-outlet.outlet, .buy-box-1 .estado-outlet")
                 ?.text().orEmpty()
+            val conditionText = buyBoxCondition.ifBlank {
+                document.selectFirst(".estado-outlet.outlet, .estado-outlet")?.text().orEmpty()
+            }
             val expectedCondition = productConditionKey(normalizeTitle(expectedTitle))
             if (conditionText.isNotBlank() &&
                 productConditionKey(normalizeTitle(conditionText)) != expectedCondition
             ) return "ARCHIVE_PRODUCT_CONDITION_MISMATCH"
         }
+
+        if (pageTitles.isEmpty() && jsonLd.isEmpty()) return "ARCHIVE_TITLE_MISSING"
 
         val visiblePrice = extractVisibleProductPrice(document, metaCurrency)?.first
         if (metaPrice == null && jsonLd.isEmpty() && visiblePrice == null) return "ARCHIVE_PRICE_METADATA_MISSING"

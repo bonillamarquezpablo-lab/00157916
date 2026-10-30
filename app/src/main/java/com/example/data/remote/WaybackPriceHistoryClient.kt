@@ -510,7 +510,11 @@ class WaybackPriceHistoryClient(
         .connectTimeout(2, TimeUnit.SECONDS)
         .readTimeout(3, TimeUnit.SECONDS)
         .callTimeout(4, TimeUnit.SECONDS)
-        .build()
+        .build(),
+    // Injectable only to make pacing deterministic in unit tests. Production keeps wall-clock
+    // timing and real suspension, so the global Internet Archive protection is unchanged.
+    private val archiveRequestNowMs: () -> Long = { System.currentTimeMillis() },
+    private val archiveRequestDelay: suspend (Long) -> Unit = { delay(it) }
 ) {
     private val preferences = context.applicationContext.getSharedPreferences(
         "minimo_wayback_backfill",
@@ -3716,16 +3720,16 @@ class WaybackPriceHistoryClient(
     private suspend fun awaitArchiveRequestTurn(
         allowDuringBackendCooldown: Boolean = false
     ): String? {
-        val now = System.currentTimeMillis()
+        val now = archiveRequestNowMs()
         if (activeRateLimitUntil(now) != null) return "WAYBACK_RATE_LIMITED"
         if (!allowDuringBackendCooldown && activeBackendUnavailableUntil(now) != null) {
             return "WAYBACK_BACKEND_UNAVAILABLE_COOLDOWN"
         }
         val lastRequestAt = preferences.getLong(KEY_LAST_AVAILABILITY_REQUEST_AT, 0L)
         val waitMs = computeAvailabilityDelayMs(lastRequestAt, now)
-        if (waitMs > 0L) delay(waitMs)
+        if (waitMs > 0L) archiveRequestDelay(waitMs)
         // Recheck both global gates after waiting; another client may have opened either circuit.
-        val afterWait = System.currentTimeMillis()
+        val afterWait = archiveRequestNowMs()
         if (activeRateLimitUntil(afterWait) != null) return "WAYBACK_RATE_LIMITED"
         if (!allowDuringBackendCooldown && activeBackendUnavailableUntil(afterWait) != null) {
             return "WAYBACK_BACKEND_UNAVAILABLE_COOLDOWN"

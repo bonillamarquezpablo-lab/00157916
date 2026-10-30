@@ -14,7 +14,7 @@ import com.example.data.remote.MementoClient
 import com.example.data.remote.shouldAttemptMementoFallback
 import com.example.data.remote.hasMatchingExplicitStorageCapacity
 import com.example.data.remote.shouldSkipDomainFallbackAfterSnapshotTimeout
-import com.example.data.remote.shouldSkipDomainFallbackAfterCdxBackendFailure
+import com.example.data.remote.shouldSkipDomainFallbackAfterRepeatedCdxTimeouts
 import com.example.data.remote.shouldOpenArchiveDomainFallbackCircuit
 import com.example.data.remote.shouldTryDomainFallbackForArchiveCandidate
 import com.example.data.remote.shouldUseAvailabilityOnlyFallbackAfterCdxTimeout
@@ -3328,7 +3328,7 @@ class PriceTrackerViewModel(application: Application) : AndroidViewModel(applica
                         attempts.any { it.diagnosticCodes.contains("WAYBACK_RATE_LIMITED") }
                     val priorDirectCdxDiagnostics = attempts.flatMap { it.diagnosticCodes }.toSet()
                     val cdxBackendUnhealthy =
-                        shouldSkipDomainFallbackAfterCdxBackendFailure(priorDirectCdxDiagnostics)
+                        shouldSkipDomainFallbackAfterRepeatedCdxTimeouts(priorDirectCdxDiagnostics)
                     val allDirectSnapshotsTimedOut =
                         shouldSkipDomainFallbackAfterSnapshotTimeout(attempts)
                     val merchantDomainForFallback = candidate.merchantDomain

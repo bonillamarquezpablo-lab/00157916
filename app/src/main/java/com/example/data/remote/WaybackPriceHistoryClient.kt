@@ -972,13 +972,17 @@ class WaybackPriceHistoryClient(
                     diagnosticCodes = setOf("WAYBACK_RATE_LIMITED")
                 )
             }
-            if (activeBackendUnavailableUntil(lookupNow) != null) {
-                return@serializedArchiveLookup WaybackBackfillResult(
-                    requestFailed = true,
-                    diagnosticCodes = setOf("WAYBACK_BACKEND_UNAVAILABLE_COOLDOWN")
+            // The backend circuit blocks expensive CDX index scans, not the bounded
+            // Availability-only recovery path below. Do not return here: doing so would label
+            // the fallback as executed while silently sending no Availability request.
+            val forceAvailabilityRecovery =
+                availabilityOnlyAfterPriorTimeout || activeBackendUnavailableUntil(lookupNow) != null
+            if (shouldSkipRecentAttempt(
+                    attempt,
+                    System.currentTimeMillis(),
+                    forceRefresh || forceAvailabilityRecovery
                 )
-            }
-            if (shouldSkipRecentAttempt(attempt, System.currentTimeMillis(), forceRefresh)) {
+            ) {
                 val previousAttemptFailed = preferences.getBoolean("${attempt}_failed", false)
                 emitCachedLookupSkippedTrace(
                     onTrace,

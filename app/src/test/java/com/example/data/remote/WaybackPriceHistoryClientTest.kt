@@ -94,9 +94,10 @@ class WaybackPriceHistoryClientTest {
             maxFallbacks = 2
         )
 
-        assertTrue("A CDX outage may use the bounded Availability-only recovery route", allowed())
-        assertTrue("A second merchant may be tried without repeating CDX", allowed(used = 1))
-        assertFalse("The configured per-search fallback limit must be respected", allowed(used = 2))
+        assertTrue("The primary retailer can recover through Availability after CDX fails", allowed())
+        assertTrue("A second retailer may be tried without repeating CDX", allowed(used = 1))
+        assertTrue("The third retailer, including the manufacturer slot, must not be skipped", allowed(used = 2))
+        assertFalse("The three-store per-search fallback limit must be respected", allowed(used = 3))
         assertFalse("HTTP 429 blocks every Archive.org fallback", allowed(rateLimited = true))
         assertFalse("Snapshot download timeouts must not start another lookup", allowed(snapshotsTimedOut = true))
         assertFalse("An outer timeout must not start another lookup", allowed(outerTimeout = true))

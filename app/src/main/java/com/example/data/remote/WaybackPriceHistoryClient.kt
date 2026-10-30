@@ -123,10 +123,10 @@ internal fun shouldOpenArchiveDomainFallbackCircuit(
     directLookupTimedOut
 
 /**
- * Once two CDX routes have timed out or returned a transient server failure, do not fan out to
- * Availability on other merchants in the same search. CDX and Availability share Archive.org
- * infrastructure; continuing those probes can turn a recoverable outage into HTTP 429 throttling.
- * Arquivo.pt/Memento remains the independent fallback.
+ * After repeated CDX failures, preserve a small Availability-only recovery path.
+ * CDX index traffic is paused by the backend circuit, but a strictly bounded number of
+ * merchant Availability lookups may still recover captures without repeating CDX scans.
+ * A real 429 always wins and blocks every Archive.org endpoint until Retry-After expires.
  */
 internal fun shouldUseAvailabilityOnlyFallbackAfterCdxTimeout(
     searchCircuitOpen: Boolean,
@@ -137,7 +137,13 @@ internal fun shouldUseAvailabilityOnlyFallbackAfterCdxTimeout(
     hasMerchantDomain: Boolean,
     usedFallbacks: Int,
     maxFallbacks: Int
-): Boolean = false
+): Boolean = searchCircuitOpen &&
+    timeoutFallbackAvailable &&
+    !rateLimited &&
+    !allDirectSnapshotsTimedOut &&
+    !directLookupTimedOut &&
+    hasMerchantDomain &&
+    usedFallbacks < maxFallbacks
 
 /**
  * Decide whether a merchant-domain fallback is worthwhile for the current candidate.
@@ -539,12 +545,6 @@ class WaybackPriceHistoryClient(
                 return@serializedArchiveLookup WaybackBackfillResult(
                     requestFailed = true,
                     diagnosticCodes = setOf("WAYBACK_RATE_LIMITED")
-                )
-            }
-            if (activeBackendUnavailableUntil(lookupNow) != null) {
-                return@serializedArchiveLookup WaybackBackfillResult(
-                    requestFailed = true,
-                    diagnosticCodes = setOf("WAYBACK_BACKEND_UNAVAILABLE_COOLDOWN")
                 )
             }
             if (!forceRefresh && wasAttemptedRecently(attempt, System.currentTimeMillis())) {
@@ -2384,7 +2384,7 @@ class WaybackPriceHistoryClient(
         val request = Request.Builder().url(endpoint).header("User-Agent", USER_AGENT).get().build()
         return try {
             // The shared permit and persisted request gate are also used by CDX fallback calls.
-            awaitArchiveRequestTurn()?.let { code ->
+            awaitArchiveRequestTurn(allowDuringBackendCooldown = true)?.let { code ->
                 return AvailabilityProbe(requestFailed = true, diagnosticCode = code)
             }
             availabilityHttp.newCall(request).execute().use { response ->
@@ -2604,7 +2604,7 @@ class WaybackPriceHistoryClient(
         var snapshotRequestAttempts = 0
 
         return availabilitySemaphore.withPermit {
-            val gate = awaitArchiveRequestTurn()
+            val gate = awaitArchiveRequestTurn(allowDuringBackendCooldown = true)
             if (gate != null) {
                 emitWaybackTrace(captureTrace, downloadStep, WaybackTraceStatus.FAILED, "Descarga bloqueada por control de ritmo: $gate.")
                 emitWaybackTrace(captureTrace, evaluateStep, WaybackTraceStatus.SKIPPED, "No hubo HTML que evaluar.")
@@ -2713,7 +2713,7 @@ class WaybackPriceHistoryClient(
                     },
                     beforeRetry = {
                         delay(SNAPSHOT_TRANSPORT_RETRY_DELAY_MS)
-                        awaitArchiveRequestTurn() == null
+                        awaitArchiveRequestTurn(allowDuringBackendCooldown = true) == null
                     }
                 )
             } catch (cancelled: CancellationException) {
@@ -3676,17 +3676,23 @@ class WaybackPriceHistoryClient(
         }
     }
 
-    private suspend fun awaitArchiveRequestTurn(): String? {
+    private suspend fun awaitArchiveRequestTurn(
+        allowDuringBackendCooldown: Boolean = false
+    ): String? {
         val now = System.currentTimeMillis()
         if (activeRateLimitUntil(now) != null) return "WAYBACK_RATE_LIMITED"
-        if (activeBackendUnavailableUntil(now) != null) return "WAYBACK_BACKEND_UNAVAILABLE_COOLDOWN"
+        if (!allowDuringBackendCooldown && activeBackendUnavailableUntil(now) != null) {
+            return "WAYBACK_BACKEND_UNAVAILABLE_COOLDOWN"
+        }
         val lastRequestAt = preferences.getLong(KEY_LAST_AVAILABILITY_REQUEST_AT, 0L)
         val waitMs = computeAvailabilityDelayMs(lastRequestAt, now)
         if (waitMs > 0L) delay(waitMs)
         // Recheck both global gates after waiting; another client may have opened either circuit.
         val afterWait = System.currentTimeMillis()
         if (activeRateLimitUntil(afterWait) != null) return "WAYBACK_RATE_LIMITED"
-        if (activeBackendUnavailableUntil(afterWait) != null) return "WAYBACK_BACKEND_UNAVAILABLE_COOLDOWN"
+        if (!allowDuringBackendCooldown && activeBackendUnavailableUntil(afterWait) != null) {
+            return "WAYBACK_BACKEND_UNAVAILABLE_COOLDOWN"
+        }
         preferences.edit().putLong(KEY_LAST_AVAILABILITY_REQUEST_AT, afterWait).apply()
         return null
     }
